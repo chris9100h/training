@@ -122,6 +122,12 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
   const ex = LB.findExercise(store, exId);
   if (!ex) { go({ name: 'lib' }); return null; }
 
+  const deleteExercise = () => {
+    if (!confirm(`"${ex.name}" aus der Datenbank löschen? Bisherige Sessions bleiben erhalten.`)) return;
+    setStore(s => ({ ...s, exercises: s.exercises.filter(e => e.id !== exId) }));
+    go({ name: 'lib' });
+  };
+
   const history = useMemoL(() => {
     return store.sessions
       .filter(s => s.ended && s.entries.some(e => e.exId === exId))
@@ -143,7 +149,14 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
 
   return (
     <Screen>
-      <TopBar title={ex.name} sub={ex.tags?.join(' · ') || ''} onBack={() => go({ name: 'lib' })} />
+      <TopBar title={ex.name} sub={ex.tags?.join(' · ') || ''} onBack={() => go({ name: 'lib' })}
+        right={
+          <button onClick={deleteExercise} style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: UI.danger, fontSize: 20, padding: '4px 8px', lineHeight: 1,
+          }}>🗑</button>
+        }
+      />
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
           <Card style={{ padding: 12 }}>
