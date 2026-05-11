@@ -21,7 +21,7 @@ const UI = {
 function Screen({ children, scroll = true, style = {} }) {
   return (
     <div style={{
-      width: '100%', minHeight: '100%',
+      width: '100%', flex: 1,
       background: UI.bg, color: UI.ink, fontFamily: UI.fontUi,
       display: 'flex', flexDirection: 'column',
       overflow: scroll ? 'auto' : 'hidden',
@@ -57,13 +57,19 @@ function TabBar({ active, onChange }) {
     { id: 'lib',  label: 'Library' },
     { id: 'hist', label: 'History' },
   ];
-  return (
+  const bar = (
     <div style={{
+      position: 'fixed',
+      bottom: 0,
+      left: '50%',
+      transform: 'translateX(-50%)',
+      width: '100%',
+      maxWidth: 440,
       borderTop: `1px solid ${UI.inkLine}`,
       background: '#0c0c0c',
       padding: '10px 14px calc(env(safe-area-inset-bottom, 8px) + 10px)',
       display: 'flex', justifyContent: 'space-around',
-      position: 'sticky', bottom: 0, zIndex: 5,
+      zIndex: 20,
     }}>
       {tabs.map(t => {
         const on = t.id === active;
@@ -83,6 +89,12 @@ function TabBar({ active, onChange }) {
         );
       })}
     </div>
+  );
+  return (
+    <>
+      <div style={{ flexShrink: 0, height: 'calc(56px + env(safe-area-inset-bottom, 8px))' }} />
+      {bar}
+    </>
   );
 }
 
