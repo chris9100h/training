@@ -7,6 +7,22 @@ function LibraryScreen({ store, setStore, go }) {
   const [tab, setTab] = useStateL('recent');
   const [q, setQ] = useStateL('');
   const [creating, setCreating] = useStateL(false);
+  const [selecting, setSelecting] = useStateL(false);
+  const [selected, setSelected] = useStateL(new Set());
+
+  const exitSelect = () => { setSelecting(false); setSelected(new Set()); };
+
+  const toggleSelect = (id) => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  const deleteSelected = () => {
+    if (!confirm(`${selected.size} Übung${selected.size > 1 ? 'en' : ''} löschen? Bisherige Sessions bleiben erhalten.`)) return;
+    setStore(s => ({ ...s, exercises: s.exercises.filter(e => !selected.has(e.id)) }));
+    exitSelect();
+  };
 
   const recent = useMemoL(() => {
     const seen = new Map();
@@ -27,10 +43,22 @@ function LibraryScreen({ store, setStore, go }) {
       .sort((a,b) => a.name.localeCompare(b.name));
   }, [store.exercises, q]);
 
+  const topBarRight = selecting ? (
+    <button onClick={exitSelect} style={{ background: 'none', border: 'none', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 14, cursor: 'pointer', padding: '4px 8px' }}>
+      Abbrechen
+    </button>
+  ) : (
+    <div style={{ display: 'flex', gap: 4 }}>
+      {store.exercises.length > 0 && (
+        <Btn kind="icon" onClick={() => { setTab('all'); setSelecting(true); }} style={{ color: UI.inkSoft, fontSize: 16 }}>☑</Btn>
+      )}
+      <Btn kind="icon" onClick={() => setCreating(true)} style={{ color: UI.gold, fontSize: 22, fontWeight: 300 }}>+</Btn>
+    </div>
+  );
+
   return (
     <Screen>
-      <TopBar title="Library"
-        right={<Btn kind="icon" onClick={() => setCreating(true)} style={{ color: UI.gold, fontSize: 22, fontWeight: 300 }}>+</Btn>} />
+      <TopBar title="Library" right={topBarRight} />
       <div style={{ display: 'flex', padding: '0 18px', gap: 0, borderBottom: `1px solid ${UI.inkLine}` }}>
         {[['recent','Zuletzt'],['all','Alle']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)} style={{
@@ -73,24 +101,66 @@ function LibraryScreen({ store, setStore, go }) {
           );
         })}
 
-        {tab === 'all' && filtered.map(e => (
-          <Card key={e.id} onClick={() => go({ name: 'exercise', exId: e.id })} style={{ cursor: 'pointer', padding: 14 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 15, fontWeight: 600 }}>{e.name}</div>
-                <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
-                  {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
+        {tab === 'all' && filtered.map(e => {
+          const isSelected = selected.has(e.id);
+          return (
+            <Card key={e.id}
+              onClick={() => selecting ? toggleSelect(e.id) : go({ name: 'exercise', exId: e.id })}
+              style={{
+                cursor: 'pointer', padding: 14,
+                borderColor: isSelected ? UI.danger : undefined,
+                background: isSelected ? 'rgba(200,116,105,0.08)' : undefined,
+              }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600 }}>{e.name}</div>
+                  <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                    {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
+                  </div>
                 </div>
+                {selecting ? (
+                  <div style={{
+                    width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                    border: `2px solid ${isSelected ? UI.danger : UI.inkLine}`,
+                    background: isSelected ? UI.danger : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {isSelected && <span style={{ color: '#fff', fontSize: 13, lineHeight: 1 }}>✓</span>}
+                  </div>
+                ) : (
+                  <span style={{ color: UI.gold, fontSize: 18 }}>›</span>
+                )}
               </div>
-              <span style={{ color: UI.gold, fontSize: 18 }}>›</span>
-            </div>
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
         {tab === 'all' && filtered.length === 0 && (
           <Empty title="Keine Übungen" action={<Btn onClick={() => setCreating(true)}>Übung anlegen</Btn>} />
         )}
       </div>
-      <TabBar active="lib" onChange={(t) => go({ name: t })} />
+
+      {selecting && (
+        <div style={{
+          position: 'fixed', bottom: 'calc(56px + env(safe-area-inset-bottom, 8px))',
+          left: '50%', transform: 'translateX(-50%)',
+          width: '100%', maxWidth: 440,
+          padding: '12px 18px',
+          background: UI.bgRaised, borderTop: `1px solid ${UI.inkLine}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          zIndex: 15,
+        }}>
+          <span style={{ fontSize: 13, color: UI.inkSoft }}>
+            {selected.size === 0 ? 'Übungen antippen zum Auswählen' : `${selected.size} ausgewählt`}
+          </span>
+          <Btn kind="ghost" onClick={deleteSelected}
+            disabled={selected.size === 0}
+            style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 38, padding: '8px 16px', fontSize: 13 }}>
+            Löschen
+          </Btn>
+        </div>
+      )}
+
+      <TabBar active="lib" onChange={(t) => { exitSelect(); go({ name: t }); }} />
       {creating && <ExerciseCreator onClose={() => setCreating(false)} setStore={setStore} />}
     </Screen>
   );
