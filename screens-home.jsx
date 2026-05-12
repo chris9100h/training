@@ -175,6 +175,15 @@ function HomeScreen({ store, setStore, go }) {
     return [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''))[0];
   }, [store.sessions]);
 
+  const completedDateKeys = useMemo(() => {
+    const set = new Set();
+    store.sessions.filter(s => s.ended).forEach(s => {
+      const d = new Date(s.date);
+      set.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+    });
+    return set;
+  }, [store.sessions]);
+
   const startSession = () => {
     if (!activeDay || isActiveRest) return;
     const entries = activeDay.items.map(it => {
@@ -253,6 +262,8 @@ function HomeScreen({ store, setStore, go }) {
             const slotLabel = weekdayMode
               ? WEEKDAYS[i]
               : d.date.toLocaleDateString('de-DE', { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
+            const slotKey = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
+            const isCompleted = !r && completedDateKeys.has(slotKey);
             return (
               <div key={d.id ?? i}
                 onClick={() => weekdayMode ? setSelectedWd(i) : setSelectedSlot(i)}
@@ -268,6 +279,9 @@ function HomeScreen({ store, setStore, go }) {
                 <div style={{ fontSize: 11, fontWeight: 600, marginTop: 3, color: r ? UI.inkSoft : isSelected ? UI.gold : UI.ink }}>
                   {r ? '—' : d.name.slice(0, 4)}
                 </div>
+                {isCompleted && (
+                  <div style={{ fontSize: 8, color: isSelected ? UI.gold : UI.inkSoft, marginTop: 2, lineHeight: 1 }}>✓</div>
+                )}
               </div>
             );
           })}
