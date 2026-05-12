@@ -501,6 +501,13 @@ function SettingsScreen({ store, setStore, go, userId }) {
           />
         </Card>
         <Btn kind="ghost" onClick={exportData}>Daten exportieren (JSON)</Btn>
+        <Btn kind="ghost" onClick={async () => {
+          if ('caches' in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(k => caches.delete(k)));
+          }
+          window.location.reload(true);
+        }}>App-Cache leeren & neu laden</Btn>
         <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>
           Ausloggen
         </Btn>
