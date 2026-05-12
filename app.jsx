@@ -37,6 +37,15 @@ function App() {
         .then(fresh => {
           // Only apply if user hasn't made local changes during the fetch
           if (!localDirty.current) {
+            // preserve fields that live only in memory / localStorage
+            const cur = prevStore.current;
+            if (cur) {
+              fresh.inProgress = cur.inProgress ?? null;
+              fresh.sessions = fresh.sessions.map(s => {
+                const mem = cur.sessions?.find(x => x.id === s.id);
+                return mem ? { ...s, currentExIdx: mem.currentExIdx ?? 0 } : s;
+              });
+            }
             prevStore.current = fresh;
             setStore(fresh);
           }
