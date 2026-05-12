@@ -81,7 +81,7 @@ function HomeScreen({ store, setStore, go }) {
   const [selectedWd, setSelectedWd] = useState(todayWd);        // weekday mode
   const [selectedSlot, setSelectedSlot] = useState(dayIdx);     // cycle mode
 
-  const minOffset = weekdayMode ? -8 : -Math.max(currentCycleNum, 8);
+  const minOffset = weekdayMode ? -8 : -(currentCycleNum + 1);
   const goBack = () => {
     if (weekOffset <= minOffset) return;
     const next = weekOffset - 1;
