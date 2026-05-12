@@ -99,6 +99,7 @@ async function loadFromSupabase(userId) {
       dayId: s.day_id,
       dayName: s.day_name,
       date: s.date,
+      startedAt: s.started_at ?? null,
       ended: s.ended,
       entries: s.entries,
     })),
@@ -115,8 +116,8 @@ async function loadFromSupabase(userId) {
 
 function sessionToRow(s, userId) {
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, scheduleId, dayId, dayName, ...rest } = s;
-  return { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
+  const { currentExIdx, scheduleId, dayId, dayName, startedAt, ...rest } = s;
+  return { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, started_at: startedAt ?? null, user_id: userId };
 }
 
 async function syncStore(prev, next, userId) {
