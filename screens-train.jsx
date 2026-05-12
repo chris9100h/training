@@ -119,7 +119,18 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   }
 
   const completed = entry.sets.filter(s => s.done).length;
+  const allDone = completed === entry.sets.length;
   const currentSetNum = Math.min(completed + 1, entry.sets.length);
+
+  const toggleAllSets = () => {
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((e, i) => i === exIdx
+        ? { ...e, sets: e.sets.map(st => ({ ...st, done: !allDone })) }
+        : e),
+    }));
+    if (!allDone) setRestStart(Date.now());
+  };
 
   return (
     <Screen scroll={false}>
@@ -178,7 +189,14 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             <Label style={{ marginBottom: 0, fontSize: 11 }}>Vorherige ↔</Label>
             <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>kg</Label>
             <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>Reps</Label>
-            <div style={{ width: 22, height: 22, border: `2px solid ${UI.inkLine}`, borderRadius: 5, alignSelf: 'center', justifySelf: 'center' }} />
+            <button onClick={toggleAllSets} style={{
+              width: 22, height: 22, border: 'none', borderRadius: 5, cursor: 'pointer',
+              background: allDone ? UI.gold : 'transparent',
+              outline: `2px solid ${allDone ? UI.gold : UI.inkLine}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 12, fontWeight: 700, color: allDone ? '#0a0a0a' : 'transparent',
+              alignSelf: 'center', justifySelf: 'center',
+            }}>✓</button>
             <span />
           </div>
 
