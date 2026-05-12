@@ -145,27 +145,27 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         right={<Btn kind="ghost" onClick={abandon} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>×</Btn>}
       />
 
-      {/* progress chips — clickable, horizontally scrollable */}
-      <div style={{ display: 'flex', gap: 6, padding: '8px 18px 0', overflowX: 'auto', scrollbarWidth: 'none' }}>
-        {session.entries.map((e, i) => {
-          const done = e.sets.every(s => s.done);
-          const active = i === exIdx;
-          return (
-            <button key={i} onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
-              style={{
-                flexShrink: 0, padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
-                background: active ? UI.gold : done ? 'rgba(212,164,55,0.15)' : UI.bgRaised,
-                color: active ? '#0a0a0a' : done ? UI.gold : UI.inkSoft,
-                fontSize: 11, fontFamily: UI.fontUi, fontWeight: active ? 600 : 400,
-                whiteSpace: 'nowrap',
-              }}>
-              {i + 1}. {e.name}
-            </button>
-          );
-        })}
-      </div>
-
       <div style={{ flex: 1, overflow: 'auto', padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {/* progress chips — clickable, horizontally scrollable */}
+        <div style={{ display: 'flex', gap: 6, margin: '-4px -18px 0', padding: '0 18px', overflowX: 'auto', scrollbarWidth: 'none' }}>
+          {session.entries.map((e, i) => {
+            const done = e.sets.every(s => s.done);
+            const active = i === exIdx;
+            return (
+              <button key={i} onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
+                style={{
+                  flexShrink: 0, padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
+                  background: active ? UI.gold : done ? 'rgba(212,164,55,0.15)' : UI.bgRaised,
+                  color: active ? '#0a0a0a' : done ? UI.gold : UI.inkSoft,
+                  fontSize: 11, fontFamily: UI.fontUi, fontWeight: active ? 600 : 400,
+                  whiteSpace: 'nowrap',
+                }}>
+                {i + 1}. {e.name}
+              </button>
+            );
+          })}
+        </div>
 
         {/* heading + session note chip */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
