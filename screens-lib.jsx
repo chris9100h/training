@@ -544,51 +544,57 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
     onSave(patch);
   };
 
-  const fieldStyle = {
+  const inputStyle = {
     background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
-    borderRadius: 10, padding: '10px 12px', color: UI.ink,
-    fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
-    width: '100%', boxSizing: 'border-box',
+    borderRadius: 10, padding: '11px 14px', color: UI.ink,
+    fontFamily: UI.fontNum, fontSize: 16, outline: 'none',
+    width: '100%', boxSizing: 'border-box', display: 'block',
   };
-  const setNumStyle = {
-    width: 44, background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
-    borderRadius: 8, color: UI.ink, padding: '6px 4px', textAlign: 'center',
-    fontFamily: UI.fontNum, fontSize: 14, outline: 'none',
+  const numInputStyle = {
+    width: 64, background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+    borderRadius: 8, color: UI.ink, padding: '9px 6px', textAlign: 'center',
+    fontFamily: UI.fontNum, fontSize: 15, outline: 'none', flexShrink: 0,
   };
 
   return (
     <Sheet open={true} onClose={onClose} title="Session bearbeiten">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* paddingBottom keeps content scrollable above the keyboard */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 160 }}>
 
-        <div style={{ display: 'flex', gap: 10 }}>
-          <div style={{ flex: 2 }}>
-            <Label>Datum</Label>
-            <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} style={fieldStyle} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <Label>Dauer (min)</Label>
-            <input type="number" inputMode="numeric" min="1" value={draftDuration}
-              onChange={e => setDraftDuration(e.target.value)} onFocus={e => e.target.select()} style={fieldStyle} />
-          </div>
+        <div>
+          <Label>Datum</Label>
+          <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} style={inputStyle} />
         </div>
 
-        <div style={{ borderTop: `1px solid ${UI.inkLine}`, paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div>
+          <Label>Dauer (Minuten)</Label>
+          <input type="number" inputMode="numeric" min="1" value={draftDuration}
+            onChange={e => setDraftDuration(e.target.value)} onFocus={e => e.target.select()} style={inputStyle} />
+        </div>
+
+        <div style={{ borderTop: `1px solid ${UI.inkLine}`, paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
           {draftEntries.map((e, eIdx) => (
             <div key={eIdx}>
-              <Label style={{ marginBottom: 6 }}>{e.name}</Label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: UI.inkFaint, letterSpacing: '0.08em', marginBottom: 8 }}>
+                {e.name.toUpperCase()}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {e.sets.map((st, sIdx) => (
-                  <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontNum, width: 16, textAlign: 'right', flexShrink: 0 }}>{sIdx + 1}</span>
+                  <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 10, background: UI.bgInset, borderRadius: 10, padding: '8px 12px' }}>
+                    <span style={{ width: 20, fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontNum, flexShrink: 0 }}>
+                      {sIdx + 1}
+                    </span>
                     <input type="number" inputMode="decimal" step="0.5" value={st.kg ?? ''}
-                      placeholder="kg" onFocus={e => e.target.select()}
+                      placeholder="—" onFocus={e => e.target.select()}
                       onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
-                      style={setNumStyle} />
-                    <span style={{ color: UI.inkFaint, fontSize: 13 }}>×</span>
+                      style={numInputStyle} />
+                    <span style={{ color: UI.inkFaint, fontSize: 12, fontFamily: UI.fontNum }}>kg</span>
+                    <span style={{ color: UI.inkLine, fontSize: 14, margin: '0 2px' }}>×</span>
                     <input type="number" inputMode="numeric" value={st.reps ?? ''}
-                      placeholder="reps" onFocus={e => e.target.select()}
+                      placeholder="—" onFocus={e => e.target.select()}
                       onChange={ev => updateSet(eIdx, sIdx, { reps: ev.target.value === '' ? null : +ev.target.value })}
-                      style={setNumStyle} />
+                      style={numInputStyle} />
+                    <span style={{ color: UI.inkFaint, fontSize: 12, fontFamily: UI.fontNum }}>reps</span>
                   </div>
                 ))}
               </div>
