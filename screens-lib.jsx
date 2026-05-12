@@ -393,7 +393,7 @@ function SessionDetailScreen({ store, go, sessionId, justFinished }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go }) {
+function SettingsScreen({ store, setStore, go, userId }) {
   const exportData = () => {
     const blob = new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -402,17 +402,23 @@ function SettingsScreen({ store, setStore, go }) {
     a.click();
     URL.revokeObjectURL(url);
   };
-  const reset = () => {
-    if (!confirm('Wirklich ALLE Daten löschen? Diese Aktion ist nicht rückgängig zu machen.')) return;
-    LB.resetStore();
-    location.reload();
+
+  const handleSignOut = async () => {
+    await LB.signOut(); // SIGNED_OUT event → App clears state automatically
   };
+
+  const handleDeleteAll = async () => {
+    if (!confirm('Wirklich ALLE Daten dauerhaft löschen? Diese Aktion ist nicht rückgängig zu machen.')) return;
+    await LB.deleteAllData(userId);
+    await LB.signOut();
+  };
+
   return (
     <Screen>
       <TopBar title="Einstellungen" onBack={() => go({ name: 'home' })} />
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
         <Card>
-          <Label>User</Label>
+          <Label>Eingeloggt als</Label>
           <div style={{ fontSize: 16, fontWeight: 500 }}>{store.user?.name}</div>
         </Card>
         <Card>
@@ -424,9 +430,12 @@ function SettingsScreen({ store, setStore, go }) {
           />
         </Card>
         <Btn kind="ghost" onClick={exportData}>Daten exportieren (JSON)</Btn>
-        <Btn kind="ghost" onClick={reset} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>Alle Daten löschen</Btn>
+        <Btn kind="ghost" onClick={handleSignOut}>Ausloggen</Btn>
+        <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>
+          Alle Daten löschen
+        </Btn>
         <div style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'center', marginTop: 8 }}>
-          Logbook · v1.0 · alles in deinem Browser
+          Logbook · v1.0 · Daten in Supabase
         </div>
       </div>
     </Screen>

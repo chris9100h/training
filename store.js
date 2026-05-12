@@ -1,57 +1,183 @@
-/* Logbook store — pure localStorage CRUD layer */
+/* Logbook store — Supabase backend */
 
-const STORE_KEY = 'logbook.v1';
+const SUPABASE_URL = 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
 
-const DEFAULT_STATE = {
-  user: null,                // { name }
-  exercises: [],             // { id, name, tags: [] }
-  schedules: [],             // { id, name, days: [{ id, name, items: [{ exId, sets, reps }] }] }
-  activeScheduleId: null,
-  cycleIndex: 0,             // which day in the cycle is "today"
-  lastAdvancedDate: null,    // ISO date of last cycle advance
-  sessions: [],              // { id, scheduleId, dayId, dayName, date, ended, entries: [{exId, name, plannedSets, plannedReps, sets: [{kg, reps}], note}] }
-  inProgress: null,          // a sessions[] entry while training, also kept in sessions
-  customDayTypes: [],        // user-defined day type labels like 'PUSH1', 'PUSH2', 'LEGS-A'
-  settings: { unit: 'kg', restDefault: 120 },
-};
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
-function loadStore() {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return structuredClone(DEFAULT_STATE);
-    const parsed = JSON.parse(raw);
-    return { ...structuredClone(DEFAULT_STATE), ...parsed };
-  } catch {
-    return structuredClone(DEFAULT_STATE);
+// ─── AUTH ────────────────────────────────────────────────────────────────
+
+async function signIn(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+async function signUp(email, password, name) {
+  const { data, error } = await supabase.auth.signUp({
+    email, password,
+    options: { data: { name } },   // store name in user_metadata for email-confirm flow
+  });
+  if (error) throw error;
+  if (data.session) {
+    // email confirmation disabled — user is immediately logged in
+    await setupNewUser(data.user.id, name);
   }
+  // if no session: email confirmation required, setupNewUser runs on first loadFromSupabase
+  return data;
 }
 
-function saveStore(state) {
-  localStorage.setItem(STORE_KEY, JSON.stringify(state));
+async function signOut() {
+  await supabase.auth.signOut();
 }
 
-function resetStore() {
-  localStorage.removeItem(STORE_KEY);
+async function deleteAllData(userId) {
+  await Promise.all([
+    supabase.from('sessions').delete().eq('user_id', userId),
+    supabase.from('exercises').delete().eq('user_id', userId),
+    supabase.from('schedules').delete().eq('user_id', userId),
+    supabase.from('user_settings').delete().eq('user_id', userId),
+    supabase.from('profiles').delete().eq('id', userId),
+  ]);
 }
 
-// Seed convenience — adds a starter PPL schedule + common exercises.
+// ─── SETUP NEW USER ──────────────────────────────────────────────────────
+
+async function setupNewUser(userId, name) {
+  const seeded = seedStarter({
+    user: { name }, exercises: [], schedules: [], sessions: [],
+    activeScheduleId: null, cycleIndex: 0, lastAdvancedDate: null,
+    inProgress: null, customDayTypes: [], settings: { unit: 'kg', restDefault: 120 },
+  });
+  await Promise.all([
+    supabase.from('profiles').upsert({ id: userId, name }),
+    supabase.from('exercises').insert(seeded.exercises.map(e => ({ ...e, user_id: userId }))),
+    supabase.from('schedules').insert(seeded.schedules.map(s => ({ ...s, user_id: userId }))),
+    supabase.from('user_settings').upsert({
+      user_id: userId,
+      active_schedule_id: seeded.activeScheduleId,
+      cycle_index: 0, unit: 'kg', rest_default: 120,
+    }),
+  ]);
+}
+
+// ─── LOAD ────────────────────────────────────────────────────────────────
+
+async function loadFromSupabase(userId) {
+  const [profileRes, exRes, schRes, sessRes, settRes] = await Promise.all([
+    supabase.from('profiles').select('id, name').eq('id', userId).maybeSingle(),
+    supabase.from('exercises').select('id, name, tags').eq('user_id', userId),
+    supabase.from('schedules').select('id, name, days').eq('user_id', userId),
+    supabase.from('sessions').select('id, schedule_id, day_id, day_name, date, ended, entries')
+      .eq('user_id', userId).order('date', { ascending: false }),
+    supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
+  ]);
+
+  // First login after email confirmation — profile not yet created
+  if (!profileRes.data) {
+    const { data: { user } } = await supabase.auth.getUser();
+    const name = user?.user_metadata?.name || user?.email?.split('@')[0] || 'Athlet';
+    await setupNewUser(userId, name);
+    return loadFromSupabase(userId);
+  }
+
+  const sett = settRes.data || {};
+
+  return {
+    user: { name: profileRes.data.name },
+    exercises: exRes.data || [],
+    schedules: schRes.data || [],
+    // map snake_case DB columns → camelCase store fields
+    sessions: (sessRes.data || []).map(s => ({
+      id: s.id,
+      scheduleId: s.schedule_id,
+      dayId: s.day_id,
+      dayName: s.day_name,
+      date: s.date,
+      ended: s.ended,
+      entries: s.entries,
+    })),
+    activeScheduleId: sett.active_schedule_id ?? null,
+    cycleIndex: sett.cycle_index ?? 0,
+    lastAdvancedDate: sett.last_advanced_date ?? null,
+    inProgress: sett.in_progress_session_id ?? null,
+    customDayTypes: [],
+    settings: { unit: sett.unit || 'kg', restDefault: sett.rest_default || 120 },
+  };
+}
+
+// ─── SYNC ────────────────────────────────────────────────────────────────
+
+function sessionToRow(s, userId) {
+  // eslint-disable-next-line no-unused-vars
+  const { currentExIdx, scheduleId, dayId, dayName, ...rest } = s;
+  return { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
+}
+
+async function syncStore(prev, next, userId) {
+  if (!prev || !next || !userId) return;
+  const ops = [];
+
+  if (prev.exercises !== next.exercises) {
+    const upsert = next.exercises.filter(e => {
+      const p = prev.exercises.find(x => x.id === e.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(e);
+    });
+    const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
+    if (upsert.length)  ops.push(supabase.from('exercises').upsert(upsert.map(e => ({ ...e, user_id: userId }))));
+    if (removed.length) ops.push(supabase.from('exercises').delete().in('id', removed.map(e => e.id)));
+  }
+
+  if (prev.schedules !== next.schedules) {
+    const upsert = next.schedules.filter(s => {
+      const p = prev.schedules.find(x => x.id === s.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(s);
+    });
+    const removed = prev.schedules.filter(s => !next.schedules.find(x => x.id === s.id));
+    if (upsert.length)  ops.push(supabase.from('schedules').upsert(upsert.map(s => ({ ...s, user_id: userId }))));
+    if (removed.length) ops.push(supabase.from('schedules').delete().in('id', removed.map(s => s.id)));
+  }
+
+  if (prev.sessions !== next.sessions) {
+    const upsert = next.sessions.filter(s => {
+      const p = prev.sessions.find(x => x.id === s.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(s);
+    });
+    if (upsert.length) ops.push(supabase.from('sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
+  }
+
+  ops.push(supabase.from('user_settings').upsert({
+    user_id: userId,
+    active_schedule_id: next.activeScheduleId ?? null,
+    cycle_index: next.cycleIndex ?? 0,
+    last_advanced_date: next.lastAdvancedDate ?? null,
+    unit: next.settings?.unit || 'kg',
+    rest_default: next.settings?.restDefault || 120,
+    in_progress_session_id: next.inProgress ?? null,
+  }));
+
+  await Promise.all(ops);
+}
+
+// ─── SEED ────────────────────────────────────────────────────────────────
+
 function seedStarter(state) {
   const exNames = [
-    ['Back squat', ['legs','compound','barbell']],
-    ['Bench press', ['push','compound','barbell']],
-    ['Deadlift', ['pull','compound','barbell']],
-    ['OHP', ['push','compound','barbell']],
-    ['Pull-up', ['pull','compound','bodyweight']],
-    ['Barbell row', ['pull','compound','barbell']],
-    ['RDL', ['legs','compound','barbell']],
-    ['Leg press', ['legs','machine']],
-    ['Standing calves', ['legs','machine']],
-    ['Hammer curl', ['pull','isolation','dumbbell']],
-    ['Triceps pushdown', ['push','isolation','cable']],
-    ['Lateral raise', ['push','isolation','dumbbell']],
+    ['Back squat',        ['legs','compound','barbell']],
+    ['Bench press',       ['push','compound','barbell']],
+    ['Deadlift',          ['pull','compound','barbell']],
+    ['OHP',               ['push','compound','barbell']],
+    ['Pull-up',           ['pull','compound','bodyweight']],
+    ['Barbell row',       ['pull','compound','barbell']],
+    ['RDL',               ['legs','compound','barbell']],
+    ['Leg press',         ['legs','machine']],
+    ['Standing calves',   ['legs','machine']],
+    ['Hammer curl',       ['pull','isolation','dumbbell']],
+    ['Triceps pushdown',  ['push','isolation','cable']],
+    ['Lateral raise',     ['push','isolation','dumbbell']],
   ];
   const exercises = exNames.map(([name, tags]) => ({ id: uid(), name, tags }));
   const byName = (n) => exercises.find(e => e.name === n).id;
@@ -61,27 +187,27 @@ function seedStarter(state) {
     name: '2 on 1 off · PPL',
     days: [
       { id: uid(), name: 'PUSH', items: [
-        { exId: byName('Bench press'), sets: 4, reps: 5 },
-        { exId: byName('OHP'), sets: 3, reps: 8 },
-        { exId: byName('Lateral raise'), sets: 3, reps: 12 },
+        { exId: byName('Bench press'),      sets: 4, reps: 5  },
+        { exId: byName('OHP'),              sets: 3, reps: 8  },
+        { exId: byName('Lateral raise'),    sets: 3, reps: 12 },
         { exId: byName('Triceps pushdown'), sets: 3, reps: 12 },
       ]},
       { id: uid(), name: 'PULL', items: [
-        { exId: byName('Deadlift'), sets: 3, reps: 5 },
-        { exId: byName('Barbell row'), sets: 4, reps: 6 },
-        { exId: byName('Pull-up'), sets: 3, reps: 8 },
+        { exId: byName('Deadlift'),    sets: 3, reps: 5  },
+        { exId: byName('Barbell row'), sets: 4, reps: 6  },
+        { exId: byName('Pull-up'),     sets: 3, reps: 8  },
         { exId: byName('Hammer curl'), sets: 3, reps: 10 },
       ]},
       { id: uid(), name: 'REST', items: [] },
       { id: uid(), name: 'LEGS', items: [
-        { exId: byName('Back squat'), sets: 4, reps: 5 },
-        { exId: byName('RDL'), sets: 3, reps: 8 },
-        { exId: byName('Leg press'), sets: 3, reps: 10 },
-        { exId: byName('Standing calves'), sets: 4, reps: 12 },
+        { exId: byName('Back squat'),     sets: 4, reps: 5  },
+        { exId: byName('RDL'),            sets: 3, reps: 8  },
+        { exId: byName('Leg press'),      sets: 3, reps: 10 },
+        { exId: byName('Standing calves'),sets: 4, reps: 12 },
       ]},
       { id: uid(), name: 'PUSH', items: [
-        { exId: byName('OHP'), sets: 4, reps: 6 },
-        { exId: byName('Bench press'), sets: 3, reps: 8 },
+        { exId: byName('OHP'),           sets: 4, reps: 6  },
+        { exId: byName('Bench press'),   sets: 3, reps: 8  },
         { exId: byName('Lateral raise'), sets: 4, reps: 12 },
       ]},
       { id: uid(), name: 'REST', items: [] },
@@ -97,13 +223,13 @@ function seedStarter(state) {
   };
 }
 
-// Helpers used widely
+// ─── HELPERS ─────────────────────────────────────────────────────────────
+
 function findExercise(state, exId) {
   return state.exercises.find(e => e.id === exId);
 }
 
 function lastSessionForExercise(state, exId) {
-  // most recent ended session containing entry for exId
   const sessions = state.sessions
     .filter(s => s.ended)
     .slice()
@@ -130,6 +256,8 @@ function nextDay(state) {
 }
 
 window.LB = {
-  STORE_KEY, DEFAULT_STATE, loadStore, saveStore, resetStore, seedStarter,
+  supabase,
+  signIn, signUp, signOut, deleteAllData,
+  loadFromSupabase, syncStore, seedStarter,
   uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay,
 };
