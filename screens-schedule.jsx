@@ -3,6 +3,8 @@
 const { useState: useStateS, useMemo: useMemoS, useRef: useRefS } = React;
 
 const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','BACK','REST'];
+const WEEKDAYS = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+const WEEKDAYS_FULL = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
 
 // ─── PlanScreen ────────────────────────────────────────────────────
 function PlanScreen({ store, setStore, go }) {
@@ -27,7 +29,9 @@ function PlanScreen({ store, setStore, go }) {
                 {isActive && <Pill gold>aktiv</Pill>}
               </div>
               <div style={{ fontSize: 12, color: UI.inkSoft, marginBottom: 10 }}>
-                {s.days.length}-Tage-Zyklus · {s.days.filter(d => d.items.length).length} Trainingstage
+                {s.mode === 'weekday'
+                  ? `${s.days.length} Trainingstage · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`
+                  : `${s.days.length}-Tage-Zyklus · ${s.days.filter(d => d.items.length).length} Trainingstage`}
               </div>
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {s.days.map((d) => (
@@ -57,11 +61,15 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
   const updateSch = (fn) => setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === sch.id ? fn(x) : x) }));
   const setActive = () => setStore(s => ({ ...s, activeScheduleId: sch.id, cycleIndex: 0 }));
 
+  const jsDay = new Date().getDay();
+  const todayWeekday = jsDay === 0 ? 6 : jsDay - 1;
+  const displayDays = sch.mode === 'weekday' ? [...sch.days].sort((a,b)=>a.weekday-b.weekday) : sch.days;
+
   return (
     <Screen>
       <TopBar
         title={sch.name}
-        sub={`${sch.days.length}-Tage-Zyklus`}
+        sub={sch.mode === 'weekday' ? displayDays.map(d=>WEEKDAYS[d.weekday]).join(' · ') : `${sch.days.length}-Tage-Zyklus`}
         onBack={() => go({ name: 'plan' })}
         right={<Btn kind="ghost" style={{ minHeight: 36, padding: '6px 12px', fontSize: 12 }} onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })}>bearbeiten</Btn>}
       />
@@ -69,16 +77,19 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
         {sch.id !== store.activeScheduleId && (
           <Btn kind="ghost" onClick={setActive} style={{ marginBottom: 4 }}>Diesen Plan aktivieren</Btn>
         )}
-        {sch.days.map((d, i) => {
+        {displayDays.map((d, i) => {
           const isRest = !d.items.length;
-          const isToday = sch.id === store.activeScheduleId && (store.cycleIndex % sch.days.length) === i;
+          const isToday = sch.id === store.activeScheduleId && (
+            sch.mode === 'weekday' ? d.weekday === todayWeekday : (store.cycleIndex % sch.days.length) === i
+          );
+          const dayLabel = sch.mode === 'weekday' ? WEEKDAYS_FULL[d.weekday] : `Tag ${i+1}`;
           return (
             <Card key={d.id} accent={isToday}
               onClick={() => setEditingDay(d.id)}
               style={{ cursor: 'pointer', padding: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isRest ? 0 : 6 }}>
                 <div>
-                  <Label style={{ marginBottom: 2 }}>Tag {i+1}{isToday ? ' · heute' : ''}</Label>
+                  <Label style={{ marginBottom: 2 }}>{dayLabel}{isToday ? ' · heute' : ''}</Label>
                   <div style={{ fontSize: 17, fontWeight: 600, color: isRest ? UI.inkSoft : isToday ? UI.gold : UI.ink }}>{d.name}</div>
                 </div>
                 <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum }}>
@@ -123,6 +134,17 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
   const [draft, setDraft] = useStateS(original ? JSON.parse(JSON.stringify(original)) : null);
   const [pickingType, setPickingType] = useStateS(null); // { afterIdx } or { replaceIdx }
   if (!draft) return null;
+
+  const toggleWeekdayEdit = (idx) => {
+    setDraft(d => {
+      if (d.days.some(day => day.weekday === idx)) return { ...d, days: d.days.filter(day => day.weekday !== idx) };
+      return { ...d, days: [...d.days, { id: LB.uid(), name: 'FULL', weekday: idx, items: [] }] };
+    });
+  };
+  const replaceWeekdayType = (weekday, type) => {
+    setDraft(d => ({ ...d, days: d.days.map(day => day.weekday === weekday ? { ...day, name: type } : day) }));
+    setPickingType(null);
+  };
 
   const moveDay = (idx, dir) => {
     const j = idx + dir;
@@ -181,37 +203,73 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Input label="Name" value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v }))} />
 
-        <div>
-          <Label>Zyklus · {draft.days.length} Tage</Label>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {draft.days.map((day, i) => {
-              const isRest = day.name === 'REST' || !day.items.length;
-              return (
+        {draft.mode === 'weekday' ? (
+          <div>
+            <Label>Trainingstage</Label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+              {WEEKDAYS.map((wd, i) => {
+                const active = draft.days.some(d => d.weekday === i);
+                return (
+                  <button key={i} onClick={() => toggleWeekdayEdit(i)} style={{
+                    width: 44, height: 44, borderRadius: 999,
+                    border: `1px solid ${active ? UI.goldSoft : UI.inkLine}`,
+                    background: active ? UI.goldFaint : 'transparent',
+                    color: active ? UI.gold : UI.inkSoft,
+                    fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', fontWeight: active ? 600 : 400,
+                  }}>{wd}</button>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {[...draft.days].sort((a,b)=>a.weekday-b.weekday).map(day => (
                 <div key={day.id} style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
                   padding: '8px 10px', borderRadius: 10,
                 }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <button onClick={() => moveDay(i, -1)} disabled={i === 0} style={{ ...iconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
-                    <button onClick={() => moveDay(i, 1)} disabled={i === draft.days.length - 1} style={{ ...iconBtn, opacity: i === draft.days.length - 1 ? 0.3 : 1 }}>▼</button>
-                  </div>
-                  <div style={{ width: 26, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontNum, fontSize: 11 }}>{i+1}</div>
-                  <button onClick={() => setPickingType({ replaceIdx: i })} style={{
+                  <div style={{ width: 30, textAlign: 'center', color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[day.weekday]}</div>
+                  <button onClick={() => setPickingType({ replaceWeekday: day.weekday })} style={{
                     flex: 1, textAlign: 'left', background: 'transparent', border: 'none', cursor: 'pointer',
                     padding: '8px 10px', borderRadius: 8,
-                    color: isRest ? UI.inkSoft : UI.ink, fontSize: 15, fontWeight: 600,
-                    fontFamily: UI.fontUi,
+                    color: day.name === 'REST' ? UI.inkSoft : UI.ink, fontSize: 15, fontWeight: 600, fontFamily: UI.fontUi,
                   }}>{day.name}<span style={{ marginLeft: 8, color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontNum, fontWeight: 400 }}>tippen zum ändern</span></button>
-                  <button onClick={() => removeDay(i)} style={{ ...iconBtn, color: UI.danger, fontSize: 18 }}>×</button>
+                  <button onClick={() => toggleWeekdayEdit(day.weekday)} style={{ ...iconBtn, color: UI.danger, fontSize: 18 }}>×</button>
                 </div>
-              );
-            })}
-            <Btn kind="ghost" onClick={() => setPickingType({ append: true })} style={{ borderStyle: 'dashed' }}>
-              + Tag hinzufügen
-            </Btn>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div>
+            <Label>Zyklus · {draft.days.length} Tage</Label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {draft.days.map((day, i) => {
+                const isRest = day.name === 'REST' || !day.items.length;
+                return (
+                  <div key={day.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+                    padding: '8px 10px', borderRadius: 10,
+                  }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <button onClick={() => moveDay(i, -1)} disabled={i === 0} style={{ ...iconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
+                      <button onClick={() => moveDay(i, 1)} disabled={i === draft.days.length - 1} style={{ ...iconBtn, opacity: i === draft.days.length - 1 ? 0.3 : 1 }}>▼</button>
+                    </div>
+                    <div style={{ width: 26, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontNum, fontSize: 11 }}>{i+1}</div>
+                    <button onClick={() => setPickingType({ replaceIdx: i })} style={{
+                      flex: 1, textAlign: 'left', background: 'transparent', border: 'none', cursor: 'pointer',
+                      padding: '8px 10px', borderRadius: 8,
+                      color: isRest ? UI.inkSoft : UI.ink, fontSize: 15, fontWeight: 600, fontFamily: UI.fontUi,
+                    }}>{day.name}<span style={{ marginLeft: 8, color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontNum, fontWeight: 400 }}>tippen zum ändern</span></button>
+                    <button onClick={() => removeDay(i)} style={{ ...iconBtn, color: UI.danger, fontSize: 18 }}>×</button>
+                  </div>
+                );
+              })}
+              <Btn kind="ghost" onClick={() => setPickingType({ append: true })} style={{ borderStyle: 'dashed' }}>
+                + Tag hinzufügen
+              </Btn>
+            </div>
+          </div>
+        )}
 
         <div style={{ fontSize: 11, color: UI.inkFaint, lineHeight: 1.5 }}>
           Übungen pro Tag werden im Plan-Detail bearbeitet.<br/>
@@ -228,6 +286,7 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
           onClose={() => setPickingType(null)}
           onPick={(type) => {
             if (pickingType.replaceIdx != null) replaceDayType(pickingType.replaceIdx, type);
+            else if (pickingType.replaceWeekday != null) replaceWeekdayType(pickingType.replaceWeekday, type);
             else addDayType(type);
           }}
         />
@@ -484,8 +543,11 @@ function ExercisePicker({ store, onClose, onPick }) {
 function ScheduleNewScreen({ store, setStore, go }) {
   const [step, setStep] = useStateS(0);
   const [name, setName] = useStateS('');
+  const [mode, setMode] = useStateS('cycle');
   const [pattern, setPattern] = useStateS(['PUSH','PULL','REST']);
+  const [weekdayDays, setWeekdayDays] = useStateS([]);
   const [pickingType, setPickingType] = useStateS(false);
+  const [pickingWeekday, setPickingWeekday] = useStateS(null);
 
   const presets = [
     { label: 'Push · Pull · Rest', val: ['PUSH','PULL','REST'] },
@@ -509,12 +571,29 @@ function ScheduleNewScreen({ store, setStore, go }) {
     };
     setStore(s => {
       const withTypes = ensureCustomTypes(s, pattern);
-      return {
-        ...withTypes,
-        schedules: [...withTypes.schedules, newSch],
-        activeScheduleId: newSch.id,
-        cycleIndex: 0,
-      };
+      return { ...withTypes, schedules: [...withTypes.schedules, newSch], activeScheduleId: newSch.id, cycleIndex: 0 };
+    });
+    go({ name: 'schedule', scheduleId: newSch.id });
+  };
+
+  const toggleWeekday = (idx) => {
+    setWeekdayDays(days => {
+      if (days.some(d => d.weekday === idx)) return days.filter(d => d.weekday !== idx);
+      return [...days, { weekday: idx, name: 'FULL' }];
+    });
+  };
+
+  const finishWeekday = () => {
+    const sorted = [...weekdayDays].sort((a,b) => a.weekday - b.weekday);
+    const newSch = {
+      id: LB.uid(),
+      name: name.trim() || 'Mein Plan',
+      mode: 'weekday',
+      days: sorted.map(d => ({ id: LB.uid(), name: d.name, weekday: d.weekday, items: [] })),
+    };
+    setStore(s => {
+      const withTypes = ensureCustomTypes(s, sorted.map(d => d.name));
+      return { ...withTypes, schedules: [...withTypes.schedules, newSch], activeScheduleId: newSch.id, cycleIndex: 0 };
     });
     go({ name: 'schedule', scheduleId: newSch.id });
   };
@@ -528,6 +607,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
             <div key={i} style={{ flex: 1, height: 3, borderRadius: 2, background: i <= step ? UI.gold : UI.inkLine }} />
           ))}
         </div>
+
         {step === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
             <div>
@@ -538,56 +618,118 @@ function ScheduleNewScreen({ store, setStore, go }) {
             <Btn onClick={() => setStep(1)} style={{ width: '100%', opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Weiter →</Btn>
           </div>
         )}
+
         {step === 1 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-            <div>
-              <div style={{ fontSize: 22, fontWeight: 600, marginBottom: 4 }}>Zyklus zusammenstellen</div>
-              <div style={{ fontSize: 13, color: UI.inkSoft }}>Tag-Typen anhängen — Zyklus wiederholt sich endlos. Brauchst du PUSH1/PUSH2? Leg eigene Typen an.</div>
+            {/* Mode toggle */}
+            <div style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `1px solid ${UI.inkLine}`, borderRadius: 10, padding: 3 }}>
+              {[{key:'cycle',label:'Zyklus'},{key:'weekday',label:'Wochentage'}].map(m => (
+                <button key={m.key} onClick={() => setMode(m.key)} style={{
+                  flex: 1, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer',
+                  background: mode === m.key ? UI.bgRaised : 'transparent',
+                  color: mode === m.key ? UI.ink : UI.inkSoft,
+                  fontFamily: UI.fontUi, fontSize: 13, fontWeight: mode === m.key ? 600 : 400,
+                }}>{m.label}</button>
+              ))}
             </div>
 
-            <div>
-              <Label>Dein Zyklus · {pattern.length} Tage</Label>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: 12, background: UI.bgInset, border: `1px solid ${UI.inkLine}`, borderRadius: 10, minHeight: 60 }}>
-                {pattern.map((p, i) => {
-                  const isStandard = STANDARD_DAY_TYPES.includes(p);
-                  return (
-                    <button key={i} onClick={() => setPattern(pat => pat.filter((_, j) => j !== i))} style={{
-                      padding: '6px 10px', borderRadius: 8,
-                      background: p === 'REST' ? 'transparent' : UI.goldFaint,
-                      border: `1px ${p === 'REST' ? 'dashed' : 'solid'} ${p === 'REST' ? UI.inkLine : UI.goldSoft}`,
-                      color: p === 'REST' ? UI.inkSoft : UI.gold,
-                      fontSize: 12, fontFamily: UI.fontNum, letterSpacing: '0.06em', cursor: 'pointer',
-                      fontWeight: isStandard ? 400 : 600,
-                    }} title="Tippen zum Entfernen">{p} ×</button>
-                  );
-                })}
-                {pattern.length === 0 && <div style={{ color: UI.inkFaint, fontSize: 12 }}>leer — tippe „Tag hinzufügen"</div>}
-              </div>
-            </div>
+            {mode === 'cycle' && (
+              <>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Zyklus zusammenstellen</div>
+                  <div style={{ fontSize: 13, color: UI.inkSoft }}>Tag-Typen anhängen — Zyklus wiederholt sich endlos.</div>
+                </div>
+                <div>
+                  <Label>Dein Zyklus · {pattern.length} Tage</Label>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: 12, background: UI.bgInset, border: `1px solid ${UI.inkLine}`, borderRadius: 10, minHeight: 60 }}>
+                    {pattern.map((p, i) => (
+                      <button key={i} onClick={() => setPattern(pat => pat.filter((_,j) => j !== i))} style={{
+                        padding: '6px 10px', borderRadius: 8,
+                        background: p === 'REST' ? 'transparent' : UI.goldFaint,
+                        border: `1px ${p === 'REST' ? 'dashed' : 'solid'} ${p === 'REST' ? UI.inkLine : UI.goldSoft}`,
+                        color: p === 'REST' ? UI.inkSoft : UI.gold,
+                        fontSize: 12, fontFamily: UI.fontNum, letterSpacing: '0.06em', cursor: 'pointer',
+                        fontWeight: STANDARD_DAY_TYPES.includes(p) ? 400 : 600,
+                      }} title="Tippen zum Entfernen">{p} ×</button>
+                    ))}
+                    {pattern.length === 0 && <div style={{ color: UI.inkFaint, fontSize: 12 }}>leer — tippe „Tag hinzufügen"</div>}
+                  </div>
+                </div>
+                <Btn kind="ghost" onClick={() => setPickingType(true)} style={{ borderStyle: 'dashed' }}>+ Tag hinzufügen</Btn>
+                <div>
+                  <Label>Schnellauswahl</Label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {presets.map(p => (
+                      <button key={p.label} onClick={() => setPattern(p.val)} style={{
+                        background: UI.bgRaised, border: `1px solid ${UI.inkLine}`,
+                        padding: '10px 14px', borderRadius: 10, cursor: 'pointer',
+                        color: UI.ink, textAlign: 'left', fontFamily: UI.fontUi, fontSize: 13,
+                        display: 'flex', justifyContent: 'space-between',
+                      }}>
+                        <span>{p.label}</span>
+                        <span style={{ color: UI.inkFaint, fontSize: 11, fontFamily: UI.fontNum }}>{p.val.length}d</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <Btn onClick={finish} style={{ opacity: pattern.length ? 1 : 0.4 }} disabled={!pattern.length}>Plan erstellen →</Btn>
+                <div style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'center', marginTop: -8 }}>
+                  Übungen kannst du gleich danach in jeden Tag eintragen.
+                </div>
+              </>
+            )}
 
-            <Btn kind="ghost" onClick={() => setPickingType(true)} style={{ borderStyle: 'dashed' }}>+ Tag hinzufügen</Btn>
-
-            <div>
-              <Label>Schnellauswahl</Label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {presets.map(p => (
-                  <button key={p.label} onClick={() => setPattern(p.val)} style={{
-                    background: UI.bgRaised, border: `1px solid ${UI.inkLine}`,
-                    padding: '10px 14px', borderRadius: 10, cursor: 'pointer',
-                    color: UI.ink, textAlign: 'left', fontFamily: UI.fontUi, fontSize: 13,
-                    display: 'flex', justifyContent: 'space-between',
-                  }}>
-                    <span>{p.label}</span>
-                    <span style={{ color: UI.inkFaint, fontSize: 11, fontFamily: UI.fontNum }}>{p.val.length}d</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <Btn onClick={finish} style={{ opacity: pattern.length ? 1 : 0.4 }} disabled={!pattern.length}>Plan erstellen →</Btn>
-            <div style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'center', marginTop: -8 }}>
-              Übungen kannst du gleich danach in jeden Tag eintragen.
-            </div>
+            {mode === 'weekday' && (
+              <>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Trainingstage wählen</div>
+                  <div style={{ fontSize: 13, color: UI.inkSoft }}>An welchen Wochentagen trainierst du?</div>
+                </div>
+                <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                  {WEEKDAYS.map((wd, i) => {
+                    const sel = weekdayDays.some(d => d.weekday === i);
+                    return (
+                      <button key={i} onClick={() => toggleWeekday(i)} style={{
+                        width: 42, height: 42, borderRadius: 999,
+                        border: `1px solid ${sel ? UI.goldSoft : UI.inkLine}`,
+                        background: sel ? UI.goldFaint : 'transparent',
+                        color: sel ? UI.gold : UI.inkSoft,
+                        fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', fontWeight: sel ? 600 : 400,
+                      }}>{wd}</button>
+                    );
+                  })}
+                </div>
+                {weekdayDays.length > 0 && (
+                  <div>
+                    <Label>Typ pro Tag (tippen zum ändern)</Label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {[...weekdayDays].sort((a,b)=>a.weekday-b.weekday).map(d => (
+                        <div key={d.weekday} style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+                          padding: '8px 12px', borderRadius: 10,
+                        }}>
+                          <div style={{ width: 30, color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[d.weekday]}</div>
+                          <button onClick={() => setPickingWeekday(d.weekday)} style={{
+                            flex: 1, textAlign: 'left', background: 'transparent', border: 'none',
+                            cursor: 'pointer', color: d.name === 'REST' ? UI.inkSoft : UI.gold,
+                            fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi, padding: 0,
+                          }}>
+                            {d.name} <span style={{ color: UI.inkFaint, fontSize: 10, fontWeight: 400 }}>ändern</span>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <Btn onClick={finishWeekday} disabled={weekdayDays.length === 0} style={{ opacity: weekdayDays.length ? 1 : 0.4 }}>
+                  Plan erstellen →
+                </Btn>
+                <div style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'center', marginTop: -8 }}>
+                  Übungen kannst du gleich danach in jeden Tag eintragen.
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -598,6 +740,17 @@ function ScheduleNewScreen({ store, setStore, go }) {
           title="Tag-Typ wählen"
           onClose={() => setPickingType(false)}
           onPick={(t) => { setPattern(pat => [...pat, t]); setPickingType(false); }}
+        />
+      )}
+      {pickingWeekday != null && (
+        <DayTypePicker
+          store={store} setStore={setStore}
+          title={`${WEEKDAYS_FULL[pickingWeekday]} — Typ wählen`}
+          onClose={() => setPickingWeekday(null)}
+          onPick={(t) => {
+            setWeekdayDays(days => days.map(d => d.weekday === pickingWeekday ? { ...d, name: t } : d));
+            setPickingWeekday(null);
+          }}
         />
       )}
     </Screen>
