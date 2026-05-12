@@ -423,31 +423,47 @@ const inlineNumStyle = {
 
 function ExercisePicker({ store, onClose, onPick }) {
   const [q, setQ] = useStateS('');
+  const [filterTags, setFilterTags] = useStateS([]);
+  const toggleFilter = (m) => setFilterTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
+
   const list = useMemoS(() => {
-    const ql = q.toLowerCase();
+    const ql = q.toUpperCase();
     return store.exercises
-      .filter(e => !q || e.name.toLowerCase().includes(ql) || e.tags?.some(t => t.includes(ql)))
+      .filter(e => {
+        const matchSearch = !q || e.name.toUpperCase().includes(ql) || e.tags?.some(t => t.toUpperCase().includes(ql));
+        const matchTags = filterTags.length === 0 || filterTags.some(ft => e.tags?.includes(ft));
+        return matchSearch && matchTags;
+      })
       .sort((a,b) => a.name.localeCompare(b.name));
-  }, [store.exercises, q]);
+  }, [store.exercises, q, filterTags]);
 
   return (
     <Sheet open={true} onClose={onClose} title="Übung wählen">
-      <Input value={q} onChange={setQ} placeholder="Suchen oder neue tippen…" autoFocus />
-      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 360, overflow: 'auto' }}>
+      <Input value={q} onChange={setQ} placeholder="SUCHEN ODER NEUE TIPPEN…" autoFocus />
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+        {MUSCLES.map(m => (
+          <Pill key={m} gold={filterTags.includes(m)} onClick={() => toggleFilter(m)}
+            style={{ cursor: 'pointer' }}>{m}</Pill>
+        ))}
+      </div>
+      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 300, overflow: 'auto' }}>
         {list.map(e => (
           <button key={e.id} onClick={() => onPick(e.id)} style={{
             background: 'transparent', border: 'none', textAlign: 'left',
-            padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
+            padding: '10px 14px', borderRadius: 8, cursor: 'pointer',
             color: UI.ink, fontSize: 15, fontFamily: UI.fontUi,
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
           }}
           onMouseEnter={ev => ev.currentTarget.style.background = UI.bgInset}
           onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}>
             <span>{e.name}</span>
-            <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontNum }}>{e.tags?.[0]}</span>
+            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+              {(e.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
+            </div>
           </button>
         ))}
-        {q && !list.find(e => e.name.toLowerCase() === q.toLowerCase()) && (
+        {list.length === 0 && <div style={{ padding: '16px 0', textAlign: 'center', color: UI.inkFaint, fontSize: 13 }}>Keine Übungen gefunden</div>}
+        {q && !list.find(e => e.name.toUpperCase() === q.toUpperCase()) && (
           <button onClick={() => {
             if (window.__createExercise) {
               const newId = window.__createExercise(q);
@@ -456,7 +472,7 @@ function ExercisePicker({ store, onClose, onPick }) {
           }} style={{
             background: UI.goldFaint, border: `1px dashed ${UI.goldSoft}`,
             padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
-            color: UI.gold, fontSize: 14, marginTop: 8,
+            color: UI.gold, fontSize: 14, marginTop: 6, fontFamily: UI.fontUi,
           }}>+ "{q}" anlegen</button>
         )}
       </div>

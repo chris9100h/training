@@ -73,9 +73,9 @@ function LoginScreen() {
           {tabs}
           <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
             {mode === 'register' && (
-              <Input label="Name" value={name} onChange={setName} placeholder="Dein Name" autoFocus={mode === 'register'} />
+              <Input label="Name" value={name} onChange={setName} placeholder="Dein Name" autoFocus={mode === 'register'} uppercase={false} />
             )}
-            <Input label="E-Mail" value={email} onChange={setEmail} placeholder="du@beispiel.de" autoFocus={mode === 'login'} />
+            <Input label="E-Mail" value={email} onChange={setEmail} placeholder="du@beispiel.de" autoFocus={mode === 'login'} uppercase={false} />
             <Input label="Passwort" value={password} onChange={setPassword} type="password" placeholder="mind. 6 Zeichen" />
             {error && (
               <div style={{ fontSize: 12, color: UI.danger, padding: '8px 12px', background: 'rgba(200,116,105,0.08)', borderRadius: 8 }}>

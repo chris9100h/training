@@ -127,7 +127,10 @@ function Label({ children, style = {} }) {
   }}>{children}</div>;
 }
 
-function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, style = {}, suffix }) {
+const MUSCLES = ['Brust','Rücken','Schultern','Bizeps','Trizeps','Bauch','Beine','Po','Wade','Unterarme'];
+
+function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, style = {}, suffix, uppercase }) {
+  const doUpper = uppercase !== undefined ? uppercase : type === 'text';
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4, ...style }}>
       {label && <Label>{label}</Label>}
@@ -137,7 +140,7 @@ function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, 
       }}>
         <input
           value={value ?? ''}
-          onChange={e => onChange(e.target.value)}
+          onChange={e => onChange(doUpper ? e.target.value.toUpperCase() : e.target.value)}
           type={type}
           placeholder={placeholder}
           autoFocus={autoFocus}
@@ -146,6 +149,7 @@ function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, 
             flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
             color: UI.ink, fontFamily: type === 'number' ? UI.fontNum : UI.fontUi,
             fontSize: 16, padding: 0,
+            textTransform: doUpper ? 'uppercase' : 'none',
           }}
         />
         {suffix && <span style={{ color: UI.inkFaint, fontSize: 12, fontFamily: UI.fontNum }}>{suffix}</span>}
@@ -260,4 +264,4 @@ function useConfirm() {
   return [el, confirm];
 }
 
-Object.assign(window, { UI, Screen, TopBar, TabBar, Btn, Card, Label, Input, Stepper, Pill, Sheet, Empty, btnPrimary, btnGhost, btnIcon, useConfirm });
+Object.assign(window, { UI, Screen, TopBar, TabBar, Btn, Card, Label, Input, Stepper, Pill, Sheet, Empty, btnPrimary, btnGhost, btnIcon, useConfirm, MUSCLES });

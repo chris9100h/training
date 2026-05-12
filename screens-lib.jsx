@@ -169,29 +169,28 @@ function LibraryScreen({ store, setStore, go }) {
 
 function ExerciseCreator({ onClose, setStore, onCreated }) {
   const [name, setName] = useStateL('');
-  const [tags, setTags] = useStateL('');
-  const [note, setNote] = useStateL('');
+  const [selectedTags, setSelectedTags] = useStateL([]);
+  const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: tags.split(',').map(t => t.trim()).filter(Boolean), note: note.trim() };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, note: '' };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
   };
   return (
     <Sheet open={true} onClose={onClose} title="Neue Übung">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <Input label="Name" value={name} onChange={setName} placeholder="z.B. Front Squat" autoFocus />
-        <Input label="Tags (komma-getrennt)" value={tags} onChange={setTags} placeholder="legs, compound, barbell" />
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <Label>Notiz (optional)</Label>
-          <textarea
-            value={note} onChange={e => setNote(e.target.value)}
-            placeholder="z.B. Kabelzug Pos 4, Griff neutral, langsam ablassen"
-            rows={3}
-            style={{ background: UI.bgInset, border: `1px solid ${UI.inkLine}`, borderRadius: 10, padding: '10px 12px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, resize: 'vertical', outline: 'none', width: '100%', boxSizing: 'border-box' }}
-          />
-        </label>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <Input label="Name" value={name} onChange={setName} placeholder="Z.B. BANKDRÜCKEN" autoFocus />
+        <div>
+          <Label>Muskelgruppe</Label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+            {MUSCLES.map(m => (
+              <Pill key={m} gold={selectedTags.includes(m)} onClick={() => toggleTag(m)}
+                style={{ cursor: 'pointer' }}>{m}</Pill>
+            ))}
+          </div>
+        </div>
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Anlegen</Btn>
       </div>
     </Sheet>
@@ -204,8 +203,20 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
   if (!ex) { go({ name: 'lib' }); return null; }
 
   const [confirmEl, confirm] = useConfirm();
+  const [editMode, setEditMode] = useStateL(false);
+  const [editName, setEditName] = useStateL('');
+  const [editTags, setEditTags] = useStateL([]);
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
+
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditMode(true); };
+  const cancelEdit = () => setEditMode(false);
+  const saveEdit = () => {
+    if (!editName.trim()) return;
+    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags } : e) }));
+    setEditMode(false);
+  };
+  const toggleEditTag = (m) => setEditTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
 
   const saveNote = () => {
     setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, note: noteVal.trim() } : e) }));
@@ -225,7 +236,6 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
       .map(s => ({ session: s, entry: s.entries.find(e => e.exId === exId) }));
   }, [store.sessions, exId]);
 
-  // 1RM estimate per session (Epley: kg * (1 + reps/30))
   const points = history.map(h => {
     const best = (h.entry.sets || []).filter(s => s.kg && s.reps)
       .reduce((m, s) => Math.max(m, s.kg * (1 + s.reps / 30)), 0);
@@ -235,18 +245,49 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
   const pr = points.length ? Math.max(...points.map(p => p.est)) : 0;
   const last = points[points.length - 1]?.est;
   const first = points[0]?.est;
-  const growth = first && last ? ((last - first) / first) * 100 : 0;
 
   return (
     <Screen>
-      <TopBar title={ex.name} sub={ex.tags?.join(' · ') || ''} onBack={() => go({ name: 'lib' })}
+      <TopBar title={ex.name} onBack={() => { if (editMode) cancelEdit(); else go({ name: 'lib' }); }}
         right={
-          <button onClick={deleteExercise} style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            color: UI.danger, fontSize: 20, padding: '4px 8px', lineHeight: 1,
-          }}>🗑</button>
+          <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <button onClick={editMode ? saveEdit : startEdit} style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: UI.gold, fontSize: 13, fontFamily: UI.fontUi, padding: '4px 8px',
+            }}>{editMode ? 'Speichern' : 'Bearbeiten'}</button>
+            {!editMode && <button onClick={deleteExercise} style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: UI.danger, fontSize: 20, padding: '4px 8px', lineHeight: 1,
+            }}>🗑</button>}
+          </div>
         }
       />
+
+      {/* tags / edit panel */}
+      <div style={{ padding: '12px 18px', borderBottom: `1px solid ${UI.inkLine}` }}>
+        {editMode ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Input label="Name" value={editName} onChange={setEditName} />
+            <div>
+              <Label>Muskelgruppe</Label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                {MUSCLES.map(m => (
+                  <Pill key={m} gold={editTags.includes(m)} onClick={() => toggleEditTag(m)}
+                    style={{ cursor: 'pointer' }}>{m}</Pill>
+                ))}
+              </div>
+            </div>
+            <Btn kind="ghost" onClick={cancelEdit} style={{ fontSize: 13 }}>Abbrechen</Btn>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {(ex.tags || []).length > 0
+              ? ex.tags.map(t => <Pill key={t} gold>{t}</Pill>)
+              : <span style={{ fontSize: 12, color: UI.inkFaint, fontStyle: 'italic' }}>Keine Muskelgruppe — Bearbeiten zum Hinzufügen</span>}
+          </div>
+        )}
+      </div>
+
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
           <Card style={{ padding: 12 }}>
@@ -265,7 +306,6 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
 
         {points.length > 1 && <ProgressChart points={points} />}
 
-        {/* exercise note */}
         <Card style={{ padding: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: editNote ? 10 : (ex.note ? 8 : 0) }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>📌 Notiz</div>
