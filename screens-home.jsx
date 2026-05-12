@@ -194,13 +194,21 @@ function HomeScreen({ store, setStore, go }) {
     return [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''))[0];
   }, [store.sessions]);
 
-  // cycle mode: set of cyclePos values of completed sessions
+  // cycle mode: set of absolute day-numbers (days since cycleStartDate) for completed sessions
   const completedCyclePos = useMemo(() => {
     if (weekdayMode || !sch) return null;
     const set = new Set();
-    store.sessions.filter(s => s.ended && s.cyclePos != null).forEach(s => set.add(s.cyclePos));
+    if (store.cycleStartDate) {
+      const start = new Date(store.cycleStartDate + 'T12:00:00');
+      store.sessions.filter(s => s.ended).forEach(s => {
+        const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+        set.add(Math.round((d - start) / 86400000));
+      });
+    } else {
+      store.sessions.filter(s => s.ended && s.cyclePos != null).forEach(s => set.add(s.cyclePos));
+    }
     return set;
-  }, [store.sessions, weekdayMode, sch]);
+  }, [store.sessions, weekdayMode, sch, store.cycleStartDate]);
 
   // weekday mode: plain date-key set
   const completedDateKeys = useMemo(() => {
