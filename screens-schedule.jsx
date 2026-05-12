@@ -44,7 +44,6 @@ function PlanScreen({ store, setStore, go }) {
           );
         })}
       </div>
-      <TabBar active="plan" onChange={(t) => go({ name: t })} />
     </Screen>
   );
 }

@@ -166,7 +166,6 @@ function HomeScreen({ store, setStore, go }) {
             action={<Btn onClick={() => go({ name: 'schedule-new' })}>Plan anlegen</Btn>}
           />
         </div>
-        <TabBar active="home" onChange={(t) => go({ name: t })} />
         {confirmEl}
       </Screen>
     );
@@ -259,7 +258,6 @@ function HomeScreen({ store, setStore, go }) {
           </Card>
         )}
       </div>
-      <TabBar active="home" onChange={(t) => go({ name: t })} />
       {confirmEl}
     </Screen>
   );

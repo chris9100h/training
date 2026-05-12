@@ -161,7 +161,6 @@ function LibraryScreen({ store, setStore, go }) {
         </div>
       )}
 
-      <TabBar active="lib" onChange={(t) => { exitSelect(); go({ name: t }); }} />
       {creating && <ExerciseCreator onClose={() => setCreating(false)} setStore={setStore} />}
       {confirmEl}
     </Screen>
@@ -380,7 +379,6 @@ function HistoryScreen({ store, go }) {
           );
         })}
       </div>
-      <TabBar active="hist" onChange={(t) => go({ name: t })} />
     </Screen>
   );
 }
