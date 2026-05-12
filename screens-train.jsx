@@ -41,6 +41,15 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     }));
   };
 
+  const removeSet = (setIdx) => {
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((e, i) => i === exIdx
+        ? { ...e, sets: e.sets.filter((_, k) => k !== setIdx) }
+        : e),
+    }));
+  };
+
   const setNote = (note) => {
     updateSession(sess => ({
       ...sess,
@@ -141,12 +150,13 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         {/* set table */}
         <div>
           {/* table header */}
-          <div style={{ display: 'grid', gridTemplateColumns: '36px 1fr 72px 72px 36px', gap: 8, padding: '0 2px 8px', borderBottom: `1px solid ${UI.inkLine}` }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '36px 1fr 72px 72px 36px 24px', gap: 8, padding: '0 2px 8px', borderBottom: `1px solid ${UI.inkLine}` }}>
             <Label style={{ marginBottom: 0, fontSize: 11 }}>Set</Label>
             <Label style={{ marginBottom: 0, fontSize: 11 }}>Vorherige ↔</Label>
             <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>kg</Label>
             <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>Reps</Label>
             <div style={{ width: 22, height: 22, border: `2px solid ${UI.inkLine}`, borderRadius: 5, alignSelf: 'center', justifySelf: 'center' }} />
+            <span />
           </div>
 
           {/* set rows */}
@@ -155,7 +165,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             const current = !s.done && entry.sets.slice(0, i).every(x => x.done);
             return (
               <div key={i} style={{
-                display: 'grid', gridTemplateColumns: '36px 1fr 72px 72px 36px', gap: 8,
+                display: 'grid', gridTemplateColumns: '36px 1fr 72px 72px 36px 24px', gap: 8,
                 alignItems: 'center', padding: '10px 2px',
                 borderBottom: `1px solid ${UI.inkLine}`,
                 opacity: s.done ? 0.45 : 1,
@@ -211,6 +221,14 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                   }}>
                   ✓
                 </button>
+
+                {/* remove set */}
+                {!s.done && entry.sets.length > 1 ? (
+                  <button onClick={() => removeSet(i)} style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: UI.danger, fontSize: 18, lineHeight: 1, padding: 0, opacity: 0.6,
+                  }}>−</button>
+                ) : <span />}
               </div>
             );
           })}
