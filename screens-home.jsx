@@ -137,6 +137,7 @@ function HomeScreen({ store, setStore, go }) {
 
   const sessionDate = useMemo(() => {
     const d = new Date();
+    d.setHours(12, 0, 0, 0); // noon local time avoids UTC day boundary issues
     if (weekdayMode) {
       d.setDate(d.getDate() + selectedWd - todayWd + weekOffset * 7);
     } else {

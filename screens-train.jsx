@@ -253,7 +253,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                   value={s.kg ?? ''} placeholder="—"
                   onFocus={e => e.target.select()}
                   onChange={e => {
-                    const kg = e.target.value === '' ? null : +e.target.value;
+                    const kg = e.target.value === '' ? null : +(e.target.value.replace(',', '.'));
                     updateSession(sess => ({
                       ...sess,
                       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
