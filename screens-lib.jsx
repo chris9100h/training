@@ -519,7 +519,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
 }
 
 function SessionEditSheet({ session, duration, onClose, onSave }) {
-  const [draftDate, setDraftDate] = useStateL(session.date ? session.date.slice(0, 10) : '');
+  const [draftDateObj, setDraftDateObj] = useStateL(() => {
+    const d = new Date(session.date);
+    d.setHours(12, 0, 0, 0);
+    return d;
+  });
+  const adjustDay = (delta) => setDraftDateObj(d => { const n = new Date(d); n.setDate(n.getDate() + delta); return n; });
   const [draftDuration, setDraftDuration] = useStateL(duration != null ? String(duration) : '');
   const [draftEntries, setDraftEntries] = useStateL(() => JSON.parse(JSON.stringify(session.entries)));
 
@@ -531,11 +536,11 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
 
   const save = () => {
     const patch = { entries: draftEntries };
-    if (draftDate && draftDate !== session.date?.slice(0, 10)) {
-      const original = new Date(session.date);
-      const [y, m, d] = draftDate.split('-').map(Number);
-      original.setFullYear(y, m - 1, d);
-      patch.date = original.toISOString();
+    const origDay = new Date(session.date); origDay.setHours(12, 0, 0, 0);
+    if (draftDateObj.toDateString() !== origDay.toDateString()) {
+      const updated = new Date(session.date);
+      updated.setFullYear(draftDateObj.getFullYear(), draftDateObj.getMonth(), draftDateObj.getDate());
+      patch.date = updated.toISOString();
     }
     const mins = parseInt(draftDuration, 10);
     if (!isNaN(mins) && mins > 0 && session.ended) {
@@ -563,7 +568,13 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
 
         <div>
           <Label>Datum</Label>
-          <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} style={inputStyle} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button onClick={() => adjustDay(-1)} style={{ ...UI.btnGhost, width: 40, height: 40, borderRadius: 10, fontSize: 18, padding: 0, minHeight: 0, flexShrink: 0 }}>←</button>
+            <div style={{ ...inputStyle, textAlign: 'center', flex: 1 }}>
+              {draftDateObj.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}
+            </div>
+            <button onClick={() => adjustDay(+1)} style={{ ...UI.btnGhost, width: 40, height: 40, borderRadius: 10, fontSize: 18, padding: 0, minHeight: 0, flexShrink: 0 }}>→</button>
+          </div>
         </div>
 
         <div>
