@@ -41,7 +41,7 @@ function TopBar({ title, sub, onBack, right }) {
       {onBack && (
         <button onClick={onBack} style={{ ...btnIcon, fontSize: 22, lineHeight: 1 }}>‹</button>
       )}
-      <div style={{ flex: 1, minWidth: 0, minHeight: 32, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div style={{ flex: 1, minWidth: 0, minHeight: 36, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         {sub && <div style={{ fontSize: 10, letterSpacing: '0.12em', color: UI.inkFaint, fontFamily: UI.fontNum, textTransform: 'uppercase' }}>{sub}</div>}
         <div style={{ fontSize: 18, fontWeight: 600, color: UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</div>
       </div>
