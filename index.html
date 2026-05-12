@@ -63,9 +63,6 @@
 <div id="err" style="display:none;position:fixed;inset:0;background:#0a0a0a;color:#c87469;font-family:monospace;font-size:13px;padding:24px;white-space:pre-wrap;z-index:9999;overflow:auto"></div>
 <script>
 function setAppHeight() {
-  // Measure env(safe-area-inset-top) in CSS pixels via a temp element.
-  // position:fixed top:0 starts below the status bar, so the correct
-  // app height = screen.height - safeAreaTop (reaches physical bottom).
   var tmp = document.createElement('div');
   tmp.style.cssText = 'position:fixed;top:0;height:env(safe-area-inset-top,0px);width:0;opacity:0;pointer-events:none';
   document.documentElement.appendChild(tmp);
@@ -75,6 +72,43 @@ function setAppHeight() {
 }
 setAppHeight();
 window.addEventListener('resize', setAppHeight);
+
+// DEBUG OVERLAY — remove once layout is fixed
+function showDebug() {
+  var tmp = document.createElement('div');
+  tmp.style.cssText = 'position:fixed;top:0;height:env(safe-area-inset-top,0px);width:0;opacity:0;pointer-events:none';
+  document.documentElement.appendChild(tmp);
+  var safeTop = tmp.getBoundingClientRect().height || 0;
+  document.documentElement.removeChild(tmp);
+
+  var tmp2 = document.createElement('div');
+  tmp2.style.cssText = 'position:fixed;top:0;bottom:0;left:0;width:0;opacity:0;pointer-events:none';
+  document.documentElement.appendChild(tmp2);
+  var fixedH = tmp2.getBoundingClientRect().height || 0;
+  document.documentElement.removeChild(tmp2);
+
+  var appH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-height')) || 0;
+  var root = document.getElementById('root');
+  var rootH = root ? root.getBoundingClientRect().height : 0;
+
+  var d = document.getElementById('dbg');
+  if (!d) {
+    d = document.createElement('div');
+    d.id = 'dbg';
+    d.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:rgba(255,0,0,0.85);color:#fff;font:12px monospace;padding:6px 10px;z-index:99999;pointer-events:none;line-height:1.7';
+    document.body.appendChild(d);
+  }
+  d.innerHTML =
+    'screen: ' + window.screen.width + 'x' + window.screen.height + ' | dpr: ' + window.devicePixelRatio + '<br>' +
+    'innerSize: ' + window.innerWidth + 'x' + window.innerHeight + '<br>' +
+    'safeTop(measured): ' + safeTop.toFixed(1) + 'px<br>' +
+    '--app-height: ' + appH.toFixed(1) + 'px<br>' +
+    '#root.height: ' + rootH.toFixed(1) + 'px<br>' +
+    'fixed(top0+bottom0): ' + fixedH.toFixed(1) + 'px<br>' +
+    'standalone: ' + (window.navigator.standalone === true);
+}
+window.addEventListener('load', showDebug);
+window.addEventListener('resize', showDebug);
 
 window.onerror = function(msg, src, line, col, err) {
   var d = document.getElementById('err');
