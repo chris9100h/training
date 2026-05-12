@@ -117,7 +117,9 @@ async function loadFromSupabase(userId) {
 function sessionToRow(s, userId) {
   // eslint-disable-next-line no-unused-vars
   const { currentExIdx, scheduleId, dayId, dayName, startedAt, ...rest } = s;
-  return { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, started_at: startedAt ?? null, user_id: userId };
+  const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
+  if (startedAt != null) row.started_at = startedAt;
+  return row;
 }
 
 async function syncStore(prev, next, userId) {
