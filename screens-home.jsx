@@ -110,7 +110,7 @@ function HomeScreen({ store, setStore, go }) {
   const dayIdx = today?.idx ?? 0;
   const isRest = day && (!day.items || day.items.length === 0);
   const dayCount = sch?.days?.length || 0;
-  const weekdayMode = sch?.mode === 'weekday';
+  const weekdayMode = sch ? LB.isWeekdayPlan(sch) : false;
   const week = useMemo(() => {
     if (!sch) return [];
     if (weekdayMode) {

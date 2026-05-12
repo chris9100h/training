@@ -139,7 +139,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(s);
     });
     const removed = prev.schedules.filter(s => !next.schedules.find(x => x.id === s.id));
-    if (upsert.length)  ops.push(_supabase.from('schedules').upsert(upsert.map(s => ({ ...s, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('schedules').upsert(upsert.map(({ mode, ...s }) => ({ ...s, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('schedules').delete().in('id', removed.map(s => s.id)));
   }
 
@@ -247,10 +247,14 @@ function lastSessionForExercise(state, exId, dayName = null) {
   return null;
 }
 
+function isWeekdayPlan(sch) {
+  return sch.mode === 'weekday' || (sch.days.length > 0 && sch.days.some(d => d.weekday != null));
+}
+
 function todaysDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
-  if (sch.mode === 'weekday') {
+  if (isWeekdayPlan(sch)) {
     const js = new Date().getDay();
     const todayWd = js === 0 ? 6 : js - 1; // 0=Mo … 6=So
     const day = sch.days.find(d => d.weekday === todayWd);
@@ -272,5 +276,5 @@ window.LB = {
   supabase: _supabase,
   signIn, signUp, signOut, deleteAllData,
   loadFromSupabase, syncStore, seedStarter,
-  uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay,
+  uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay, isWeekdayPlan,
 };

@@ -27,7 +27,7 @@ function PlanScreen({ store, setStore, go }) {
                 {isActive && <Pill gold>aktiv</Pill>}
               </div>
               <div style={{ fontSize: 12, color: UI.inkSoft, marginBottom: 10 }}>
-                {s.mode === 'weekday'
+                {LB.isWeekdayPlan(s)
                   ? `${s.days.length} Trainingstage · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`
                   : `${s.days.length}-Tage-Zyklus · ${s.days.filter(d => d.items.length).length} Trainingstage`}
               </div>
@@ -61,13 +61,13 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
 
   const jsDay = new Date().getDay();
   const todayWeekday = jsDay === 0 ? 6 : jsDay - 1;
-  const displayDays = sch.mode === 'weekday' ? [...sch.days].sort((a,b)=>a.weekday-b.weekday) : sch.days;
+  const displayDays = LB.isWeekdayPlan(sch) ? [...sch.days].sort((a,b)=>a.weekday-b.weekday) : sch.days;
 
   return (
     <Screen>
       <TopBar
         title={sch.name}
-        sub={sch.mode === 'weekday' ? displayDays.map(d=>WEEKDAYS[d.weekday]).join(' · ') : `${sch.days.length}-Tage-Zyklus`}
+        sub={LB.isWeekdayPlan(sch) ? displayDays.map(d=>WEEKDAYS[d.weekday]).join(' · ') : `${sch.days.length}-Tage-Zyklus`}
         onBack={() => go({ name: 'plan' })}
         right={<Btn kind="ghost" style={{ minHeight: 36, padding: '6px 12px', fontSize: 12 }} onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })}>bearbeiten</Btn>}
       />
@@ -78,9 +78,9 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
         {displayDays.map((d, i) => {
           const isRest = !d.items.length;
           const isToday = sch.id === store.activeScheduleId && (
-            sch.mode === 'weekday' ? d.weekday === todayWeekday : (store.cycleIndex % sch.days.length) === i
+            LB.isWeekdayPlan(sch) ? d.weekday === todayWeekday : (store.cycleIndex % sch.days.length) === i
           );
-          const dayLabel = sch.mode === 'weekday' ? WEEKDAYS_FULL[d.weekday] : `Tag ${i+1}`;
+          const dayLabel = LB.isWeekdayPlan(sch) ? WEEKDAYS_FULL[d.weekday] : `Tag ${i+1}`;
           return (
             <Card key={d.id} accent={isToday}
               onClick={() => setEditingDay(d.id)}
@@ -201,7 +201,7 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Input label="Name" value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v }))} />
 
-        {draft.mode === 'weekday' ? (
+        {LB.isWeekdayPlan(draft) ? (
           <div>
             <Label>Trainingstage</Label>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
