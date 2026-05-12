@@ -63,10 +63,9 @@
 <div id="err" style="display:none;position:fixed;inset:0;background:#0a0a0a;color:#c87469;font-family:monospace;font-size:13px;padding:24px;white-space:pre-wrap;z-index:9999;overflow:auto"></div>
 <script>
 function setAppHeight() {
-  document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+  document.documentElement.style.setProperty('--app-height', window.screen.height + 'px');
 }
 setAppHeight();
-window.addEventListener('resize', setAppHeight);
 
 window.onerror = function(msg, src, line, col, err) {
   var d = document.getElementById('err');
