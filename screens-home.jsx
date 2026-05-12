@@ -168,6 +168,16 @@ function HomeScreen({ store, setStore, go }) {
   const isViewingToday = weekOffset === 0 && (weekdayMode ? selectedWd === todayWd : selectedSlot === dayIdx);
   const isActiveRest = !activeDay?.items?.length;
 
+  const isSlotDone = useMemo(() => {
+    if (isActiveRest) return false;
+    if (weekdayMode) {
+      const key = `${sessionDate.getFullYear()}-${sessionDate.getMonth()}-${sessionDate.getDate()}`;
+      return completedDateKeys?.has(key) ?? false;
+    }
+    const pos = (currentCycleNum + weekOffset) * dayCount + selectedSlot;
+    return completedCyclePos?.has(pos) ?? false;
+  }, [isActiveRest, weekdayMode, sessionDate, completedDateKeys, completedCyclePos, currentCycleNum, weekOffset, dayCount, selectedSlot]);
+
   const periodLabel = useMemo(() => {
     if (weekdayMode) {
       if (weekOffset === 0) return 'DIESE WOCHE';
@@ -363,16 +373,23 @@ function HomeScreen({ store, setStore, go }) {
                 );
               })}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <Btn onClick={startSession} style={{ width: '100%' }}>
-                {isViewingToday ? 'Training starten →' : 'Training nacherfassen →'}
-              </Btn>
-              {!weekdayMode && isViewingToday && (
-                <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>
-                  Tag überspringen
+            {isSlotDone ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', color: UI.ok }}>
+                <span style={{ fontSize: 20, lineHeight: 1 }}>{'✓'}</span>
+                <span style={{ fontSize: 14, fontWeight: 500 }}>Training erledigt</span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <Btn onClick={startSession} style={{ width: '100%' }}>
+                  {isViewingToday ? 'Training starten →' : 'Training nacherfassen →'}
                 </Btn>
-              )}
-            </div>
+                {!weekdayMode && isViewingToday && (
+                  <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>
+                    Tag überspringen
+                  </Btn>
+                )}
+              </div>
+            )}
           </Card>
         )}
 
