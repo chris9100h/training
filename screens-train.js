@@ -1,0 +1,712 @@
+/* Training mode — one exercise per screen, swipe through */
+
+const {
+  useState: useStateT,
+  useEffect: useEffectT,
+  useRef: useRefT
+} = React;
+function TrainingScreen({
+  store,
+  setStore,
+  go,
+  sessionId
+}) {
+  const session = store.sessions.find(s => s.id === sessionId);
+  if (!session) {
+    go({
+      name: 'home'
+    });
+    return null;
+  }
+  const exIdx = session.currentExIdx || 0;
+  const entry = session.entries[exIdx];
+  const exercise = entry ? LB.findExercise(store, entry.exId) : null;
+  const last = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayName) : null;
+  const updateSession = fn => {
+    setStore(s => ({
+      ...s,
+      sessions: s.sessions.map(x => x.id === session.id ? fn(x) : x)
+    }));
+  };
+  const updateSet = (setIdx, patch) => {
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((e, i) => i === exIdx ? {
+        ...e,
+        sets: e.sets.map((st, k) => k === setIdx ? {
+          ...st,
+          ...patch
+        } : st)
+      } : e)
+    }));
+  };
+  const completeSet = setIdx => {
+    updateSet(setIdx, {
+      done: true
+    });
+    setRestStart(Date.now());
+    const updatedSets = entry.sets.map((st, k) => k === setIdx ? {
+      ...st,
+      done: true
+    } : st);
+    if (updatedSets.every(st => st.done)) {
+      setTimeout(() => navigate(1), 600);
+    }
+  };
+  const addSet = () => {
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((e, i) => i === exIdx ? {
+        ...e,
+        sets: [...e.sets, {
+          kg: e.sets[e.sets.length - 1]?.kg ?? null,
+          reps: e.sets[e.sets.length - 1]?.reps ?? null,
+          done: false
+        }]
+      } : e)
+    }));
+  };
+  const removeSet = async setIdx => {
+    if (!(await confirm(`Satz ${setIdx + 1} entfernen?`, {
+      ok: 'Entfernen',
+      danger: true
+    }))) return;
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((e, i) => i === exIdx ? {
+        ...e,
+        sets: e.sets.filter((_, k) => k !== setIdx)
+      } : e)
+    }));
+  };
+  const setNote = note => {
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((e, i) => i === exIdx ? {
+        ...e,
+        note
+      } : e)
+    }));
+  };
+  const navigate = dir => {
+    const newIdx = exIdx + dir;
+    if (newIdx < 0) return;
+    if (newIdx >= session.entries.length) {
+      setFinishOpen(true);
+      return;
+    }
+    updateSession(sess => ({
+      ...sess,
+      currentExIdx: newIdx
+    }));
+  };
+  const finish = () => {
+    updateSession(sess => ({
+      ...sess,
+      ended: new Date().toISOString()
+    }));
+    setStore(s => ({
+      ...s,
+      inProgress: null,
+      cycleIndex: s.cycleIndex + 1,
+      lastAdvancedDate: LB.todayISO()
+    }));
+    go({
+      name: 'session',
+      sessionId: session.id,
+      justFinished: true
+    });
+  };
+  const abandon = async () => {
+    if (!(await confirm('Eingaben gehen verloren.', {
+      title: 'Session abbrechen?',
+      ok: 'Abbrechen',
+      cancel: 'Weiter trainieren',
+      danger: true
+    }))) return;
+    setStore(s => ({
+      ...s,
+      sessions: s.sessions.filter(x => x.id !== session.id),
+      inProgress: null
+    }));
+    go({
+      name: 'home'
+    });
+  };
+
+  // ── rest timer ────────────────────────────────────────────
+  const [restStart, setRestStart] = useStateT(null);
+  const [now, setNow] = useStateT(Date.now());
+  useEffectT(() => {
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, []);
+  const restDef = store.settings?.restDefault || 120;
+  const restElapsed = restStart ? Math.floor((now - restStart) / 1000) : null;
+  const restRemaining = restElapsed != null ? Math.max(0, restDef - restElapsed) : null;
+  const restPct = restElapsed != null ? Math.min(100, restElapsed / restDef * 100) : 0;
+  const [confirmEl, confirm] = useConfirm();
+  const [finishOpen, setFinishOpen] = useStateT(false);
+  const [notePicker, setNotePicker] = useStateT(false);
+  const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
+  const [exNoteOpen, setExNoteOpen] = useStateT(false);
+  const [exNoteVal, setExNoteVal] = useStateT('');
+  const saveExNote = () => {
+    setStore(s => ({
+      ...s,
+      exercises: s.exercises.map(e => e.id === entry.exId ? {
+        ...e,
+        note: exNoteVal.trim()
+      } : e)
+    }));
+    setExNoteOpen(false);
+  };
+  if (!entry) {
+    return /*#__PURE__*/React.createElement(Screen, null, /*#__PURE__*/React.createElement(Empty, {
+      title: "Diese Session ist leer",
+      action: /*#__PURE__*/React.createElement(Btn, {
+        onClick: () => go({
+          name: 'home'
+        })
+      }, "Zur\xFCck")
+    }));
+  }
+  const completed = entry.sets.filter(s => s.done).length;
+  const allDone = completed === entry.sets.length;
+  const currentSetNum = Math.min(completed + 1, entry.sets.length);
+  const checkAllSets = () => {
+    if (allDone) return;
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((e, i) => i === exIdx ? {
+        ...e,
+        sets: e.sets.map(st => ({
+          ...st,
+          done: true
+        }))
+      } : e)
+    }));
+    setRestStart(Date.now());
+    setTimeout(() => navigate(1), 600);
+  };
+  return /*#__PURE__*/React.createElement(Screen, {
+    scroll: false
+  }, /*#__PURE__*/React.createElement(TopBar, {
+    title: `${session.dayName} · ${exIdx + 1}/${session.entries.length}`,
+    sub: "Training l\xE4uft",
+    right: /*#__PURE__*/React.createElement(Btn, {
+      kind: "ghost",
+      onClick: abandon,
+      style: {
+        minHeight: 32,
+        padding: '4px 10px',
+        fontSize: 11,
+        color: UI.danger,
+        borderColor: 'rgba(200,116,105,0.25)'
+      }
+    }, "\xD7")
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      padding: '8px 18px 0',
+      overflowX: 'auto',
+      scrollbarWidth: 'none'
+    }
+  }, session.entries.map((e, i) => {
+    const done = e.sets.every(s => s.done);
+    const active = i === exIdx;
+    return /*#__PURE__*/React.createElement("button", {
+      key: i,
+      onClick: () => updateSession(sess => ({
+        ...sess,
+        currentExIdx: i
+      })),
+      style: {
+        flexShrink: 0,
+        padding: '4px 10px',
+        borderRadius: 20,
+        border: 'none',
+        cursor: 'pointer',
+        background: active ? UI.gold : done ? 'rgba(212,164,55,0.15)' : UI.bgRaised,
+        color: active ? '#0a0a0a' : done ? UI.gold : UI.inkSoft,
+        fontSize: 11,
+        fontFamily: UI.fontUi,
+        fontWeight: active ? 600 : 400,
+        whiteSpace: 'nowrap'
+      }
+    }, i + 1, ". ", e.name);
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      overflow: 'auto',
+      padding: '12px 18px 18px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 26,
+      fontWeight: 700,
+      lineHeight: 1.2
+    }
+  }, entry.name), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      color: UI.inkSoft,
+      marginTop: 4
+    }
+  }, "Set ", currentSetNum, " of ", entry.sets.length)), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setNotePicker(true),
+    style: {
+      background: entry.note ? UI.goldFaint : 'transparent',
+      border: `1px solid ${entry.note ? UI.goldSoft : UI.inkLine}`,
+      borderRadius: 20,
+      padding: '6px 12px',
+      cursor: 'pointer',
+      color: entry.note ? UI.gold : UI.inkFaint,
+      fontSize: 12,
+      fontFamily: UI.fontUi,
+      flexShrink: 0,
+      marginTop: 2
+    }
+  }, "\uD83D\uDCDD ", entry.note ? 'Notiz' : '+ Notiz')), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '36px 1fr 72px 72px 36px 24px',
+      gap: 8,
+      padding: '0 2px 8px',
+      borderBottom: `1px solid ${UI.inkLine}`
+    }
+  }, /*#__PURE__*/React.createElement(Label, {
+    style: {
+      marginBottom: 0,
+      fontSize: 11
+    }
+  }, "Set"), /*#__PURE__*/React.createElement(Label, {
+    style: {
+      marginBottom: 0,
+      fontSize: 11
+    }
+  }, "Vorherige \u2194"), /*#__PURE__*/React.createElement(Label, {
+    style: {
+      marginBottom: 0,
+      fontSize: 11,
+      textAlign: 'center'
+    }
+  }, "kg"), /*#__PURE__*/React.createElement(Label, {
+    style: {
+      marginBottom: 0,
+      fontSize: 11,
+      textAlign: 'center'
+    }
+  }, "Reps"), /*#__PURE__*/React.createElement("button", {
+    onClick: checkAllSets,
+    style: {
+      width: 22,
+      height: 22,
+      border: 'none',
+      borderRadius: 5,
+      cursor: 'pointer',
+      background: allDone ? UI.gold : 'transparent',
+      outline: `2px solid ${allDone ? UI.gold : UI.inkLine}`,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: 12,
+      fontWeight: 700,
+      color: allDone ? '#0a0a0a' : 'transparent',
+      alignSelf: 'center',
+      justifySelf: 'center'
+    }
+  }, "\u2713"), /*#__PURE__*/React.createElement("span", null)), entry.sets.map((s, i) => {
+    const prevSet = last?.entry?.sets?.[i];
+    const current = !s.done && entry.sets.slice(0, i).every(x => x.done);
+    return /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        display: 'grid',
+        gridTemplateColumns: '36px 1fr 72px 72px 36px 24px',
+        gap: 8,
+        alignItems: 'center',
+        padding: '10px 2px',
+        borderBottom: `1px solid ${UI.inkLine}`,
+        opacity: s.done ? 0.45 : 1
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 28,
+        height: 28,
+        borderRadius: '50%',
+        flexShrink: 0,
+        background: current ? UI.goldFaint : 'transparent',
+        border: `2px solid ${current ? UI.gold : UI.inkLine}`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: UI.fontNum,
+        fontSize: 13,
+        fontWeight: 600,
+        color: current ? UI.gold : UI.inkSoft
+      }
+    }, i + 1), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        color: UI.inkSoft,
+        fontFamily: UI.fontNum
+      }
+    }, prevSet?.kg && prevSet?.reps ? `${prevSet.kg} kg × ${prevSet.reps}` : '—'), /*#__PURE__*/React.createElement("input", {
+      type: "number",
+      inputMode: "decimal",
+      step: "0.5",
+      value: s.kg ?? '',
+      placeholder: "\u2014",
+      onFocus: e => e.target.select(),
+      onChange: e => updateSet(i, {
+        kg: e.target.value === '' ? null : +e.target.value,
+        done: false
+      }),
+      disabled: s.done,
+      style: setInputStyle(s.done, current)
+    }), /*#__PURE__*/React.createElement("input", {
+      type: "number",
+      inputMode: "numeric",
+      value: s.reps ?? '',
+      placeholder: "\u2014",
+      onFocus: e => e.target.select(),
+      onChange: e => updateSet(i, {
+        reps: e.target.value === '' ? null : +e.target.value,
+        done: false
+      }),
+      disabled: s.done,
+      style: setInputStyle(s.done, current)
+    }), /*#__PURE__*/React.createElement("button", {
+      onClick: () => s.done ? updateSet(i, {
+        done: false
+      }) : completeSet(i),
+      disabled: !s.done && (!s.kg || !s.reps),
+      style: {
+        width: 28,
+        height: 28,
+        borderRadius: 6,
+        border: 'none',
+        cursor: 'pointer',
+        background: s.done ? UI.gold : 'transparent',
+        outline: `2px solid ${s.done ? UI.gold : !s.kg || !s.reps ? UI.inkLine : UI.inkSoft}`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 14,
+        fontWeight: 700,
+        color: s.done ? '#0a0a0a' : 'transparent',
+        opacity: !s.done && (!s.kg || !s.reps) ? 0.35 : 1,
+        flexShrink: 0
+      }
+    }, "\u2713"), !s.done && entry.sets.length > 1 ? /*#__PURE__*/React.createElement("button", {
+      onClick: () => removeSet(i),
+      style: {
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        color: UI.danger,
+        fontSize: 18,
+        lineHeight: 1,
+        padding: 0,
+        opacity: 0.6
+      }
+    }, "\u2212") : /*#__PURE__*/React.createElement("span", null));
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: addSet,
+    style: {
+      marginTop: 10,
+      width: 36,
+      height: 36,
+      borderRadius: '50%',
+      background: 'transparent',
+      border: `1px solid ${UI.inkLine}`,
+      color: UI.inkSoft,
+      fontSize: 20,
+      lineHeight: 1,
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    }
+  }, "+")), restStart && restRemaining > 0 && /*#__PURE__*/React.createElement(Card, {
+    style: {
+      padding: 12,
+      background: UI.bgInset
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'baseline',
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement(Label, {
+    style: {
+      marginBottom: 0
+    }
+  }, "Pause"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: UI.fontNum,
+      fontSize: 22,
+      color: UI.gold,
+      fontWeight: 500
+    }
+  }, Math.floor(restRemaining / 60), ":", (restRemaining % 60).toString().padStart(2, '0'))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: 3,
+      background: UI.inkLine,
+      borderRadius: 2,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: '100%',
+      width: `${restPct}%`,
+      background: UI.gold,
+      transition: 'width 0.25s linear'
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      marginTop: 8
+    }
+  }, /*#__PURE__*/React.createElement(Btn, {
+    kind: "ghost",
+    onClick: () => setRestStart(null),
+    style: {
+      flex: 1,
+      minHeight: 36,
+      fontSize: 12
+    }
+  }, "\xDCberspringen"), /*#__PURE__*/React.createElement(Btn, {
+    kind: "ghost",
+    onClick: () => setRestStart(Date.now() - (restElapsed - 30) * 1000),
+    style: {
+      flex: 1,
+      minHeight: 36,
+      fontSize: 12
+    }
+  }, "+30s"))), exercise?.note && /*#__PURE__*/React.createElement(Card, {
+    style: {
+      padding: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 600,
+      color: UI.ink
+    }
+  }, "Exercise Note"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 16
+    }
+  }, "\uD83D\uDCCC")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      color: UI.inkSoft,
+      lineHeight: 1.5,
+      whiteSpace: 'pre-wrap'
+    }
+  }, exercise.note))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      borderTop: `1px solid ${UI.inkLine}`,
+      padding: '10px 18px calc(env(safe-area-inset-bottom, 8px) + 12px)',
+      background: UI.bg,
+      display: 'flex',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement(Btn, {
+    kind: "ghost",
+    onClick: () => navigate(-1),
+    disabled: exIdx === 0,
+    style: {
+      flex: 1,
+      opacity: exIdx === 0 ? 0.3 : 1
+    }
+  }, "\u2039 zur\xFCck"), /*#__PURE__*/React.createElement(Btn, {
+    onClick: () => navigate(1),
+    style: {
+      flex: 2
+    }
+  }, exIdx === session.entries.length - 1 ? 'Fertig →' : 'Nächste Übung →')), /*#__PURE__*/React.createElement(Sheet, {
+    open: finishOpen,
+    onClose: () => setFinishOpen(false),
+    title: "Session beenden?"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: UI.inkSoft,
+      marginBottom: 14
+    }
+  }, session.entries.reduce((c, e) => c + e.sets.filter(s => s.done).length, 0), " von", ' ', session.entries.reduce((c, e) => c + e.sets.length, 0), " Sets geloggt \xB7", ' ', Math.round(totalVolume(session)).toLocaleString('de-DE'), " kg Gesamtvolumen"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement(Btn, {
+    kind: "ghost",
+    onClick: () => setFinishOpen(false),
+    style: {
+      flex: 1
+    }
+  }, "Weiter trainieren"), /*#__PURE__*/React.createElement(Btn, {
+    onClick: finish,
+    style: {
+      flex: 2
+    }
+  }, "Beenden \u2713"))), /*#__PURE__*/React.createElement(Sheet, {
+    open: notePicker,
+    onClose: () => setNotePicker(false),
+    title: "Welche Notiz?"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setNotePicker(false);
+      setSessionNoteOpen(true);
+    },
+    style: {
+      background: UI.bgInset,
+      border: `1px solid ${UI.inkLine}`,
+      borderRadius: 12,
+      padding: '14px 16px',
+      cursor: 'pointer',
+      textAlign: 'left'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 600,
+      color: UI.ink,
+      marginBottom: 4
+    }
+  }, "\uD83D\uDCDD Session-Notiz"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: UI.inkSoft
+    }
+  }, "Nur f\xFCr dieses Training sichtbar \u2014 z.B. wie sich der Satz angef\xFChlt hat.")), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setNotePicker(false);
+      setExNoteVal(exercise?.note || '');
+      setExNoteOpen(true);
+    },
+    style: {
+      background: UI.bgInset,
+      border: `1px solid ${UI.inkLine}`,
+      borderRadius: 12,
+      padding: '14px 16px',
+      cursor: 'pointer',
+      textAlign: 'left'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 600,
+      color: UI.ink,
+      marginBottom: 4
+    }
+  }, "\uD83D\uDCCC \xDCbungs-Notiz"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: UI.inkSoft
+    }
+  }, "Dauerhaft gespeichert \u2014 wird bei jeder Session angezeigt. z.B. Einstellungen, Technikhinweise.")))), /*#__PURE__*/React.createElement(Sheet, {
+    open: sessionNoteOpen,
+    onClose: () => setSessionNoteOpen(false),
+    title: "Session-Notiz"
+  }, /*#__PURE__*/React.createElement("textarea", {
+    value: entry.note || '',
+    onChange: e => setNote(e.target.value),
+    placeholder: "z.B. Knie hat gezwickt, n\xE4chstes Mal Aufw\xE4rmsatz mehr",
+    rows: 4,
+    style: {
+      width: '100%',
+      boxSizing: 'border-box',
+      background: UI.bgInset,
+      border: `1px solid ${UI.inkLine}`,
+      borderRadius: 10,
+      padding: 12,
+      color: UI.ink,
+      fontFamily: UI.fontUi,
+      fontSize: 14,
+      resize: 'vertical',
+      outline: 'none'
+    }
+  }), /*#__PURE__*/React.createElement(Btn, {
+    onClick: () => setSessionNoteOpen(false),
+    style: {
+      marginTop: 12,
+      width: '100%'
+    }
+  }, "Speichern")), confirmEl, /*#__PURE__*/React.createElement(Sheet, {
+    open: exNoteOpen,
+    onClose: () => setExNoteOpen(false),
+    title: "\xDCbungs-Notiz"
+  }, /*#__PURE__*/React.createElement("textarea", {
+    value: exNoteVal,
+    onChange: e => setExNoteVal(e.target.value),
+    placeholder: "z.B. Kabelzug Pos 4, Griff neutral, langsam ablassen",
+    rows: 4,
+    style: {
+      width: '100%',
+      boxSizing: 'border-box',
+      background: UI.bgInset,
+      border: `1px solid ${UI.inkLine}`,
+      borderRadius: 10,
+      padding: 12,
+      color: UI.ink,
+      fontFamily: UI.fontUi,
+      fontSize: 14,
+      resize: 'vertical',
+      outline: 'none'
+    }
+  }), /*#__PURE__*/React.createElement(Btn, {
+    onClick: saveExNote,
+    style: {
+      marginTop: 12,
+      width: '100%'
+    }
+  }, "Speichern")));
+}
+function setInputStyle(done, current) {
+  return {
+    background: done ? 'transparent' : UI.bgInset,
+    border: `1px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.inkLine}`,
+    borderRadius: 8,
+    outline: 'none',
+    color: done ? UI.inkSoft : UI.ink,
+    fontFamily: UI.fontNum,
+    fontSize: 16,
+    fontWeight: 500,
+    width: '100%',
+    padding: '7px 4px',
+    textAlign: 'center'
+  };
+}
+Object.assign(window.Screens, {
+  TrainingScreen
+});
