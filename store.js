@@ -3,7 +3,7 @@
 const SUPABASE_URL = 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -11,13 +11,13 @@ function todayISO() { return new Date().toISOString().slice(0, 10); }
 // ─── AUTH ────────────────────────────────────────────────────────────────
 
 async function signIn(email, password) {
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
   return data;
 }
 
 async function signUp(email, password, name) {
-  const { data, error } = await supabase.auth.signUp({
+  const { data, error } = await _supabase.auth.signUp({
     email, password,
     options: { data: { name } },   // store name in user_metadata for email-confirm flow
   });
@@ -31,16 +31,16 @@ async function signUp(email, password, name) {
 }
 
 async function signOut() {
-  await supabase.auth.signOut();
+  await _supabase.auth.signOut();
 }
 
 async function deleteAllData(userId) {
   await Promise.all([
-    supabase.from('sessions').delete().eq('user_id', userId),
-    supabase.from('exercises').delete().eq('user_id', userId),
-    supabase.from('schedules').delete().eq('user_id', userId),
-    supabase.from('user_settings').delete().eq('user_id', userId),
-    supabase.from('profiles').delete().eq('id', userId),
+    _supabase.from('sessions').delete().eq('user_id', userId),
+    _supabase.from('exercises').delete().eq('user_id', userId),
+    _supabase.from('schedules').delete().eq('user_id', userId),
+    _supabase.from('user_settings').delete().eq('user_id', userId),
+    _supabase.from('profiles').delete().eq('id', userId),
   ]);
 }
 
@@ -53,10 +53,10 @@ async function setupNewUser(userId, name) {
     inProgress: null, customDayTypes: [], settings: { unit: 'kg', restDefault: 120 },
   });
   await Promise.all([
-    supabase.from('profiles').upsert({ id: userId, name }),
-    supabase.from('exercises').insert(seeded.exercises.map(e => ({ ...e, user_id: userId }))),
-    supabase.from('schedules').insert(seeded.schedules.map(s => ({ ...s, user_id: userId }))),
-    supabase.from('user_settings').upsert({
+    _supabase.from('profiles').upsert({ id: userId, name }),
+    _supabase.from('exercises').insert(seeded.exercises.map(e => ({ ...e, user_id: userId }))),
+    _supabase.from('schedules').insert(seeded.schedules.map(s => ({ ...s, user_id: userId }))),
+    _supabase.from('user_settings').upsert({
       user_id: userId,
       active_schedule_id: seeded.activeScheduleId,
       cycle_index: 0, unit: 'kg', rest_default: 120,
@@ -68,17 +68,17 @@ async function setupNewUser(userId, name) {
 
 async function loadFromSupabase(userId) {
   const [profileRes, exRes, schRes, sessRes, settRes] = await Promise.all([
-    supabase.from('profiles').select('id, name').eq('id', userId).maybeSingle(),
-    supabase.from('exercises').select('id, name, tags').eq('user_id', userId),
-    supabase.from('schedules').select('id, name, days').eq('user_id', userId),
-    supabase.from('sessions').select('id, schedule_id, day_id, day_name, date, ended, entries')
+    _supabase.from('profiles').select('id, name').eq('id', userId).maybeSingle(),
+    _supabase.from('exercises').select('id, name, tags').eq('user_id', userId),
+    _supabase.from('schedules').select('id, name, days').eq('user_id', userId),
+    _supabase.from('sessions').select('id, schedule_id, day_id, day_name, date, ended, entries')
       .eq('user_id', userId).order('date', { ascending: false }),
-    supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
+    _supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
   ]);
 
   // First login after email confirmation — profile not yet created
   if (!profileRes.data) {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await _supabase.auth.getUser();
     const name = user?.user_metadata?.name || user?.email?.split('@')[0] || 'Athlet';
     await setupNewUser(userId, name);
     return loadFromSupabase(userId);
@@ -127,8 +127,8 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(supabase.from('exercises').upsert(upsert.map(e => ({ ...e, user_id: userId }))));
-    if (removed.length) ops.push(supabase.from('exercises').delete().in('id', removed.map(e => e.id)));
+    if (upsert.length)  ops.push(_supabase.from('exercises').upsert(upsert.map(e => ({ ...e, user_id: userId }))));
+    if (removed.length) ops.push(_supabase.from('exercises').delete().in('id', removed.map(e => e.id)));
   }
 
   if (prev.schedules !== next.schedules) {
@@ -137,8 +137,8 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(s);
     });
     const removed = prev.schedules.filter(s => !next.schedules.find(x => x.id === s.id));
-    if (upsert.length)  ops.push(supabase.from('schedules').upsert(upsert.map(s => ({ ...s, user_id: userId }))));
-    if (removed.length) ops.push(supabase.from('schedules').delete().in('id', removed.map(s => s.id)));
+    if (upsert.length)  ops.push(_supabase.from('schedules').upsert(upsert.map(s => ({ ...s, user_id: userId }))));
+    if (removed.length) ops.push(_supabase.from('schedules').delete().in('id', removed.map(s => s.id)));
   }
 
   if (prev.sessions !== next.sessions) {
@@ -146,10 +146,10 @@ async function syncStore(prev, next, userId) {
       const p = prev.sessions.find(x => x.id === s.id);
       return !p || JSON.stringify(p) !== JSON.stringify(s);
     });
-    if (upsert.length) ops.push(supabase.from('sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
+    if (upsert.length) ops.push(_supabase.from('sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
   }
 
-  ops.push(supabase.from('user_settings').upsert({
+  ops.push(_supabase.from('user_settings').upsert({
     user_id: userId,
     active_schedule_id: next.activeScheduleId ?? null,
     cycle_index: next.cycleIndex ?? 0,
@@ -256,7 +256,7 @@ function nextDay(state) {
 }
 
 window.LB = {
-  supabase,
+  supabase: _supabase,
   signIn, signUp, signOut, deleteAllData,
   loadFromSupabase, syncStore, seedStarter,
   uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay,
