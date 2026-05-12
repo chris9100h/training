@@ -10,6 +10,8 @@ function LibraryScreen({ store, setStore, go }) {
   const [creating, setCreating] = useStateL(false);
   const [selecting, setSelecting] = useStateL(false);
   const [selected, setSelected] = useStateL(new Set());
+  const [filterTags, setFilterTags] = useStateL([]);
+  const toggleFilter = (m) => setFilterTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
 
   const exitSelect = () => { setSelecting(false); setSelected(new Set()); };
 
@@ -38,11 +40,15 @@ function LibraryScreen({ store, setStore, go }) {
   }, [store.exercises, store.sessions]);
 
   const filtered = useMemoL(() => {
-    const ql = q.toLowerCase();
+    const ql = q.toUpperCase();
     return store.exercises
-      .filter(e => !q || e.name.toLowerCase().includes(ql) || e.tags?.some(t => t.includes(ql)))
+      .filter(e => {
+        const matchSearch = !q || e.name.toUpperCase().includes(ql) || e.tags?.some(t => t.toUpperCase().includes(ql));
+        const matchTags = filterTags.length === 0 || filterTags.some(ft => e.tags?.includes(ft));
+        return matchSearch && matchTags;
+      })
       .sort((a,b) => a.name.localeCompare(b.name));
-  }, [store.exercises, q]);
+  }, [store.exercises, q, filterTags]);
 
   const topBarRight = selecting ? (
     <button onClick={exitSelect} style={{ background: 'none', border: 'none', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 14, cursor: 'pointer', padding: '4px 8px' }}>
@@ -75,7 +81,15 @@ function LibraryScreen({ store, setStore, go }) {
 
       <div style={{ padding: 18, paddingBottom: selecting ? 80 : 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {tab === 'all' && (
-          <Input value={q} onChange={setQ} placeholder="Suchen…" />
+          <>
+            <Input value={q} onChange={setQ} placeholder="SUCHEN…" />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {MUSCLES.map(m => (
+                <Pill key={m} gold={filterTags.includes(m)} onClick={() => toggleFilter(m)}
+                  style={{ cursor: 'pointer' }}>{m}</Pill>
+              ))}
+            </div>
+          </>
         )}
 
         {tab === 'recent' && recent.length === 0 && (
