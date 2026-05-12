@@ -8,6 +8,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   const exIdx = session.currentExIdx || 0;
   const entry = session.entries[exIdx];
+  const exercise = entry ? LB.findExercise(store, entry.exId) : null;
   const last = entry ? LB.lastSessionForExercise(store, entry.exId) : null;
 
   const updateSession = (fn) => {
@@ -94,82 +95,89 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     return <Screen><Empty title="Diese Session ist leer" action={<Btn onClick={() => go({ name: 'home' })}>Zurück</Btn>} /></Screen>;
   }
 
-  const allSetsDone = entry.sets.every(s => s.done);
   const completed = entry.sets.filter(s => s.done).length;
+  const currentSetNum = Math.min(completed + 1, entry.sets.length);
 
   return (
     <Screen scroll={false}>
       <TopBar
         title={`${session.dayName} · ${exIdx+1}/${session.entries.length}`}
-        sub={'Training läuft'}
+        sub="Training läuft"
         right={<Btn kind="ghost" onClick={abandon} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>×</Btn>}
       />
 
       {/* progress dots */}
-      <div style={{ display: 'flex', gap: 4, padding: '10px 18px 4px' }}>
+      <div style={{ display: 'flex', gap: 4, padding: '8px 18px 0' }}>
         {session.entries.map((_, i) => (
           <div key={i} style={{
             flex: 1, height: 3, borderRadius: 2,
-            background: i < exIdx ? UI.gold : i === exIdx ? UI.gold : UI.inkLine,
-            opacity: i === exIdx ? 1 : i < exIdx ? 0.6 : 1,
+            background: i <= exIdx ? UI.gold : UI.inkLine,
+            opacity: i === exIdx ? 1 : i < exIdx ? 0.5 : 0.3,
           }} />
         ))}
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '8px 18px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {/* exercise heading */}
-        <div>
-          <div style={{ fontSize: 26, fontWeight: 600 }}>{entry.name}</div>
-          <div style={{ fontSize: 12, color: UI.inkFaint, marginTop: 2, fontFamily: UI.fontNum }}>
-            Soll: {entry.plannedSets} × {entry.plannedReps}
+      <div style={{ flex: 1, overflow: 'auto', padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {/* heading + session note chip */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.2 }}>{entry.name}</div>
+            <div style={{ fontSize: 14, color: UI.inkSoft, marginTop: 4 }}>
+              Set {currentSetNum} of {entry.sets.length}
+            </div>
           </div>
+          <button onClick={() => setNoteOpen(true)} style={{
+            background: entry.note ? UI.goldFaint : 'transparent',
+            border: `1px solid ${entry.note ? UI.goldSoft : UI.inkLine}`,
+            borderRadius: 20, padding: '6px 12px', cursor: 'pointer',
+            color: entry.note ? UI.gold : UI.inkFaint, fontSize: 12,
+            fontFamily: UI.fontUi, flexShrink: 0, marginTop: 2,
+          }}>
+            📝 {entry.note ? 'Notiz' : '+ Notiz'}
+          </button>
         </div>
 
-        {/* last log card */}
-        {last ? (
-          <Card style={{ padding: 12, background: UI.bgInset }}>
-            <Label style={{ color: UI.gold, marginBottom: 6 }}>
-              Letztes Mal · {new Date(last.session.ended || last.session.date).toLocaleDateString('de-DE', { day:'numeric', month:'short' })} ·{' '}
-              {Math.round((Date.now() - new Date(last.session.ended || last.session.date)) / 86400000)}d her
-            </Label>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontFamily: UI.fontNum, fontSize: 13, color: UI.ink }}>
-              {last.entry.sets.map((s, i) => (
-                <span key={i} style={{ opacity: s.kg ? 1 : 0.4 }}>
-                  {s.kg || '—'}<span style={{ color: UI.inkFaint }}>×</span>{s.reps || '—'}
-                </span>
-              ))}
-            </div>
-            {last.entry.note && (
-              <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 6, fontStyle: 'italic' }}>"{last.entry.note}"</div>
-            )}
-          </Card>
-        ) : (
-          <Card style={{ padding: 10, background: UI.bgInset, borderStyle: 'dashed' }}>
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em' }}>
-              ERSTE SESSION FÜR DIESE ÜBUNG
-            </div>
-          </Card>
-        )}
-
-        {/* set rows */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '36px 1fr 1fr 44px', gap: 8, padding: '0 4px' }}>
-            <Label style={{ marginBottom: 0 }}>Set</Label>
-            <Label style={{ marginBottom: 0 }}>Gewicht</Label>
-            <Label style={{ marginBottom: 0 }}>Reps</Label>
-            <span />
+        {/* set table */}
+        <div>
+          {/* table header */}
+          <div style={{ display: 'grid', gridTemplateColumns: '36px 1fr 72px 72px 36px', gap: 8, padding: '0 2px 8px', borderBottom: `1px solid ${UI.inkLine}` }}>
+            <Label style={{ marginBottom: 0, fontSize: 11 }}>Set</Label>
+            <Label style={{ marginBottom: 0, fontSize: 11 }}>Vorherige ↔</Label>
+            <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>kg</Label>
+            <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>Reps</Label>
+            <div style={{ width: 22, height: 22, border: `2px solid ${UI.inkLine}`, borderRadius: 5, alignSelf: 'center', justifySelf: 'center' }} />
           </div>
+
+          {/* set rows */}
           {entry.sets.map((s, i) => {
+            const prevSet = last?.entry?.sets?.[i];
             const current = !s.done && entry.sets.slice(0, i).every(x => x.done);
             return (
               <div key={i} style={{
-                display: 'grid', gridTemplateColumns: '36px 1fr 1fr 44px', gap: 8,
-                alignItems: 'center', padding: '8px 8px',
-                background: current ? UI.goldFaint : s.done ? UI.bgInset : UI.bgRaised,
-                border: `1px solid ${current ? UI.goldSoft : UI.inkLine}`,
-                borderRadius: 10,
+                display: 'grid', gridTemplateColumns: '36px 1fr 72px 72px 36px', gap: 8,
+                alignItems: 'center', padding: '10px 2px',
+                borderBottom: `1px solid ${UI.inkLine}`,
+                opacity: s.done ? 0.45 : 1,
               }}>
-                <div style={{ fontFamily: UI.fontNum, fontSize: 14, color: current ? UI.gold : UI.inkSoft, fontWeight: 600 }}>{i+1}</div>
+                {/* set number circle */}
+                <div style={{
+                  width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                  background: current ? UI.goldFaint : 'transparent',
+                  border: `2px solid ${current ? UI.gold : UI.inkLine}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontFamily: UI.fontNum, fontSize: 13, fontWeight: 600,
+                  color: current ? UI.gold : UI.inkSoft,
+                }}>
+                  {i + 1}
+                </div>
+
+                {/* previous */}
+                <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontNum }}>
+                  {prevSet?.kg && prevSet?.reps ? `${prevSet.kg} kg × ${prevSet.reps}` : '—'}
+                </div>
+
+                {/* kg */}
                 <input
                   type="number" inputMode="decimal" step="0.5"
                   value={s.kg ?? ''} placeholder="—"
@@ -178,6 +186,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                   disabled={s.done}
                   style={setInputStyle(s.done, current)}
                 />
+
+                {/* reps */}
                 <input
                   type="number" inputMode="numeric"
                   value={s.reps ?? ''} placeholder="—"
@@ -186,28 +196,32 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                   disabled={s.done}
                   style={setInputStyle(s.done, current)}
                 />
-                {s.done ? (
-                  <button onClick={() => updateSet(i, { done: false })} style={{
-                    background: UI.gold, border: 'none', borderRadius: 8,
-                    color: '#0a0a0a', fontSize: 14, fontWeight: 700, cursor: 'pointer', height: 36,
-                  }}>✓</button>
-                ) : (
-                  <button onClick={() => completeSet(i)} disabled={!s.kg || !s.reps} style={{
-                    background: current ? UI.gold : 'transparent',
-                    border: `1px solid ${current ? UI.gold : UI.inkLine}`,
-                    borderRadius: 8, color: current ? '#0a0a0a' : UI.inkFaint,
-                    fontSize: 14, fontWeight: 600, cursor: s.kg && s.reps ? 'pointer' : 'not-allowed',
-                    height: 36, opacity: !s.kg || !s.reps ? 0.4 : 1,
-                  }}>log</button>
-                )}
+
+                {/* checkbox */}
+                <button onClick={() => s.done ? updateSet(i, { done: false }) : completeSet(i)}
+                  disabled={!s.done && (!s.kg || !s.reps)}
+                  style={{
+                    width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer',
+                    background: s.done ? UI.gold : 'transparent',
+                    outline: `2px solid ${s.done ? UI.gold : (!s.kg || !s.reps) ? UI.inkLine : UI.inkSoft}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 14, fontWeight: 700, color: s.done ? '#0a0a0a' : 'transparent',
+                    opacity: !s.done && (!s.kg || !s.reps) ? 0.35 : 1,
+                    flexShrink: 0,
+                  }}>
+                  ✓
+                </button>
               </div>
             );
           })}
+
+          {/* add set */}
           <button onClick={addSet} style={{
-            background: 'transparent', border: `1px dashed ${UI.inkLine}`,
-            color: UI.inkSoft, padding: '8px', borderRadius: 8, fontSize: 12,
-            cursor: 'pointer', fontFamily: UI.fontUi,
-          }}>+ extra Set</button>
+            marginTop: 10, width: 36, height: 36, borderRadius: '50%',
+            background: 'transparent', border: `1px solid ${UI.inkLine}`,
+            color: UI.inkSoft, fontSize: 20, lineHeight: 1, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>+</button>
         </div>
 
         {/* rest timer */}
@@ -229,14 +243,18 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           </Card>
         )}
 
-        {/* note */}
-        <button onClick={() => setNoteOpen(true)} style={{
-          background: 'transparent', border: `1px dashed ${UI.inkLine}`,
-          padding: '10px 14px', borderRadius: 10, color: entry.note ? UI.ink : UI.inkFaint,
-          fontSize: 13, textAlign: 'left', cursor: 'pointer', fontFamily: UI.fontUi,
-        }}>
-          {entry.note ? `📝 ${entry.note}` : '+ Notiz hinzufügen'}
-        </button>
+        {/* exercise note (permanent, from exercise definition) */}
+        {exercise?.note && (
+          <Card style={{ padding: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink }}>Exercise Note</div>
+              <span style={{ fontSize: 16 }}>📌</span>
+            </div>
+            <div style={{ fontSize: 14, color: UI.inkSoft, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+              {exercise.note}
+            </div>
+          </Card>
+        )}
       </div>
 
       {/* footer nav */}
@@ -260,8 +278,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         </div>
       </Sheet>
 
-      {/* note editor */}
-      <Sheet open={noteOpen} onClose={() => setNoteOpen(false)} title="Notiz">
+      {/* session note editor */}
+      <Sheet open={noteOpen} onClose={() => setNoteOpen(false)} title="Session-Notiz">
         <textarea
           value={entry.note || ''}
           onChange={e => setNote(e.target.value)}
@@ -282,10 +300,12 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
 function setInputStyle(done, current) {
   return {
-    background: 'transparent', border: 'none', outline: 'none',
-    color: done ? UI.inkSoft : current ? UI.ink : UI.ink,
-    fontFamily: UI.fontNum, fontSize: 18, fontWeight: 500,
-    width: '100%', padding: '6px 4px', textAlign: 'center',
+    background: done ? 'transparent' : UI.bgInset,
+    border: `1px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.inkLine}`,
+    borderRadius: 8, outline: 'none',
+    color: done ? UI.inkSoft : UI.ink,
+    fontFamily: UI.fontNum, fontSize: 16, fontWeight: 500,
+    width: '100%', padding: '7px 4px', textAlign: 'center',
   };
 }
 

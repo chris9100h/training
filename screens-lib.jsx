@@ -169,9 +169,10 @@ function LibraryScreen({ store, setStore, go }) {
 function ExerciseCreator({ onClose, setStore, onCreated }) {
   const [name, setName] = useStateL('');
   const [tags, setTags] = useStateL('');
+  const [note, setNote] = useStateL('');
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: tags.split(',').map(t => t.trim()).filter(Boolean) };
+    const ex = { id: LB.uid(), name: name.trim(), tags: tags.split(',').map(t => t.trim()).filter(Boolean), note: note.trim() };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -181,6 +182,15 @@ function ExerciseCreator({ onClose, setStore, onCreated }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Input label="Name" value={name} onChange={setName} placeholder="z.B. Front Squat" autoFocus />
         <Input label="Tags (komma-getrennt)" value={tags} onChange={setTags} placeholder="legs, compound, barbell" />
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <Label>Notiz (optional)</Label>
+          <textarea
+            value={note} onChange={e => setNote(e.target.value)}
+            placeholder="z.B. Kabelzug Pos 4, Griff neutral, langsam ablassen"
+            rows={3}
+            style={{ background: UI.bgInset, border: `1px solid ${UI.inkLine}`, borderRadius: 10, padding: '10px 12px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, resize: 'vertical', outline: 'none', width: '100%', boxSizing: 'border-box' }}
+          />
+        </label>
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Anlegen</Btn>
       </div>
     </Sheet>
@@ -191,6 +201,14 @@ function ExerciseCreator({ onClose, setStore, onCreated }) {
 function ExerciseDetailScreen({ store, setStore, go, exId }) {
   const ex = LB.findExercise(store, exId);
   if (!ex) { go({ name: 'lib' }); return null; }
+
+  const [editNote, setEditNote] = useStateL(false);
+  const [noteVal, setNoteVal] = useStateL(ex.note || '');
+
+  const saveNote = () => {
+    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, note: noteVal.trim() } : e) }));
+    setEditNote(false);
+  };
 
   const deleteExercise = () => {
     if (!confirm(`"${ex.name}" aus der Datenbank löschen? Bisherige Sessions bleiben erhalten.`)) return;
@@ -244,6 +262,31 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
         </div>
 
         {points.length > 1 && <ProgressChart points={points} />}
+
+        {/* exercise note */}
+        <Card style={{ padding: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: editNote ? 10 : (ex.note ? 8 : 0) }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>📌 Notiz</div>
+            <button onClick={() => { setNoteVal(ex.note || ''); setEditNote(v => !v); }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.gold, fontSize: 13, fontFamily: UI.fontUi, padding: '2px 0' }}>
+              {editNote ? 'Abbrechen' : 'Bearbeiten'}
+            </button>
+          </div>
+          {editNote ? (
+            <>
+              <textarea value={noteVal} onChange={e => setNoteVal(e.target.value)}
+                placeholder="z.B. Kabelzug Pos 4, Griff neutral, langsam ablassen"
+                rows={3}
+                style={{ width: '100%', boxSizing: 'border-box', background: UI.bgInset, border: `1px solid ${UI.inkLine}`, borderRadius: 10, padding: '10px 12px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, resize: 'vertical', outline: 'none' }}
+              />
+              <Btn onClick={saveNote} style={{ marginTop: 10, width: '100%' }}>Speichern</Btn>
+            </>
+          ) : (
+            <div style={{ fontSize: 14, color: ex.note ? UI.inkSoft : UI.inkFaint, lineHeight: 1.5, whiteSpace: 'pre-wrap', fontStyle: ex.note ? 'normal' : 'italic' }}>
+              {ex.note || 'Noch keine Notiz. Tippe Bearbeiten zum Hinzufügen.'}
+            </div>
+          )}
+        </Card>
 
         <div>
           <Label>Verlauf</Label>
