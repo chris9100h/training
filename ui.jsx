@@ -217,7 +217,7 @@ function Sheet({ open, onClose, title, children }) {
       animation: 'sheet-fade 0.18s ease',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
-        width: '100%', maxWidth: 540,
+        width: '100%', maxWidth: 540, boxSizing: 'border-box',
         background: UI.bgRaised, borderRadius: '20px 20px 0 0',
         border: `1px solid ${UI.inkLine}`, borderBottom: 'none',
         padding: `14px 18px ${kbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 18px)'}`,
