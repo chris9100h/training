@@ -58,6 +58,14 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
 
   const updateSch = (fn) => setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === sch.id ? fn(x) : x) }));
   const setActive = () => setStore(s => ({ ...s, activeScheduleId: sch.id, cycleIndex: 0 }));
+  const duplicate = () => {
+    const copy = JSON.parse(JSON.stringify(sch));
+    copy.id = LB.uid();
+    copy.name = copy.name + ' (Kopie)';
+    copy.days = copy.days.map(d => ({ ...d, id: LB.uid() }));
+    setStore(s => ({ ...s, schedules: [...s.schedules, copy] }));
+    go({ name: 'schedule', scheduleId: copy.id });
+  };
 
   const jsDay = new Date().getDay();
   const todayWeekday = jsDay === 0 ? 6 : jsDay - 1;
@@ -75,6 +83,7 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
         {sch.id !== store.activeScheduleId && (
           <Btn kind="ghost" onClick={setActive} style={{ marginBottom: 4 }}>Diesen Plan aktivieren</Btn>
         )}
+        <Btn kind="ghost" onClick={duplicate} style={{ marginBottom: 4 }}>Plan duplizieren</Btn>
         {displayDays.map((d, i) => {
           const isRest = !d.items.length;
           const isToday = sch.id === store.activeScheduleId && (
