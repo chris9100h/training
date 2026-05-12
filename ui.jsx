@@ -196,13 +196,27 @@ function Pill({ children, gold = false, style = {}, ...rest }) {
 
 function Sheet({ open, onClose, title, children }) {
   const [kbHeight, setKbHeight] = React.useState(0);
+  const scrollRef = React.useRef(null);
 
   React.useEffect(() => {
     if (!open) return;
     const vv = window.visualViewport;
     if (!vv) return;
     const update = () => {
-      setKbHeight(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+      const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      setKbHeight(kb);
+      if (kb > 0 && scrollRef.current) {
+        const el = document.activeElement;
+        if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+          const elRect = el.getBoundingClientRect();
+          const containerRect = scrollRef.current.getBoundingClientRect();
+          const visibleBottom = containerRect.top + vv.height - kb;
+          const pad = 24;
+          if (elRect.bottom > visibleBottom - pad) {
+            scrollRef.current.scrollTop += elRect.bottom - (visibleBottom - pad);
+          }
+        }
+      }
     };
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
@@ -218,7 +232,7 @@ function Sheet({ open, onClose, title, children }) {
       paddingBottom: kbHeight,
       animation: 'sheet-fade 0.18s ease',
     }}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div ref={scrollRef} onClick={e => e.stopPropagation()} style={{
         width: '100%', maxWidth: 540,
         background: UI.bgRaised, borderRadius: '20px 20px 0 0',
         border: `1px solid ${UI.inkLine}`, borderBottom: 'none',
