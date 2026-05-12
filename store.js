@@ -116,7 +116,7 @@ async function loadFromSupabase(userId) {
 
 function sessionToRow(s, userId) {
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, scheduleId, dayId, dayName, startedAt, ...rest } = s;
+  const { currentExIdx, cyclePos, scheduleId, dayId, dayName, startedAt, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   return row;

@@ -43,7 +43,7 @@ function App() {
               fresh.inProgress = cur.inProgress ?? null;
               fresh.sessions = fresh.sessions.map(s => {
                 const mem = cur.sessions?.find(x => x.id === s.id);
-                return mem ? { ...s, currentExIdx: mem.currentExIdx ?? 0 } : s;
+                return mem ? { ...s, currentExIdx: mem.currentExIdx ?? 0, cyclePos: mem.cyclePos ?? null } : s;
               });
             }
             prevStore.current = fresh;

@@ -175,18 +175,13 @@ function HomeScreen({ store, setStore, go }) {
     return [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''))[0];
   }, [store.sessions]);
 
-  // cycle mode: for each dayId → sessions sorted by date ascending
-  // badge check: slot in displayed cycle N is done if sessions[N] exists
-  const completedByDayId = useMemo(() => {
+  // cycle mode: set of cyclePos values of completed sessions
+  const completedCyclePos = useMemo(() => {
     if (weekdayMode || !sch) return null;
-    const map = new Map();
-    store.sessions.filter(s => s.ended && s.scheduleId === sch.id).forEach(s => {
-      if (!map.has(s.dayId)) map.set(s.dayId, []);
-      map.get(s.dayId).push(s);
-    });
-    map.forEach(arr => arr.sort((a, b) => a.date.localeCompare(b.date)));
-    return map;
-  }, [store.sessions, sch, weekdayMode]);
+    const set = new Set();
+    store.sessions.filter(s => s.ended && s.cyclePos != null).forEach(s => set.add(s.cyclePos));
+    return set;
+  }, [store.sessions, weekdayMode, sch]);
 
   // weekday mode: plain date-key set
   const completedDateKeys = useMemo(() => {
@@ -215,9 +210,11 @@ function HomeScreen({ store, setStore, go }) {
       };
     });
     const nowISO = new Date().toISOString();
+    const cyclePos = weekdayMode ? null : (currentCycleNum + weekOffset) * dayCount + selectedSlot;
     const session = {
       id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
       date: sessionDate.toISOString(), startedAt: nowISO, ended: null, entries, currentExIdx: 0,
+      cyclePos,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
     go({ name: 'train', sessionId: session.id });
@@ -283,9 +280,8 @@ function HomeScreen({ store, setStore, go }) {
                 const slotKey = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
                 isCompleted = completedDateKeys?.has(slotKey) ?? false;
               } else {
-                const displayedCycleNum = currentCycleNum + weekOffset;
-                const sessions = completedByDayId?.get(d.id) || [];
-                isCompleted = sessions.length > displayedCycleNum;
+                const pos = (currentCycleNum + weekOffset) * dayCount + i;
+                isCompleted = completedCyclePos?.has(pos) ?? false;
               }
             }
             return (
