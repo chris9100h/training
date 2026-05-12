@@ -521,11 +521,17 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
 function SessionEditSheet({ session, duration, onClose, onSave }) {
   const [draftDate, setDraftDate] = useStateL(session.date ? session.date.slice(0, 10) : '');
   const [draftDuration, setDraftDuration] = useStateL(duration != null ? String(duration) : '');
+  const [draftEntries, setDraftEntries] = useStateL(() => JSON.parse(JSON.stringify(session.entries)));
+
+  const updateSet = (eIdx, sIdx, patch) => {
+    setDraftEntries(entries => entries.map((e, i) =>
+      i !== eIdx ? e : { ...e, sets: e.sets.map((st, k) => k !== sIdx ? st : { ...st, ...patch }) }
+    ));
+  };
 
   const save = () => {
-    const patch = {};
+    const patch = { entries: draftEntries };
     if (draftDate && draftDate !== session.date?.slice(0, 10)) {
-      // preserve the original time-of-day, just swap the date portion
       const original = new Date(session.date);
       const [y, m, d] = draftDate.split('-').map(Number);
       original.setFullYear(y, m - 1, d);
@@ -533,45 +539,64 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
     }
     const mins = parseInt(draftDuration, 10);
     if (!isNaN(mins) && mins > 0 && session.ended) {
-      // adjust startedAt so that ended - startedAt = mins
       patch.startedAt = new Date(new Date(session.ended) - mins * 60000).toISOString();
     }
     onSave(patch);
   };
 
+  const fieldStyle = {
+    background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+    borderRadius: 10, padding: '10px 12px', color: UI.ink,
+    fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
+    width: '100%', boxSizing: 'border-box',
+  };
+  const setNumStyle = {
+    width: 44, background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+    borderRadius: 8, color: UI.ink, padding: '6px 4px', textAlign: 'center',
+    fontFamily: UI.fontNum, fontSize: 14, outline: 'none',
+  };
+
   return (
     <Sheet open={true} onClose={onClose} title="Session bearbeiten">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div>
-          <Label>Datum</Label>
-          <input
-            type="date"
-            value={draftDate}
-            onChange={e => setDraftDate(e.target.value)}
-            style={{
-              width: '100%', boxSizing: 'border-box',
-              background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
-              borderRadius: 10, padding: '10px 12px', color: UI.ink,
-              fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
-            }}
-          />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 2 }}>
+            <Label>Datum</Label>
+            <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} style={fieldStyle} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <Label>Dauer (min)</Label>
+            <input type="number" inputMode="numeric" min="1" value={draftDuration}
+              onChange={e => setDraftDuration(e.target.value)} onFocus={e => e.target.select()} style={fieldStyle} />
+          </div>
         </div>
-        <div>
-          <Label>Dauer (Minuten)</Label>
-          <input
-            type="number" inputMode="numeric" min="1"
-            value={draftDuration}
-            onChange={e => setDraftDuration(e.target.value)}
-            onFocus={e => e.target.select()}
-            style={{
-              width: '100%', boxSizing: 'border-box',
-              background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
-              borderRadius: 10, padding: '10px 12px', color: UI.ink,
-              fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
-            }}
-          />
+
+        <div style={{ borderTop: `1px solid ${UI.inkLine}`, paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {draftEntries.map((e, eIdx) => (
+            <div key={eIdx}>
+              <Label style={{ marginBottom: 6 }}>{e.name}</Label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {e.sets.map((st, sIdx) => (
+                  <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontNum, width: 16, textAlign: 'right', flexShrink: 0 }}>{sIdx + 1}</span>
+                    <input type="number" inputMode="decimal" step="0.5" value={st.kg ?? ''}
+                      placeholder="kg" onFocus={e => e.target.select()}
+                      onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
+                      style={setNumStyle} />
+                    <span style={{ color: UI.inkFaint, fontSize: 13 }}>×</span>
+                    <input type="number" inputMode="numeric" value={st.reps ?? ''}
+                      placeholder="reps" onFocus={e => e.target.select()}
+                      onChange={ev => updateSet(eIdx, sIdx, { reps: ev.target.value === '' ? null : +ev.target.value })}
+                      style={setNumStyle} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+
+        <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={onClose} style={{ flex: 1 }}>Abbrechen</Btn>
           <Btn onClick={save} style={{ flex: 2 }}>Speichern</Btn>
         </div>
