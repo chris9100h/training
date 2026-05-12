@@ -318,13 +318,20 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         )}
       </div>
 
-      {/* footer nav */}
-      <div style={{ borderTop: `1px solid ${UI.inkLine}`, padding: '10px 18px calc(env(safe-area-inset-bottom, 8px) + 12px)', background: UI.bg, display: 'flex', gap: 8 }}>
+      {/* footer nav — fixed to bottom like TabBar */}
+      <div style={{
+        position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)',
+        width: '100%', maxWidth: 440,
+        borderTop: `1px solid ${UI.inkLine}`,
+        padding: `10px 18px calc(env(safe-area-inset-bottom, 8px) + 10px)`,
+        background: UI.bg, display: 'flex', gap: 8, zIndex: 10,
+      }}>
         <Btn kind="ghost" onClick={() => navigate(-1)} disabled={exIdx === 0} style={{ flex: 1, opacity: exIdx === 0 ? 0.3 : 1 }}>‹ zurück</Btn>
         <Btn onClick={() => navigate(1)} style={{ flex: 2 }}>
           {exIdx === session.entries.length - 1 ? 'Fertig →' : 'Nächste Übung →'}
         </Btn>
       </div>
+      <div style={{ flexShrink: 0, height: 'calc(64px + env(safe-area-inset-bottom, 8px))' }} />
 
       {/* finish confirmation */}
       <Sheet open={finishOpen} onClose={() => setFinishOpen(false)} title="Session beenden?">
