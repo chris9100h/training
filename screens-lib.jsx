@@ -413,7 +413,7 @@ function HistoryScreen({ store, go }) {
         {sessions.map(s => {
           const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
           const vol = totalVolume(s);
-          const date = new Date(s.ended);
+          const date = new Date(s.date);
           const days = Math.round((Date.now() - date) / 86400000);
           return (
             <Card key={s.id} onClick={() => go({ name: 'session', sessionId: s.id })} style={{ cursor: 'pointer', padding: 14 }}>
@@ -438,17 +438,32 @@ function HistoryScreen({ store, go }) {
 }
 
 // ─── SESSION DETAIL ──────────────────────────────────────────────────
-function SessionDetailScreen({ store, go, sessionId, justFinished }) {
+function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
+  const [confirmEl, confirm] = useConfirm();
+  const [editing, setEditing] = useStateL(false);
   const s = store.sessions.find(x => x.id === sessionId);
   if (!s) { go({ name: 'hist' }); return null; }
   const vol = totalVolume(s);
-  const duration = s.ended && s.date ? Math.round((new Date(s.ended) - new Date(s.date)) / 60000) : null;
+  const duration = s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null;
+
+  const deleteSession = async () => {
+    if (!await confirm('Diese Session wird dauerhaft gelöscht.', { title: 'Session löschen?', ok: 'Löschen', danger: true })) return;
+    setStore(s => ({ ...s, sessions: s.sessions.filter(x => x.id !== sessionId) }));
+    go({ name: 'hist' });
+  };
 
   return (
     <Screen>
       <TopBar title={s.dayName}
-        sub={new Date(s.ended || s.date).toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
-        onBack={() => go({ name: justFinished ? 'home' : 'hist' })} />
+        sub={new Date(s.date).toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
+        onBack={() => go({ name: justFinished ? 'home' : 'hist' })}
+        right={
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Btn kind="ghost" onClick={() => setEditing(true)} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11 }}>Bearbeiten</Btn>
+            <Btn kind="ghost" onClick={deleteSession} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>Löschen</Btn>
+          </div>
+        }
+      />
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {justFinished && (
           <Card accent style={{ textAlign: 'center', padding: 18 }}>
@@ -487,7 +502,112 @@ function SessionDetailScreen({ store, go, sessionId, justFinished }) {
           </Card>
         ))}
       </div>
+      {editing && (
+        <SessionEditSheet
+          session={s}
+          duration={duration}
+          onClose={() => setEditing(false)}
+          onSave={(patch) => {
+            setStore(st => ({ ...st, sessions: st.sessions.map(x => x.id === s.id ? { ...x, ...patch } : x) }));
+            setEditing(false);
+          }}
+        />
+      )}
+      {confirmEl}
     </Screen>
+  );
+}
+
+function SessionEditSheet({ session, duration, onClose, onSave }) {
+  const [draftDate, setDraftDate] = useStateL(session.date ? session.date.slice(0, 10) : '');
+  const [draftDuration, setDraftDuration] = useStateL(duration != null ? String(duration) : '');
+  const [draftEntries, setDraftEntries] = useStateL(() => JSON.parse(JSON.stringify(session.entries)));
+
+  const updateSet = (eIdx, sIdx, patch) => {
+    setDraftEntries(entries => entries.map((e, i) =>
+      i !== eIdx ? e : { ...e, sets: e.sets.map((st, k) => k !== sIdx ? st : { ...st, ...patch }) }
+    ));
+  };
+
+  const save = () => {
+    const patch = { entries: draftEntries };
+    if (draftDate && draftDate !== session.date?.slice(0, 10)) {
+      const original = new Date(session.date);
+      const [y, m, d] = draftDate.split('-').map(Number);
+      original.setFullYear(y, m - 1, d);
+      patch.date = original.toISOString();
+    }
+    const mins = parseInt(draftDuration, 10);
+    if (!isNaN(mins) && mins > 0 && session.ended) {
+      patch.startedAt = new Date(new Date(session.ended) - mins * 60000).toISOString();
+    }
+    onSave(patch);
+  };
+
+  const inputStyle = {
+    background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+    borderRadius: 10, padding: '11px 14px', color: UI.ink,
+    fontFamily: UI.fontNum, fontSize: 16, outline: 'none',
+    width: '100%', boxSizing: 'border-box', display: 'block',
+  };
+  const numInputStyle = {
+    width: 64, background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+    borderRadius: 8, color: UI.ink, padding: '9px 6px', textAlign: 'center',
+    fontFamily: UI.fontNum, fontSize: 15, outline: 'none', flexShrink: 0,
+  };
+
+  return (
+    <Sheet open={true} onClose={onClose} title="Session bearbeiten">
+      {/* paddingBottom keeps content scrollable above the keyboard */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 160 }}>
+
+        <div>
+          <Label>Datum</Label>
+          <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} style={inputStyle} />
+        </div>
+
+        <div>
+          <Label>Dauer (Minuten)</Label>
+          <input type="number" inputMode="numeric" min="1" value={draftDuration}
+            onChange={e => setDraftDuration(e.target.value)} onFocus={e => e.target.select()} style={inputStyle} />
+        </div>
+
+        <div style={{ borderTop: `1px solid ${UI.inkLine}`, paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {draftEntries.map((e, eIdx) => (
+            <div key={eIdx}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: UI.inkFaint, letterSpacing: '0.08em', marginBottom: 8 }}>
+                {e.name.toUpperCase()}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {e.sets.map((st, sIdx) => (
+                  <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 10, background: UI.bgInset, borderRadius: 10, padding: '8px 12px' }}>
+                    <span style={{ width: 20, fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontNum, flexShrink: 0 }}>
+                      {sIdx + 1}
+                    </span>
+                    <input type="number" inputMode="decimal" step="0.5" value={st.kg ?? ''}
+                      placeholder="—" onFocus={e => e.target.select()}
+                      onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
+                      style={numInputStyle} />
+                    <span style={{ color: UI.inkFaint, fontSize: 12, fontFamily: UI.fontNum }}>kg</span>
+                    <span style={{ color: UI.inkLine, fontSize: 14, margin: '0 2px' }}>×</span>
+                    <input type="number" inputMode="numeric" value={st.reps ?? ''}
+                      placeholder="—" onFocus={e => e.target.select()}
+                      onChange={ev => updateSet(eIdx, sIdx, { reps: ev.target.value === '' ? null : +ev.target.value })}
+                      style={numInputStyle} />
+                    <span style={{ color: UI.inkFaint, fontSize: 12, fontFamily: UI.fontNum }}>reps</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={onClose} style={{ flex: 1 }}>Abbrechen</Btn>
+          <Btn onClick={save} style={{ flex: 2 }}>Speichern</Btn>
+        </div>
+      </div>
+    </Sheet>
   );
 }
 

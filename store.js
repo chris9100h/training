@@ -71,7 +71,7 @@ async function loadFromSupabase(userId) {
     _supabase.from('profiles').select('id, name').eq('id', userId).maybeSingle(),
     _supabase.from('exercises').select('id, name, tags, note').eq('user_id', userId),
     _supabase.from('schedules').select('id, name, days').eq('user_id', userId),
-    _supabase.from('sessions').select('id, schedule_id, day_id, day_name, date, ended, entries')
+    _supabase.from('sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
   ]);
@@ -99,6 +99,7 @@ async function loadFromSupabase(userId) {
       dayId: s.day_id,
       dayName: s.day_name,
       date: s.date,
+      startedAt: s.started_at ?? null,
       ended: s.ended,
       entries: s.entries,
     })),
@@ -115,8 +116,10 @@ async function loadFromSupabase(userId) {
 
 function sessionToRow(s, userId) {
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, scheduleId, dayId, dayName, ...rest } = s;
-  return { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
+  const { currentExIdx, scheduleId, dayId, dayName, startedAt, ...rest } = s;
+  const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
+  if (startedAt != null) row.started_at = startedAt;
+  return row;
 }
 
 async function syncStore(prev, next, userId) {
@@ -272,9 +275,33 @@ function nextDay(state) {
   return { schedule: sch, day: sch.days[idx], idx };
 }
 
+// ─── LOCAL CACHE ─────────────────────────────────────────────────────
+
+function saveToLocal(store, userId) {
+  try {
+    localStorage.setItem(`logbook-${userId}`, JSON.stringify(store));
+  } catch (_) {}
+}
+
+function loadFromLocal(userId) {
+  try {
+    const raw = localStorage.getItem(`logbook-${userId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+
+function clearLocal(userId) {
+  try {
+    const key = userId ? `logbook-${userId}` : null;
+    if (key) { localStorage.removeItem(key); return; }
+    Object.keys(localStorage).filter(k => k.startsWith('logbook-')).forEach(k => localStorage.removeItem(k));
+  } catch (_) {}
+}
+
 window.LB = {
   supabase: _supabase,
   signIn, signUp, signOut, deleteAllData,
   loadFromSupabase, syncStore, seedStarter,
+  saveToLocal, loadFromLocal, clearLocal,
   uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay, isWeekdayPlan,
 };

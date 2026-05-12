@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS public.sessions (
   day_id      text,
   day_name    text,
   date        timestamptz,
+  started_at  timestamptz,
   ended       timestamptz,
   entries     jsonb NOT NULL DEFAULT '[]'
 );
