@@ -93,16 +93,18 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
         {sch.id === store.activeScheduleId && !LB.isWeekdayPlan(sch) && (
           <Card style={{ padding: 14 }}>
             <Label>Zyklus-Startdatum (Tag 1)</Label>
-            <input type="date"
-              value={store.cycleStartDate || ''}
-              onChange={e => { if (e.target.value) setStore(s => ({ ...s, cycleStartDate: e.target.value })); }}
-              style={{
-                background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
-                borderRadius: 10, padding: '11px 14px', color: UI.ink,
-                fontFamily: UI.fontNum, fontSize: 16, outline: 'none',
-                width: '100%', boxSizing: 'border-box', display: 'block',
-              }}
-            />
+            <div style={{ overflow: 'hidden', borderRadius: 10 }}>
+              <input type="date"
+                value={store.cycleStartDate || ''}
+                onChange={e => { if (e.target.value) setStore(s => ({ ...s, cycleStartDate: e.target.value })); }}
+                style={{
+                  background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+                  borderRadius: 10, padding: '11px 14px', color: UI.ink,
+                  fontFamily: UI.fontNum, fontSize: 16, outline: 'none',
+                  width: '100%', boxSizing: 'border-box', display: 'block',
+                }}
+              />
+            </div>
             <div style={{ fontSize: 12, color: UI.inkFaint, marginTop: 6 }}>
               Heute = Tag {activeCycleDayIdx + 1} von {sch.days.length}
             </div>
