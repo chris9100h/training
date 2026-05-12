@@ -14,8 +14,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <style>
-  html { height: 100%; }
-  body, #root { height: 100dvh; margin: 0; }
+  html, body { height: 100dvh; margin: 0; }
   html, body {
     background: #0a0a0a;
     color: #f0ece0;
@@ -32,12 +31,12 @@
   }
   #root {
     width: 100%; max-width: 440px;
+    flex: 1; min-height: 0;
     background: #0a0a0a;
     box-shadow: 0 0 80px rgba(0,0,0,0.6);
     position: relative;
     display: flex; flex-direction: column;
     overflow: hidden;
-    /* push content below iOS status bar */
     padding-top: env(safe-area-inset-top);
   }
   * { box-sizing: border-box; }
