@@ -252,7 +252,20 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                   type="number" inputMode="decimal" step="0.5"
                   value={s.kg ?? ''} placeholder="—"
                   onFocus={e => e.target.select()}
-                  onChange={e => updateSet(i, { kg: e.target.value === '' ? null : +e.target.value, done: false })}
+                  onChange={e => {
+                    const kg = e.target.value === '' ? null : +e.target.value;
+                    updateSession(sess => ({
+                      ...sess,
+                      entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+                        ...en,
+                        sets: en.sets.map((st, si) =>
+                          si === i ? { ...st, kg, done: false }
+                          : si > i && !st.done ? { ...st, kg }
+                          : st
+                        ),
+                      }),
+                    }));
+                  }}
                   disabled={s.done}
                   style={setInputStyle(s.done, current)}
                 />

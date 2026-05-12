@@ -151,7 +151,9 @@ async function syncStore(prev, next, userId) {
       const p = prev.sessions.find(x => x.id === s.id);
       return !p || JSON.stringify(p) !== JSON.stringify(s);
     });
-    if (upsert.length) ops.push(_supabase.from('sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
+    const removed = prev.sessions.filter(s => !next.sessions.find(x => x.id === s.id));
+    if (upsert.length)  ops.push(_supabase.from('sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
+    if (removed.length) ops.push(_supabase.from('sessions').delete().in('id', removed.map(s => s.id)));
   }
 
   if (prev.user?.name !== next.user?.name && next.user?.name) {

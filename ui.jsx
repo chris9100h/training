@@ -201,7 +201,11 @@ function Sheet({ open, onClose, title, children }) {
     if (!open) return;
     const vv = window.visualViewport;
     if (!vv) return;
-    const update = () => setKbHeight(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+    const update = () => {
+      const t = document.activeElement?.type;
+      if (t === 'date' || t === 'time' || t === 'datetime-local') return;
+      setKbHeight(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+    };
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
     update();
