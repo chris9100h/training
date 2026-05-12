@@ -72,7 +72,7 @@ function LibraryScreen({ store, setStore, go }) {
         ))}
       </div>
 
-      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ padding: 18, paddingBottom: selecting ? 80 : 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {tab === 'all' && (
           <Input value={q} onChange={setQ} placeholder="Suchen…" />
         )}
