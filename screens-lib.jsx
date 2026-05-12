@@ -564,7 +564,7 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
         <div>
           <Label>Datum</Label>
           <div style={{ width: '100%', overflow: 'hidden', borderRadius: 10 }}>
-            <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} style={inputStyle} />
+            <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} style={{ ...inputStyle, textAlign: 'center', textAlignLast: 'center' }} />
           </div>
         </div>
 
