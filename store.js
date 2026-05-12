@@ -235,9 +235,9 @@ function findExercise(state, exId) {
   return state.exercises.find(e => e.id === exId);
 }
 
-function lastSessionForExercise(state, exId) {
+function lastSessionForExercise(state, exId, dayName = null) {
   const sessions = state.sessions
-    .filter(s => s.ended)
+    .filter(s => s.ended && (dayName == null || s.dayName === dayName))
     .slice()
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   for (const s of sessions) {

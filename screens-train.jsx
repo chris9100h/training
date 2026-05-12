@@ -9,7 +9,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const exIdx = session.currentExIdx || 0;
   const entry = session.entries[exIdx];
   const exercise = entry ? LB.findExercise(store, entry.exId) : null;
-  const last = entry ? LB.lastSessionForExercise(store, entry.exId) : null;
+  const last = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayName) : null;
 
   const updateSession = (fn) => {
     setStore(s => ({
@@ -131,6 +131,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         : e),
     }));
     setRestStart(Date.now());
+    setTimeout(() => navigate(1), 600);
   };
 
   return (

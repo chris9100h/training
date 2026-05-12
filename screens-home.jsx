@@ -126,7 +126,7 @@ function HomeScreen({ store, setStore, go }) {
     if (!day || isRest) return;
     const entries = day.items.map(it => {
       const ex = LB.findExercise(store, it.exId);
-      const last = LB.lastSessionForExercise(store, it.exId);
+      const last = LB.lastSessionForExercise(store, it.exId, day.name);
       const seedSets = Array.from({ length: it.sets }).map((_, i) => {
         const prev = last?.entry?.sets?.[i];
         return { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
