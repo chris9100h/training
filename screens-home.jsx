@@ -167,6 +167,7 @@ function HomeScreen({ store, setStore, go }) {
 
   const isViewingToday = weekOffset === 0 && (weekdayMode ? selectedWd === todayWd : selectedSlot === dayIdx);
   const isActiveRest = !activeDay?.items?.length;
+  const isFutureSlot = sessionDate > (() => { const d = new Date(); d.setHours(12,0,0,0); return d; })();
 
   const periodLabel = useMemo(() => {
     if (weekdayMode) {
@@ -389,7 +390,7 @@ function HomeScreen({ store, setStore, go }) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <Btn onClick={startSession} style={{ width: '100%' }}>
-                  {isViewingToday ? 'Training starten →' : 'Training nacherfassen →'}
+                  {(isViewingToday || isFutureSlot) ? 'Training starten →' : 'Training nacherfassen →'}
                 </Btn>
                 {!weekdayMode && isViewingToday && (
                   <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>
