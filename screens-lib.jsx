@@ -570,7 +570,7 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
 
         <div>
           <Label>Dauer</Label>
-          <select value={draftDuration} onChange={e => setDraftDuration(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
+          <select value={draftDuration} onChange={e => setDraftDuration(e.target.value)} style={{ ...inputStyle, cursor: 'pointer', textAlignLast: 'center' }}>
             {Array.from({ length: 37 }, (_, i) => i * 5).map(m => (
               <option key={m} value={String(m)}>{m === 0 ? '—' : `${m} min`}</option>
             ))}
