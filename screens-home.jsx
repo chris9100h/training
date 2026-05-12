@@ -73,24 +73,32 @@ function HomeScreen({ store, setStore, go }) {
 
   const jsDay = new Date().getDay();
   const todayWd = jsDay === 0 ? 6 : jsDay - 1;
+  // How many full cycles have been completed (0-indexed: 0 = first cycle still running)
+  const currentCycleNum = dayCount > 0 ? Math.floor(store.cycleIndex / dayCount) : 0;
 
-  // weekOffset: 0 = current week/period, -1 = previous, etc.
+  // weekOffset: weeks back (weekday mode) or cycles back (cycle mode). 0 = current.
   const [weekOffset, setWeekOffset] = useState(0);
-  const [selectedWd, setSelectedWd] = useState(todayWd);   // weekday mode
-  const [selectedSlot, setSelectedSlot] = useState(0);      // cycle mode (slot 0 = "today" in current period)
+  const [selectedWd, setSelectedWd] = useState(todayWd);        // weekday mode
+  const [selectedSlot, setSelectedSlot] = useState(dayIdx);     // cycle mode
 
+  const minOffset = weekdayMode ? -8 : -currentCycleNum;
   const goBack = () => {
-    if (weekOffset <= -8) return;
+    if (weekOffset <= minOffset) return;
     const next = weekOffset - 1;
     setWeekOffset(next);
-    setSelectedSlot(6); // default to most recent slot in previous period
+    // default to last slot of the previous cycle (most recent past day)
+    if (!weekdayMode) setSelectedSlot(dayCount - 1);
   };
   const goForward = () => {
     if (weekOffset >= 0) return;
     const next = weekOffset + 1;
     setWeekOffset(next);
-    if (next === 0) { setSelectedSlot(0); setSelectedWd(todayWd); }
-    else setSelectedSlot(6);
+    if (next === 0) {
+      setSelectedSlot(dayIdx);
+      setSelectedWd(todayWd);
+    } else if (!weekdayMode) {
+      setSelectedSlot(dayCount - 1);
+    }
   };
 
   const week = useMemo(() => {
@@ -109,11 +117,12 @@ function HomeScreen({ store, setStore, go }) {
         };
       });
     }
-    return Array.from({ length: 7 }).map((_, i) => {
-      const slotOffset = weekOffset * 7 + i;
-      const idx = ((dayIdx + slotOffset) % dayCount + dayCount) % dayCount;
-      const date = new Date(); date.setDate(date.getDate() + slotOffset);
-      return { ...sch.days[idx], slotOffset, slotIdx: i, date, isToday: slotOffset === 0 };
+    // Cycle mode: show exactly dayCount slots (the full cycle), not a fixed 7
+    return sch.days.map((d, i) => {
+      // days from today: cycleOffset * dayCount + i - dayIdx
+      const daysFromToday = weekOffset * dayCount + i - dayIdx;
+      const date = new Date(); date.setDate(date.getDate() + daysFromToday);
+      return { ...d, slotIdx: i, date, isToday: weekOffset === 0 && i === dayIdx };
     });
   }, [sch, dayIdx, dayCount, weekdayMode, todayWd, weekOffset]);
 
@@ -123,22 +132,21 @@ function HomeScreen({ store, setStore, go }) {
       const found = sch.days.find(d => d.weekday === selectedWd);
       return found ?? { id: 'rest-virtual', name: 'REST', items: [], weekday: selectedWd };
     }
-    const slotOffset = weekOffset * 7 + selectedSlot;
-    const idx = ((dayIdx + slotOffset) % dayCount + dayCount) % dayCount;
-    return sch.days[idx];
-  }, [weekdayMode, sch, selectedWd, selectedSlot, weekOffset, dayIdx, dayCount, day]);
+    return sch.days[selectedSlot] ?? sch.days[0];
+  }, [weekdayMode, sch, selectedWd, selectedSlot, day]);
 
   const sessionDate = useMemo(() => {
     const d = new Date();
     if (weekdayMode) {
       d.setDate(d.getDate() + selectedWd - todayWd + weekOffset * 7);
     } else {
-      d.setDate(d.getDate() + weekOffset * 7 + selectedSlot);
+      // days from today for slot selectedSlot in cycle weekOffset
+      d.setDate(d.getDate() + weekOffset * dayCount + selectedSlot - dayIdx);
     }
     return d;
-  }, [weekdayMode, selectedWd, todayWd, weekOffset, selectedSlot]);
+  }, [weekdayMode, selectedWd, todayWd, weekOffset, selectedSlot, dayIdx, dayCount]);
 
-  const isViewingToday = weekOffset === 0 && (weekdayMode ? selectedWd === todayWd : selectedSlot === 0);
+  const isViewingToday = weekOffset === 0 && (weekdayMode ? selectedWd === todayWd : selectedSlot === dayIdx);
   const isActiveRest = !activeDay?.items?.length;
 
   const periodLabel = useMemo(() => {
@@ -147,22 +155,21 @@ function HomeScreen({ store, setStore, go }) {
       if (weekOffset === -1) return 'LETZTE WOCHE';
       return `VOR ${-weekOffset} WOCHEN`;
     }
-    if (week.length === 0) return '';
-    const fmt = d => d.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' });
-    return `${fmt(week[0].date)} – ${fmt(week[6].date)}`;
-  }, [weekdayMode, weekOffset, week]);
+    const cycleNum = currentCycleNum + weekOffset + 1; // 1-indexed
+    return `ZYKLUS ${cycleNum}`;
+  }, [weekdayMode, weekOffset, currentCycleNum]);
 
   const cardLabel = useMemo(() => {
     if (isViewingToday) {
       return weekdayMode
         ? `Heute · ${WEEKDAYS_FULL[selectedWd]}`
-        : `Heute · Tag ${dayIdx + 1} von ${dayCount}`;
+        : `Heute · Tag ${selectedSlot + 1} von ${dayCount}`;
     }
     const dateStr = sessionDate.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' });
     return weekdayMode
       ? dateStr
-      : `${dateStr} · Tag ${(((dayIdx + weekOffset * 7 + selectedSlot) % dayCount) + dayCount) % dayCount + 1} von ${dayCount}`;
-  }, [isViewingToday, weekdayMode, selectedWd, dayIdx, dayCount, sessionDate, weekOffset, selectedSlot]);
+      : `${dateStr} · Tag ${selectedSlot + 1} von ${dayCount}`;
+  }, [isViewingToday, weekdayMode, selectedWd, selectedSlot, dayCount, sessionDate]);
 
   const lastSession = useMemo(() => {
     return [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''))[0];
@@ -230,21 +237,21 @@ function HomeScreen({ store, setStore, go }) {
 
         {/* period navigation */}
         <div style={{ display: 'flex', alignItems: 'center' }}>
-          <button onClick={goBack} style={navBtn(weekOffset <= -8)}>←</button>
+          <button onClick={goBack} style={navBtn(weekOffset <= minOffset)}>←</button>
           <div style={{ flex: 1, textAlign: 'center', fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.08em' }}>
             {periodLabel}
           </div>
           <button onClick={goForward} disabled={weekOffset === 0} style={navBtn(weekOffset === 0)}>→</button>
         </div>
 
-        {/* week strip */}
+        {/* day strip */}
         <div style={{ display: 'flex', gap: 5 }}>
           {week.map((d, i) => {
             const isSelected = weekdayMode ? i === selectedWd : i === selectedSlot;
             const r = !d.items?.length;
             const slotLabel = weekdayMode
               ? WEEKDAYS[i]
-              : (weekOffset === 0 ? (i === 0 ? 'HEUTE' : `+${i}`) : d.date.toLocaleDateString('de-DE', { day: 'numeric', month: 'numeric' }).slice(0, -1));
+              : d.date.toLocaleDateString('de-DE', { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
             return (
               <div key={d.id ?? i}
                 onClick={() => weekdayMode ? setSelectedWd(i) : setSelectedSlot(i)}
