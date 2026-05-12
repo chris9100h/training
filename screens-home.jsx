@@ -189,7 +189,7 @@ function HomeScreen({ store, setStore, go }) {
     if (!weekdayMode) return null;
     const set = new Set();
     store.sessions.filter(s => s.ended).forEach(s => {
-      const d = new Date(s.date);
+      const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
       set.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
     });
     return set;
@@ -360,7 +360,7 @@ function HomeScreen({ store, setStore, go }) {
               <div>
                 <div style={{ fontSize: 15, fontWeight: 500 }}>{lastSession.dayName}</div>
                 <div style={{ fontSize: 12, color: UI.inkFaint }}>
-                  {new Date(lastSession.date).toLocaleDateString('de-DE', { day:'numeric', month:'short' })} ·{' '}
+                  {new Date(lastSession.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('de-DE', { day:'numeric', month:'short' })} ·{' '}
                   {totalVolume(lastSession).toLocaleString('de-DE')} kg
                 </div>
               </div>

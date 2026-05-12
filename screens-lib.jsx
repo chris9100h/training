@@ -413,7 +413,7 @@ function HistoryScreen({ store, go }) {
         {sessions.map(s => {
           const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
           const vol = totalVolume(s);
-          const date = new Date(s.date);
+          const date = new Date(s.date.slice(0, 10) + 'T12:00:00');
           const days = Math.round((Date.now() - date) / 86400000);
           return (
             <Card key={s.id} onClick={() => go({ name: 'session', sessionId: s.id })} style={{ cursor: 'pointer', padding: 14 }}>
@@ -455,7 +455,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
   return (
     <Screen>
       <TopBar title={s.dayName}
-        sub={new Date(s.date).toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
+        sub={new Date(s.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
         onBack={() => go({ name: justFinished ? 'home' : 'hist' })}
         right={
           <div style={{ display: 'flex', gap: 6 }}>
