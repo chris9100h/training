@@ -114,6 +114,7 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
         <DayEditor
           store={store} setStore={setStore}
           day={sch.days.find(d => d.id === editingDay)}
+          schedule={sch}
           onClose={() => setEditingDay(null)}
           onSave={(updated) => {
             updateSch(s => ({ ...s, days: s.days.map(d => d.id === updated.id ? updated : d) }));
@@ -401,10 +402,46 @@ function chipStyle(dashed) {
   };
 }
 
+// ─── Day copy picker ─────────────────────────────────────────────────
+function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy }) {
+  const copyableDays = schedule.days.filter(d => d.id !== currentDayId && d.items.length > 0);
+
+  return (
+    <Sheet open={true} onClose={onClose} title="Übungen kopieren von">
+      {copyableDays.length === 0 ? (
+        <div style={{ padding: '24px 0', textAlign: 'center', color: UI.inkFaint, fontSize: 13 }}>
+          Keine anderen Tage mit Übungen vorhanden.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+          {copyableDays.map(d => (
+            <button key={d.id} onClick={() => onCopy(d.items)} style={{
+              background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+              borderRadius: 10, padding: '12px 14px', cursor: 'pointer',
+              textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi,
+            }}
+            onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.gold}
+            onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.inkLine}>
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{d.name}</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft }}>
+                {d.items.map(it => LB.findExercise(store, it.exId)?.name || '—').join(' · ')}
+              </div>
+              <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 4, fontFamily: UI.fontNum }}>
+                {d.items.length} Übung{d.items.length !== 1 ? 'en' : ''}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
 // ─── Day editor (exercises within a day) ─────────────────────────────
-function DayEditor({ store, setStore, day, onClose, onSave }) {
+function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const [draft, setDraft] = useStateS(day);
   const [addingEx, setAddingEx] = useStateS(false);
+  const [copyingFrom, setCopyingFrom] = useStateS(false);
   if (!draft) return null;
 
   const updateItem = (idx, patch) => setDraft(d => ({ ...d, items: d.items.map((it, i) => i === idx ? { ...it, ...patch } : it) }));
@@ -422,6 +459,12 @@ function DayEditor({ store, setStore, day, onClose, onSave }) {
       return { ...d, items };
     });
   };
+  const copyItemsFromDay = (items) => {
+    setDraft(d => ({ ...d, items: [...items] }));
+    setCopyingFrom(false);
+  };
+
+  const otherDaysWithExercises = schedule ? schedule.days.filter(d => d.id !== draft.id && d.items.length > 0) : [];
 
   return (
     <Sheet open={true} onClose={onClose} title="Tag bearbeiten">
@@ -434,7 +477,15 @@ function DayEditor({ store, setStore, day, onClose, onSave }) {
         </div>
       ) : (
         <div style={{ marginTop: 14 }}>
-          <Label>Übungen</Label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Label style={{ marginBottom: 0 }}>Übungen</Label>
+            {otherDaysWithExercises.length > 0 && (
+              <button onClick={() => setCopyingFrom(true)} style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                color: UI.gold, fontSize: 12, fontFamily: UI.fontUi, padding: '2px 0',
+              }}>Von Tag kopieren</button>
+            )}
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {draft.items.map((it, i) => {
               const ex = LB.findExercise(store, it.exId);
@@ -467,6 +518,15 @@ function DayEditor({ store, setStore, day, onClose, onSave }) {
 
       {addingEx && (
         <ExercisePicker store={store} onClose={() => setAddingEx(false)} onPick={addExercise} />
+      )}
+      {copyingFrom && schedule && (
+        <DayCopyPicker
+          store={store}
+          schedule={schedule}
+          currentDayId={draft.id}
+          onClose={() => setCopyingFrom(false)}
+          onCopy={copyItemsFromDay}
+        />
       )}
     </Sheet>
   );
