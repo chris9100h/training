@@ -2,6 +2,33 @@
 
 const { useState: useStateT, useEffect: useEffectT, useRef: useRefT } = React;
 
+function KgInput({ value, onChange, done, style }) {
+  const fmt = v => v != null ? String(v).replace('.', ',') : '';
+  const [raw, setRaw] = useStateT(() => fmt(value));
+  const focused = useRefT(false);
+  useEffectT(() => { if (!focused.current) setRaw(fmt(value)); }, [value]);
+  return (
+    <input
+      type="text" inputMode="decimal"
+      value={raw} placeholder="—"
+      disabled={done}
+      style={style}
+      onFocus={e => { focused.current = true; e.target.select(); }}
+      onBlur={() => {
+        focused.current = false;
+        const num = raw === '' ? null : parseFloat(raw.replace(',', '.'));
+        setRaw(num != null ? fmt(num) : '');
+      }}
+      onChange={e => {
+        const str = e.target.value;
+        setRaw(str);
+        const num = str === '' ? null : parseFloat(str.replace(',', '.'));
+        if (str === '' || !isNaN(num)) onChange(num ?? null);
+      }}
+    />
+  );
+}
+
 function TrainingScreen({ store, setStore, go, sessionId }) {
   const session = store.sessions.find(s => s.id === sessionId);
   if (!session) { go({ name: 'home' }); return null; }
@@ -248,26 +275,21 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                 </div>
 
                 {/* kg */}
-                <input
-                  type="number" inputMode="decimal" step="any"
-                  value={s.kg ?? ''} placeholder="—"
-                  onFocus={e => e.target.select()}
-                  onChange={e => {
-                    const kg = e.target.value === '' ? null : +(e.target.value.replace(',', '.'));
-                    updateSession(sess => ({
-                      ...sess,
-                      entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
-                        ...en,
-                        sets: en.sets.map((st, si) =>
-                          si === i ? { ...st, kg, done: false }
-                          : si > i && !st.done ? { ...st, kg }
-                          : st
-                        ),
-                      }),
-                    }));
-                  }}
-                  disabled={s.done}
+                <KgInput
+                  value={s.kg}
+                  done={s.done}
                   style={setInputStyle(s.done, current)}
+                  onChange={kg => updateSession(sess => ({
+                    ...sess,
+                    entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+                      ...en,
+                      sets: en.sets.map((st, si) =>
+                        si === i ? { ...st, kg, done: false }
+                        : si > i && !st.done ? { ...st, kg }
+                        : st
+                      ),
+                    }),
+                  }))}
                 />
 
                 {/* reps */}
