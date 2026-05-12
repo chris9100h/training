@@ -63,9 +63,18 @@
 <div id="err" style="display:none;position:fixed;inset:0;background:#0a0a0a;color:#c87469;font-family:monospace;font-size:13px;padding:24px;white-space:pre-wrap;z-index:9999;overflow:auto"></div>
 <script>
 function setAppHeight() {
-  document.documentElement.style.setProperty('--app-height', window.screen.height + 'px');
+  // Measure env(safe-area-inset-top) in CSS pixels via a temp element.
+  // position:fixed top:0 starts below the status bar, so the correct
+  // app height = screen.height - safeAreaTop (reaches physical bottom).
+  var tmp = document.createElement('div');
+  tmp.style.cssText = 'position:fixed;top:0;height:env(safe-area-inset-top,0px);width:0;opacity:0;pointer-events:none';
+  document.documentElement.appendChild(tmp);
+  var safeTop = tmp.getBoundingClientRect().height || 0;
+  document.documentElement.removeChild(tmp);
+  document.documentElement.style.setProperty('--app-height', (window.screen.height - safeTop) + 'px');
 }
 setAppHeight();
+window.addEventListener('resize', setAppHeight);
 
 window.onerror = function(msg, src, line, col, err) {
   var d = document.getElementById('err');
