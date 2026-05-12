@@ -110,13 +110,26 @@ function HomeScreen({ store, setStore, go }) {
   const dayIdx = today?.idx ?? 0;
   const isRest = day && (!day.items || day.items.length === 0);
   const dayCount = sch?.days?.length || 0;
+  const weekdayMode = sch?.mode === 'weekday';
   const week = useMemo(() => {
     if (!sch) return [];
+    if (weekdayMode) {
+      const js = new Date().getDay();
+      const todayWd = js === 0 ? 6 : js - 1;
+      return Array.from({ length: 7 }).map((_, i) => {
+        const trainingDay = sch.days.find(d => d.weekday === i);
+        return {
+          id: `wd-${i}`, weekday: i, isToday: i === todayWd,
+          name: trainingDay?.name ?? 'REST',
+          items: trainingDay?.items ?? [],
+        };
+      });
+    }
     return Array.from({ length: 7 }).map((_, i) => {
       const idx = (dayIdx + i) % dayCount;
       return { ...sch.days[idx], offset: i };
     });
-  }, [sch, dayIdx, dayCount]);
+  }, [sch, dayIdx, dayCount, weekdayMode]);
 
   const lastSession = useMemo(() => {
     return [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''))[0];
@@ -183,17 +196,17 @@ function HomeScreen({ store, setStore, go }) {
         {/* week strip */}
         <div style={{ display: 'flex', gap: 6 }}>
           {week.map((d, i) => {
-            const isToday = i === 0;
+            const isToday = weekdayMode ? d.isToday : i === 0;
             const r = !d.items?.length;
             return (
-              <div key={i} style={{
+              <div key={d.id ?? i} style={{
                 flex: 1, padding: '8px 4px', textAlign: 'center',
                 background: isToday ? UI.goldFaint : UI.bgRaised,
                 border: `1px solid ${isToday ? UI.goldSoft : UI.inkLine}`,
                 borderRadius: 10,
               }}>
-                <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontNum }}>
-                  {i === 0 ? 'HEUTE' : `+${i}`}
+                <div style={{ fontSize: 9, color: isToday ? UI.gold : UI.inkFaint, fontFamily: UI.fontNum }}>
+                  {weekdayMode ? WEEKDAYS[i] : (i === 0 ? 'HEUTE' : `+${i}`)}
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 600, marginTop: 3, color: r ? UI.inkSoft : isToday ? UI.gold : UI.ink }}>
                   {r ? '—' : d.name.slice(0, 4)}
@@ -206,19 +219,19 @@ function HomeScreen({ store, setStore, go }) {
         {/* today's card */}
         {isRest ? (
           <Card>
-            <Label>Heute · Tag {dayIdx+1} von {dayCount}</Label>
+            <Label>Heute · {weekdayMode ? WEEKDAYS_FULL[day?.weekday ?? dayIdx] : `Tag ${dayIdx+1} von ${dayCount}`}</Label>
             <div style={{ fontSize: 28, fontWeight: 600, marginBottom: 4 }}>Rest Day</div>
             <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 14 }}>
               Erholung ist Teil des Plans. Tomorrow is leg day.
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <Btn kind="ghost" onClick={skipRest} style={{ flex: 1 }}>Rest abhaken →</Btn>
+              {!weekdayMode && <Btn kind="ghost" onClick={skipRest} style={{ flex: 1 }}>Rest abhaken →</Btn>}
               <Btn kind="ghost" onClick={() => go({ name: 'plan' })} style={{ flex: 1 }}>Plan ansehen</Btn>
             </div>
           </Card>
         ) : (
           <Card accent>
-            <Label style={{ color: UI.gold }}>Heute · Tag {dayIdx+1} von {dayCount}</Label>
+            <Label style={{ color: UI.gold }}>Heute · {weekdayMode ? WEEKDAYS_FULL[day?.weekday ?? dayIdx] : `Tag ${dayIdx+1} von ${dayCount}`}</Label>
             <div style={{ fontSize: 28, fontWeight: 600, color: UI.gold, marginBottom: 4 }}>{day.name}</div>
             <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>
               {day.items.length} Übungen · ~{Math.round(day.items.reduce((a,b) => a + b.sets*2 + 3, 0))} min
@@ -236,7 +249,7 @@ function HomeScreen({ store, setStore, go }) {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <Btn onClick={startSession} style={{ width: '100%' }}>Training starten →</Btn>
-              <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>Tag überspringen</Btn>
+              {!weekdayMode && <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>Tag überspringen</Btn>}
             </div>
           </Card>
         )}

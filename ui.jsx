@@ -128,6 +128,8 @@ function Label({ children, style = {} }) {
 }
 
 const MUSCLES = ['Brust','Rücken','Schultern','Bizeps','Trizeps','Bauch','Quads','Hamstrings','Glutes','Waden','Unterarme'];
+const WEEKDAYS = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+const WEEKDAYS_FULL = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
 
 function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, style = {}, suffix, uppercase }) {
   const doUpper = uppercase !== undefined ? uppercase : type === 'text';

@@ -250,6 +250,13 @@ function lastSessionForExercise(state, exId, dayName = null) {
 function todaysDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
+  if (sch.mode === 'weekday') {
+    const js = new Date().getDay();
+    const todayWd = js === 0 ? 6 : js - 1; // 0=Mo … 6=So
+    const day = sch.days.find(d => d.weekday === todayWd);
+    if (day) return { schedule: sch, day, idx: todayWd };
+    return { schedule: sch, day: { id: 'rest-virtual', name: 'REST', items: [], weekday: todayWd }, idx: todayWd };
+  }
   const idx = state.cycleIndex % sch.days.length;
   return { schedule: sch, day: sch.days[idx], idx };
 }

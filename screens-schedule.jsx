@@ -3,8 +3,6 @@
 const { useState: useStateS, useMemo: useMemoS, useRef: useRefS } = React;
 
 const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','BACK','REST'];
-const WEEKDAYS = ['Mo','Di','Mi','Do','Fr','Sa','So'];
-const WEEKDAYS_FULL = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
 
 // ─── PlanScreen ────────────────────────────────────────────────────
 function PlanScreen({ store, setStore, go }) {
