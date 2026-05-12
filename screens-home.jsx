@@ -168,16 +168,6 @@ function HomeScreen({ store, setStore, go }) {
   const isViewingToday = weekOffset === 0 && (weekdayMode ? selectedWd === todayWd : selectedSlot === dayIdx);
   const isActiveRest = !activeDay?.items?.length;
 
-  const isSlotDone = useMemo(() => {
-    if (isActiveRest) return false;
-    if (weekdayMode) {
-      const key = `${sessionDate.getFullYear()}-${sessionDate.getMonth()}-${sessionDate.getDate()}`;
-      return completedDateKeys?.has(key) ?? false;
-    }
-    const pos = (currentCycleNum + weekOffset) * dayCount + selectedSlot;
-    return completedCyclePos?.has(pos) ?? false;
-  }, [isActiveRest, weekdayMode, sessionDate, completedDateKeys, completedCyclePos, currentCycleNum, weekOffset, dayCount, selectedSlot]);
-
   const periodLabel = useMemo(() => {
     if (weekdayMode) {
       if (weekOffset === 0) return 'DIESE WOCHE';
@@ -222,6 +212,16 @@ function HomeScreen({ store, setStore, go }) {
     });
     return set;
   }, [store.sessions, weekdayMode]);
+
+  const isSlotDone = useMemo(() => {
+    if (isActiveRest) return false;
+    if (weekdayMode) {
+      const key = `${sessionDate.getFullYear()}-${sessionDate.getMonth()}-${sessionDate.getDate()}`;
+      return completedDateKeys?.has(key) ?? false;
+    }
+    const pos = (currentCycleNum + weekOffset) * dayCount + selectedSlot;
+    return completedCyclePos?.has(pos) ?? false;
+  }, [isActiveRest, weekdayMode, sessionDate, completedDateKeys, completedCyclePos, currentCycleNum, weekOffset, dayCount, selectedSlot]);
 
   const startSession = () => {
     if (!activeDay || isActiveRest) return;
