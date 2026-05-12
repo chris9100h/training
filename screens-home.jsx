@@ -68,40 +68,101 @@ function HomeScreen({ store, setStore, go }) {
   const sch = today?.schedule;
   const day = today?.day;
   const dayIdx = today?.idx ?? 0;
-  const isRest = day && (!day.items || day.items.length === 0);
   const dayCount = sch?.days?.length || 0;
   const weekdayMode = sch ? LB.isWeekdayPlan(sch) : false;
 
   const jsDay = new Date().getDay();
   const todayWd = jsDay === 0 ? 6 : jsDay - 1;
-  const [selectedWd, setSelectedWd] = useState(todayWd);
+
+  // weekOffset: 0 = current week/period, -1 = previous, etc.
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [selectedWd, setSelectedWd] = useState(todayWd);   // weekday mode
+  const [selectedSlot, setSelectedSlot] = useState(0);      // cycle mode (slot 0 = "today" in current period)
+
+  const goBack = () => {
+    if (weekOffset <= -8) return;
+    const next = weekOffset - 1;
+    setWeekOffset(next);
+    setSelectedSlot(6); // default to most recent slot in previous period
+  };
+  const goForward = () => {
+    if (weekOffset >= 0) return;
+    const next = weekOffset + 1;
+    setWeekOffset(next);
+    if (next === 0) { setSelectedSlot(0); setSelectedWd(todayWd); }
+    else setSelectedSlot(6);
+  };
 
   const week = useMemo(() => {
     if (!sch) return [];
     if (weekdayMode) {
       return Array.from({ length: 7 }).map((_, i) => {
         const trainingDay = sch.days.find(d => d.weekday === i);
+        const diff = i - todayWd + weekOffset * 7;
+        const date = new Date(); date.setDate(date.getDate() + diff);
         return {
-          id: `wd-${i}`, weekday: i, isToday: i === todayWd,
+          id: `wd-${i}`, weekday: i,
+          isToday: i === todayWd && weekOffset === 0,
           name: trainingDay?.name ?? 'REST',
           items: trainingDay?.items ?? [],
+          date,
         };
       });
     }
     return Array.from({ length: 7 }).map((_, i) => {
-      const idx = (dayIdx + i) % dayCount;
-      return { ...sch.days[idx], offset: i };
+      const slotOffset = weekOffset * 7 + i;
+      const idx = ((dayIdx + slotOffset) % dayCount + dayCount) % dayCount;
+      const date = new Date(); date.setDate(date.getDate() + slotOffset);
+      return { ...sch.days[idx], slotOffset, slotIdx: i, date, isToday: slotOffset === 0 };
     });
-  }, [sch, dayIdx, dayCount, weekdayMode, todayWd]);
+  }, [sch, dayIdx, dayCount, weekdayMode, todayWd, weekOffset]);
 
   const activeDay = useMemo(() => {
-    if (!weekdayMode || !sch) return day;
-    const found = sch.days.find(d => d.weekday === selectedWd);
-    return found ?? { id: 'rest-virtual', name: 'REST', items: [], weekday: selectedWd };
-  }, [weekdayMode, sch, selectedWd, day]);
+    if (!sch) return day;
+    if (weekdayMode) {
+      const found = sch.days.find(d => d.weekday === selectedWd);
+      return found ?? { id: 'rest-virtual', name: 'REST', items: [], weekday: selectedWd };
+    }
+    const slotOffset = weekOffset * 7 + selectedSlot;
+    const idx = ((dayIdx + slotOffset) % dayCount + dayCount) % dayCount;
+    return sch.days[idx];
+  }, [weekdayMode, sch, selectedWd, selectedSlot, weekOffset, dayIdx, dayCount, day]);
 
-  const isActiveRest = activeDay && (!activeDay.items || activeDay.items.length === 0);
-  const isViewingToday = !weekdayMode || selectedWd === todayWd;
+  const sessionDate = useMemo(() => {
+    const d = new Date();
+    if (weekdayMode) {
+      d.setDate(d.getDate() + selectedWd - todayWd + weekOffset * 7);
+    } else {
+      d.setDate(d.getDate() + weekOffset * 7 + selectedSlot);
+    }
+    return d;
+  }, [weekdayMode, selectedWd, todayWd, weekOffset, selectedSlot]);
+
+  const isViewingToday = weekOffset === 0 && (weekdayMode ? selectedWd === todayWd : selectedSlot === 0);
+  const isActiveRest = !activeDay?.items?.length;
+
+  const periodLabel = useMemo(() => {
+    if (weekdayMode) {
+      if (weekOffset === 0) return 'DIESE WOCHE';
+      if (weekOffset === -1) return 'LETZTE WOCHE';
+      return `VOR ${-weekOffset} WOCHEN`;
+    }
+    if (week.length === 0) return '';
+    const fmt = d => d.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' });
+    return `${fmt(week[0].date)} – ${fmt(week[6].date)}`;
+  }, [weekdayMode, weekOffset, week]);
+
+  const cardLabel = useMemo(() => {
+    if (isViewingToday) {
+      return weekdayMode
+        ? `Heute · ${WEEKDAYS_FULL[selectedWd]}`
+        : `Heute · Tag ${dayIdx + 1} von ${dayCount}`;
+    }
+    const dateStr = sessionDate.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' });
+    return weekdayMode
+      ? dateStr
+      : `${dateStr} · Tag ${(((dayIdx + weekOffset * 7 + selectedSlot) % dayCount) + dayCount) % dayCount + 1} von ${dayCount}`;
+  }, [isViewingToday, weekdayMode, selectedWd, dayIdx, dayCount, sessionDate, weekOffset, selectedSlot]);
 
   const lastSession = useMemo(() => {
     return [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''))[0];
@@ -124,19 +185,20 @@ function HomeScreen({ store, setStore, go }) {
     });
     const session = {
       id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
-      date: new Date().toISOString(), ended: null, entries, currentExIdx: 0,
+      date: sessionDate.toISOString(), ended: null, entries, currentExIdx: 0,
     };
-    setStore(s => ({
-      ...s,
-      sessions: [...s.sessions, session],
-      inProgress: session.id,
-    }));
+    setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
     go({ name: 'train', sessionId: session.id });
   };
 
   const skipRest = () => {
     setStore(s => ({ ...s, cycleIndex: s.cycleIndex + 1, lastAdvancedDate: LB.todayISO() }));
   };
+
+  const navBtn = (disabled) => ({
+    background: 'transparent', border: 'none', cursor: disabled ? 'default' : 'pointer',
+    color: disabled ? UI.inkLine : UI.inkSoft, fontSize: 16, padding: '0 4px', lineHeight: 1,
+  });
 
   if (!sch) {
     return (
@@ -164,27 +226,38 @@ function HomeScreen({ store, setStore, go }) {
         right={<Btn kind="icon" onClick={() => go({ name: 'settings' })} style={{ fontSize: 20 }}>⋯</Btn>}
       />
 
-      <div style={{ padding: '14px 18px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ padding: '14px 18px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+        {/* period navigation */}
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <button onClick={goBack} style={navBtn(weekOffset <= -8)}>←</button>
+          <div style={{ flex: 1, textAlign: 'center', fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.08em' }}>
+            {periodLabel}
+          </div>
+          <button onClick={goForward} disabled={weekOffset === 0} style={navBtn(weekOffset === 0)}>→</button>
+        </div>
+
         {/* week strip */}
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 5 }}>
           {week.map((d, i) => {
-            const isToday = weekdayMode ? d.isToday : i === 0;
-            const isSelected = weekdayMode ? i === selectedWd : i === 0;
+            const isSelected = weekdayMode ? i === selectedWd : i === selectedSlot;
             const r = !d.items?.length;
+            const slotLabel = weekdayMode
+              ? WEEKDAYS[i]
+              : (weekOffset === 0 ? (i === 0 ? 'HEUTE' : `+${i}`) : d.date.toLocaleDateString('de-DE', { day: 'numeric', month: 'numeric' }).slice(0, -1));
             return (
               <div key={d.id ?? i}
-                onClick={weekdayMode ? () => setSelectedWd(i) : undefined}
+                onClick={() => weekdayMode ? setSelectedWd(i) : setSelectedSlot(i)}
                 style={{
-                  flex: 1, padding: '8px 4px', textAlign: 'center',
+                  flex: 1, padding: '7px 3px', textAlign: 'center',
                   background: isSelected ? UI.goldFaint : UI.bgRaised,
-                  border: `1px solid ${isSelected ? UI.goldSoft : isToday ? UI.inkSoft : UI.inkLine}`,
-                  borderRadius: 10,
-                  cursor: weekdayMode ? 'pointer' : 'default',
+                  border: `1px solid ${isSelected ? UI.goldSoft : d.isToday ? UI.inkSoft : UI.inkLine}`,
+                  borderRadius: 10, cursor: 'pointer',
                 }}>
-                <div style={{ fontSize: 9, color: isSelected ? UI.gold : isToday ? UI.inkSoft : UI.inkFaint, fontFamily: UI.fontNum }}>
-                  {weekdayMode ? WEEKDAYS[i] : (i === 0 ? 'HEUTE' : `+${i}`)}
+                <div style={{ fontSize: 9, color: isSelected ? UI.gold : d.isToday ? UI.inkSoft : UI.inkFaint, fontFamily: UI.fontNum }}>
+                  {slotLabel}
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 600, marginTop: 3, color: r ? UI.inkSoft : isSelected ? UI.gold : UI.ink }}>
+                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 3, color: r ? UI.inkSoft : isSelected ? UI.gold : UI.ink }}>
                   {r ? '—' : d.name.slice(0, 4)}
                 </div>
               </div>
@@ -195,27 +268,19 @@ function HomeScreen({ store, setStore, go }) {
         {/* day card */}
         {isActiveRest ? (
           <Card>
-            <Label>
-              {weekdayMode
-                ? (isViewingToday ? `Heute · ${WEEKDAYS_FULL[selectedWd]}` : WEEKDAYS_FULL[selectedWd])
-                : `Heute · Tag ${dayIdx+1} von ${dayCount}`}
-            </Label>
+            <Label>{cardLabel}</Label>
             <div style={{ fontSize: 28, fontWeight: 600, marginBottom: 4 }}>Rest Day</div>
             <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 14 }}>
               Erholung ist Teil des Plans. Tomorrow is leg day.
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              {!weekdayMode && <Btn kind="ghost" onClick={skipRest} style={{ flex: 1 }}>Rest abhaken →</Btn>}
+              {!weekdayMode && isViewingToday && <Btn kind="ghost" onClick={skipRest} style={{ flex: 1 }}>Rest abhaken →</Btn>}
               <Btn kind="ghost" onClick={() => go({ name: 'plan' })} style={{ flex: 1 }}>Plan ansehen</Btn>
             </div>
           </Card>
         ) : (
           <Card accent>
-            <Label style={{ color: UI.gold }}>
-              {weekdayMode
-                ? (isViewingToday ? `Heute · ${WEEKDAYS_FULL[selectedWd]}` : WEEKDAYS_FULL[selectedWd])
-                : `Heute · Tag ${dayIdx+1} von ${dayCount}`}
-            </Label>
+            <Label style={{ color: UI.gold }}>{cardLabel}</Label>
             <div style={{ fontSize: 28, fontWeight: 600, color: UI.gold, marginBottom: 4 }}>{activeDay.name}</div>
             <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>
               {activeDay.items.length} Übungen · ~{Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))} min
@@ -232,8 +297,14 @@ function HomeScreen({ store, setStore, go }) {
               })}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <Btn onClick={startSession} style={{ width: '100%' }}>Training starten →</Btn>
-              {!weekdayMode && <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>Tag überspringen</Btn>}
+              <Btn onClick={startSession} style={{ width: '100%' }}>
+                {isViewingToday ? 'Training starten →' : 'Training nacherfassen →'}
+              </Btn>
+              {!weekdayMode && isViewingToday && (
+                <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>
+                  Tag überspringen
+                </Btn>
+              )}
             </div>
           </Card>
         )}
