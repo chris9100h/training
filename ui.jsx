@@ -195,7 +195,7 @@ function Pill({ children, gold = false, style = {}, ...rest }) {
 }
 
 function Sheet({ open, onClose, title, children }) {
-  const [kbHeight, setKbHeight] = React.useState(0);
+  const backdropRef = React.useRef(null);
   const scrollRef = React.useRef(null);
 
   React.useEffect(() => {
@@ -204,16 +204,16 @@ function Sheet({ open, onClose, title, children }) {
     if (!vv) return;
     const update = () => {
       const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-      setKbHeight(kb);
+      // mutate DOM directly — no setState → no re-render → no scroll reset
+      if (backdropRef.current) backdropRef.current.style.paddingBottom = `${kb}px`;
+      if (scrollRef.current) scrollRef.current.style.paddingBottom = kb > 0 ? '18px' : 'calc(env(safe-area-inset-bottom, 8px) + 18px)';
       if (kb > 0 && scrollRef.current) {
         const el = document.activeElement;
         if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
           const elRect = el.getBoundingClientRect();
-          const containerRect = scrollRef.current.getBoundingClientRect();
-          const visibleBottom = containerRect.top + vv.height - kb;
-          const pad = 24;
-          if (elRect.bottom > visibleBottom - pad) {
-            scrollRef.current.scrollTop += elRect.bottom - (visibleBottom - pad);
+          const visibleBottom = vv.offsetTop + vv.height - 24;
+          if (elRect.bottom > visibleBottom) {
+            scrollRef.current.scrollTop += elRect.bottom - visibleBottom;
           }
         }
       }
@@ -226,17 +226,17 @@ function Sheet({ open, onClose, title, children }) {
 
   if (!open) return null;
   return (
-    <div onClick={onClose} style={{
+    <div ref={backdropRef} onClick={onClose} style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100,
       display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-      paddingBottom: kbHeight,
       animation: 'sheet-fade 0.18s ease',
     }}>
       <div ref={scrollRef} onClick={e => e.stopPropagation()} style={{
         width: '100%', maxWidth: 540,
         background: UI.bgRaised, borderRadius: '20px 20px 0 0',
         border: `1px solid ${UI.inkLine}`, borderBottom: 'none',
-        padding: `14px 18px ${kbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 18px)'}`,
+        padding: 'calc(env(safe-area-inset-bottom, 8px) + 18px)',
+        paddingTop: '14px',
         animation: 'sheet-up 0.22s ease',
         maxHeight: '85vh', overflow: 'auto',
       }}>
