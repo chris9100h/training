@@ -520,7 +520,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
 
 function SessionEditSheet({ session, duration, onClose, onSave }) {
   const [draftDate, setDraftDate] = useStateL(session.date ? session.date.slice(0, 10) : '');
-  const [draftDuration, setDraftDuration] = useStateL(duration != null ? String(duration) : '');
+  const [draftDuration, setDraftDuration] = useStateL(duration != null ? String(Math.round(duration / 5) * 5) : '0');
   const [draftEntries, setDraftEntries] = useStateL(() => JSON.parse(JSON.stringify(session.entries)));
 
   const updateSet = (eIdx, sIdx, patch) => {
@@ -569,9 +569,12 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
         </div>
 
         <div>
-          <Label>Dauer (Minuten)</Label>
-          <input type="number" inputMode="numeric" min="1" value={draftDuration}
-            onChange={e => setDraftDuration(e.target.value)} onFocus={e => e.target.select()} style={inputStyle} />
+          <Label>Dauer</Label>
+          <select value={draftDuration} onChange={e => setDraftDuration(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
+            {Array.from({ length: 37 }, (_, i) => i * 5).map(m => (
+              <option key={m} value={String(m)}>{m === 0 ? '—' : `${m} min`}</option>
+            ))}
+          </select>
         </div>
 
         <div style={{ borderTop: `1px solid ${UI.inkLine}`, paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
