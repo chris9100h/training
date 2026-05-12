@@ -129,7 +129,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('exercises').upsert(upsert.map(e => ({ ...e, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('exercises').delete().in('id', removed.map(e => e.id)));
   }
 
