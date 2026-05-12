@@ -440,6 +440,7 @@ function HistoryScreen({ store, go }) {
 // ─── SESSION DETAIL ──────────────────────────────────────────────────
 function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
   const [confirmEl, confirm] = useConfirm();
+  const [editing, setEditing] = useStateL(false);
   const s = store.sessions.find(x => x.id === sessionId);
   if (!s) { go({ name: 'hist' }); return null; }
   const vol = totalVolume(s);
@@ -456,7 +457,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
       <TopBar title={s.dayName}
         sub={new Date(s.date).toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
         onBack={() => go({ name: justFinished ? 'home' : 'hist' })}
-        right={<Btn kind="ghost" onClick={deleteSession} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>Löschen</Btn>}
+        right={
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Btn kind="ghost" onClick={() => setEditing(true)} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11 }}>Bearbeiten</Btn>
+            <Btn kind="ghost" onClick={deleteSession} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>Löschen</Btn>
+          </div>
+        }
       />
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {justFinished && (
@@ -496,8 +502,81 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
           </Card>
         ))}
       </div>
+      {editing && (
+        <SessionEditSheet
+          session={s}
+          duration={duration}
+          onClose={() => setEditing(false)}
+          onSave={(patch) => {
+            setStore(st => ({ ...st, sessions: st.sessions.map(x => x.id === s.id ? { ...x, ...patch } : x) }));
+            setEditing(false);
+          }}
+        />
+      )}
       {confirmEl}
     </Screen>
+  );
+}
+
+function SessionEditSheet({ session, duration, onClose, onSave }) {
+  const [draftDate, setDraftDate] = useStateL(session.date ? session.date.slice(0, 10) : '');
+  const [draftDuration, setDraftDuration] = useStateL(duration != null ? String(duration) : '');
+
+  const save = () => {
+    const patch = {};
+    if (draftDate && draftDate !== session.date?.slice(0, 10)) {
+      // preserve the original time-of-day, just swap the date portion
+      const original = new Date(session.date);
+      const [y, m, d] = draftDate.split('-').map(Number);
+      original.setFullYear(y, m - 1, d);
+      patch.date = original.toISOString();
+    }
+    const mins = parseInt(draftDuration, 10);
+    if (!isNaN(mins) && mins > 0 && session.ended) {
+      // adjust startedAt so that ended - startedAt = mins
+      patch.startedAt = new Date(new Date(session.ended) - mins * 60000).toISOString();
+    }
+    onSave(patch);
+  };
+
+  return (
+    <Sheet open={true} onClose={onClose} title="Session bearbeiten">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div>
+          <Label>Datum</Label>
+          <input
+            type="date"
+            value={draftDate}
+            onChange={e => setDraftDate(e.target.value)}
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+              borderRadius: 10, padding: '10px 12px', color: UI.ink,
+              fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
+            }}
+          />
+        </div>
+        <div>
+          <Label>Dauer (Minuten)</Label>
+          <input
+            type="number" inputMode="numeric" min="1"
+            value={draftDuration}
+            onChange={e => setDraftDuration(e.target.value)}
+            onFocus={e => e.target.select()}
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+              borderRadius: 10, padding: '10px 12px', color: UI.ink,
+              fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
+            }}
+          />
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <Btn kind="ghost" onClick={onClose} style={{ flex: 1 }}>Abbrechen</Btn>
+          <Btn onClick={save} style={{ flex: 2 }}>Speichern</Btn>
+        </div>
+      </div>
+    </Sheet>
   );
 }
 
