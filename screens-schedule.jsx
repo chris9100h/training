@@ -1,6 +1,6 @@
 /* Schedules — list, detail, edit, create */
 
-const { useState: useStateS, useMemo: useMemoS, useRef: useRefS } = React;
+const { useState: useStateS, useMemo: useMemoS, useRef: useRefS, useEffect: useEffectS } = React;
 
 const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','BACK','REST'];
 
@@ -442,6 +442,20 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const [draft, setDraft] = useStateS(day);
   const [addingEx, setAddingEx] = useStateS(false);
   const [copyingFrom, setCopyingFrom] = useStateS(false);
+
+  useEffectS(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const handler = () => {
+      const el = document.activeElement;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+        setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50);
+      }
+    };
+    vv.addEventListener('resize', handler);
+    return () => vv.removeEventListener('resize', handler);
+  }, []);
+
   if (!draft) return null;
 
   const updateItem = (idx, patch) => setDraft(d => ({ ...d, items: d.items.map((it, i) => i === idx ? { ...it, ...patch } : it) }));
@@ -500,9 +514,9 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                     <button onClick={() => moveItem(i, 1)} disabled={i === draft.items.length - 1} style={{ ...iconBtn, opacity: i === draft.items.length - 1 ? 0.3 : 1 }}>▼</button>
                   </div>
                   <div style={{ flex: 1, fontSize: 14 }}>{ex?.name || '—'}</div>
-                  <input type="number" inputMode="numeric" value={it.sets} onFocus={e => { e.target.select(); const t = e.target; setTimeout(() => t.scrollIntoView({ block: 'center', behavior: 'smooth' }), 350); }} onChange={e => updateItem(i, { sets: +e.target.value || 1 })} style={inlineNumStyle} />
+                  <input type="number" inputMode="numeric" value={it.sets} onFocus={e => e.target.select()} onChange={e => updateItem(i, { sets: +e.target.value || 1 })} style={inlineNumStyle} />
                   <span style={{ color: UI.inkFaint, fontSize: 12 }}>×</span>
-                  <input type="number" inputMode="numeric" value={it.reps} onFocus={e => { e.target.select(); const t = e.target; setTimeout(() => t.scrollIntoView({ block: 'center', behavior: 'smooth' }), 350); }} onChange={e => updateItem(i, { reps: +e.target.value || 1 })} style={inlineNumStyle} />
+                  <input type="number" inputMode="numeric" value={it.reps} onFocus={e => e.target.select()} onChange={e => updateItem(i, { reps: +e.target.value || 1 })} style={inlineNumStyle} />
                   <button onClick={() => removeItem(i)} style={{ ...iconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
                 </div>
               );
