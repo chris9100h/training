@@ -233,7 +233,10 @@ function HomeScreen({ store, setStore, go }) {
                 );
               })}
             </div>
-            <Btn onClick={startSession} style={{ width: '100%' }}>Training starten →</Btn>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <Btn onClick={startSession} style={{ width: '100%' }}>Training starten →</Btn>
+              <Btn kind="ghost" onClick={skipRest} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>Tag überspringen</Btn>
+            </div>
           </Card>
         )}
 
