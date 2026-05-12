@@ -528,16 +528,24 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
               const ex = LB.findExercise(store, it.exId);
               return (
                 <div key={i} onClick={() => setEditingItem(i)} style={{
-                  display: 'flex', gap: 6, alignItems: 'center',
+                  display: 'flex', gap: 8, alignItems: 'center',
                   background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
-                  padding: '10px 10px', borderRadius: 10, cursor: 'pointer',
+                  padding: '11px 12px', borderRadius: 12, cursor: 'pointer',
                 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <button onClick={e => { e.stopPropagation(); moveItem(i, -1); }} disabled={i === 0} style={{ ...iconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
                     <button onClick={e => { e.stopPropagation(); moveItem(i, 1); }} disabled={i === draft.items.length - 1} style={{ ...iconBtn, opacity: i === draft.items.length - 1 ? 0.3 : 1 }}>▼</button>
                   </div>
-                  <div style={{ flex: 1, fontSize: 14 }}>{ex?.name || '—'}</div>
-                  <div style={{ fontFamily: UI.fontNum, fontSize: 13, color: UI.gold }}>{it.sets}×{it.reps}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: UI.ink }}>{ex?.name || '—'}</div>
+                    {it.note ? <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{it.note}</div> : null}
+                  </div>
+                  <div style={{
+                    fontFamily: UI.fontNum, fontSize: 13, fontWeight: 600,
+                    color: UI.gold, background: UI.goldFaint,
+                    border: `1px solid ${UI.goldSoft}`, borderRadius: 8,
+                    padding: '3px 8px', whiteSpace: 'nowrap',
+                  }}>{it.sets}×{it.reps}</div>
                   <button onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...iconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
                 </div>
               );
