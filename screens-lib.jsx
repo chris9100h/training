@@ -548,7 +548,7 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
     background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
     borderRadius: 10, padding: '11px 14px', color: UI.ink,
     fontFamily: UI.fontNum, fontSize: 16, outline: 'none',
-    width: '100%', boxSizing: 'border-box', display: 'block', textAlign: 'center',
+    width: '100%', boxSizing: 'border-box', display: 'block',
   };
   const numInputStyle = {
     width: 64, background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
