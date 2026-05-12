@@ -438,17 +438,26 @@ function HistoryScreen({ store, go }) {
 }
 
 // ─── SESSION DETAIL ──────────────────────────────────────────────────
-function SessionDetailScreen({ store, go, sessionId, justFinished }) {
+function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
+  const [confirmEl, confirm] = useConfirm();
   const s = store.sessions.find(x => x.id === sessionId);
   if (!s) { go({ name: 'hist' }); return null; }
   const vol = totalVolume(s);
   const duration = s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null;
 
+  const deleteSession = async () => {
+    if (!await confirm('Diese Session wird dauerhaft gelöscht.', { title: 'Session löschen?', ok: 'Löschen', danger: true })) return;
+    setStore(s => ({ ...s, sessions: s.sessions.filter(x => x.id !== sessionId) }));
+    go({ name: 'hist' });
+  };
+
   return (
     <Screen>
       <TopBar title={s.dayName}
         sub={new Date(s.date).toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
-        onBack={() => go({ name: justFinished ? 'home' : 'hist' })} />
+        onBack={() => go({ name: justFinished ? 'home' : 'hist' })}
+        right={<Btn kind="ghost" onClick={deleteSession} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>Löschen</Btn>}
+      />
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {justFinished && (
           <Card accent style={{ textAlign: 'center', padding: 18 }}>
@@ -487,6 +496,7 @@ function SessionDetailScreen({ store, go, sessionId, justFinished }) {
           </Card>
         ))}
       </div>
+      {confirmEl}
     </Screen>
   );
 }
