@@ -280,7 +280,7 @@ function HomeScreen({ store, setStore, go }) {
                   {r ? '—' : d.name.slice(0, 4)}
                 </div>
                 {isCompleted && (
-                  <div style={{ fontSize: 8, color: isSelected ? UI.gold : UI.inkSoft, marginTop: 2, lineHeight: 1 }}>✓</div>
+                  <div style={{ fontSize: 8, color: isSelected ? UI.gold : UI.inkSoft, marginTop: 2, lineHeight: 1 }}>{'✓'}</div>
                 )}
               </div>
             );
