@@ -2,6 +2,33 @@
 
 const { useState: useStateT, useEffect: useEffectT, useRef: useRefT } = React;
 
+function KgInput({ value, onChange, done, style }) {
+  const fmt = v => v != null ? String(v).replace('.', ',') : '';
+  const [raw, setRaw] = useStateT(() => fmt(value));
+  const focused = useRefT(false);
+  useEffectT(() => { if (!focused.current) setRaw(fmt(value)); }, [value]);
+  return (
+    <input
+      type="text" inputMode="decimal"
+      value={raw} placeholder="—"
+      disabled={done}
+      style={style}
+      onFocus={e => { focused.current = true; e.target.select(); }}
+      onBlur={() => {
+        focused.current = false;
+        const num = raw === '' ? null : parseFloat(raw.replace(',', '.'));
+        setRaw(num != null ? fmt(num) : '');
+      }}
+      onChange={e => {
+        const str = e.target.value;
+        setRaw(str);
+        const num = str === '' ? null : parseFloat(str.replace(',', '.'));
+        if (str === '' || !isNaN(num)) onChange(num ?? null);
+      }}
+    />
+  );
+}
+
 function TrainingScreen({ store, setStore, go, sessionId }) {
   const session = store.sessions.find(s => s.id === sessionId);
   if (!session) { go({ name: 'home' }); return null; }
@@ -90,6 +117,17 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     go({ name: 'home' });
   };
 
+  // ── chip strip scroll ─────────────────────────────────────
+  const chipRowRef = useRefT(null);
+  useEffectT(() => {
+    const row = chipRowRef.current;
+    if (!row) return;
+    const chip = row.children[exIdx];
+    if (!chip) return;
+    const target = chip.offsetLeft - row.offsetWidth / 2 + chip.offsetWidth / 2;
+    row.scrollLeft = target;
+  }, [exIdx]);
+
   // ── rest timer ────────────────────────────────────────────
   const [restStart, setRestStart] = useStateT(null);
   const [now, setNow] = useStateT(Date.now());
@@ -145,27 +183,28 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         right={<Btn kind="ghost" onClick={abandon} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>×</Btn>}
       />
 
-      {/* progress chips — clickable, horizontally scrollable */}
-      <div style={{ display: 'flex', gap: 6, padding: '8px 18px 0', overflowX: 'auto', scrollbarWidth: 'none' }}>
-        {session.entries.map((e, i) => {
-          const done = e.sets.every(s => s.done);
-          const active = i === exIdx;
-          return (
-            <button key={i} onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
-              style={{
-                flexShrink: 0, padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
-                background: active ? UI.gold : done ? 'rgba(212,164,55,0.15)' : UI.bgRaised,
-                color: active ? '#0a0a0a' : done ? UI.gold : UI.inkSoft,
-                fontSize: 11, fontFamily: UI.fontUi, fontWeight: active ? 600 : 400,
-                whiteSpace: 'nowrap',
-              }}>
-              {i + 1}. {e.name}
-            </button>
-          );
-        })}
-      </div>
-
       <div style={{ flex: 1, overflow: 'auto', padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {/* progress chips — clickable, horizontally scrollable */}
+        <div ref={chipRowRef} style={{ display: 'flex', gap: 6, margin: '-4px -18px 0', padding: '0 18px', overflowX: 'auto', scrollbarWidth: 'none' }}>
+          {session.entries.map((e, i) => {
+            const done = e.sets.every(s => s.done);
+            const active = i === exIdx;
+            return (
+              <button key={i}
+                onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
+                style={{
+                  flexShrink: 0, padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
+                  background: active ? UI.gold : done ? 'rgba(212,164,55,0.15)' : UI.bgRaised,
+                  color: active ? '#0a0a0a' : done ? UI.gold : UI.inkSoft,
+                  fontSize: 11, fontFamily: UI.fontUi, fontWeight: active ? 600 : 400,
+                  whiteSpace: 'nowrap',
+                }}>
+                {i + 1}. {e.name}
+              </button>
+            );
+          })}
+        </div>
 
         {/* heading + session note chip */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -236,13 +275,21 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                 </div>
 
                 {/* kg */}
-                <input
-                  type="number" inputMode="decimal" step="0.5"
-                  value={s.kg ?? ''} placeholder="—"
-                  onFocus={e => e.target.select()}
-                  onChange={e => updateSet(i, { kg: e.target.value === '' ? null : +e.target.value, done: false })}
-                  disabled={s.done}
+                <KgInput
+                  value={s.kg}
+                  done={s.done}
                   style={setInputStyle(s.done, current)}
+                  onChange={kg => updateSession(sess => ({
+                    ...sess,
+                    entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+                      ...en,
+                      sets: en.sets.map((st, si) =>
+                        si === i ? { ...st, kg, done: false }
+                        : si > i && !st.done ? { ...st, kg }
+                        : st
+                      ),
+                    }),
+                  }))}
                 />
 
                 {/* reps */}

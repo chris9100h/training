@@ -57,11 +57,25 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
   if (!sch) return null;
 
   const updateSch = (fn) => setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === sch.id ? fn(x) : x) }));
-  const setActive = () => setStore(s => ({ ...s, activeScheduleId: sch.id, cycleIndex: 0 }));
+  const setActive = () => setStore(s => ({ ...s, activeScheduleId: sch.id, cycleIndex: 0, cycleStartDate: LB.todayISO() }));
+  const duplicate = () => {
+    const copy = JSON.parse(JSON.stringify(sch));
+    copy.id = LB.uid();
+    copy.name = copy.name + ' (Kopie)';
+    copy.days = copy.days.map(d => ({ ...d, id: LB.uid() }));
+    setStore(s => ({ ...s, schedules: [...s.schedules, copy] }));
+    go({ name: 'schedule', scheduleId: copy.id });
+  };
 
   const jsDay = new Date().getDay();
   const todayWeekday = jsDay === 0 ? 6 : jsDay - 1;
   const displayDays = LB.isWeekdayPlan(sch) ? [...sch.days].sort((a,b)=>a.weekday-b.weekday) : sch.days;
+
+  const activeCycleDayIdx = sch.id === store.activeScheduleId && !LB.isWeekdayPlan(sch)
+    ? (store.cycleStartDate
+        ? (() => { const t = new Date(); t.setHours(12,0,0,0); const st = new Date(store.cycleStartDate+'T12:00:00'); return ((Math.round((t-st)/86400000) % sch.days.length) + sch.days.length) % sch.days.length; })()
+        : (store.cycleIndex || 0) % sch.days.length)
+    : -1;
 
   return (
     <Screen>
@@ -75,10 +89,31 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
         {sch.id !== store.activeScheduleId && (
           <Btn kind="ghost" onClick={setActive} style={{ marginBottom: 4 }}>Diesen Plan aktivieren</Btn>
         )}
+        <Btn kind="ghost" onClick={duplicate} style={{ marginBottom: 4 }}>Plan duplizieren</Btn>
+        {sch.id === store.activeScheduleId && !LB.isWeekdayPlan(sch) && (
+          <Card style={{ padding: 14 }}>
+            <Label>Zyklus-Startdatum (Tag 1)</Label>
+            <div style={{ overflow: 'hidden', borderRadius: 10 }}>
+              <input type="date"
+                value={store.cycleStartDate || ''}
+                onChange={e => { if (e.target.value) setStore(s => ({ ...s, cycleStartDate: e.target.value })); }}
+                style={{
+                  background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+                  borderRadius: 10, padding: '11px 14px', color: UI.ink,
+                  fontFamily: UI.fontNum, fontSize: 16, outline: 'none',
+                  width: '100%', boxSizing: 'border-box', display: 'block',
+                }}
+              />
+            </div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, marginTop: 6 }}>
+              Heute = Tag {activeCycleDayIdx + 1} von {sch.days.length}
+            </div>
+          </Card>
+        )}
         {displayDays.map((d, i) => {
           const isRest = !d.items.length;
           const isToday = sch.id === store.activeScheduleId && (
-            LB.isWeekdayPlan(sch) ? d.weekday === todayWeekday : (store.cycleIndex % sch.days.length) === i
+            LB.isWeekdayPlan(sch) ? d.weekday === todayWeekday : activeCycleDayIdx === i
           );
           const dayLabel = LB.isWeekdayPlan(sch) ? WEEKDAYS_FULL[d.weekday] : `Tag ${i+1}`;
           return (
@@ -438,10 +473,47 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy }) {
 }
 
 // ─── Day editor (exercises within a day) ─────────────────────────────
+function ExerciseItemEditor({ item, exName, onClose, onSave }) {
+  const [sets, setSets] = useStateS(item.sets);
+  const [reps, setReps] = useStateS(item.reps);
+  const [note, setNote] = useStateS(item.note || '');
+  return (
+    <Sheet open={true} onClose={onClose} title={exName}>
+      <div style={{ display: 'flex', gap: 24, justifyContent: 'center', marginBottom: 20 }}>
+        <div style={{ textAlign: 'center', flex: 1 }}>
+          <Label style={{ textAlign: 'center' }}>Sätze</Label>
+          <Stepper value={sets} onChange={v => setSets(Math.max(1, Math.round(v)))} step={1} min={1} />
+        </div>
+        <div style={{ textAlign: 'center', flex: 1 }}>
+          <Label style={{ textAlign: 'center' }}>Wiederholungen</Label>
+          <Stepper value={reps} onChange={v => setReps(Math.max(1, Math.round(v)))} step={1} min={1} />
+        </div>
+      </div>
+      <Label>Notiz (optional)</Label>
+      <textarea
+        value={note}
+        onChange={e => setNote(e.target.value)}
+        placeholder="z.B. Kabelzug Pos 4, langsam ablassen…"
+        rows={3}
+        style={{
+          width: '100%', boxSizing: 'border-box',
+          background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+          borderRadius: 10, padding: 12, color: UI.ink,
+          fontFamily: UI.fontUi, fontSize: 14, resize: 'vertical', outline: 'none',
+          marginBottom: 14,
+        }}
+      />
+      <Btn onClick={() => onSave({ sets, reps, note })} style={{ width: '100%' }}>Übernehmen</Btn>
+    </Sheet>
+  );
+}
+
 function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const [draft, setDraft] = useStateS(day);
   const [addingEx, setAddingEx] = useStateS(false);
   const [copyingFrom, setCopyingFrom] = useStateS(false);
+  const [editingItem, setEditingItem] = useStateS(null); // index
+
   if (!draft) return null;
 
   const updateItem = (idx, patch) => setDraft(d => ({ ...d, items: d.items.map((it, i) => i === idx ? { ...it, ...patch } : it) }));
@@ -490,20 +562,26 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
             {draft.items.map((it, i) => {
               const ex = LB.findExercise(store, it.exId);
               return (
-                <div key={i} style={{
-                  display: 'flex', gap: 6, alignItems: 'center',
+                <div key={i} onClick={() => setEditingItem(i)} style={{
+                  display: 'flex', gap: 8, alignItems: 'center',
                   background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
-                  padding: '8px 10px', borderRadius: 10,
+                  padding: '11px 12px', borderRadius: 12, cursor: 'pointer',
                 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <button onClick={() => moveItem(i, -1)} disabled={i === 0} style={{ ...iconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
-                    <button onClick={() => moveItem(i, 1)} disabled={i === draft.items.length - 1} style={{ ...iconBtn, opacity: i === draft.items.length - 1 ? 0.3 : 1 }}>▼</button>
+                    <button onClick={e => { e.stopPropagation(); moveItem(i, -1); }} disabled={i === 0} style={{ ...iconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
+                    <button onClick={e => { e.stopPropagation(); moveItem(i, 1); }} disabled={i === draft.items.length - 1} style={{ ...iconBtn, opacity: i === draft.items.length - 1 ? 0.3 : 1 }}>▼</button>
                   </div>
-                  <div style={{ flex: 1, fontSize: 14 }}>{ex?.name || '—'}</div>
-                  <input type="number" inputMode="numeric" value={it.sets} onFocus={e => e.target.select()} onChange={e => updateItem(i, { sets: +e.target.value || 1 })} style={inlineNumStyle} />
-                  <span style={{ color: UI.inkFaint, fontSize: 12 }}>×</span>
-                  <input type="number" inputMode="numeric" value={it.reps} onFocus={e => e.target.select()} onChange={e => updateItem(i, { reps: +e.target.value || 1 })} style={inlineNumStyle} />
-                  <button onClick={() => removeItem(i)} style={{ ...iconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: UI.ink }}>{ex?.name || '—'}</div>
+                    {it.note ? <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{it.note}</div> : null}
+                  </div>
+                  <div style={{
+                    fontFamily: UI.fontNum, fontSize: 13, fontWeight: 600,
+                    color: UI.gold, background: UI.goldFaint,
+                    border: `1px solid ${UI.goldSoft}`, borderRadius: 8,
+                    padding: '3px 8px', whiteSpace: 'nowrap',
+                  }}>{it.sets}×{it.reps}</div>
+                  <button onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...iconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
                 </div>
               );
             })}
@@ -516,6 +594,14 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
         <Btn onClick={() => onSave(draft)} style={{ flex: 2 }}>Speichern</Btn>
       </div>
 
+      {editingItem !== null && (
+        <ExerciseItemEditor
+          item={draft.items[editingItem]}
+          exName={LB.findExercise(store, draft.items[editingItem]?.exId)?.name || '—'}
+          onClose={() => setEditingItem(null)}
+          onSave={(patch) => { updateItem(editingItem, patch); setEditingItem(null); }}
+        />
+      )}
       {addingEx && (
         <ExercisePicker store={store} onClose={() => setAddingEx(false)} onPick={addExercise} />
       )}
@@ -531,12 +617,6 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     </Sheet>
   );
 }
-
-const inlineNumStyle = {
-  width: 36, background: '#0a0a0a', border: `1px solid ${UI.inkLine}`,
-  borderRadius: 6, color: UI.ink, padding: '6px 4px', textAlign: 'center',
-  fontFamily: UI.fontNum, fontSize: 14, outline: 'none',
-};
 
 function ExercisePicker({ store, onClose, onPick }) {
   const [q, setQ] = useStateS('');
@@ -629,7 +709,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
     };
     setStore(s => {
       const withTypes = ensureCustomTypes(s, pattern);
-      return { ...withTypes, schedules: [...withTypes.schedules, newSch], activeScheduleId: newSch.id, cycleIndex: 0 };
+      return { ...withTypes, schedules: [...withTypes.schedules, newSch], activeScheduleId: newSch.id, cycleIndex: 0, cycleStartDate: LB.todayISO() };
     });
     go({ name: 'schedule', scheduleId: newSch.id });
   };

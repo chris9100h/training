@@ -73,15 +73,33 @@ function HomeScreen({ store, setStore, go }) {
 
   const jsDay = new Date().getDay();
   const todayWd = jsDay === 0 ? 6 : jsDay - 1;
+
+  // Auto-migrate from cycleIndex to cycleStartDate on first load
+  useEffect(() => {
+    if (!weekdayMode && sch && !store.cycleStartDate) {
+      const today = new Date(); today.setHours(12, 0, 0, 0);
+      const start = new Date(today.getTime() - (store.cycleIndex || 0) * 86400000);
+      setStore(s => s.cycleStartDate ? s : { ...s, cycleStartDate: start.toISOString().slice(0, 10) });
+    }
+  }, []); // eslint-disable-line
+
+  // Total days elapsed since cycle start (falls back to cycleIndex for legacy data)
+  const todayN = useMemo(() => {
+    if (weekdayMode || !store.cycleStartDate) return store.cycleIndex || 0;
+    const today = new Date(); today.setHours(12, 0, 0, 0);
+    const start = new Date(store.cycleStartDate + 'T12:00:00');
+    return Math.max(0, Math.round((today.getTime() - start.getTime()) / 86400000));
+  }, [store.cycleStartDate, store.cycleIndex, weekdayMode]);
+
   // How many full cycles have been completed (0-indexed: 0 = first cycle still running)
-  const currentCycleNum = dayCount > 0 ? Math.floor(store.cycleIndex / dayCount) : 0;
+  const currentCycleNum = dayCount > 0 ? Math.floor(todayN / dayCount) : 0;
 
   // weekOffset: weeks back (weekday mode) or cycles back (cycle mode). 0 = current.
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedWd, setSelectedWd] = useState(todayWd);        // weekday mode
   const [selectedSlot, setSelectedSlot] = useState(dayIdx);     // cycle mode
 
-  const minOffset = weekdayMode ? -8 : -currentCycleNum;
+  const minOffset = weekdayMode ? -8 : -(currentCycleNum + 1);
   const goBack = () => {
     if (weekOffset <= minOffset) return;
     const next = weekOffset - 1;
@@ -137,6 +155,7 @@ function HomeScreen({ store, setStore, go }) {
 
   const sessionDate = useMemo(() => {
     const d = new Date();
+    d.setHours(12, 0, 0, 0); // noon local time avoids UTC day boundary issues
     if (weekdayMode) {
       d.setDate(d.getDate() + selectedWd - todayWd + weekOffset * 7);
     } else {
@@ -148,6 +167,7 @@ function HomeScreen({ store, setStore, go }) {
 
   const isViewingToday = weekOffset === 0 && (weekdayMode ? selectedWd === todayWd : selectedSlot === dayIdx);
   const isActiveRest = !activeDay?.items?.length;
+  const isFutureSlot = sessionDate > (() => { const d = new Date(); d.setHours(12,0,0,0); return d; })();
 
   const periodLabel = useMemo(() => {
     if (weekdayMode) {
@@ -175,6 +195,43 @@ function HomeScreen({ store, setStore, go }) {
     return [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''))[0];
   }, [store.sessions]);
 
+  // cycle mode: set of absolute day-numbers (days since cycleStartDate) for completed sessions
+  const completedCyclePos = useMemo(() => {
+    if (weekdayMode || !sch) return null;
+    const set = new Set();
+    if (store.cycleStartDate) {
+      const start = new Date(store.cycleStartDate + 'T12:00:00');
+      store.sessions.filter(s => s.ended).forEach(s => {
+        const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+        set.add(Math.round((d - start) / 86400000));
+      });
+    } else {
+      store.sessions.filter(s => s.ended && s.cyclePos != null).forEach(s => set.add(s.cyclePos));
+    }
+    return set;
+  }, [store.sessions, weekdayMode, sch, store.cycleStartDate]);
+
+  // weekday mode: plain date-key set
+  const completedDateKeys = useMemo(() => {
+    if (!weekdayMode) return null;
+    const set = new Set();
+    store.sessions.filter(s => s.ended).forEach(s => {
+      const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+      set.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+    });
+    return set;
+  }, [store.sessions, weekdayMode]);
+
+  const isSlotDone = useMemo(() => {
+    if (isActiveRest) return false;
+    if (weekdayMode) {
+      const key = `${sessionDate.getFullYear()}-${sessionDate.getMonth()}-${sessionDate.getDate()}`;
+      return completedDateKeys?.has(key) ?? false;
+    }
+    const pos = (currentCycleNum + weekOffset) * dayCount + selectedSlot;
+    return completedCyclePos?.has(pos) ?? false;
+  }, [isActiveRest, weekdayMode, sessionDate, completedDateKeys, completedCyclePos, currentCycleNum, weekOffset, dayCount, selectedSlot]);
+
   const startSession = () => {
     if (!activeDay || isActiveRest) return;
     const entries = activeDay.items.map(it => {
@@ -191,16 +248,24 @@ function HomeScreen({ store, setStore, go }) {
       };
     });
     const nowISO = new Date().toISOString();
+    const cyclePos = weekdayMode ? null : (currentCycleNum + weekOffset) * dayCount + selectedSlot;
     const session = {
       id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
       date: sessionDate.toISOString(), startedAt: nowISO, ended: null, entries, currentExIdx: 0,
+      cyclePos,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
     go({ name: 'train', sessionId: session.id });
   };
 
   const skipRest = () => {
-    setStore(s => ({ ...s, cycleIndex: s.cycleIndex + 1, lastAdvancedDate: LB.todayISO() }));
+    if (store.cycleStartDate) {
+      const start = new Date(store.cycleStartDate + 'T12:00:00');
+      start.setDate(start.getDate() - 1);
+      setStore(s => ({ ...s, cycleStartDate: start.toISOString().slice(0, 10), lastAdvancedDate: LB.todayISO() }));
+    } else {
+      setStore(s => ({ ...s, cycleIndex: s.cycleIndex + 1, lastAdvancedDate: LB.todayISO() }));
+    }
   };
 
   const navBtn = (disabled) => ({
@@ -253,6 +318,16 @@ function HomeScreen({ store, setStore, go }) {
             const slotLabel = weekdayMode
               ? WEEKDAYS[i]
               : d.date.toLocaleDateString('de-DE', { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
+            let isCompleted = false;
+            if (!r) {
+              if (weekdayMode) {
+                const slotKey = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
+                isCompleted = completedDateKeys?.has(slotKey) ?? false;
+              } else {
+                const pos = (currentCycleNum + weekOffset) * dayCount + i;
+                isCompleted = completedCyclePos?.has(pos) ?? false;
+              }
+            }
             return (
               <div key={d.id ?? i}
                 onClick={() => weekdayMode ? setSelectedWd(i) : setSelectedSlot(i)}
@@ -268,6 +343,9 @@ function HomeScreen({ store, setStore, go }) {
                 <div style={{ fontSize: 11, fontWeight: 600, marginTop: 3, color: r ? UI.inkSoft : isSelected ? UI.gold : UI.ink }}>
                   {r ? '—' : d.name.slice(0, 4)}
                 </div>
+                {isCompleted && (
+                  <div style={{ fontSize: 8, color: isSelected ? UI.gold : UI.inkSoft, marginTop: 2, lineHeight: 1 }}>{'✓'}</div>
+                )}
               </div>
             );
           })}
@@ -279,7 +357,7 @@ function HomeScreen({ store, setStore, go }) {
             <Label>{cardLabel}</Label>
             <div style={{ fontSize: 28, fontWeight: 600, marginBottom: 4 }}>Rest Day</div>
             <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 14 }}>
-              Erholung ist Teil des Plans. Tomorrow is leg day.
+              Erholung ist Teil des Plans.
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               {!weekdayMode && isViewingToday && <Btn kind="ghost" onClick={skipRest} style={{ flex: 1 }}>Rest abhaken →</Btn>}
@@ -304,16 +382,23 @@ function HomeScreen({ store, setStore, go }) {
                 );
               })}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <Btn onClick={startSession} style={{ width: '100%' }}>
-                {isViewingToday ? 'Training starten →' : 'Training nacherfassen →'}
-              </Btn>
-              {!weekdayMode && isViewingToday && (
-                <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>
-                  Tag überspringen
+            {isSlotDone ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', color: UI.ok }}>
+                <span style={{ fontSize: 20, lineHeight: 1 }}>{'✓'}</span>
+                <span style={{ fontSize: 14, fontWeight: 500 }}>Training erledigt</span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <Btn onClick={startSession} style={{ width: '100%' }}>
+                  {(isViewingToday || isFutureSlot) ? 'Training starten →' : 'Training nacherfassen →'}
                 </Btn>
-              )}
-            </div>
+                {!weekdayMode && isViewingToday && (
+                  <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>
+                    Tag überspringen
+                  </Btn>
+                )}
+              </div>
+            )}
           </Card>
         )}
 
@@ -325,7 +410,7 @@ function HomeScreen({ store, setStore, go }) {
               <div>
                 <div style={{ fontSize: 15, fontWeight: 500 }}>{lastSession.dayName}</div>
                 <div style={{ fontSize: 12, color: UI.inkFaint }}>
-                  {new Date(lastSession.date).toLocaleDateString('de-DE', { day:'numeric', month:'short' })} ·{' '}
+                  {new Date(lastSession.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('de-DE', { day:'numeric', month:'short' })} ·{' '}
                   {totalVolume(lastSession).toLocaleString('de-DE')} kg
                 </div>
               </div>
