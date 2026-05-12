@@ -102,7 +102,15 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const restPct = restElapsed != null ? Math.min(100, (restElapsed / restDef) * 100) : 0;
 
   const [finishOpen, setFinishOpen] = useStateT(false);
-  const [noteOpen, setNoteOpen] = useStateT(false);
+  const [notePicker, setNotePicker] = useStateT(false);
+  const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
+  const [exNoteOpen, setExNoteOpen] = useStateT(false);
+  const [exNoteVal, setExNoteVal] = useStateT('');
+
+  const saveExNote = () => {
+    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === entry.exId ? { ...e, note: exNoteVal.trim() } : e) }));
+    setExNoteOpen(false);
+  };
 
   if (!entry) {
     return <Screen><Empty title="Diese Session ist leer" action={<Btn onClick={() => go({ name: 'home' })}>Zurück</Btn>} /></Screen>;
@@ -149,7 +157,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               Set {currentSetNum} of {entry.sets.length}
             </div>
           </div>
-          <button onClick={() => setNoteOpen(true)} style={{
+          <button onClick={() => setNotePicker(true)} style={{
             background: entry.note ? UI.goldFaint : 'transparent',
             border: `1px solid ${entry.note ? UI.goldSoft : UI.inkLine}`,
             borderRadius: 20, padding: '6px 12px', cursor: 'pointer',
@@ -309,8 +317,28 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         </div>
       </Sheet>
 
+      {/* note type picker */}
+      <Sheet open={notePicker} onClose={() => setNotePicker(false)} title="Welche Notiz?">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <button onClick={() => { setNotePicker(false); setSessionNoteOpen(true); }} style={{
+            background: UI.bgInset, border: `1px solid ${UI.inkLine}`, borderRadius: 12,
+            padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>📝 Session-Notiz</div>
+            <div style={{ fontSize: 12, color: UI.inkSoft }}>Nur für dieses Training sichtbar — z.B. wie sich der Satz angefühlt hat.</div>
+          </button>
+          <button onClick={() => { setNotePicker(false); setExNoteVal(exercise?.note || ''); setExNoteOpen(true); }} style={{
+            background: UI.bgInset, border: `1px solid ${UI.inkLine}`, borderRadius: 12,
+            padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>📌 Übungs-Notiz</div>
+            <div style={{ fontSize: 12, color: UI.inkSoft }}>Dauerhaft gespeichert — wird bei jeder Session angezeigt. z.B. Einstellungen, Technikhinweise.</div>
+          </button>
+        </div>
+      </Sheet>
+
       {/* session note editor */}
-      <Sheet open={noteOpen} onClose={() => setNoteOpen(false)} title="Session-Notiz">
+      <Sheet open={sessionNoteOpen} onClose={() => setSessionNoteOpen(false)} title="Session-Notiz">
         <textarea
           value={entry.note || ''}
           onChange={e => setNote(e.target.value)}
@@ -323,7 +351,24 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             resize: 'vertical', outline: 'none',
           }}
         />
-        <Btn onClick={() => setNoteOpen(false)} style={{ marginTop: 12, width: '100%' }}>Speichern</Btn>
+        <Btn onClick={() => setSessionNoteOpen(false)} style={{ marginTop: 12, width: '100%' }}>Speichern</Btn>
+      </Sheet>
+
+      {/* exercise note editor */}
+      <Sheet open={exNoteOpen} onClose={() => setExNoteOpen(false)} title="Übungs-Notiz">
+        <textarea
+          value={exNoteVal}
+          onChange={e => setExNoteVal(e.target.value)}
+          placeholder="z.B. Kabelzug Pos 4, Griff neutral, langsam ablassen"
+          rows={4}
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+            borderRadius: 10, padding: 12, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
+            resize: 'vertical', outline: 'none',
+          }}
+        />
+        <Btn onClick={saveExNote} style={{ marginTop: 12, width: '100%' }}>Speichern</Btn>
       </Sheet>
     </Screen>
   );
