@@ -500,9 +500,9 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                     <button onClick={() => moveItem(i, 1)} disabled={i === draft.items.length - 1} style={{ ...iconBtn, opacity: i === draft.items.length - 1 ? 0.3 : 1 }}>▼</button>
                   </div>
                   <div style={{ flex: 1, fontSize: 14 }}>{ex?.name || '—'}</div>
-                  <input type="number" inputMode="numeric" value={it.sets} onFocus={e => e.target.select()} onChange={e => updateItem(i, { sets: +e.target.value || 1 })} style={inlineNumStyle} />
+                  <input type="number" inputMode="numeric" value={it.sets} onFocus={e => { e.target.select(); e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }); }} onChange={e => updateItem(i, { sets: +e.target.value || 1 })} style={inlineNumStyle} />
                   <span style={{ color: UI.inkFaint, fontSize: 12 }}>×</span>
-                  <input type="number" inputMode="numeric" value={it.reps} onFocus={e => e.target.select()} onChange={e => updateItem(i, { reps: +e.target.value || 1 })} style={inlineNumStyle} />
+                  <input type="number" inputMode="numeric" value={it.reps} onFocus={e => { e.target.select(); e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }); }} onChange={e => updateItem(i, { reps: +e.target.value || 1 })} style={inlineNumStyle} />
                   <button onClick={() => removeItem(i)} style={{ ...iconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
                 </div>
               );
