@@ -394,6 +394,14 @@ function SessionDetailScreen({ store, go, sessionId, justFinished }) {
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
 function SettingsScreen({ store, setStore, go, userId }) {
+  const [nickname, setNickname] = useStateL(store.user?.name || '');
+
+  const saveNickname = () => {
+    const trimmed = nickname.trim();
+    if (!trimmed || trimmed === store.user?.name) return;
+    setStore(s => ({ ...s, user: { ...s.user, name: trimmed } }));
+  };
+
   const exportData = () => {
     const blob = new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -404,7 +412,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   };
 
   const handleSignOut = async () => {
-    await LB.signOut(); // SIGNED_OUT event → App clears state automatically
+    await LB.signOut();
   };
 
   const handleDeleteAll = async () => {
@@ -418,8 +426,23 @@ function SettingsScreen({ store, setStore, go, userId }) {
       <TopBar title="Einstellungen" onBack={() => go({ name: 'home' })} />
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
         <Card>
-          <Label>Eingeloggt als</Label>
-          <div style={{ fontSize: 16, fontWeight: 500 }}>{store.user?.name}</div>
+          <Label>Spitzname</Label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+            <input
+              value={nickname}
+              onChange={e => setNickname(e.target.value)}
+              onBlur={saveNickname}
+              onKeyDown={e => e.key === 'Enter' && (e.target.blur())}
+              placeholder="Dein Name"
+              style={{
+                flex: 1, background: 'transparent', border: 'none', outline: 'none',
+                color: UI.ink, fontFamily: UI.fontUi, fontSize: 16, padding: 0,
+              }}
+            />
+          </div>
+          <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 6 }}>
+            Eingeloggt als {store.user?.email || userId}
+          </div>
         </Card>
         <Card>
           <Label>Pause Default</Label>
@@ -430,8 +453,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
           />
         </Card>
         <Btn kind="ghost" onClick={exportData}>Daten exportieren (JSON)</Btn>
-        <Btn kind="ghost" onClick={handleSignOut}>Ausloggen</Btn>
-        <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>
+        <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>
+          Ausloggen
+        </Btn>
+        <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', opacity: 0.6 }}>
           Alle Daten löschen
         </Btn>
         <div style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'center', marginTop: 8 }}>

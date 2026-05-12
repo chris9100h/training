@@ -86,8 +86,10 @@ async function loadFromSupabase(userId) {
 
   const sett = settRes.data || {};
 
+  const { data: { user: authUser } } = await _supabase.auth.getUser();
+
   return {
-    user: { name: profileRes.data.name },
+    user: { name: profileRes.data.name, email: authUser?.email || '' },
     exercises: exRes.data || [],
     schedules: schRes.data || [],
     // map snake_case DB columns → camelCase store fields
@@ -147,6 +149,10 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(s);
     });
     if (upsert.length) ops.push(_supabase.from('sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
+  }
+
+  if (prev.user?.name !== next.user?.name && next.user?.name) {
+    ops.push(_supabase.from('profiles').upsert({ id: userId, name: next.user.name }));
   }
 
   ops.push(_supabase.from('user_settings').upsert({
