@@ -122,14 +122,15 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const allDone = completed === entry.sets.length;
   const currentSetNum = Math.min(completed + 1, entry.sets.length);
 
-  const toggleAllSets = () => {
+  const checkAllSets = () => {
+    if (allDone) return;
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
-        ? { ...e, sets: e.sets.map(st => ({ ...st, done: !allDone })) }
+        ? { ...e, sets: e.sets.map(st => ({ ...st, done: true })) }
         : e),
     }));
-    if (!allDone) setRestStart(Date.now());
+    setRestStart(Date.now());
   };
 
   return (
@@ -189,7 +190,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             <Label style={{ marginBottom: 0, fontSize: 11 }}>Vorherige ↔</Label>
             <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>kg</Label>
             <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>Reps</Label>
-            <button onClick={toggleAllSets} style={{
+            <button onClick={checkAllSets} style={{
               width: 22, height: 22, border: 'none', borderRadius: 5, cursor: 'pointer',
               background: allDone ? UI.gold : 'transparent',
               outline: `2px solid ${allDone ? UI.gold : UI.inkLine}`,
