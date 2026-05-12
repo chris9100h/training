@@ -357,7 +357,7 @@ function HomeScreen({ store, setStore, go }) {
             <Label>{cardLabel}</Label>
             <div style={{ fontSize: 28, fontWeight: 600, marginBottom: 4 }}>Rest Day</div>
             <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 14 }}>
-              Erholung ist Teil des Plans. Tomorrow is leg day.
+              Erholung ist Teil des Plans.
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               {!weekdayMode && isViewingToday && <Btn kind="ghost" onClick={skipRest} style={{ flex: 1 }}>Rest abhaken →</Btn>}
