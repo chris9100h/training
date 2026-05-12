@@ -1,6 +1,6 @@
 /* Schedules — list, detail, edit, create */
 
-const { useState: useStateS, useMemo: useMemoS, useRef: useRefS, useEffect: useEffectS } = React;
+const { useState: useStateS, useMemo: useMemoS, useRef: useRefS } = React;
 
 const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','BACK','REST'];
 
@@ -438,10 +438,46 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy }) {
 }
 
 // ─── Day editor (exercises within a day) ─────────────────────────────
+function ExerciseItemEditor({ item, exName, onClose, onSave }) {
+  const [sets, setSets] = useStateS(item.sets);
+  const [reps, setReps] = useStateS(item.reps);
+  const [note, setNote] = useStateS(item.note || '');
+  return (
+    <Sheet open={true} onClose={onClose} title={exName}>
+      <div style={{ display: 'flex', gap: 24, justifyContent: 'center', marginBottom: 20 }}>
+        <div style={{ textAlign: 'center', flex: 1 }}>
+          <Label style={{ textAlign: 'center' }}>Sätze</Label>
+          <Stepper value={sets} onChange={v => setSets(Math.max(1, Math.round(v)))} step={1} min={1} />
+        </div>
+        <div style={{ textAlign: 'center', flex: 1 }}>
+          <Label style={{ textAlign: 'center' }}>Wiederholungen</Label>
+          <Stepper value={reps} onChange={v => setReps(Math.max(1, Math.round(v)))} step={1} min={1} />
+        </div>
+      </div>
+      <Label>Notiz (optional)</Label>
+      <textarea
+        value={note}
+        onChange={e => setNote(e.target.value)}
+        placeholder="z.B. Kabelzug Pos 4, langsam ablassen…"
+        rows={3}
+        style={{
+          width: '100%', boxSizing: 'border-box',
+          background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+          borderRadius: 10, padding: 12, color: UI.ink,
+          fontFamily: UI.fontUi, fontSize: 14, resize: 'vertical', outline: 'none',
+          marginBottom: 14,
+        }}
+      />
+      <Btn onClick={() => onSave({ sets, reps, note })} style={{ width: '100%' }}>Übernehmen</Btn>
+    </Sheet>
+  );
+}
+
 function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const [draft, setDraft] = useStateS(day);
   const [addingEx, setAddingEx] = useStateS(false);
   const [copyingFrom, setCopyingFrom] = useStateS(false);
+  const [editingItem, setEditingItem] = useStateS(null); // index
 
   if (!draft) return null;
 
@@ -491,20 +527,18 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
             {draft.items.map((it, i) => {
               const ex = LB.findExercise(store, it.exId);
               return (
-                <div key={i} style={{
+                <div key={i} onClick={() => setEditingItem(i)} style={{
                   display: 'flex', gap: 6, alignItems: 'center',
                   background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
-                  padding: '8px 10px', borderRadius: 10,
+                  padding: '10px 10px', borderRadius: 10, cursor: 'pointer',
                 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <button onClick={() => moveItem(i, -1)} disabled={i === 0} style={{ ...iconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
-                    <button onClick={() => moveItem(i, 1)} disabled={i === draft.items.length - 1} style={{ ...iconBtn, opacity: i === draft.items.length - 1 ? 0.3 : 1 }}>▼</button>
+                    <button onClick={e => { e.stopPropagation(); moveItem(i, -1); }} disabled={i === 0} style={{ ...iconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
+                    <button onClick={e => { e.stopPropagation(); moveItem(i, 1); }} disabled={i === draft.items.length - 1} style={{ ...iconBtn, opacity: i === draft.items.length - 1 ? 0.3 : 1 }}>▼</button>
                   </div>
                   <div style={{ flex: 1, fontSize: 14 }}>{ex?.name || '—'}</div>
-                  <input type="number" inputMode="numeric" value={it.sets} onFocus={e => e.target.select()} onChange={e => updateItem(i, { sets: +e.target.value || 1 })} style={inlineNumStyle} />
-                  <span style={{ color: UI.inkFaint, fontSize: 12 }}>×</span>
-                  <input type="number" inputMode="numeric" value={it.reps} onFocus={e => e.target.select()} onChange={e => updateItem(i, { reps: +e.target.value || 1 })} style={inlineNumStyle} />
-                  <button onClick={() => removeItem(i)} style={{ ...iconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
+                  <div style={{ fontFamily: UI.fontNum, fontSize: 13, color: UI.gold }}>{it.sets}×{it.reps}</div>
+                  <button onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...iconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
                 </div>
               );
             })}
@@ -517,6 +551,14 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
         <Btn onClick={() => onSave(draft)} style={{ flex: 2 }}>Speichern</Btn>
       </div>
 
+      {editingItem !== null && (
+        <ExerciseItemEditor
+          item={draft.items[editingItem]}
+          exName={LB.findExercise(store, draft.items[editingItem]?.exId)?.name || '—'}
+          onClose={() => setEditingItem(null)}
+          onSave={(patch) => { updateItem(editingItem, patch); setEditingItem(null); }}
+        />
+      )}
       {addingEx && (
         <ExercisePicker store={store} onClose={() => setAddingEx(false)} onPick={addExercise} />
       )}
@@ -532,12 +574,6 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     </Sheet>
   );
 }
-
-const inlineNumStyle = {
-  width: 36, background: '#0a0a0a', border: `1px solid ${UI.inkLine}`,
-  borderRadius: 6, color: UI.ink, padding: '6px 4px', textAlign: 'center',
-  fontFamily: UI.fontNum, fontSize: 14, outline: 'none',
-};
 
 function ExercisePicker({ store, onClose, onPick }) {
   const [q, setQ] = useStateS('');
