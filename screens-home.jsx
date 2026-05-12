@@ -190,9 +190,10 @@ function HomeScreen({ store, setStore, go }) {
         sets: seedSets, note: '',
       };
     });
+    const nowISO = new Date().toISOString();
     const session = {
       id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
-      date: sessionDate.toISOString(), ended: null, entries, currentExIdx: 0,
+      date: sessionDate.toISOString(), startedAt: nowISO, ended: null, entries, currentExIdx: 0,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
     go({ name: 'train', sessionId: session.id });

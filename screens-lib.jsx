@@ -442,7 +442,7 @@ function SessionDetailScreen({ store, go, sessionId, justFinished }) {
   const s = store.sessions.find(x => x.id === sessionId);
   if (!s) { go({ name: 'hist' }); return null; }
   const vol = totalVolume(s);
-  const duration = s.ended && s.date ? Math.round((new Date(s.ended) - new Date(s.date)) / 60000) : null;
+  const duration = s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null;
 
   return (
     <Screen>
