@@ -249,8 +249,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
                 {/* kg */}
                 <input
-                  type="text" inputMode="decimal"
-                  value={s.kg != null ? String(s.kg) : ''} placeholder="—"
+                  type="number" inputMode="decimal" step="any"
+                  value={s.kg ?? ''} placeholder="—"
                   onFocus={e => e.target.select()}
                   onChange={e => {
                     const kg = e.target.value === '' ? null : +(e.target.value.replace(',', '.'));
