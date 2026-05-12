@@ -4,31 +4,19 @@ const { useState, useEffect, useMemo, useRef } = React;
 
 // ─── LOGIN ────────────────────────────────────────────────────────────
 function LoginScreen() {
-  const [mode, setMode]         = useState('login');  // 'login' | 'register'
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName]         = useState('');
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
-  const [info, setInfo]         = useState('');
 
-  const canSubmit = email.trim() && password.length >= 6 && (mode === 'login' || name.trim());
+  const canSubmit = email.trim() && password.length >= 6;
 
   const submit = async () => {
     if (!canSubmit || loading) return;
-    setLoading(true); setError(''); setInfo('');
+    setLoading(true); setError('');
     try {
-      if (mode === 'login') {
-        await LB.signIn(email.trim(), password);
-        // SIGNED_IN event → App loads data automatically
-      } else {
-        const { session } = (await LB.signUp(email.trim(), password, name.trim()));
-        if (!session) {
-          setInfo('Fast fertig! Bestätige deine E-Mail-Adresse und logge dich dann ein.');
-          setMode('login');
-        }
-        // if session exists → SIGNED_IN fires automatically
-      }
+      await LB.signIn(email.trim(), password);
+      // SIGNED_IN event → App loads data automatically
     } catch (e) {
       setError(e.message || 'Fehler beim Anmelden');
     } finally {
@@ -36,55 +24,27 @@ function LoginScreen() {
     }
   };
 
-  const logo = (
-    <div style={{ textAlign: 'center' }}>
-      <div style={{
-        width: 64, height: 64, margin: '0 auto 14px', borderRadius: '50%',
-        border: `1.5px solid ${UI.gold}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: UI.gold, fontSize: 28, fontWeight: 700,
-      }}>L</div>
-      <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: '0.04em', color: UI.gold }}>LOGBOOK</div>
-      <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginTop: 4 }}>
-        iron · sweat · numbers
-      </div>
-    </div>
-  );
-
-  const tabs = (
-    <div style={{ display: 'flex', borderBottom: `1px solid ${UI.inkLine}` }}>
-      {[['login','Einloggen'],['register','Registrieren']].map(([id, label]) => (
-        <button key={id} onClick={() => { setMode(id); setError(''); setInfo(''); }} style={{
-          flex: 1, background: 'none', border: 'none', cursor: 'pointer',
-          padding: '10px 0', fontFamily: UI.fontUi, fontSize: 14,
-          fontWeight: mode === id ? 600 : 500,
-          color: mode === id ? UI.gold : UI.inkSoft,
-          borderBottom: `2px solid ${mode === id ? UI.gold : 'transparent'}`,
-          marginBottom: -1,
-        }}>{label}</button>
-      ))}
-    </div>
-  );
-
   return (
     <Screen scroll={false} style={{ justifyContent: 'center' }}>
       <div style={{ padding: '24px 24px', display: 'flex', flexDirection: 'column', gap: 20, justifyContent: 'center', flex: 1 }}>
-        {logo}
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: 64, height: 64, margin: '0 auto 14px', borderRadius: '50%',
+            border: `1.5px solid ${UI.gold}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: UI.gold, fontSize: 28, fontWeight: 700,
+          }}>L</div>
+          <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: '0.04em', color: UI.gold }}>LOGBOOK</div>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginTop: 4 }}>
+            iron · sweat · numbers
+          </div>
+        </div>
         <div style={{ background: UI.bgRaised, border: `1px solid ${UI.inkLine}`, borderRadius: 16, overflow: 'hidden', marginTop: 8 }}>
-          {tabs}
           <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {mode === 'register' && (
-              <Input label="Name" value={name} onChange={setName} placeholder="Dein Name" autoFocus={mode === 'register'} uppercase={false} />
-            )}
-            <Input label="E-Mail" value={email} onChange={setEmail} placeholder="du@beispiel.de" autoFocus={mode === 'login'} uppercase={false} />
+            <Input label="E-Mail" value={email} onChange={setEmail} placeholder="du@beispiel.de" autoFocus uppercase={false} />
             <Input label="Passwort" value={password} onChange={setPassword} type="password" placeholder="mind. 6 Zeichen" />
             {error && (
               <div style={{ fontSize: 12, color: UI.danger, padding: '8px 12px', background: 'rgba(200,116,105,0.08)', borderRadius: 8 }}>
                 {error}
-              </div>
-            )}
-            {info && (
-              <div style={{ fontSize: 12, color: UI.ok, padding: '8px 12px', background: 'rgba(127,176,105,0.08)', borderRadius: 8 }}>
-                {info}
               </div>
             )}
             <Btn
@@ -92,7 +52,7 @@ function LoginScreen() {
               disabled={!canSubmit || loading}
               style={{ opacity: canSubmit && !loading ? 1 : 0.4, marginTop: 4 }}
             >
-              {loading ? 'Bitte warten…' : mode === 'login' ? 'Einloggen →' : 'Konto erstellen →'}
+              {loading ? 'Bitte warten…' : 'Einloggen →'}
             </Btn>
           </div>
         </div>
@@ -110,13 +70,26 @@ function HomeScreen({ store, setStore, go }) {
   const dayIdx = today?.idx ?? 0;
   const isRest = day && (!day.items || day.items.length === 0);
   const dayCount = sch?.days?.length || 0;
+  const weekdayMode = sch ? LB.isWeekdayPlan(sch) : false;
   const week = useMemo(() => {
     if (!sch) return [];
+    if (weekdayMode) {
+      const js = new Date().getDay();
+      const todayWd = js === 0 ? 6 : js - 1;
+      return Array.from({ length: 7 }).map((_, i) => {
+        const trainingDay = sch.days.find(d => d.weekday === i);
+        return {
+          id: `wd-${i}`, weekday: i, isToday: i === todayWd,
+          name: trainingDay?.name ?? 'REST',
+          items: trainingDay?.items ?? [],
+        };
+      });
+    }
     return Array.from({ length: 7 }).map((_, i) => {
       const idx = (dayIdx + i) % dayCount;
       return { ...sch.days[idx], offset: i };
     });
-  }, [sch, dayIdx, dayCount]);
+  }, [sch, dayIdx, dayCount, weekdayMode]);
 
   const lastSession = useMemo(() => {
     return [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''))[0];
@@ -183,17 +156,17 @@ function HomeScreen({ store, setStore, go }) {
         {/* week strip */}
         <div style={{ display: 'flex', gap: 6 }}>
           {week.map((d, i) => {
-            const isToday = i === 0;
+            const isToday = weekdayMode ? d.isToday : i === 0;
             const r = !d.items?.length;
             return (
-              <div key={i} style={{
+              <div key={d.id ?? i} style={{
                 flex: 1, padding: '8px 4px', textAlign: 'center',
                 background: isToday ? UI.goldFaint : UI.bgRaised,
                 border: `1px solid ${isToday ? UI.goldSoft : UI.inkLine}`,
                 borderRadius: 10,
               }}>
-                <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontNum }}>
-                  {i === 0 ? 'HEUTE' : `+${i}`}
+                <div style={{ fontSize: 9, color: isToday ? UI.gold : UI.inkFaint, fontFamily: UI.fontNum }}>
+                  {weekdayMode ? WEEKDAYS[i] : (i === 0 ? 'HEUTE' : `+${i}`)}
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 600, marginTop: 3, color: r ? UI.inkSoft : isToday ? UI.gold : UI.ink }}>
                   {r ? '—' : d.name.slice(0, 4)}
@@ -206,19 +179,19 @@ function HomeScreen({ store, setStore, go }) {
         {/* today's card */}
         {isRest ? (
           <Card>
-            <Label>Heute · Tag {dayIdx+1} von {dayCount}</Label>
+            <Label>Heute · {weekdayMode ? WEEKDAYS_FULL[day?.weekday ?? dayIdx] : `Tag ${dayIdx+1} von ${dayCount}`}</Label>
             <div style={{ fontSize: 28, fontWeight: 600, marginBottom: 4 }}>Rest Day</div>
             <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 14 }}>
               Erholung ist Teil des Plans. Tomorrow is leg day.
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <Btn kind="ghost" onClick={skipRest} style={{ flex: 1 }}>Rest abhaken →</Btn>
+              {!weekdayMode && <Btn kind="ghost" onClick={skipRest} style={{ flex: 1 }}>Rest abhaken →</Btn>}
               <Btn kind="ghost" onClick={() => go({ name: 'plan' })} style={{ flex: 1 }}>Plan ansehen</Btn>
             </div>
           </Card>
         ) : (
           <Card accent>
-            <Label style={{ color: UI.gold }}>Heute · Tag {dayIdx+1} von {dayCount}</Label>
+            <Label style={{ color: UI.gold }}>Heute · {weekdayMode ? WEEKDAYS_FULL[day?.weekday ?? dayIdx] : `Tag ${dayIdx+1} von ${dayCount}`}</Label>
             <div style={{ fontSize: 28, fontWeight: 600, color: UI.gold, marginBottom: 4 }}>{day.name}</div>
             <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>
               {day.items.length} Übungen · ~{Math.round(day.items.reduce((a,b) => a + b.sets*2 + 3, 0))} min
@@ -236,7 +209,7 @@ function HomeScreen({ store, setStore, go }) {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <Btn onClick={startSession} style={{ width: '100%' }}>Training starten →</Btn>
-              <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>Tag überspringen</Btn>
+              {!weekdayMode && <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>Tag überspringen</Btn>}
             </div>
           </Card>
         )}
