@@ -69,7 +69,7 @@ async function setupNewUser(userId, name) {
 async function loadFromSupabase(userId) {
   const [profileRes, exRes, schRes, sessRes, settRes] = await Promise.all([
     _supabase.from('profiles').select('id, name').eq('id', userId).maybeSingle(),
-    _supabase.from('exercises').select('id, name, tags').eq('user_id', userId),
+    _supabase.from('exercises').select('id, name, tags, note').eq('user_id', userId),
     _supabase.from('schedules').select('id, name, days').eq('user_id', userId),
     _supabase.from('sessions').select('id, schedule_id, day_id, day_name, date, ended, entries')
       .eq('user_id', userId).order('date', { ascending: false }),
