@@ -3,16 +3,7 @@
 const SUPABASE_URL = 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
 
-// Supabase CDN setzt window.supabase; createClient ist darauf verfügbar.
-// Wird hier lazy erstellt damit ein CDN-Ladefehler store.js nicht abbricht.
-function getClient() {
-  if (!window._sbClient) {
-    if (!window.supabase?.createClient) throw new Error('Supabase JS nicht geladen');
-    window._sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  }
-  return window._sbClient;
-}
-const supabase = { get auth() { return getClient().auth; }, from(t) { return getClient().from(t); } };
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
