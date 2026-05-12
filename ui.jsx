@@ -21,7 +21,7 @@ const UI = {
 function Screen({ children, scroll = true, style = {} }) {
   return (
     <div style={{
-      width: '100%', minHeight: '100%',
+      width: '100%', flex: 1, minHeight: 0,
       background: UI.bg, color: UI.ink, fontFamily: UI.fontUi,
       display: 'flex', flexDirection: 'column',
       overflow: scroll ? 'auto' : 'hidden',
@@ -33,7 +33,7 @@ function Screen({ children, scroll = true, style = {} }) {
 function TopBar({ title, sub, onBack, right }) {
   return (
     <div style={{
-      padding: '14px 18px 12px',
+      padding: 'calc(14px + env(safe-area-inset-top, 0px)) 18px 12px',
       display: 'flex', alignItems: 'center', gap: 12,
       borderBottom: `1px solid ${UI.inkLine}`,
       position: 'sticky', top: 0, background: UI.bg, zIndex: 5,
@@ -41,7 +41,7 @@ function TopBar({ title, sub, onBack, right }) {
       {onBack && (
         <button onClick={onBack} style={{ ...btnIcon, fontSize: 22, lineHeight: 1 }}>‹</button>
       )}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0, minHeight: 36, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         {sub && <div style={{ fontSize: 10, letterSpacing: '0.12em', color: UI.inkFaint, fontFamily: UI.fontNum, textTransform: 'uppercase' }}>{sub}</div>}
         <div style={{ fontSize: 18, fontWeight: 600, color: UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</div>
       </div>
@@ -59,11 +59,12 @@ function TabBar({ active, onChange }) {
   ];
   return (
     <div style={{
+      flexShrink: 0,
       borderTop: `1px solid ${UI.inkLine}`,
       background: '#0c0c0c',
       padding: '10px 14px calc(env(safe-area-inset-bottom, 8px) + 10px)',
       display: 'flex', justifyContent: 'space-around',
-      position: 'sticky', bottom: 0, zIndex: 5,
+      zIndex: 20,
     }}>
       {tabs.map(t => {
         const on = t.id === active;
@@ -126,7 +127,10 @@ function Label({ children, style = {} }) {
   }}>{children}</div>;
 }
 
-function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, style = {}, suffix }) {
+const MUSCLES = ['Brust','Rücken','Schultern','Bizeps','Trizeps','Bauch','Quads','Hamstrings','Glutes','Waden','Unterarme'];
+
+function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, style = {}, suffix, uppercase }) {
+  const doUpper = uppercase !== undefined ? uppercase : type === 'text';
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4, ...style }}>
       {label && <Label>{label}</Label>}
@@ -136,7 +140,7 @@ function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, 
       }}>
         <input
           value={value ?? ''}
-          onChange={e => onChange(e.target.value)}
+          onChange={e => onChange(doUpper ? e.target.value.toUpperCase() : e.target.value)}
           type={type}
           placeholder={placeholder}
           autoFocus={autoFocus}
@@ -145,6 +149,7 @@ function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, 
             flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
             color: UI.ink, fontFamily: type === 'number' ? UI.fontNum : UI.fontUi,
             fontSize: 16, padding: 0,
+            textTransform: doUpper ? 'uppercase' : 'none',
           }}
         />
         {suffix && <span style={{ color: UI.inkFaint, fontSize: 12, fontFamily: UI.fontNum }}>{suffix}</span>}
@@ -188,18 +193,34 @@ function Pill({ children, gold = false, style = {}, ...rest }) {
 }
 
 function Sheet({ open, onClose, title, children }) {
+  const [kbHeight, setKbHeight] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      setKbHeight(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+    };
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    update();
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); };
+  }, [open]);
+
   if (!open) return null;
   return (
     <div onClick={onClose} style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100,
       display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+      paddingBottom: kbHeight,
       animation: 'sheet-fade 0.18s ease',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
         width: '100%', maxWidth: 540,
         background: UI.bgRaised, borderRadius: '20px 20px 0 0',
         border: `1px solid ${UI.inkLine}`, borderBottom: 'none',
-        padding: '14px 18px calc(env(safe-area-inset-bottom, 8px) + 18px)',
+        padding: `14px 18px ${kbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 18px)'}`,
         animation: 'sheet-up 0.22s ease',
         maxHeight: '85vh', overflow: 'auto',
       }}>
@@ -221,4 +242,26 @@ function Empty({ title, sub, action }) {
   );
 }
 
-Object.assign(window, { UI, Screen, TopBar, TabBar, Btn, Card, Label, Input, Stepper, Pill, Sheet, Empty, btnPrimary, btnGhost, btnIcon });
+function useConfirm() {
+  const [state, setState] = React.useState(null);
+
+  const confirm = (message, { title = 'Bestätigen?', ok = 'OK', cancel = 'Abbrechen', danger = false } = {}) =>
+    new Promise(resolve => setState({ message, title, ok, cancel, danger, resolve }));
+
+  const close = (result) => { state?.resolve(result); setState(null); };
+
+  const el = state && (
+    <Sheet open={true} onClose={() => close(false)}>
+      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>{state.title}</div>
+      <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 18, lineHeight: 1.5 }}>{state.message}</div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Btn kind="ghost" onClick={() => close(false)} style={{ flex: 1 }}>{state.cancel}</Btn>
+        <Btn onClick={() => close(true)} style={{ flex: 2, ...(state.danger ? { background: UI.danger, borderColor: UI.danger } : {}) }}>{state.ok}</Btn>
+      </div>
+    </Sheet>
+  );
+
+  return [el, confirm];
+}
+
+Object.assign(window, { UI, Screen, TopBar, TabBar, Btn, Card, Label, Input, Stepper, Pill, Sheet, Empty, btnPrimary, btnGhost, btnIcon, useConfirm, MUSCLES });

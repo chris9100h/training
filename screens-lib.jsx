@@ -4,9 +4,28 @@ const { useState: useStateL, useMemo: useMemoL } = React;
 
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go }) {
+  const [confirmEl, confirm] = useConfirm();
   const [tab, setTab] = useStateL('recent');
   const [q, setQ] = useStateL('');
   const [creating, setCreating] = useStateL(false);
+  const [selecting, setSelecting] = useStateL(false);
+  const [selected, setSelected] = useStateL(new Set());
+  const [filterTags, setFilterTags] = useStateL([]);
+  const toggleFilter = (m) => setFilterTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
+
+  const exitSelect = () => { setSelecting(false); setSelected(new Set()); };
+
+  const toggleSelect = (id) => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  const deleteSelected = async () => {
+    if (!await confirm(`Bisherige Sessions bleiben erhalten.`, { title: `${selected.size} Übung${selected.size > 1 ? 'en' : ''} löschen?`, ok: 'Löschen', danger: true })) return;
+    setStore(s => ({ ...s, exercises: s.exercises.filter(e => !selected.has(e.id)) }));
+    exitSelect();
+  };
 
   const recent = useMemoL(() => {
     const seen = new Map();
@@ -21,16 +40,32 @@ function LibraryScreen({ store, setStore, go }) {
   }, [store.exercises, store.sessions]);
 
   const filtered = useMemoL(() => {
-    const ql = q.toLowerCase();
+    const ql = q.toUpperCase();
     return store.exercises
-      .filter(e => !q || e.name.toLowerCase().includes(ql) || e.tags?.some(t => t.includes(ql)))
+      .filter(e => {
+        const matchSearch = !q || e.name.toUpperCase().includes(ql) || e.tags?.some(t => t.toUpperCase().includes(ql));
+        const matchTags = filterTags.length === 0 || filterTags.some(ft => e.tags?.includes(ft));
+        return matchSearch && matchTags;
+      })
       .sort((a,b) => a.name.localeCompare(b.name));
-  }, [store.exercises, q]);
+  }, [store.exercises, q, filterTags]);
+
+  const topBarRight = selecting ? (
+    <button onClick={exitSelect} style={{ background: 'none', border: 'none', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 14, cursor: 'pointer', padding: '4px 8px' }}>
+      Abbrechen
+    </button>
+  ) : (
+    <div style={{ display: 'flex', gap: 4 }}>
+      {store.exercises.length > 0 && (
+        <Btn kind="icon" onClick={() => { setTab('all'); setSelecting(true); }} style={{ color: UI.inkSoft, fontSize: 16 }}>☑</Btn>
+      )}
+      <Btn kind="icon" onClick={() => setCreating(true)} style={{ color: UI.gold, fontSize: 22, fontWeight: 300 }}>+</Btn>
+    </div>
+  );
 
   return (
     <Screen>
-      <TopBar title="Library"
-        right={<Btn kind="icon" onClick={() => setCreating(true)} style={{ color: UI.gold, fontSize: 22, fontWeight: 300 }}>+</Btn>} />
+      <TopBar title="Library" right={topBarRight} />
       <div style={{ display: 'flex', padding: '0 18px', gap: 0, borderBottom: `1px solid ${UI.inkLine}` }}>
         {[['recent','Zuletzt'],['all','Alle']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)} style={{
@@ -44,9 +79,17 @@ function LibraryScreen({ store, setStore, go }) {
         ))}
       </div>
 
-      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ padding: 18, paddingBottom: selecting ? 80 : 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {tab === 'all' && (
-          <Input value={q} onChange={setQ} placeholder="Suchen…" />
+          <>
+            <Input value={q} onChange={setQ} placeholder="SUCHEN…" />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {MUSCLES.map(m => (
+                <Pill key={m} gold={filterTags.includes(m)} onClick={() => toggleFilter(m)}
+                  style={{ cursor: 'pointer' }}>{m}</Pill>
+              ))}
+            </div>
+          </>
         )}
 
         {tab === 'recent' && recent.length === 0 && (
@@ -73,44 +116,95 @@ function LibraryScreen({ store, setStore, go }) {
           );
         })}
 
-        {tab === 'all' && filtered.map(e => (
-          <Card key={e.id} onClick={() => go({ name: 'exercise', exId: e.id })} style={{ cursor: 'pointer', padding: 14 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 15, fontWeight: 600 }}>{e.name}</div>
-                <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
-                  {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
+        {tab === 'all' && filtered.map(e => {
+          const isSelected = selected.has(e.id);
+          return (
+            <Card key={e.id}
+              onClick={() => selecting ? toggleSelect(e.id) : go({ name: 'exercise', exId: e.id })}
+              style={{
+                cursor: 'pointer', padding: 14,
+                borderColor: isSelected ? UI.danger : undefined,
+                background: isSelected ? 'rgba(200,116,105,0.08)' : undefined,
+              }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600 }}>{e.name}</div>
+                  <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                    {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
+                  </div>
                 </div>
+                {selecting ? (
+                  <div style={{
+                    width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                    border: `2px solid ${isSelected ? UI.danger : UI.inkLine}`,
+                    background: isSelected ? UI.danger : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {isSelected && <span style={{ color: '#fff', fontSize: 13, lineHeight: 1 }}>✓</span>}
+                  </div>
+                ) : (
+                  <span style={{ color: UI.gold, fontSize: 18 }}>›</span>
+                )}
               </div>
-              <span style={{ color: UI.gold, fontSize: 18 }}>›</span>
-            </div>
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
         {tab === 'all' && filtered.length === 0 && (
           <Empty title="Keine Übungen" action={<Btn onClick={() => setCreating(true)}>Übung anlegen</Btn>} />
         )}
       </div>
-      <TabBar active="lib" onChange={(t) => go({ name: t })} />
+
+      {selecting && (
+        <div style={{
+          position: 'fixed', bottom: 'calc(56px + env(safe-area-inset-bottom, 8px))',
+          left: '50%', transform: 'translateX(-50%)',
+          width: '100%', maxWidth: 440,
+          padding: '12px 18px',
+          background: UI.bgRaised, borderTop: `1px solid ${UI.inkLine}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          zIndex: 15,
+        }}>
+          <span style={{ fontSize: 13, color: UI.inkSoft }}>
+            {selected.size === 0 ? 'Übungen antippen zum Auswählen' : `${selected.size} ausgewählt`}
+          </span>
+          <Btn kind="ghost" onClick={deleteSelected}
+            disabled={selected.size === 0}
+            style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 38, padding: '8px 16px', fontSize: 13 }}>
+            Löschen
+          </Btn>
+        </div>
+      )}
+
       {creating && <ExerciseCreator onClose={() => setCreating(false)} setStore={setStore} />}
+      {confirmEl}
     </Screen>
   );
 }
 
 function ExerciseCreator({ onClose, setStore, onCreated }) {
   const [name, setName] = useStateL('');
-  const [tags, setTags] = useStateL('');
+  const [selectedTags, setSelectedTags] = useStateL([]);
+  const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: tags.split(',').map(t => t.trim()).filter(Boolean) };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, note: '' };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
   };
   return (
     <Sheet open={true} onClose={onClose} title="Neue Übung">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <Input label="Name" value={name} onChange={setName} placeholder="z.B. Front Squat" autoFocus />
-        <Input label="Tags (komma-getrennt)" value={tags} onChange={setTags} placeholder="legs, compound, barbell" />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <Input label="Name" value={name} onChange={setName} placeholder="Z.B. BANKDRÜCKEN" autoFocus />
+        <div>
+          <Label>Muskelgruppe</Label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+            {MUSCLES.map(m => (
+              <Pill key={m} gold={selectedTags.includes(m)} onClick={() => toggleTag(m)}
+                style={{ cursor: 'pointer' }}>{m}</Pill>
+            ))}
+          </div>
+        </div>
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Anlegen</Btn>
       </div>
     </Sheet>
@@ -122,6 +216,33 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
   const ex = LB.findExercise(store, exId);
   if (!ex) { go({ name: 'lib' }); return null; }
 
+  const [confirmEl, confirm] = useConfirm();
+  const [editMode, setEditMode] = useStateL(false);
+  const [editName, setEditName] = useStateL('');
+  const [editTags, setEditTags] = useStateL([]);
+  const [editNote, setEditNote] = useStateL(false);
+  const [noteVal, setNoteVal] = useStateL(ex.note || '');
+
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditMode(true); };
+  const cancelEdit = () => setEditMode(false);
+  const saveEdit = () => {
+    if (!editName.trim()) return;
+    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags } : e) }));
+    setEditMode(false);
+  };
+  const toggleEditTag = (m) => setEditTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
+
+  const saveNote = () => {
+    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, note: noteVal.trim() } : e) }));
+    setEditNote(false);
+  };
+
+  const deleteExercise = async () => {
+    if (!await confirm('Bisherige Sessions bleiben erhalten.', { title: `"${ex.name}" löschen?`, ok: 'Löschen', danger: true })) return;
+    setStore(s => ({ ...s, exercises: s.exercises.filter(e => e.id !== exId) }));
+    go({ name: 'lib' });
+  };
+
   const history = useMemoL(() => {
     return store.sessions
       .filter(s => s.ended && s.entries.some(e => e.exId === exId))
@@ -129,7 +250,6 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
       .map(s => ({ session: s, entry: s.entries.find(e => e.exId === exId) }));
   }, [store.sessions, exId]);
 
-  // 1RM estimate per session (Epley: kg * (1 + reps/30))
   const points = history.map(h => {
     const best = (h.entry.sets || []).filter(s => s.kg && s.reps)
       .reduce((m, s) => Math.max(m, s.kg * (1 + s.reps / 30)), 0);
@@ -139,11 +259,49 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
   const pr = points.length ? Math.max(...points.map(p => p.est)) : 0;
   const last = points[points.length - 1]?.est;
   const first = points[0]?.est;
-  const growth = first && last ? ((last - first) / first) * 100 : 0;
 
   return (
     <Screen>
-      <TopBar title={ex.name} sub={ex.tags?.join(' · ') || ''} onBack={() => go({ name: 'lib' })} />
+      <TopBar title={ex.name} onBack={() => { if (editMode) cancelEdit(); else go({ name: 'lib' }); }}
+        right={
+          <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <button onClick={editMode ? saveEdit : startEdit} style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: UI.gold, fontSize: 13, fontFamily: UI.fontUi, padding: '4px 8px',
+            }}>{editMode ? 'Speichern' : 'Bearbeiten'}</button>
+            {!editMode && <button onClick={deleteExercise} style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: UI.danger, fontSize: 20, padding: '4px 8px', lineHeight: 1,
+            }}>🗑</button>}
+          </div>
+        }
+      />
+
+      {/* tags / edit panel */}
+      <div style={{ padding: '12px 18px', borderBottom: `1px solid ${UI.inkLine}` }}>
+        {editMode ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Input label="Name" value={editName} onChange={setEditName} />
+            <div>
+              <Label>Muskelgruppe</Label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                {MUSCLES.map(m => (
+                  <Pill key={m} gold={editTags.includes(m)} onClick={() => toggleEditTag(m)}
+                    style={{ cursor: 'pointer' }}>{m}</Pill>
+                ))}
+              </div>
+            </div>
+            <Btn kind="ghost" onClick={cancelEdit} style={{ fontSize: 13 }}>Abbrechen</Btn>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {(ex.tags || []).length > 0
+              ? ex.tags.map(t => <Pill key={t} gold>{t}</Pill>)
+              : <span style={{ fontSize: 12, color: UI.inkFaint, fontStyle: 'italic' }}>Keine Muskelgruppe — Bearbeiten zum Hinzufügen</span>}
+          </div>
+        )}
+      </div>
+
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
           <Card style={{ padding: 12 }}>
@@ -161,6 +319,30 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
         </div>
 
         {points.length > 1 && <ProgressChart points={points} />}
+
+        <Card style={{ padding: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: editNote ? 10 : (ex.note ? 8 : 0) }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>📌 Notiz</div>
+            <button onClick={() => { setNoteVal(ex.note || ''); setEditNote(v => !v); }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.gold, fontSize: 13, fontFamily: UI.fontUi, padding: '2px 0' }}>
+              {editNote ? 'Abbrechen' : 'Bearbeiten'}
+            </button>
+          </div>
+          {editNote ? (
+            <>
+              <textarea value={noteVal} onChange={e => setNoteVal(e.target.value)}
+                placeholder="z.B. Kabelzug Pos 4, Griff neutral, langsam ablassen"
+                rows={3}
+                style={{ width: '100%', boxSizing: 'border-box', background: UI.bgInset, border: `1px solid ${UI.inkLine}`, borderRadius: 10, padding: '10px 12px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, resize: 'vertical', outline: 'none' }}
+              />
+              <Btn onClick={saveNote} style={{ marginTop: 10, width: '100%' }}>Speichern</Btn>
+            </>
+          ) : (
+            <div style={{ fontSize: 14, color: ex.note ? UI.inkSoft : UI.inkFaint, lineHeight: 1.5, whiteSpace: 'pre-wrap', fontStyle: ex.note ? 'normal' : 'italic' }}>
+              {ex.note || 'Noch keine Notiz. Tippe Bearbeiten zum Hinzufügen.'}
+            </div>
+          )}
+        </Card>
 
         <div>
           <Label>Verlauf</Label>
@@ -184,6 +366,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
           </div>
         </div>
       </div>
+      {confirmEl}
     </Screen>
   );
 }
@@ -250,7 +433,6 @@ function HistoryScreen({ store, go }) {
           );
         })}
       </div>
-      <TabBar active="hist" onChange={(t) => go({ name: t })} />
     </Screen>
   );
 }
@@ -310,7 +492,16 @@ function SessionDetailScreen({ store, go, sessionId, justFinished }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go }) {
+function SettingsScreen({ store, setStore, go, userId }) {
+  const [confirmEl, confirm] = useConfirm();
+  const [nickname, setNickname] = useStateL(store.user?.name || '');
+
+  const saveNickname = () => {
+    const trimmed = nickname.trim();
+    if (!trimmed || trimmed === store.user?.name) return;
+    setStore(s => ({ ...s, user: { ...s.user, name: trimmed } }));
+  };
+
   const exportData = () => {
     const blob = new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -319,18 +510,39 @@ function SettingsScreen({ store, setStore, go }) {
     a.click();
     URL.revokeObjectURL(url);
   };
-  const reset = () => {
-    if (!confirm('Wirklich ALLE Daten löschen? Diese Aktion ist nicht rückgängig zu machen.')) return;
-    LB.resetStore();
-    location.reload();
+
+  const handleSignOut = async () => {
+    await LB.signOut();
   };
+
+  const handleDeleteAll = async () => {
+    if (!await confirm('Diese Aktion ist nicht rückgängig zu machen.', { title: 'Alle Daten löschen?', ok: 'Alles löschen', danger: true })) return;
+    await LB.deleteAllData(userId);
+    await LB.signOut();
+  };
+
   return (
     <Screen>
       <TopBar title="Einstellungen" onBack={() => go({ name: 'home' })} />
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
         <Card>
-          <Label>User</Label>
-          <div style={{ fontSize: 16, fontWeight: 500 }}>{store.user?.name}</div>
+          <Label>Spitzname</Label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+            <input
+              value={nickname}
+              onChange={e => setNickname(e.target.value)}
+              onBlur={saveNickname}
+              onKeyDown={e => e.key === 'Enter' && (e.target.blur())}
+              placeholder="Dein Name"
+              style={{
+                flex: 1, background: 'transparent', border: 'none', outline: 'none',
+                color: UI.ink, fontFamily: UI.fontUi, fontSize: 16, padding: 0,
+              }}
+            />
+          </div>
+          <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 6 }}>
+            Eingeloggt als {store.user?.email || userId}
+          </div>
         </Card>
         <Card>
           <Label>Pause Default</Label>
@@ -341,11 +553,24 @@ function SettingsScreen({ store, setStore, go }) {
           />
         </Card>
         <Btn kind="ghost" onClick={exportData}>Daten exportieren (JSON)</Btn>
-        <Btn kind="ghost" onClick={reset} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>Alle Daten löschen</Btn>
+        <Btn kind="ghost" onClick={async () => {
+          if ('caches' in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(k => caches.delete(k)));
+          }
+          window.location.reload(true);
+        }}>App-Cache leeren & neu laden</Btn>
+        <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>
+          Ausloggen
+        </Btn>
+        <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', opacity: 0.6 }}>
+          Alle Daten löschen
+        </Btn>
         <div style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'center', marginTop: 8 }}>
-          Logbook · v1.0 · alles in deinem Browser
+          Logbook · v1.0 · Daten in Supabase
         </div>
       </div>
+      {confirmEl}
     </Screen>
   );
 }

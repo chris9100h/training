@@ -1,16 +1,67 @@
-/* Main App — routing + state glue */
+/* Main App — auth + routing */
 
-const { useState: useStateA, useEffect: useEffectA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+
+function LoadingScreen() {
+  return (
+    <Screen scroll={false} style={{ justifyContent: 'center', alignItems: 'center' }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: 28, fontWeight: 600, color: UI.gold, letterSpacing: '0.06em', marginBottom: 10 }}>
+          LOGBOOK
+        </div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em' }}>
+          Laden…
+        </div>
+      </div>
+    </Screen>
+  );
+}
 
 function App() {
-  const [store, setStore] = useStateA(() => LB.loadStore());
-  const [route, setRoute] = useStateA({ name: 'home' });
+  const [phase, setPhase]   = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed'
+  const [store, setStore]   = useStateA(null);
+  const [userId, setUserId] = useStateA(null);
+  const [route, setRoute]   = useStateA({ name: 'home' });
+  const prevStore           = useRefA(null);
 
-  // persist on every change
-  useEffectA(() => { LB.saveStore(store); }, [store]);
+  const loadData = async (uid) => {
+    setPhase('loading');
+    try {
+      const loaded = await LB.loadFromSupabase(uid);
+      prevStore.current = loaded;
+      setStore(loaded);
+      setPhase('ready');
+    } catch (e) {
+      console.error('loadFromSupabase failed', e);
+      setPhase('unauthed');
+    }
+  };
 
-  // auto-advance cycle: if user opens app on a new calendar day and didn't open
-  // training, we keep the cycleIndex untouched (advance happens on session finish)
+  useEffectA(() => {
+    const { data: { subscription } } = LB.supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'INITIAL_SESSION') {
+        if (session) { setUserId(session.user.id); loadData(session.user.id); }
+        else          { setPhase('unauthed'); }
+      } else if (event === 'SIGNED_IN') {
+        setUserId(session.user.id);
+        loadData(session.user.id);
+      } else if (event === 'SIGNED_OUT') {
+        setStore(null);
+        setUserId(null);
+        prevStore.current = null;
+        setRoute({ name: 'home' });
+        setPhase('unauthed');
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // background sync on every store change
+  useEffectA(() => {
+    if (!store || !userId || phase !== 'ready') return;
+    LB.syncStore(prevStore.current, store, userId).catch(console.error);
+    prevStore.current = store;
+  }, [store]);
 
   // helper for in-sheet "+ new exercise"
   window.__createExercise = (name) => {
@@ -19,33 +70,41 @@ function App() {
     return id;
   };
 
-  if (!store.user) {
-    return <window.Screens.LoginScreen onLogin={(name) => {
-      setStore(s => LB.seedStarter({ ...s, user: { name } }));
-    }} />;
-  }
+  if (phase === 'init' || phase === 'loading') return <LoadingScreen />;
+  if (phase === 'unauthed') return <window.Screens.LoginScreen />;
 
-  const go = (r) => setRoute(r);
-  const props = { store, setStore, go };
+  const go    = (r) => setRoute(r);
+  const props = { store, setStore, go, userId };
+  const tabRoutes = ['home', 'plan', 'lib', 'hist'];
+  const showTab = tabRoutes.includes(route.name);
 
+  let screen;
   switch (route.name) {
-    case 'home':            return <window.Screens.HomeScreen {...props} />;
-    case 'plan':            return <window.Screens.PlanScreen {...props} />;
-    case 'schedule':        return <window.Screens.ScheduleDetailScreen {...props} scheduleId={route.scheduleId} />;
-    case 'schedule-new':    return <window.Screens.ScheduleNewScreen {...props} />;
-    case 'schedule-edit':   return <window.Screens.ScheduleEditScreen {...props} scheduleId={route.scheduleId} />;
-    case 'train':           return <window.Screens.TrainingScreen {...props} sessionId={route.sessionId} />;
-    case 'lib':             return <window.Screens.LibraryScreen {...props} />;
-    case 'exercise':        return <window.Screens.ExerciseDetailScreen {...props} exId={route.exId} />;
-    case 'hist':            return <window.Screens.HistoryScreen {...props} />;
-    case 'session':         return <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} />;
-    case 'settings':        return <window.Screens.SettingsScreen {...props} />;
-    default:                return <window.Screens.HomeScreen {...props} />;
+    case 'home':          screen = <window.Screens.HomeScreen {...props} />; break;
+    case 'plan':          screen = <window.Screens.PlanScreen {...props} />; break;
+    case 'schedule':      screen = <window.Screens.ScheduleDetailScreen {...props} scheduleId={route.scheduleId} />; break;
+    case 'schedule-new':  screen = <window.Screens.ScheduleNewScreen {...props} />; break;
+    case 'schedule-edit': screen = <window.Screens.ScheduleEditScreen {...props} scheduleId={route.scheduleId} />; break;
+    case 'train':         screen = <window.Screens.TrainingScreen {...props} sessionId={route.sessionId} />; break;
+    case 'lib':           screen = <window.Screens.LibraryScreen {...props} />; break;
+    case 'exercise':      screen = <window.Screens.ExerciseDetailScreen {...props} exId={route.exId} />; break;
+    case 'hist':          screen = <window.Screens.HistoryScreen {...props} />; break;
+    case 'session':       screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} />; break;
+    case 'settings':      screen = <window.Screens.SettingsScreen {...props} />; break;
+    default:              screen = <window.Screens.HomeScreen {...props} />; break;
   }
+
+  return (
+    <>
+      {screen}
+      {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} />}
+    </>
+  );
 }
 
 function tryMount() {
-  if (window.LB && window.Screens?.LoginScreen && window.Screens?.HomeScreen && window.Screens?.TrainingScreen && window.Screens?.LibraryScreen) {
+  if (window.LB && window.Screens?.LoginScreen && window.Screens?.HomeScreen &&
+      window.Screens?.LibraryScreen && window.Screens?.TrainingScreen) {
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   } else {
     setTimeout(tryMount, 50);

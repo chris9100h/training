@@ -3,15 +3,20 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
-<meta name="theme-color" content="#0a0a0a" />
+<meta name="theme-color" content="#0c0c0c" />
 <title>Logbook</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Logbook" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <style>
-  html, body, #root { height: 100%; margin: 0; }
+  html, body { min-height: 100vh; margin: 0; }
   html, body {
-    background: #0a0a0a;
+    background: #0c0c0c;
     color: #f0ece0;
     font-family: "Inter", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -22,13 +27,15 @@
     display: flex; justify-content: center; align-items: stretch;
     background:
       radial-gradient(circle at 50% 0%, rgba(212,164,55,0.05), transparent 70%),
-      #050505;
+      #0c0c0c;
   }
   #root {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    margin: 0 auto;
     width: 100%; max-width: 440px;
     background: #0a0a0a;
     box-shadow: 0 0 80px rgba(0,0,0,0.6);
-    position: relative;
     display: flex; flex-direction: column;
     overflow: hidden;
   }
@@ -36,6 +43,14 @@
   input[type=number]::-webkit-outer-spin-button,
   input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   input[type=number] { -moz-appearance: textfield; }
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px transparent inset !important;
+    box-shadow: 0 0 0 1000px transparent inset !important;
+    -webkit-text-fill-color: #f0ece0 !important;
+    transition: background-color 5000s ease-in-out 0s;
+  }
   button { font: inherit; }
   ::-webkit-scrollbar { width: 0; height: 0; }
   @keyframes sheet-up { from { transform: translateY(20%); opacity: 0.7; } to { transform: translateY(0); opacity: 1; } }
@@ -44,11 +59,39 @@
 </head>
 <body>
 <div id="root"></div>
+<div id="err" style="display:none;position:fixed;inset:0;background:#0a0a0a;color:#c87469;font-family:monospace;font-size:13px;padding:24px;white-space:pre-wrap;z-index:9999;overflow:auto"></div>
+<script>
+
+window.onerror = function(msg, src, line, col, err) {
+  var d = document.getElementById('err');
+  d.style.display = 'block';
+  d.textContent += '[JS ERROR] ' + msg + '\n  ' + src + ':' + line + '\n\n';
+};
+window.onunhandledrejection = function(e) {
+  var d = document.getElementById('err');
+  d.style.display = 'block';
+  d.textContent += '[PROMISE] ' + (e.reason?.message || e.reason) + '\n\n';
+};
+// Fallback: if React never mounts after 6s, show diagnostic info
+setTimeout(function() {
+  if (!document.getElementById('root').children.length) {
+    var d = document.getElementById('err');
+    d.style.display = 'block';
+    d.textContent += '[TIMEOUT] React hat nicht gemountet.\n';
+    d.textContent += 'window.LB: ' + typeof window.LB + '\n';
+    d.textContent += 'window.supabase: ' + typeof window.supabase + '\n';
+    d.textContent += 'window.Screens: ' + JSON.stringify(Object.keys(window.Screens||{})) + '\n';
+    d.textContent += 'window.React: ' + typeof window.React + '\n';
+    d.textContent += 'window.Screen: ' + typeof window.Screen + '\n';
+  }
+}, 6000);
+</script>
 
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 
+<script src="supabase.js"></script>
 <script src="store.js"></script>
 <script type="text/babel" src="ui.jsx"></script>
 <script type="text/babel" src="screens-home.jsx"></script>
@@ -56,5 +99,12 @@
 <script type="text/babel" src="screens-train.jsx"></script>
 <script type="text/babel" src="screens-lib.jsx"></script>
 <script type="text/babel" src="app.jsx"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/training/sw.js');
+    });
+  }
+</script>
 </body>
 </html>
