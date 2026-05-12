@@ -93,7 +93,8 @@ function App() {
 }
 
 function tryMount() {
-  if (window.LB && window.supabase && window.Screens?.LoginScreen && window.Screens?.HomeScreen) {
+  if (window.LB && window.Screens?.LoginScreen && window.Screens?.HomeScreen &&
+      window.Screens?.LibraryScreen && window.Screens?.TrainingScreen) {
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   } else {
     setTimeout(tryMount, 50);
