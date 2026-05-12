@@ -71,11 +71,14 @@ function HomeScreen({ store, setStore, go }) {
   const isRest = day && (!day.items || day.items.length === 0);
   const dayCount = sch?.days?.length || 0;
   const weekdayMode = sch ? LB.isWeekdayPlan(sch) : false;
+
+  const jsDay = new Date().getDay();
+  const todayWd = jsDay === 0 ? 6 : jsDay - 1;
+  const [selectedWd, setSelectedWd] = useState(todayWd);
+
   const week = useMemo(() => {
     if (!sch) return [];
     if (weekdayMode) {
-      const js = new Date().getDay();
-      const todayWd = js === 0 ? 6 : js - 1;
       return Array.from({ length: 7 }).map((_, i) => {
         const trainingDay = sch.days.find(d => d.weekday === i);
         return {
@@ -89,17 +92,26 @@ function HomeScreen({ store, setStore, go }) {
       const idx = (dayIdx + i) % dayCount;
       return { ...sch.days[idx], offset: i };
     });
-  }, [sch, dayIdx, dayCount, weekdayMode]);
+  }, [sch, dayIdx, dayCount, weekdayMode, todayWd]);
+
+  const activeDay = useMemo(() => {
+    if (!weekdayMode || !sch) return day;
+    const found = sch.days.find(d => d.weekday === selectedWd);
+    return found ?? { id: 'rest-virtual', name: 'REST', items: [], weekday: selectedWd };
+  }, [weekdayMode, sch, selectedWd, day]);
+
+  const isActiveRest = activeDay && (!activeDay.items || activeDay.items.length === 0);
+  const isViewingToday = !weekdayMode || selectedWd === todayWd;
 
   const lastSession = useMemo(() => {
     return [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''))[0];
   }, [store.sessions]);
 
   const startSession = () => {
-    if (!day || isRest) return;
-    const entries = day.items.map(it => {
+    if (!activeDay || isActiveRest) return;
+    const entries = activeDay.items.map(it => {
       const ex = LB.findExercise(store, it.exId);
-      const last = LB.lastSessionForExercise(store, it.exId, day.name);
+      const last = LB.lastSessionForExercise(store, it.exId, activeDay.name);
       const seedSets = Array.from({ length: it.sets }).map((_, i) => {
         const prev = last?.entry?.sets?.[i];
         return { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
@@ -111,7 +123,7 @@ function HomeScreen({ store, setStore, go }) {
       };
     });
     const session = {
-      id: LB.uid(), scheduleId: sch.id, dayId: day.id, dayName: day.name,
+      id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
       date: new Date().toISOString(), ended: null, entries, currentExIdx: 0,
     };
     setStore(s => ({
@@ -157,18 +169,22 @@ function HomeScreen({ store, setStore, go }) {
         <div style={{ display: 'flex', gap: 6 }}>
           {week.map((d, i) => {
             const isToday = weekdayMode ? d.isToday : i === 0;
+            const isSelected = weekdayMode ? i === selectedWd : i === 0;
             const r = !d.items?.length;
             return (
-              <div key={d.id ?? i} style={{
-                flex: 1, padding: '8px 4px', textAlign: 'center',
-                background: isToday ? UI.goldFaint : UI.bgRaised,
-                border: `1px solid ${isToday ? UI.goldSoft : UI.inkLine}`,
-                borderRadius: 10,
-              }}>
-                <div style={{ fontSize: 9, color: isToday ? UI.gold : UI.inkFaint, fontFamily: UI.fontNum }}>
+              <div key={d.id ?? i}
+                onClick={weekdayMode ? () => setSelectedWd(i) : undefined}
+                style={{
+                  flex: 1, padding: '8px 4px', textAlign: 'center',
+                  background: isSelected ? UI.goldFaint : UI.bgRaised,
+                  border: `1px solid ${isSelected ? UI.goldSoft : isToday ? UI.inkSoft : UI.inkLine}`,
+                  borderRadius: 10,
+                  cursor: weekdayMode ? 'pointer' : 'default',
+                }}>
+                <div style={{ fontSize: 9, color: isSelected ? UI.gold : isToday ? UI.inkSoft : UI.inkFaint, fontFamily: UI.fontNum }}>
                   {weekdayMode ? WEEKDAYS[i] : (i === 0 ? 'HEUTE' : `+${i}`)}
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 600, marginTop: 3, color: r ? UI.inkSoft : isToday ? UI.gold : UI.ink }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginTop: 3, color: r ? UI.inkSoft : isSelected ? UI.gold : UI.ink }}>
                   {r ? '—' : d.name.slice(0, 4)}
                 </div>
               </div>
@@ -176,10 +192,14 @@ function HomeScreen({ store, setStore, go }) {
           })}
         </div>
 
-        {/* today's card */}
-        {isRest ? (
+        {/* day card */}
+        {isActiveRest ? (
           <Card>
-            <Label>Heute · {weekdayMode ? WEEKDAYS_FULL[day?.weekday ?? dayIdx] : `Tag ${dayIdx+1} von ${dayCount}`}</Label>
+            <Label>
+              {weekdayMode
+                ? (isViewingToday ? `Heute · ${WEEKDAYS_FULL[selectedWd]}` : WEEKDAYS_FULL[selectedWd])
+                : `Heute · Tag ${dayIdx+1} von ${dayCount}`}
+            </Label>
             <div style={{ fontSize: 28, fontWeight: 600, marginBottom: 4 }}>Rest Day</div>
             <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 14 }}>
               Erholung ist Teil des Plans. Tomorrow is leg day.
@@ -191,16 +211,20 @@ function HomeScreen({ store, setStore, go }) {
           </Card>
         ) : (
           <Card accent>
-            <Label style={{ color: UI.gold }}>Heute · {weekdayMode ? WEEKDAYS_FULL[day?.weekday ?? dayIdx] : `Tag ${dayIdx+1} von ${dayCount}`}</Label>
-            <div style={{ fontSize: 28, fontWeight: 600, color: UI.gold, marginBottom: 4 }}>{day.name}</div>
+            <Label style={{ color: UI.gold }}>
+              {weekdayMode
+                ? (isViewingToday ? `Heute · ${WEEKDAYS_FULL[selectedWd]}` : WEEKDAYS_FULL[selectedWd])
+                : `Heute · Tag ${dayIdx+1} von ${dayCount}`}
+            </Label>
+            <div style={{ fontSize: 28, fontWeight: 600, color: UI.gold, marginBottom: 4 }}>{activeDay.name}</div>
             <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>
-              {day.items.length} Übungen · ~{Math.round(day.items.reduce((a,b) => a + b.sets*2 + 3, 0))} min
+              {activeDay.items.length} Übungen · ~{Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))} min
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
-              {day.items.map((it, i) => {
+              {activeDay.items.map((it, i) => {
                 const ex = LB.findExercise(store, it.exId);
                 return (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '6px 0', borderBottom: i < day.items.length - 1 ? `1px dashed ${UI.goldSoft}` : 'none' }}>
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '6px 0', borderBottom: i < activeDay.items.length - 1 ? `1px dashed ${UI.goldSoft}` : 'none' }}>
                     <span style={{ color: UI.ink }}>{ex?.name || '—'}</span>
                     <span style={{ color: UI.gold, fontFamily: UI.fontNum, fontSize: 13 }}>{it.sets} × {it.reps}</span>
                   </div>
