@@ -90,6 +90,17 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     go({ name: 'home' });
   };
 
+  // ── chip strip scroll ─────────────────────────────────────
+  const chipRowRef = useRefT(null);
+  useEffectT(() => {
+    const row = chipRowRef.current;
+    if (!row) return;
+    const chip = row.children[exIdx];
+    if (!chip) return;
+    const target = chip.offsetLeft - row.offsetWidth / 2 + chip.offsetWidth / 2;
+    row.scrollLeft = target;
+  }, [exIdx]);
+
   // ── rest timer ────────────────────────────────────────────
   const [restStart, setRestStart] = useStateT(null);
   const [now, setNow] = useStateT(Date.now());
@@ -148,13 +159,12 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       <div style={{ flex: 1, overflow: 'auto', padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* progress chips — clickable, horizontally scrollable */}
-        <div style={{ display: 'flex', gap: 6, margin: '-4px -18px 0', padding: '0 18px', overflowX: 'auto', scrollbarWidth: 'none' }}>
+        <div ref={chipRowRef} style={{ display: 'flex', gap: 6, margin: '-4px -18px 0', padding: '0 18px', overflowX: 'auto', scrollbarWidth: 'none' }}>
           {session.entries.map((e, i) => {
             const done = e.sets.every(s => s.done);
             const active = i === exIdx;
             return (
               <button key={i}
-                ref={el => { if (active && el) el.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); }}
                 onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
                 style={{
                   flexShrink: 0, padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
