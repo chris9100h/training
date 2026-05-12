@@ -77,29 +77,6 @@ function setAppHeight() {
 setAppHeight();
 window.addEventListener('resize', setAppHeight);
 
-// DEBUG — remove after fix
-function showDebug() {
-  var safeTop    = measureEnv('env(safe-area-inset-top,0px)');
-  var safeBot    = measureEnv('env(safe-area-inset-bottom,0px)');
-  var cssVh      = measureEnv('100vh');
-  var vvH        = window.visualViewport ? window.visualViewport.height : 0;
-  var appH       = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-height')) || 0;
-  var rootH      = (document.getElementById('root') || {}).getBoundingClientRect ? document.getElementById('root').getBoundingClientRect().height : 0;
-
-  var el = document.getElementById('dbg');
-  if (!el) { el = document.createElement('div'); el.id = 'dbg';
-    el.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:rgba(200,0,0,0.9);color:#fff;font:11px monospace;padding:5px 8px;z-index:99999;pointer-events:none;line-height:1.6';
-    document.body.appendChild(el); }
-  el.innerHTML =
-    'screen:' + window.screen.width + 'x' + window.screen.height + ' availH:' + window.screen.availHeight + '<br>' +
-    'innerH:' + window.innerHeight + ' visualVP:' + vvH.toFixed(0) + ' cssVh:' + cssVh.toFixed(0) + '<br>' +
-    'safeTop:' + safeTop.toFixed(1) + ' safeBot:' + safeBot.toFixed(1) + '<br>' +
-    '--app-height:' + appH.toFixed(1) + ' #root:' + rootH.toFixed(1) + '<br>' +
-    'standalone:' + (window.navigator.standalone === true);
-}
-window.addEventListener('load', showDebug);
-window.addEventListener('resize', showDebug);
-
 window.onerror = function(msg, src, line, col, err) {
   var d = document.getElementById('err');
   d.style.display = 'block';
