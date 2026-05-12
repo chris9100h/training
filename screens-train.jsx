@@ -122,8 +122,11 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const allDone = completed === entry.sets.length;
   const currentSetNum = Math.min(completed + 1, entry.sets.length);
 
-  const checkAllSets = () => {
-    if (allDone) return;
+  const anyMissingData = entry.sets.some(st => !st.done && (!st.kg || !st.reps));
+
+  const checkAllSets = async () => {
+    if (allDone || anyMissingData) return;
+    if (!await confirm(`Alle ${entry.sets.length} Sätze abhaken und weiter?`, { ok: 'Alle abhaken' })) return;
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
@@ -191,13 +194,15 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             <Label style={{ marginBottom: 0, fontSize: 11 }}>Vorherige ↔</Label>
             <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>kg</Label>
             <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>Reps</Label>
-            <button onClick={checkAllSets} style={{
-              width: 22, height: 22, border: 'none', borderRadius: 5, cursor: 'pointer',
+            <button onClick={checkAllSets} disabled={anyMissingData && !allDone} style={{
+              width: 22, height: 22, border: 'none', borderRadius: 5,
+              cursor: anyMissingData && !allDone ? 'default' : 'pointer',
               background: allDone ? UI.gold : 'transparent',
               outline: `2px solid ${allDone ? UI.gold : UI.inkLine}`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 12, fontWeight: 700, color: allDone ? '#0a0a0a' : 'transparent',
               alignSelf: 'center', justifySelf: 'center',
+              opacity: anyMissingData && !allDone ? 0.3 : 1,
             }}>✓</button>
             <span />
           </div>
