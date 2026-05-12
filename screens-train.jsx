@@ -153,7 +153,9 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             const done = e.sets.every(s => s.done);
             const active = i === exIdx;
             return (
-              <button key={i} onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
+              <button key={i}
+                ref={el => { if (active && el) el.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); }}
+                onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
                 style={{
                   flexShrink: 0, padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
                   background: active ? UI.gold : done ? 'rgba(212,164,55,0.15)' : UI.bgRaised,
