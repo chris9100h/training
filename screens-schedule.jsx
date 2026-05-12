@@ -439,7 +439,7 @@ function ExercisePicker({ store, onClose, onPick }) {
 
   return (
     <Sheet open={true} onClose={onClose} title="Übung wählen">
-      <Input value={q} onChange={setQ} placeholder="SUCHEN ODER NEUE TIPPEN…" autoFocus />
+      <Input value={q} onChange={setQ} placeholder="SUCHEN ODER NEUE TIPPEN…" />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
         {MUSCLES.map(m => (
           <Pill key={m} gold={filterTags.includes(m)} onClick={() => toggleFilter(m)}
