@@ -155,7 +155,9 @@ function HomeScreen({ store, setStore, go }) {
   if (!sch) {
     return (
       <Screen>
-        <TopBar title={`Hey ${store.user.name}`} sub={new Date().toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })} />
+        <TopBar title={`Hey ${store.user.name}`} sub={new Date().toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
+          right={<Btn kind="icon" onClick={() => go({ name: 'settings' })} style={{ fontSize: 20 }}>⋯</Btn>}
+        />
         <div style={{ padding: 18 }}>
           <Empty
             title="Noch kein Plan"
