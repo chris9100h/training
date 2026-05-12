@@ -325,7 +325,7 @@ function HomeScreen({ store, setStore, go }) {
               <div>
                 <div style={{ fontSize: 15, fontWeight: 500 }}>{lastSession.dayName}</div>
                 <div style={{ fontSize: 12, color: UI.inkFaint }}>
-                  {new Date(lastSession.ended).toLocaleDateString('de-DE', { day:'numeric', month:'short' })} ·{' '}
+                  {new Date(lastSession.date).toLocaleDateString('de-DE', { day:'numeric', month:'short' })} ·{' '}
                   {totalVolume(lastSession).toLocaleString('de-DE')} kg
                 </div>
               </div>
