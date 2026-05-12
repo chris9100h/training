@@ -175,14 +175,29 @@ function HomeScreen({ store, setStore, go }) {
     return [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''))[0];
   }, [store.sessions]);
 
+  // cycle mode: for each dayId → sessions sorted by date ascending
+  // badge check: slot in displayed cycle N is done if sessions[N] exists
+  const completedByDayId = useMemo(() => {
+    if (weekdayMode || !sch) return null;
+    const map = new Map();
+    store.sessions.filter(s => s.ended && s.scheduleId === sch.id).forEach(s => {
+      if (!map.has(s.dayId)) map.set(s.dayId, []);
+      map.get(s.dayId).push(s);
+    });
+    map.forEach(arr => arr.sort((a, b) => a.date.localeCompare(b.date)));
+    return map;
+  }, [store.sessions, sch, weekdayMode]);
+
+  // weekday mode: plain date-key set
   const completedDateKeys = useMemo(() => {
+    if (!weekdayMode) return null;
     const set = new Set();
     store.sessions.filter(s => s.ended).forEach(s => {
       const d = new Date(s.date);
       set.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
     });
     return set;
-  }, [store.sessions]);
+  }, [store.sessions, weekdayMode]);
 
   const startSession = () => {
     if (!activeDay || isActiveRest) return;
@@ -262,8 +277,17 @@ function HomeScreen({ store, setStore, go }) {
             const slotLabel = weekdayMode
               ? WEEKDAYS[i]
               : d.date.toLocaleDateString('de-DE', { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
-            const slotKey = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
-            const isCompleted = !r && completedDateKeys.has(slotKey);
+            let isCompleted = false;
+            if (!r) {
+              if (weekdayMode) {
+                const slotKey = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
+                isCompleted = completedDateKeys?.has(slotKey) ?? false;
+              } else {
+                const displayedCycleNum = currentCycleNum + weekOffset;
+                const sessions = completedByDayId?.get(d.id) || [];
+                isCompleted = sessions.length > displayedCycleNum;
+              }
+            }
             return (
               <div key={d.id ?? i}
                 onClick={() => weekdayMode ? setSelectedWd(i) : setSelectedSlot(i)}
