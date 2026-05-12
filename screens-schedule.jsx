@@ -10,7 +10,7 @@ function PlanScreen({ store, setStore, go }) {
     <Screen>
       <TopBar
         title="Plan"
-        right={<Btn kind="icon" onClick={() => go({ name: 'schedule-new' })} style={{ color: UI.gold, fontSize: 22, fontWeight: 300 }}>+</Btn>}
+        right={<Btn kind="icon" onClick={() => go({ name: 'schedule-new' })} style={{ color: UI.gold, fontSize: 20, fontWeight: 400, background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`, borderRadius: 999, padding: '6px 16px' }}>+</Btn>}
       />
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
         {store.schedules.length === 0 && (

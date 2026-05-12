@@ -55,11 +55,11 @@ function LibraryScreen({ store, setStore, go }) {
       Abbrechen
     </button>
   ) : (
-    <div style={{ display: 'flex', gap: 4 }}>
+    <div style={{ display: 'flex', gap: 8 }}>
       {store.exercises.length > 0 && (
-        <Btn kind="icon" onClick={() => { setTab('all'); setSelecting(true); }} style={{ color: UI.inkSoft, fontSize: 16 }}>☑</Btn>
+        <Btn kind="icon" onClick={() => { setTab('all'); setSelecting(true); }} style={{ color: UI.inkSoft, fontSize: 15, border: `1px solid ${UI.inkLine}`, borderRadius: 999, padding: '6px 14px' }}>☑ Auswählen</Btn>
       )}
-      <Btn kind="icon" onClick={() => setCreating(true)} style={{ color: UI.gold, fontSize: 22, fontWeight: 300 }}>+</Btn>
+      <Btn kind="icon" onClick={() => setCreating(true)} style={{ color: UI.gold, fontSize: 20, fontWeight: 400, background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`, borderRadius: 999, padding: '6px 16px' }}>+</Btn>
     </div>
   );
 
