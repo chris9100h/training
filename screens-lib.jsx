@@ -351,7 +351,7 @@ function HistoryScreen({ store, go }) {
 
   return (
     <Screen>
-      <TopBar title="History" />
+      <TopBar title="History" sub={new Date().toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })} />
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {sessions.length === 0 && (
           <Empty title="Keine Sessions" sub="Logge dein erstes Training, um Verlauf zu sehen." />
