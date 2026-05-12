@@ -275,9 +275,33 @@ function nextDay(state) {
   return { schedule: sch, day: sch.days[idx], idx };
 }
 
+// ─── LOCAL CACHE ─────────────────────────────────────────────────────
+
+function saveToLocal(store, userId) {
+  try {
+    localStorage.setItem(`logbook-${userId}`, JSON.stringify(store));
+  } catch (_) {}
+}
+
+function loadFromLocal(userId) {
+  try {
+    const raw = localStorage.getItem(`logbook-${userId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+
+function clearLocal(userId) {
+  try {
+    const key = userId ? `logbook-${userId}` : null;
+    if (key) { localStorage.removeItem(key); return; }
+    Object.keys(localStorage).filter(k => k.startsWith('logbook-')).forEach(k => localStorage.removeItem(k));
+  } catch (_) {}
+}
+
 window.LB = {
   supabase: _supabase,
   signIn, signUp, signOut, deleteAllData,
   loadFromSupabase, syncStore, seedStarter,
+  saveToLocal, loadFromLocal, clearLocal,
   uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay, isWeekdayPlan,
 };

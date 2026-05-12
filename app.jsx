@@ -23,17 +23,36 @@ function App() {
   const [userId, setUserId] = useStateA(null);
   const [route, setRoute]   = useStateA({ name: 'home' });
   const prevStore           = useRefA(null);
+  const localDirty          = useRefA(false); // true if user changed store after cache load
 
   const loadData = async (uid) => {
-    setPhase('loading');
-    try {
-      const loaded = await LB.loadFromSupabase(uid);
-      prevStore.current = loaded;
-      setStore(loaded);
+    localDirty.current = false;
+    const cached = LB.loadFromLocal(uid);
+    if (cached) {
+      // Show instantly from cache, then refresh from Supabase in background
+      prevStore.current = cached;
+      setStore(cached);
       setPhase('ready');
-    } catch (e) {
-      console.error('loadFromSupabase failed', e);
-      setPhase('unauthed');
+      LB.loadFromSupabase(uid)
+        .then(fresh => {
+          // Only apply if user hasn't made local changes during the fetch
+          if (!localDirty.current) {
+            prevStore.current = fresh;
+            setStore(fresh);
+          }
+        })
+        .catch(console.error);
+    } else {
+      setPhase('loading');
+      try {
+        const loaded = await LB.loadFromSupabase(uid);
+        prevStore.current = loaded;
+        setStore(loaded);
+        setPhase('ready');
+      } catch (e) {
+        console.error('loadFromSupabase failed', e);
+        setPhase('unauthed');
+      }
     }
   };
 
@@ -46,9 +65,11 @@ function App() {
         setUserId(session.user.id);
         loadData(session.user.id);
       } else if (event === 'SIGNED_OUT') {
+        LB.clearLocal(userId);
         setStore(null);
         setUserId(null);
         prevStore.current = null;
+        localDirty.current = false;
         setRoute({ name: 'home' });
         setPhase('unauthed');
       }
@@ -56,10 +77,12 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // background sync on every store change
+  // Sync to Supabase + save to localStorage on every store change
   useEffectA(() => {
     if (!store || !userId || phase !== 'ready') return;
+    if (prevStore.current !== store) localDirty.current = true;
     LB.syncStore(prevStore.current, store, userId).catch(console.error);
+    LB.saveToLocal(store, userId);
     prevStore.current = store;
   }, [store]);
 
