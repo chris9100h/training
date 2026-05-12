@@ -44,6 +44,32 @@
 </head>
 <body>
 <div id="root"></div>
+<div id="err" style="display:none;position:fixed;inset:0;background:#0a0a0a;color:#c87469;font-family:monospace;font-size:13px;padding:24px;white-space:pre-wrap;z-index:9999;overflow:auto"></div>
+<script>
+window.onerror = function(msg, src, line, col, err) {
+  var d = document.getElementById('err');
+  d.style.display = 'block';
+  d.textContent += '[JS ERROR] ' + msg + '\n  ' + src + ':' + line + '\n\n';
+};
+window.onunhandledrejection = function(e) {
+  var d = document.getElementById('err');
+  d.style.display = 'block';
+  d.textContent += '[PROMISE] ' + (e.reason?.message || e.reason) + '\n\n';
+};
+// Fallback: if React never mounts after 6s, show diagnostic info
+setTimeout(function() {
+  if (!document.getElementById('root').children.length) {
+    var d = document.getElementById('err');
+    d.style.display = 'block';
+    d.textContent += '[TIMEOUT] React hat nicht gemountet.\n';
+    d.textContent += 'window.LB: ' + typeof window.LB + '\n';
+    d.textContent += 'window.supabase: ' + typeof window.supabase + '\n';
+    d.textContent += 'window.Screens: ' + JSON.stringify(Object.keys(window.Screens||{})) + '\n';
+    d.textContent += 'window.React: ' + typeof window.React + '\n';
+    d.textContent += 'window.Screen: ' + typeof window.Screen + '\n';
+  }
+}, 6000);
+</script>
 
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
