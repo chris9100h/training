@@ -4,6 +4,7 @@ const { useState: useStateL, useMemo: useMemoL } = React;
 
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go }) {
+  const [confirmEl, confirm] = useConfirm();
   const [tab, setTab] = useStateL('recent');
   const [q, setQ] = useStateL('');
   const [creating, setCreating] = useStateL(false);
@@ -18,8 +19,8 @@ function LibraryScreen({ store, setStore, go }) {
     return next;
   });
 
-  const deleteSelected = () => {
-    if (!confirm(`${selected.size} Übung${selected.size > 1 ? 'en' : ''} löschen? Bisherige Sessions bleiben erhalten.`)) return;
+  const deleteSelected = async () => {
+    if (!await confirm(`Bisherige Sessions bleiben erhalten.`, { title: `${selected.size} Übung${selected.size > 1 ? 'en' : ''} löschen?`, ok: 'Löschen', danger: true })) return;
     setStore(s => ({ ...s, exercises: s.exercises.filter(e => !selected.has(e.id)) }));
     exitSelect();
   };
@@ -162,6 +163,7 @@ function LibraryScreen({ store, setStore, go }) {
 
       <TabBar active="lib" onChange={(t) => { exitSelect(); go({ name: t }); }} />
       {creating && <ExerciseCreator onClose={() => setCreating(false)} setStore={setStore} />}
+      {confirmEl}
     </Screen>
   );
 }
@@ -202,6 +204,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
   const ex = LB.findExercise(store, exId);
   if (!ex) { go({ name: 'lib' }); return null; }
 
+  const [confirmEl, confirm] = useConfirm();
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
 
@@ -210,8 +213,8 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
     setEditNote(false);
   };
 
-  const deleteExercise = () => {
-    if (!confirm(`"${ex.name}" aus der Datenbank löschen? Bisherige Sessions bleiben erhalten.`)) return;
+  const deleteExercise = async () => {
+    if (!await confirm('Bisherige Sessions bleiben erhalten.', { title: `"${ex.name}" löschen?`, ok: 'Löschen', danger: true })) return;
     setStore(s => ({ ...s, exercises: s.exercises.filter(e => e.id !== exId) }));
     go({ name: 'lib' });
   };
@@ -310,6 +313,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
           </div>
         </div>
       </div>
+      {confirmEl}
     </Screen>
   );
 }
@@ -437,6 +441,7 @@ function SessionDetailScreen({ store, go, sessionId, justFinished }) {
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
 function SettingsScreen({ store, setStore, go, userId }) {
+  const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateL(store.user?.name || '');
 
   const saveNickname = () => {
@@ -459,7 +464,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   };
 
   const handleDeleteAll = async () => {
-    if (!confirm('Wirklich ALLE Daten dauerhaft löschen? Diese Aktion ist nicht rückgängig zu machen.')) return;
+    if (!await confirm('Diese Aktion ist nicht rückgängig zu machen.', { title: 'Alle Daten löschen?', ok: 'Alles löschen', danger: true })) return;
     await LB.deleteAllData(userId);
     await LB.signOut();
   };
@@ -506,6 +511,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           Logbook · v1.0 · Daten in Supabase
         </div>
       </div>
+      {confirmEl}
     </Screen>
   );
 }

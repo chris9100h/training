@@ -103,6 +103,7 @@ function LoginScreen() {
 
 // ─── HOME ─────────────────────────────────────────────────────────────
 function HomeScreen({ store, setStore, go }) {
+  const [confirmEl, confirm] = useConfirm();
   const today = LB.todaysDay(store);
   const sch = today?.schedule;
   const day = today?.day;
@@ -166,6 +167,7 @@ function HomeScreen({ store, setStore, go }) {
           />
         </div>
         <TabBar active="home" onChange={(t) => go({ name: t })} />
+        {confirmEl}
       </Screen>
     );
   }
@@ -235,7 +237,7 @@ function HomeScreen({ store, setStore, go }) {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <Btn onClick={startSession} style={{ width: '100%' }}>Training starten →</Btn>
-              <Btn kind="ghost" onClick={() => confirm('Tag überspringen und zum nächsten Tag springen?') && skipRest()} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>Tag überspringen</Btn>
+              <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>Tag überspringen</Btn>
             </div>
           </Card>
         )}
@@ -258,6 +260,7 @@ function HomeScreen({ store, setStore, go }) {
         )}
       </div>
       <TabBar active="home" onChange={(t) => go({ name: t })} />
+      {confirmEl}
     </Screen>
   );
 }

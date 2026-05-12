@@ -45,7 +45,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     }));
   };
 
-  const removeSet = (setIdx) => {
+  const removeSet = async (setIdx) => {
+    if (!await confirm(`Satz ${setIdx + 1} entfernen?`, { ok: 'Entfernen', danger: true })) return;
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
@@ -79,8 +80,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     go({ name: 'session', sessionId: session.id, justFinished: true });
   };
 
-  const abandon = () => {
-    if (!confirm('Session abbrechen? Eingaben gehen verloren.')) return;
+  const abandon = async () => {
+    if (!await confirm('Eingaben gehen verloren.', { title: 'Session abbrechen?', ok: 'Abbrechen', cancel: 'Weiter trainieren', danger: true })) return;
     setStore(s => ({
       ...s,
       sessions: s.sessions.filter(x => x.id !== session.id),
@@ -101,6 +102,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const restRemaining = restElapsed != null ? Math.max(0, restDef - restElapsed) : null;
   const restPct = restElapsed != null ? Math.min(100, (restElapsed / restDef) * 100) : 0;
 
+  const [confirmEl, confirm] = useConfirm();
   const [finishOpen, setFinishOpen] = useStateT(false);
   const [notePicker, setNotePicker] = useStateT(false);
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
@@ -353,6 +355,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         />
         <Btn onClick={() => setSessionNoteOpen(false)} style={{ marginTop: 12, width: '100%' }}>Speichern</Btn>
       </Sheet>
+
+      {confirmEl}
 
       {/* exercise note editor */}
       <Sheet open={exNoteOpen} onClose={() => setExNoteOpen(false)} title="Übungs-Notiz">

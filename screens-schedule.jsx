@@ -119,6 +119,7 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
 
 // ─── Edit screen — rename, manage pattern (reorder/add/remove days) ─
 function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
+  const [confirmEl, confirm] = useConfirm();
   const original = store.schedules.find(s => s.id === scheduleId);
   const [draft, setDraft] = useStateS(original ? JSON.parse(JSON.stringify(original)) : null);
   const [pickingType, setPickingType] = useStateS(null); // { afterIdx } or { replaceIdx }
@@ -133,8 +134,8 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
       return { ...d, days };
     });
   };
-  const removeDay = (idx) => {
-    if (!confirm(`Tag "${draft.days[idx].name}" aus dem Zyklus entfernen?`)) return;
+  const removeDay = async (idx) => {
+    if (!await confirm(`Tag "${draft.days[idx].name}" aus dem Zyklus entfernen?`, { ok: 'Entfernen', danger: true })) return;
     setDraft(d => ({ ...d, days: d.days.filter((_, i) => i !== idx) }));
   };
   const addDayType = (type, atIdx = null) => {
@@ -156,8 +157,8 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
     setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === draft.id ? draft : x) }));
     go({ name: 'schedule', scheduleId: draft.id });
   };
-  const deleteSch = () => {
-    if (!confirm(`"${draft.name}" wirklich löschen?`)) return;
+  const deleteSch = async () => {
+    if (!await confirm(`Dieser Schritt kann nicht rückgängig gemacht werden.`, { title: `"${draft.name}" löschen?`, ok: 'Löschen', danger: true })) return;
     setStore(s => ({
       ...s,
       schedules: s.schedules.filter(x => x.id !== draft.id),
@@ -172,8 +173,8 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
     <Screen>
       <TopBar
         title="Plan bearbeiten"
-        onBack={() => {
-          if (dirty && !confirm('Änderungen verwerfen?')) return;
+        onBack={async () => {
+          if (dirty && !await confirm('Ungespeicherte Änderungen gehen verloren.', { title: 'Änderungen verwerfen?', ok: 'Verwerfen', danger: true })) return;
           go({ name: 'schedule', scheduleId: draft.id });
         }}
         right={<Btn kind="ghost" onClick={save} style={{ minHeight: 36, padding: '6px 12px', fontSize: 12, color: dirty ? UI.gold : UI.inkSoft, borderColor: dirty ? UI.goldSoft : UI.inkLine }}>speichern</Btn>}
@@ -232,6 +233,7 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
           }}
         />
       )}
+      {confirmEl}
     </Screen>
   );
 }
@@ -244,6 +246,7 @@ const iconBtn = {
 
 // ─── Day-type picker (sheet) — standard + custom + create new ─────────
 function DayTypePicker({ store, setStore, title, onClose, onPick }) {
+  const [confirmEl, confirm] = useConfirm();
   const [creating, setCreating] = useStateS(false);
   const [newName, setNewName] = useStateS('');
   const custom = store.customDayTypes || [];
@@ -259,8 +262,8 @@ function DayTypePicker({ store, setStore, title, onClose, onPick }) {
     onPick(name);
   };
 
-  const removeCustom = (name) => {
-    if (!confirm(`"${name}" aus eigenen Tag-Typen entfernen? (Bestehende Pläne bleiben unverändert.)`)) return;
+  const removeCustom = async (name) => {
+    if (!await confirm('Bestehende Pläne bleiben unverändert.', { title: `"${name}" entfernen?`, ok: 'Entfernen', danger: true })) return;
     setStore(s => ({ ...s, customDayTypes: (s.customDayTypes || []).filter(t => t !== name) }));
   };
 
@@ -327,6 +330,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick }) {
       <div style={{ marginTop: 18, fontSize: 11, color: UI.inkFaint, lineHeight: 1.5 }}>
         Tipp: Für Pläne wie <span style={{ fontFamily: UI.fontNum, color: UI.inkSoft }}>PUSH1 / PULL1 / REST / LEGS1 / PUSH2 / REST / PULL2 / LEGS2 / REST</span> einfach mehrere eigene Typen anlegen.
       </div>
+      {confirmEl}
     </Sheet>
   );
 }

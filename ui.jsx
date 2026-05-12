@@ -249,4 +249,26 @@ function Empty({ title, sub, action }) {
   );
 }
 
-Object.assign(window, { UI, Screen, TopBar, TabBar, Btn, Card, Label, Input, Stepper, Pill, Sheet, Empty, btnPrimary, btnGhost, btnIcon });
+function useConfirm() {
+  const [state, setState] = React.useState(null);
+
+  const confirm = (message, { title = 'Bestätigen?', ok = 'OK', cancel = 'Abbrechen', danger = false } = {}) =>
+    new Promise(resolve => setState({ message, title, ok, cancel, danger, resolve }));
+
+  const close = (result) => { state?.resolve(result); setState(null); };
+
+  const el = state && (
+    <Sheet open={true} onClose={() => close(false)}>
+      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>{state.title}</div>
+      <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 18, lineHeight: 1.5 }}>{state.message}</div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Btn kind="ghost" onClick={() => close(false)} style={{ flex: 1 }}>{state.cancel}</Btn>
+        <Btn onClick={() => close(true)} style={{ flex: 2, ...(state.danger ? { background: UI.danger, borderColor: UI.danger } : {}) }}>{state.ok}</Btn>
+      </div>
+    </Sheet>
+  );
+
+  return [el, confirm];
+}
+
+Object.assign(window, { UI, Screen, TopBar, TabBar, Btn, Card, Label, Input, Stepper, Pill, Sheet, Empty, btnPrimary, btnGhost, btnIcon, useConfirm });
