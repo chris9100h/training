@@ -127,7 +127,7 @@ function Label({ children, style = {} }) {
   }}>{children}</div>;
 }
 
-const MUSCLES = ['Brust','Rücken','Schultern','Bizeps','Trizeps','Bauch','Beine','Po','Wade','Unterarme'];
+const MUSCLES = ['Brust','Rücken','Schultern','Bizeps','Trizeps','Bauch','Quads','Hamstrings','Glutes','Waden','Unterarme'];
 
 function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, style = {}, suffix, uppercase }) {
   const doUpper = uppercase !== undefined ? uppercase : type === 'text';
