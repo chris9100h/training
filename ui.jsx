@@ -33,7 +33,7 @@ function Screen({ children, scroll = true, style = {} }) {
 function TopBar({ title, sub, onBack, right }) {
   return (
     <div style={{
-      padding: '14px 18px 12px',
+      padding: 'calc(14px + env(safe-area-inset-top, 0px)) 18px 12px',
       display: 'flex', alignItems: 'center', gap: 12,
       borderBottom: `1px solid ${UI.inkLine}`,
       position: 'sticky', top: 0, background: UI.bg, zIndex: 5,
