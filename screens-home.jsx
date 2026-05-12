@@ -73,8 +73,26 @@ function HomeScreen({ store, setStore, go }) {
 
   const jsDay = new Date().getDay();
   const todayWd = jsDay === 0 ? 6 : jsDay - 1;
+
+  // Auto-migrate from cycleIndex to cycleStartDate on first load
+  useEffect(() => {
+    if (!weekdayMode && sch && !store.cycleStartDate) {
+      const today = new Date(); today.setHours(12, 0, 0, 0);
+      const start = new Date(today.getTime() - (store.cycleIndex || 0) * 86400000);
+      setStore(s => s.cycleStartDate ? s : { ...s, cycleStartDate: start.toISOString().slice(0, 10) });
+    }
+  }, []); // eslint-disable-line
+
+  // Total days elapsed since cycle start (falls back to cycleIndex for legacy data)
+  const todayN = useMemo(() => {
+    if (weekdayMode || !store.cycleStartDate) return store.cycleIndex || 0;
+    const today = new Date(); today.setHours(12, 0, 0, 0);
+    const start = new Date(store.cycleStartDate + 'T12:00:00');
+    return Math.max(0, Math.round((today.getTime() - start.getTime()) / 86400000));
+  }, [store.cycleStartDate, store.cycleIndex, weekdayMode]);
+
   // How many full cycles have been completed (0-indexed: 0 = first cycle still running)
-  const currentCycleNum = dayCount > 0 ? Math.floor(store.cycleIndex / dayCount) : 0;
+  const currentCycleNum = dayCount > 0 ? Math.floor(todayN / dayCount) : 0;
 
   // weekOffset: weeks back (weekday mode) or cycles back (cycle mode). 0 = current.
   const [weekOffset, setWeekOffset] = useState(0);
@@ -222,7 +240,13 @@ function HomeScreen({ store, setStore, go }) {
   };
 
   const skipRest = () => {
-    setStore(s => ({ ...s, cycleIndex: s.cycleIndex + 1, lastAdvancedDate: LB.todayISO() }));
+    if (store.cycleStartDate) {
+      const start = new Date(store.cycleStartDate + 'T12:00:00');
+      start.setDate(start.getDate() - 1);
+      setStore(s => ({ ...s, cycleStartDate: start.toISOString().slice(0, 10), lastAdvancedDate: LB.todayISO() }));
+    } else {
+      setStore(s => ({ ...s, cycleIndex: s.cycleIndex + 1, lastAdvancedDate: LB.todayISO() }));
+    }
   };
 
   const navBtn = (disabled) => ({

@@ -105,6 +105,7 @@ async function loadFromSupabase(userId) {
     })),
     activeScheduleId: sett.active_schedule_id ?? null,
     cycleIndex: sett.cycle_index ?? 0,
+    cycleStartDate: sett.cycle_start_date ?? null,
     lastAdvancedDate: sett.last_advanced_date ?? null,
     inProgress: sett.in_progress_session_id ?? null,
     customDayTypes: [],
@@ -164,6 +165,7 @@ async function syncStore(prev, next, userId) {
     user_id: userId,
     active_schedule_id: next.activeScheduleId ?? null,
     cycle_index: next.cycleIndex ?? 0,
+    cycle_start_date: next.cycleStartDate ?? null,
     last_advanced_date: next.lastAdvancedDate ?? null,
     unit: next.settings?.unit || 'kg',
     rest_default: next.settings?.restDefault || 120,
@@ -231,6 +233,7 @@ function seedStarter(state) {
     schedules: [...state.schedules, sched],
     activeScheduleId: sched.id,
     cycleIndex: 0,
+    cycleStartDate: todayISO(),
   };
 }
 
@@ -266,7 +269,15 @@ function todaysDay(state) {
     if (day) return { schedule: sch, day, idx: todayWd };
     return { schedule: sch, day: { id: 'rest-virtual', name: 'REST', items: [], weekday: todayWd }, idx: todayWd };
   }
-  const idx = state.cycleIndex % sch.days.length;
+  let idx;
+  if (state.cycleStartDate) {
+    const today = new Date(); today.setHours(12, 0, 0, 0);
+    const start = new Date(state.cycleStartDate + 'T12:00:00');
+    const n = Math.round((today.getTime() - start.getTime()) / 86400000);
+    idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
+  } else {
+    idx = (state.cycleIndex || 0) % sch.days.length;
+  }
   return { schedule: sch, day: sch.days[idx], idx };
 }
 

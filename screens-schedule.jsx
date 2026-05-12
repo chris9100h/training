@@ -57,7 +57,7 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
   if (!sch) return null;
 
   const updateSch = (fn) => setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === sch.id ? fn(x) : x) }));
-  const setActive = () => setStore(s => ({ ...s, activeScheduleId: sch.id, cycleIndex: 0 }));
+  const setActive = () => setStore(s => ({ ...s, activeScheduleId: sch.id, cycleIndex: 0, cycleStartDate: LB.todayISO() }));
   const duplicate = () => {
     const copy = JSON.parse(JSON.stringify(sch));
     copy.id = LB.uid();
@@ -70,6 +70,12 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
   const jsDay = new Date().getDay();
   const todayWeekday = jsDay === 0 ? 6 : jsDay - 1;
   const displayDays = LB.isWeekdayPlan(sch) ? [...sch.days].sort((a,b)=>a.weekday-b.weekday) : sch.days;
+
+  const activeCycleDayIdx = sch.id === store.activeScheduleId && !LB.isWeekdayPlan(sch)
+    ? (store.cycleStartDate
+        ? (() => { const t = new Date(); t.setHours(12,0,0,0); const st = new Date(store.cycleStartDate+'T12:00:00'); return ((Math.round((t-st)/86400000) % sch.days.length) + sch.days.length) % sch.days.length; })()
+        : (store.cycleIndex || 0) % sch.days.length)
+    : -1;
 
   return (
     <Screen>
@@ -84,10 +90,28 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
           <Btn kind="ghost" onClick={setActive} style={{ marginBottom: 4 }}>Diesen Plan aktivieren</Btn>
         )}
         <Btn kind="ghost" onClick={duplicate} style={{ marginBottom: 4 }}>Plan duplizieren</Btn>
+        {sch.id === store.activeScheduleId && !LB.isWeekdayPlan(sch) && (
+          <Card style={{ padding: 14 }}>
+            <Label>Zyklus-Startdatum (Tag 1)</Label>
+            <input type="date"
+              value={store.cycleStartDate || ''}
+              onChange={e => { if (e.target.value) setStore(s => ({ ...s, cycleStartDate: e.target.value })); }}
+              style={{
+                background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+                borderRadius: 10, padding: '11px 14px', color: UI.ink,
+                fontFamily: UI.fontNum, fontSize: 16, outline: 'none',
+                width: '100%', boxSizing: 'border-box', display: 'block',
+              }}
+            />
+            <div style={{ fontSize: 12, color: UI.inkFaint, marginTop: 6 }}>
+              Heute = Tag {activeCycleDayIdx + 1} von {sch.days.length}
+            </div>
+          </Card>
+        )}
         {displayDays.map((d, i) => {
           const isRest = !d.items.length;
           const isToday = sch.id === store.activeScheduleId && (
-            LB.isWeekdayPlan(sch) ? d.weekday === todayWeekday : (store.cycleIndex % sch.days.length) === i
+            LB.isWeekdayPlan(sch) ? d.weekday === todayWeekday : activeCycleDayIdx === i
           );
           const dayLabel = LB.isWeekdayPlan(sch) ? WEEKDAYS_FULL[d.weekday] : `Tag ${i+1}`;
           return (
@@ -683,7 +707,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
     };
     setStore(s => {
       const withTypes = ensureCustomTypes(s, pattern);
-      return { ...withTypes, schedules: [...withTypes.schedules, newSch], activeScheduleId: newSch.id, cycleIndex: 0 };
+      return { ...withTypes, schedules: [...withTypes.schedules, newSch], activeScheduleId: newSch.id, cycleIndex: 0, cycleStartDate: LB.todayISO() };
     });
     go({ name: 'schedule', scheduleId: newSch.id });
   };
