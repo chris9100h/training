@@ -448,8 +448,21 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     if (!vv) return;
     const handler = () => {
       const el = document.activeElement;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
-        setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50);
+      if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) return;
+      // find nearest scrollable ancestor and nudge it manually
+      let parent = el.parentElement;
+      while (parent) {
+        const { overflowY, overflow } = window.getComputedStyle(parent);
+        if (overflowY === 'auto' || overflowY === 'scroll' || overflow === 'auto' || overflow === 'scroll') {
+          const elRect = el.getBoundingClientRect();
+          const visibleBottom = vv.offsetTop + vv.height;
+          const pad = 24;
+          if (elRect.bottom > visibleBottom - pad) {
+            parent.scrollTop += elRect.bottom - (visibleBottom - pad);
+          }
+          break;
+        }
+        parent = parent.parentElement;
       }
     };
     vv.addEventListener('resize', handler);
