@@ -195,8 +195,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       {/* session timer pill */}
       <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', padding: '10px 18px 0' }}>
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          height: 34, padding: '0 18px', borderRadius: 999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          height: 34, width: '100%', borderRadius: 999,
           background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
         }}>
           <div style={{
