@@ -53,23 +53,28 @@ function App() {
   useEffectA(() => {
     if (!('serviceWorker' in navigator)) return;
     navigator.serviceWorker.ready.then(reg => {
+      // iOS PWA won't auto-check for SW updates — force it
+      reg.update().catch(() => {});
+
       const trackWorker = (worker) => {
         if (!worker) return;
         worker.addEventListener('statechange', () => {
-          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+          if (worker.state === 'installed') {
             waitingWorker.current = worker;
             setUpdateAvailable(true);
           }
         });
       };
-      if (reg.waiting && navigator.serviceWorker.controller) {
+      if (reg.waiting) {
         waitingWorker.current = reg.waiting;
         setUpdateAvailable(true);
       }
       reg.addEventListener('updatefound', () => trackWorker(reg.installing));
     });
-    // Reload all tabs when SW takes control
-    navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
+    // location.reload() unreliable in iOS PWA standalone mode
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      window.location.href = window.location.href;
+    });
   }, []);
 
   const applyUpdate = useCallbackA(() => {
