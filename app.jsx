@@ -51,7 +51,7 @@ function App() {
   const localDirty                = useRefA(false); // true if user changed store after cache load
 
   useEffectA(() => {
-    const THRESHOLD = 30 * 60 * 1000;
+    const THRESHOLD = 1 * 60 * 1000;
     const KEY = 'logbook-bg-ts';
 
     const onHide = () => localStorage.setItem(KEY, Date.now());
