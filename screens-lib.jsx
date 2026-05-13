@@ -552,7 +552,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
                     fontFamily: UI.fontNum, fontSize: 12,
                     color: gold ? UI.goldLight : UI.ink,
                   }}>
-                    {st.kg ?? '—'}<span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                    {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
                   </span>
                 );
               })}
@@ -603,7 +603,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
                     fontFamily: UI.fontNum, fontSize: 11,
                     color: gold ? UI.goldLight : UI.ink,
                   }}>
-                    {st.kg ?? '—'}<span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                    {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
                   </span>
                 );
               })}
