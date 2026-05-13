@@ -192,23 +192,23 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         right={<Btn kind="ghost" onClick={abandon} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>×</Btn>}
       />
 
-      {/* session timer bar */}
-      <div style={{
-        flexShrink: 0,
-        background: UI.goldFaint,
-        borderBottom: `1px solid ${UI.goldSoft}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        gap: 8, height: 36,
-      }}>
+      {/* session timer pill */}
+      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', padding: '10px 18px 0' }}>
         <div style={{
-          width: 6, height: 6, borderRadius: 3,
-          background: UI.gold,
-          animation: 'timerPulse 2s ease-in-out infinite',
-        }} />
-        <span style={{
-          fontFamily: UI.fontNum, fontSize: 13,
-          color: UI.gold, letterSpacing: '0.14em', fontWeight: 500,
-        }}>{sessionTimeStr}</span>
+          display: 'flex', alignItems: 'center', gap: 8,
+          height: 34, padding: '0 18px', borderRadius: 999,
+          background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
+        }}>
+          <div style={{
+            width: 6, height: 6, borderRadius: 3,
+            background: UI.gold,
+            animation: 'timerPulse 2s ease-in-out infinite',
+          }} />
+          <span style={{
+            fontFamily: UI.fontNum, fontSize: 13,
+            color: UI.gold, letterSpacing: '0.14em', fontWeight: 500,
+          }}>{sessionTimeStr}</span>
+        </div>
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: 16 }}>
