@@ -570,14 +570,14 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
           <div>
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 3 }}>
-              {new Date(s.date.slice(0,10) + 'T12:00:00').toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
+              {new Date(s.date.slice(0,10) + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
             </div>
             <div style={{ fontSize: 22, fontWeight: 700 }}>{s.dayName}</div>
           </div>
           <div style={{ fontSize: 10, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.15em', marginTop: 2 }}>LOGBOOK</div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
-          {[['DAUER', duration != null ? `${duration} min` : '—'], ['VOLUMEN', `${Math.round(vol).toLocaleString('de-DE')} kg`], ['SETS', s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)]].map(([label, value]) => (
+          {[['DURATION', duration != null ? `${duration} min` : '—'], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} kg`], ['SETS', s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)]].map(([label, value]) => (
             <div key={label} style={{ background: UI.bgRaised, borderRadius: 10, padding: '8px 12px' }}>
               <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginBottom: 3 }}>{label}</div>
               <div style={{ fontFamily: UI.fontNum, fontSize: 16 }}>{value}</div>
