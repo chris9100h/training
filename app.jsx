@@ -1,6 +1,29 @@
 /* Main App — auth + routing */
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useCallback: useCallbackA } = React;
+
+function UpdateBanner({ onUpdate }) {
+  return (
+    <div style={{
+      flexShrink: 0,
+      background: UI.goldFaint, borderBottom: `1px solid ${UI.goldSoft}`,
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '8px 16px', gap: 12,
+    }}>
+      <span style={{ fontSize: 13, color: UI.gold, fontFamily: UI.fontUi }}>
+        Neue Version verfügbar
+      </span>
+      <button onClick={onUpdate} style={{
+        background: UI.gold, color: '#0a0a0a',
+        border: 'none', borderRadius: 8,
+        padding: '5px 12px', fontSize: 12, fontWeight: 600,
+        fontFamily: UI.fontUi, cursor: 'pointer', flexShrink: 0,
+      }}>
+        Jetzt updaten
+      </button>
+    </div>
+  );
+}
 
 function LoadingScreen() {
   return (
@@ -18,12 +41,40 @@ function LoadingScreen() {
 }
 
 function App() {
-  const [phase, setPhase]   = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed'
-  const [store, setStore]   = useStateA(null);
-  const [userId, setUserId] = useStateA(null);
-  const [route, setRoute]   = useStateA({ name: 'home' });
-  const prevStore           = useRefA(null);
-  const localDirty          = useRefA(false); // true if user changed store after cache load
+  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed'
+  const [store, setStore]         = useStateA(null);
+  const [userId, setUserId]       = useStateA(null);
+  const [route, setRoute]         = useStateA({ name: 'home' });
+  const [updateAvailable, setUpdateAvailable] = useStateA(false);
+  const waitingWorker             = useRefA(null);
+  const prevStore                 = useRefA(null);
+  const localDirty                = useRefA(false); // true if user changed store after cache load
+
+  useEffectA(() => {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.ready.then(reg => {
+      const trackWorker = (worker) => {
+        if (!worker) return;
+        worker.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            waitingWorker.current = worker;
+            setUpdateAvailable(true);
+          }
+        });
+      };
+      if (reg.waiting && navigator.serviceWorker.controller) {
+        waitingWorker.current = reg.waiting;
+        setUpdateAvailable(true);
+      }
+      reg.addEventListener('updatefound', () => trackWorker(reg.installing));
+    });
+    // Reload all tabs when SW takes control
+    navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
+  }, []);
+
+  const applyUpdate = useCallbackA(() => {
+    waitingWorker.current?.postMessage({ type: 'SKIP_WAITING' });
+  }, []);
 
   const loadData = async (uid) => {
     localDirty.current = false;
@@ -128,6 +179,7 @@ function App() {
 
   return (
     <>
+      {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
       {screen}
       {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} />}
     </>
