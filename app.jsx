@@ -93,10 +93,15 @@ function App() {
         .then(fresh => {
           // Only apply if user hasn't made local changes during the fetch
           if (!localDirty.current) {
-            // preserve fields that live only in memory / localStorage
+            // preserve fields that live only in memory / localStorage,
+            // or that the user may have changed locally before the write reached Supabase
             const cur = prevStore.current;
             if (cur) {
-              fresh.inProgress = cur.inProgress ?? null;
+              fresh.inProgress        = cur.inProgress        ?? null;
+              fresh.activeScheduleId  = cur.activeScheduleId  ?? fresh.activeScheduleId;
+              fresh.cycleIndex        = cur.cycleIndex        ?? fresh.cycleIndex;
+              fresh.cycleStartDate    = cur.cycleStartDate    ?? fresh.cycleStartDate;
+              fresh.lastAdvancedDate  = cur.lastAdvancedDate  ?? fresh.lastAdvancedDate;
               fresh.sessions = fresh.sessions.map(s => {
                 const mem = cur.sessions?.find(x => x.id === s.id);
                 return mem ? { ...s, currentExIdx: mem.currentExIdx ?? 0, cyclePos: mem.cyclePos ?? null } : s;
