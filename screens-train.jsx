@@ -192,6 +192,25 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         right={<Btn kind="ghost" onClick={abandon} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>×</Btn>}
       />
 
+      {/* session timer bar */}
+      <div style={{
+        flexShrink: 0,
+        background: UI.goldFaint,
+        borderBottom: `1px solid ${UI.goldSoft}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        gap: 8, height: 36,
+      }}>
+        <div style={{
+          width: 6, height: 6, borderRadius: 3,
+          background: UI.gold,
+          animation: 'timerPulse 2s ease-in-out infinite',
+        }} />
+        <span style={{
+          fontFamily: UI.fontNum, fontSize: 13,
+          color: UI.gold, letterSpacing: '0.14em', fontWeight: 500,
+        }}>{sessionTimeStr}</span>
+      </div>
+
       <div style={{ flex: 1, overflow: 'auto', padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* progress chips — clickable, horizontally scrollable */}
@@ -380,27 +399,6 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       </div>
 
       {/* session timer bar — directly above footer nav */}
-      <div style={{
-        position: 'fixed', bottom: 'calc(64px + env(safe-area-inset-bottom, 8px))',
-        left: '50%', transform: 'translateX(-50%)',
-        width: '100%', maxWidth: 440,
-        height: 40,
-        background: UI.bgRaised,
-        borderTop: `1px solid ${UI.goldSoft}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        gap: 8, zIndex: 9,
-      }}>
-        <div style={{
-          width: 6, height: 6, borderRadius: 3,
-          background: UI.gold,
-          animation: 'timerPulse 2s ease-in-out infinite',
-        }} />
-        <span style={{
-          fontFamily: UI.fontNum, fontSize: 14,
-          color: UI.gold, letterSpacing: '0.12em', fontWeight: 500,
-        }}>{sessionTimeStr}</span>
-      </div>
-
       {/* footer nav — fixed to bottom like TabBar */}
       <div style={{
         position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)',
@@ -414,7 +412,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           {exIdx === session.entries.length - 1 ? 'Fertig →' : 'Nächste Übung →'}
         </Btn>
       </div>
-      <div style={{ flexShrink: 0, height: 'calc(104px + env(safe-area-inset-bottom, 8px))' }} />
+      <div style={{ flexShrink: 0, height: 'calc(64px + env(safe-area-inset-bottom, 8px))' }} />
 
       {/* finish confirmation */}
       <Sheet open={finishOpen} onClose={() => setFinishOpen(false)} title="Session beenden?">
