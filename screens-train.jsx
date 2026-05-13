@@ -135,6 +135,15 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     const t = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(t);
   }, []);
+  const sessionStart = session.startedAt ? new Date(session.startedAt).getTime() : null;
+  const sessionElapsed = sessionStart ? Math.floor((now - sessionStart) / 1000) : 0;
+  const _sh = Math.floor(sessionElapsed / 3600);
+  const _sm = Math.floor((sessionElapsed % 3600) / 60);
+  const _ss = sessionElapsed % 60;
+  const sessionTimeStr = _sh > 0
+    ? `${_sh}:${String(_sm).padStart(2,'0')}:${String(_ss).padStart(2,'0')}`
+    : `${String(_sm).padStart(2,'0')}:${String(_ss).padStart(2,'0')}`;
+
   const restDef = store.settings?.restDefault || 120;
   const restElapsed = restStart ? Math.floor((now - restStart) / 1000) : null;
   const restRemaining = restElapsed != null ? Math.max(0, restDef - restElapsed) : null;
@@ -370,6 +379,28 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         )}
       </div>
 
+      {/* session timer bar — directly above footer nav */}
+      <div style={{
+        position: 'fixed', bottom: 'calc(64px + env(safe-area-inset-bottom, 8px))',
+        left: '50%', transform: 'translateX(-50%)',
+        width: '100%', maxWidth: 440,
+        height: 40,
+        background: UI.bgRaised,
+        borderTop: `1px solid ${UI.goldSoft}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        gap: 8, zIndex: 9,
+      }}>
+        <div style={{
+          width: 6, height: 6, borderRadius: 3,
+          background: UI.gold,
+          animation: 'timerPulse 2s ease-in-out infinite',
+        }} />
+        <span style={{
+          fontFamily: UI.fontNum, fontSize: 14,
+          color: UI.gold, letterSpacing: '0.12em', fontWeight: 500,
+        }}>{sessionTimeStr}</span>
+      </div>
+
       {/* footer nav — fixed to bottom like TabBar */}
       <div style={{
         position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)',
@@ -383,7 +414,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           {exIdx === session.entries.length - 1 ? 'Fertig →' : 'Nächste Übung →'}
         </Btn>
       </div>
-      <div style={{ flexShrink: 0, height: 'calc(64px + env(safe-area-inset-bottom, 8px))' }} />
+      <div style={{ flexShrink: 0, height: 'calc(104px + env(safe-area-inset-bottom, 8px))' }} />
 
       {/* finish confirmation */}
       <Sheet open={finishOpen} onClose={() => setFinishOpen(false)} title="Session beenden?">
