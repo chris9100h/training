@@ -1,6 +1,6 @@
 /* Library + History + Session detail + Settings */
 
-const { useState: useStateL, useMemo: useMemoL } = React;
+const { useState: useStateL, useMemo: useMemoL, useRef: useRefL } = React;
 
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go }) {
@@ -441,6 +441,8 @@ function HistoryScreen({ store, go }) {
 function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
   const [confirmEl, confirm] = useConfirm();
   const [editing, setEditing] = useStateL(false);
+  const [capturing, setCapturing] = useStateL(false);
+  const captureRef = useRefL(null);
   const s = store.sessions.find(x => x.id === sessionId);
   if (!s) { go({ name: 'hist' }); return null; }
   const vol = totalVolume(s);
@@ -462,6 +464,32 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
     prevEntryMap[e.exId] = prev?.entries.find(en => en.exId === e.exId) ?? null;
   });
 
+  const takeScreenshot = async () => {
+    if (!captureRef.current || !window.html2canvas) return;
+    setCapturing(true);
+    try {
+      const canvas = await window.html2canvas(captureRef.current, {
+        backgroundColor: '#0a0a0a', scale: 2, useCORS: true, logging: false,
+      });
+      canvas.toBlob(async (blob) => {
+        const filename = `${s.dayName}-${s.date.slice(0,10)}.png`;
+        const file = new File([blob], filename, { type: 'image/png' });
+        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+          try { await navigator.share({ files: [file] }); } catch(_) {}
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = filename;
+          document.body.appendChild(a); a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+      }, 'image/png');
+    } finally {
+      setCapturing(false);
+    }
+  };
+
   const isImprovement = (st, prevSet) => {
     if (!prevSet || !st.done) return false;
     if (st.kg != null && prevSet.kg != null && st.kg > prevSet.kg) return true;
@@ -476,6 +504,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
         onBack={() => go({ name: justFinished ? 'home' : 'hist' })}
         right={
           <div style={{ display: 'flex', gap: 6 }}>
+            <Btn kind="ghost" onClick={takeScreenshot} disabled={capturing} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11 }}>
+              {capturing ? '…' : '↓'}
+            </Btn>
             <Btn kind="ghost" onClick={() => setEditing(true)} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11 }}>Bearbeiten</Btn>
             <Btn kind="ghost" onClick={deleteSession} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>Löschen</Btn>
           </div>
@@ -530,6 +561,58 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
           </Card>
         ))}
       </div>
+      {/* off-screen capture target */}
+      <div ref={captureRef} style={{
+        position: 'fixed', top: 0, left: '-9999px', width: 390,
+        background: '#0a0a0a', padding: '20px 18px 24px',
+        fontFamily: UI.fontUi, color: UI.ink,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 3 }}>
+              {new Date(s.date.slice(0,10) + 'T12:00:00').toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{s.dayName}</div>
+          </div>
+          <div style={{ fontSize: 10, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.15em', marginTop: 2 }}>LOGBOOK</div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
+          {[['DAUER', duration != null ? `${duration} min` : '—'], ['VOLUMEN', `${Math.round(vol).toLocaleString('de-DE')} kg`], ['SETS', s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)]].map(([label, value]) => (
+            <div key={label} style={{ background: UI.bgRaised, borderRadius: 10, padding: '8px 12px' }}>
+              <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginBottom: 3 }}>{label}</div>
+              <div style={{ fontFamily: UI.fontNum, fontSize: 16 }}>{value}</div>
+            </div>
+          ))}
+        </div>
+        {s.entries.map((e, i) => (
+          <div key={i} style={{ background: UI.bgRaised, borderRadius: 10, padding: '7px 12px', marginBottom: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.02em' }}>{e.name}</div>
+              <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontNum }}>{e.sets.filter(x => x.done).length}/{e.sets.length}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {e.sets.map((st, j) => {
+                const prev = prevEntryMap[e.exId];
+                const gold = isImprovement(st, prev?.sets?.[j]);
+                return (
+                  <span key={j} style={{
+                    opacity: st.done ? 1 : 0.35,
+                    background: gold ? UI.goldFaint : UI.bgInset,
+                    border: `1px solid ${gold ? UI.goldSoft : 'transparent'}`,
+                    borderRadius: 6, padding: '2px 7px',
+                    fontFamily: UI.fontNum, fontSize: 11,
+                    color: gold ? UI.goldLight : UI.ink,
+                  }}>
+                    {st.kg ?? '—'}<span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                  </span>
+                );
+              })}
+            </div>
+            {e.note && <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 4, fontStyle: 'italic' }}>"{e.note}"</div>}
+          </div>
+        ))}
+      </div>
+
       {editing && (
         <SessionEditSheet
           session={s}
