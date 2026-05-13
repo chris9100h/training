@@ -464,7 +464,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
           </div>
         }
       />
-      <div style={{ padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ padding: '8px 18px 18px', display: 'flex', flexDirection: 'column', gap: 6 }}>
         {justFinished && (
           <Card accent style={{ textAlign: 'center', padding: 14 }}>
             <div style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.15em' }}>SESSION KOMPLETT</div>
@@ -486,8 +486,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
           </Card>
         </div>
         {s.entries.map((e, i) => (
-          <Card key={i} style={{ padding: '8px 12px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+          <Card key={i} style={{ padding: '6px 12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: '0.02em' }}>{e.name}</div>
               <Pill>{e.sets.filter(x => x.done).length} / {e.sets.length}</Pill>
             </div>
