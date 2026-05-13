@@ -184,8 +184,8 @@ function App() {
 
   return (
     <>
-      {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
       {screen}
+      {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
       {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} />}
     </>
   );
