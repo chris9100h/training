@@ -452,6 +452,23 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
     go({ name: 'hist' });
   };
 
+  // previous session per exercise (excluding this session)
+  const prevEntryMap = {};
+  s.entries.forEach(e => {
+    const prev = store.sessions
+      .filter(x => x.ended && x.id !== s.id && x.dayName === s.dayName)
+      .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
+      .find(x => x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null)));
+    prevEntryMap[e.exId] = prev?.entries.find(en => en.exId === e.exId) ?? null;
+  });
+
+  const isImprovement = (st, prevSet) => {
+    if (!prevSet || !st.done) return false;
+    if (st.kg != null && prevSet.kg != null && st.kg > prevSet.kg) return true;
+    if (st.kg === prevSet.kg && st.reps != null && prevSet.reps != null && st.reps > prevSet.reps) return true;
+    return false;
+  };
+
   return (
     <Screen>
       <TopBar title={s.dayName}
@@ -492,16 +509,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
               <Pill>{e.sets.filter(x => x.done).length} / {e.sets.length}</Pill>
             </div>
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              {e.sets.map((st, j) => (
-                <span key={j} style={{
-                  opacity: st.done ? 1 : 0.35,
-                  background: UI.bgInset, borderRadius: 6,
-                  padding: '2px 7px',
-                  fontFamily: UI.fontNum, fontSize: 12, color: UI.ink,
-                }}>
-                  {st.kg ?? '—'}<span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
-                </span>
-              ))}
+              {e.sets.map((st, j) => {
+                const prev = prevEntryMap[e.exId];
+                const gold = isImprovement(st, prev?.sets?.[j]);
+                return (
+                  <span key={j} style={{
+                    opacity: st.done ? 1 : 0.35,
+                    background: gold ? UI.goldFaint : UI.bgInset,
+                    border: `1px solid ${gold ? UI.goldSoft : 'transparent'}`,
+                    borderRadius: 6, padding: '2px 7px',
+                    fontFamily: UI.fontNum, fontSize: 12,
+                    color: gold ? UI.goldLight : UI.ink,
+                  }}>
+                    {st.kg ?? '—'}<span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                  </span>
+                );
+              })}
             </div>
             {e.note && <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 5, fontStyle: 'italic' }}>"{e.note}"</div>}
           </Card>
