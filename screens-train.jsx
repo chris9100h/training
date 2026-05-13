@@ -155,10 +155,77 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
   const [exNoteVal, setExNoteVal] = useStateT('');
+  const [planDiffOpen, setPlanDiffOpen] = useStateT(false);
+  const [planDiff, setPlanDiff] = useStateT([]);
+  const [swapOpen, setSwapOpen] = useStateT(false);
 
   const saveExNote = () => {
     setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === entry.exId ? { ...e, note: exNoteVal.trim() } : e) }));
     setExNoteOpen(false);
+  };
+
+  const swapExercise = async () => {
+    if (!await confirm(`"${entry.name}" austauschen?`, { ok: 'Austauschen' })) return;
+    setSwapOpen(true);
+  };
+
+  const doSwap = (newExId) => {
+    const newEx = LB.findExercise(store, newExId);
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((e, i) => i !== exIdx ? e : { ...e, exId: newExId, name: newEx?.name || '?' }),
+    }));
+    setSwapOpen(false);
+  };
+
+  const computePlanDiff = () => {
+    const schedule = store.schedules?.find(s => s.id === session.scheduleId);
+    const day = schedule?.days?.find(d => d.id === session.dayId);
+    if (!day) return [];
+    return session.entries.reduce((acc, entry, i) => {
+      const planItem = day.items[i];
+      if (!planItem) return acc;
+      if (entry.exId !== planItem.exId) {
+        const oldEx = LB.findExercise(store, planItem.exId);
+        acc.push({ type: 'swap', idx: i, oldName: oldEx?.name || '?', newName: entry.name, newExId: entry.exId });
+      } else if (entry.sets.length !== planItem.sets) {
+        acc.push({ type: 'sets', idx: i, exName: entry.name, oldSets: planItem.sets, newSets: entry.sets.length });
+      }
+      return acc;
+    }, []);
+  };
+
+  const tryFinish = () => {
+    const diffs = computePlanDiff();
+    if (diffs.length > 0) {
+      setPlanDiff(diffs);
+      setFinishOpen(false);
+      setPlanDiffOpen(true);
+    } else {
+      finish();
+    }
+  };
+
+  const applyPlanAndFinish = () => {
+    const schedule = store.schedules?.find(s => s.id === session.scheduleId);
+    const day = schedule?.days?.find(d => d.id === session.dayId);
+    if (schedule && day) {
+      const newItems = day.items.map((item, i) => {
+        const diff = planDiff.find(d => d.idx === i);
+        if (!diff) return item;
+        if (diff.type === 'swap') return { ...item, exId: session.entries[i].exId };
+        if (diff.type === 'sets') return { ...item, sets: session.entries[i].sets.length };
+        return item;
+      });
+      setStore(s => ({
+        ...s,
+        schedules: s.schedules.map(sch => sch.id === schedule.id ? {
+          ...sch,
+          days: sch.days.map(d => d.id === day.id ? { ...d, items: newItems } : d),
+        } : sch),
+      }));
+    }
+    finish();
   };
 
   if (!entry) {
@@ -356,13 +423,21 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             );
           })}
 
-          {/* add set */}
-          <button onClick={addSet} style={{
-            marginTop: 10, width: 36, height: 36, borderRadius: '50%',
-            background: 'transparent', border: `1px solid ${UI.inkLine}`,
-            color: UI.inkSoft, fontSize: 20, lineHeight: 1, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>+</button>
+          {/* add set + swap exercise */}
+          <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+            <button onClick={addSet} style={{
+              width: 36, height: 36, borderRadius: '50%',
+              background: 'transparent', border: `1px solid ${UI.inkLine}`,
+              color: UI.inkSoft, fontSize: 20, lineHeight: 1, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>+</button>
+            <button onClick={swapExercise} style={{
+              width: 36, height: 36, borderRadius: '50%',
+              background: 'transparent', border: `1px solid ${UI.inkLine}`,
+              color: UI.inkSoft, fontSize: 16, lineHeight: 1, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>⇄</button>
+          </div>
         </div>
 
         {/* rest timer */}
@@ -423,7 +498,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={() => setFinishOpen(false)} style={{ flex: 1 }}>Weiter trainieren</Btn>
-          <Btn onClick={finish} style={{ flex: 2 }}>Beenden ✓</Btn>
+          <Btn onClick={tryFinish} style={{ flex: 2 }}>Beenden ✓</Btn>
         </div>
       </Sheet>
 
@@ -463,6 +538,42 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         />
         <Btn onClick={() => setSessionNoteOpen(false)} style={{ marginTop: 12, width: '100%' }}>Speichern</Btn>
       </Sheet>
+
+      {/* plan diff — update plan? */}
+      <Sheet open={planDiffOpen} onClose={() => { setPlanDiffOpen(false); finish(); }} title="Plan updaten?">
+        <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>
+          Änderungen gegenüber Plan:
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+          {planDiff.map((d, i) => (
+            <div key={i} style={{
+              background: UI.bgInset, borderRadius: 10, padding: '10px 14px',
+              fontSize: 13, color: UI.ink, display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              {d.type === 'swap' ? (
+                <>
+                  <span style={{ color: UI.goldLight, fontSize: 15 }}>⇄</span>
+                  <span><span style={{ color: UI.inkSoft }}>{d.oldName}</span>{' → '}<strong>{d.newName}</strong></span>
+                </>
+              ) : (
+                <>
+                  <span style={{ color: UI.goldLight, fontSize: 15 }}>≡</span>
+                  <span><strong>{d.exName}</strong>{': '}
+                    <span style={{ color: UI.inkSoft }}>{d.oldSets} Sätze</span>{' → '}<strong>{d.newSets} Sätze</strong>
+                  </span>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={() => { setPlanDiffOpen(false); finish(); }} style={{ flex: 1 }}>Nein</Btn>
+          <Btn onClick={() => { setPlanDiffOpen(false); applyPlanAndFinish(); }} style={{ flex: 2 }}>Ja, updaten</Btn>
+        </div>
+      </Sheet>
+
+      {/* exercise swap picker */}
+      {swapOpen && <window.Screens.ExercisePicker store={store} onClose={() => setSwapOpen(false)} onPick={doSwap} />}
 
       {confirmEl}
 
