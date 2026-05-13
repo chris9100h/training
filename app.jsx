@@ -51,6 +51,19 @@ function App() {
   const localDirty                = useRefA(false); // true if user changed store after cache load
 
   useEffectA(() => {
+    let hiddenAt = null;
+    const onVisibility = () => {
+      if (document.hidden) {
+        hiddenAt = Date.now();
+      } else if (hiddenAt && Date.now() - hiddenAt > 30 * 60 * 1000) {
+        window.location.reload();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
+  useEffectA(() => {
     if (!('serviceWorker' in navigator)) return;
     navigator.serviceWorker.ready.then(reg => {
       // iOS PWA won't auto-check for SW updates — force it
