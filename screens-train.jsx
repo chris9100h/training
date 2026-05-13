@@ -324,7 +324,6 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               outline: `2px solid ${allDone ? UI.gold : UI.inkLine}`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 14, fontWeight: 700, color: allDone ? '#0a0a0a' : 'transparent',
-              alignSelf: 'center', justifySelf: 'center',
               opacity: anyMissingData && !allDone ? 0.3 : 1,
             }}>✓</button>
             <span />
