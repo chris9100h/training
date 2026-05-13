@@ -51,16 +51,32 @@ function App() {
   const localDirty                = useRefA(false); // true if user changed store after cache load
 
   useEffectA(() => {
-    let hiddenAt = null;
+    const THRESHOLD = 30 * 60 * 1000;
+    const KEY = 'logbook-bg-ts';
+
+    const onHide = () => localStorage.setItem(KEY, Date.now());
+    const onShow = (e) => {
+      if (!e.persisted) return;
+      const ts = localStorage.getItem(KEY);
+      if (ts && Date.now() - Number(ts) > THRESHOLD) window.location.reload();
+    };
+    // visibilitychange as additional fallback
     const onVisibility = () => {
-      if (document.hidden) {
-        hiddenAt = Date.now();
-      } else if (hiddenAt && Date.now() - hiddenAt > 30 * 60 * 1000) {
-        window.location.reload();
+      if (document.hidden) localStorage.setItem(KEY, Date.now());
+      else {
+        const ts = localStorage.getItem(KEY);
+        if (ts && Date.now() - Number(ts) > THRESHOLD) window.location.reload();
       }
     };
+
+    window.addEventListener('pagehide', onHide);
+    window.addEventListener('pageshow', onShow);
     document.addEventListener('visibilitychange', onVisibility);
-    return () => document.removeEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('pageshow', onShow);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   useEffectA(() => {
