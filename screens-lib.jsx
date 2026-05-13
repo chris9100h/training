@@ -1,6 +1,6 @@
 /* Library + History + Session detail + Settings */
 
-const { useState: useStateL, useMemo: useMemoL, useRef: useRefL } = React;
+const { useState: useStateL, useMemo: useMemoL, useRef: useRefL, useEffect: useEffectL } = React;
 
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go }) {
@@ -731,6 +731,14 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
 function SettingsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateL(store.user?.name || '');
+  const [swVersion, setSwVersion] = useStateL('');
+  useEffectL(() => {
+    if (!('caches' in window)) return;
+    caches.keys().then(keys => {
+      const name = keys.find(k => k.startsWith('logbook-'));
+      if (name) setSwVersion(name.replace('logbook-', ''));
+    });
+  }, []);
 
   const saveNickname = () => {
     const trimmed = nickname.trim();
@@ -803,7 +811,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           Alle Daten löschen
         </Btn>
         <div style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'center', marginTop: 8 }}>
-          Logbook · v1.0 · Daten in Supabase
+          Logbook · {swVersion || '…'} · Daten in Supabase
         </div>
       </div>
       {confirmEl}
