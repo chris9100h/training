@@ -464,41 +464,46 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
           </div>
         }
       />
-      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {justFinished && (
-          <Card accent style={{ textAlign: 'center', padding: 18 }}>
+          <Card accent style={{ textAlign: 'center', padding: 14 }}>
             <div style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.15em' }}>SESSION KOMPLETT</div>
-            <div style={{ fontSize: 22, fontWeight: 600, color: UI.gold, marginTop: 4 }}>Stark gemacht 💪</div>
+            <div style={{ fontSize: 20, fontWeight: 600, color: UI.gold, marginTop: 4 }}>Stark gemacht 💪</div>
           </Card>
         )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-          <Card style={{ padding: 12 }}>
+          <Card style={{ padding: '8px 12px' }}>
             <Label>Dauer</Label>
-            <div style={{ fontFamily: UI.fontNum, fontSize: 20 }}>{duration ?? '—'}<span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 2 }}>min</span></div>
+            <div style={{ fontFamily: UI.fontNum, fontSize: 18 }}>{duration ?? '—'}<span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 2 }}>min</span></div>
           </Card>
-          <Card style={{ padding: 12 }}>
+          <Card style={{ padding: '8px 12px' }}>
             <Label>Volumen</Label>
-            <div style={{ fontFamily: UI.fontNum, fontSize: 20 }}>{Math.round(vol).toLocaleString('de-DE')}<span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 2 }}>kg</span></div>
+            <div style={{ fontFamily: UI.fontNum, fontSize: 18 }}>{Math.round(vol).toLocaleString('de-DE')}<span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 2 }}>kg</span></div>
           </Card>
-          <Card style={{ padding: 12 }}>
+          <Card style={{ padding: '8px 12px' }}>
             <Label>Sets</Label>
-            <div style={{ fontFamily: UI.fontNum, fontSize: 20 }}>{s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)}</div>
+            <div style={{ fontFamily: UI.fontNum, fontSize: 18 }}>{s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)}</div>
           </Card>
         </div>
         {s.entries.map((e, i) => (
-          <Card key={i} style={{ padding: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-              <div style={{ fontSize: 15, fontWeight: 600 }}>{e.name}</div>
+          <Card key={i} style={{ padding: '8px 12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: '0.02em' }}>{e.name}</div>
               <Pill>{e.sets.filter(x => x.done).length} / {e.sets.length}</Pill>
             </div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontFamily: UI.fontNum, fontSize: 13 }}>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
               {e.sets.map((st, j) => (
-                <span key={j} style={{ opacity: st.done ? 1 : 0.35 }}>
-                  {st.kg ?? '—'}<span style={{ color: UI.inkFaint }}>×</span>{st.reps ?? '—'}
+                <span key={j} style={{
+                  opacity: st.done ? 1 : 0.35,
+                  background: UI.bgInset, borderRadius: 6,
+                  padding: '2px 7px',
+                  fontFamily: UI.fontNum, fontSize: 12, color: UI.ink,
+                }}>
+                  {st.kg ?? '—'}<span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
                 </span>
               ))}
             </div>
-            {e.note && <div style={{ fontSize: 12, color: UI.inkFaint, marginTop: 6, fontStyle: 'italic' }}>"{e.note}"</div>}
+            {e.note && <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 5, fontStyle: 'italic' }}>"{e.note}"</div>}
           </Card>
         ))}
       </div>
