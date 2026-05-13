@@ -301,23 +301,12 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           })}
         </div>
 
-        {/* heading + session note chip */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.2 }}>{entry.name}</div>
-            <div style={{ fontSize: 14, color: UI.inkSoft, marginTop: 4 }}>
-              Set {currentSetNum} of {entry.sets.length}
-            </div>
+        {/* heading */}
+        <div>
+          <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.2 }}>{entry.name}</div>
+          <div style={{ fontSize: 14, color: UI.inkSoft, marginTop: 4 }}>
+            Set {currentSetNum} of {entry.sets.length}
           </div>
-          <button onClick={() => setNotePicker(true)} style={{
-            background: entry.note ? UI.goldFaint : 'transparent',
-            border: `1px solid ${entry.note ? UI.goldSoft : UI.inkLine}`,
-            borderRadius: 20, padding: '6px 12px', cursor: 'pointer',
-            color: entry.note ? UI.gold : UI.inkFaint, fontSize: 12,
-            fontFamily: UI.fontUi, flexShrink: 0, marginTop: 2,
-          }}>
-            📝 {entry.note ? 'Notiz' : '+ Notiz'}
-          </button>
         </div>
 
         {/* set table */}
@@ -423,8 +412,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             );
           })}
 
-          {/* add set + swap exercise */}
-          <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+          {/* add set + swap exercise + note */}
+          <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
             <button onClick={addSet} style={{
               width: 36, height: 36, borderRadius: '50%',
               background: 'transparent', border: `1px solid ${UI.inkLine}`,
@@ -437,6 +426,16 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               color: UI.inkSoft, fontSize: 16, lineHeight: 1, cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>⇄</button>
+            <div style={{ flex: 1 }} />
+            <button onClick={() => setNotePicker(true)} style={{
+              background: entry.note ? UI.goldFaint : 'transparent',
+              border: `1px solid ${entry.note ? UI.goldSoft : UI.inkLine}`,
+              borderRadius: 20, padding: '6px 12px', cursor: 'pointer',
+              color: entry.note ? UI.gold : UI.inkFaint, fontSize: 12,
+              fontFamily: UI.fontUi, flexShrink: 0,
+            }}>
+              📝 {entry.note ? 'Notiz' : '+ Notiz'}
+            </button>
           </div>
         </div>
 
