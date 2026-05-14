@@ -732,6 +732,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateL(store.user?.name || '');
   const [swVersion, setSwVersion] = useStateL('');
+  const [pushStatus, setPushStatus] = useStateL(null);
   useEffectL(() => {
     if (!('caches' in window)) return;
     caches.keys().then(keys => {
@@ -739,6 +740,25 @@ function SettingsScreen({ store, setStore, go, userId }) {
       if (name) setSwVersion(name.replace('logbook-', ''));
     });
   }, []);
+
+  const testPushover = async () => {
+    setPushStatus('sending');
+    try {
+      const res = await fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: 'Pause vorbei — weiter gehts! 💪', title: 'Logbook Test' }),
+      });
+      const data = await res.json();
+      setPushStatus(data.status === 1 ? 'ok' : `error: ${JSON.stringify(data)}`);
+    } catch (e) {
+      setPushStatus(`error: ${e.message}`);
+    }
+    setTimeout(() => setPushStatus(null), 5000);
+  };
 
   const saveNickname = () => {
     const trimmed = nickname.trim();
@@ -796,6 +816,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
             onChange={(v) => setStore(s => ({ ...s, settings: { ...s.settings, restDefault: v } }))}
           />
         </Card>
+        <Btn kind="ghost" onClick={testPushover}>
+          {pushStatus === 'sending' ? 'Sende…' : pushStatus === 'ok' ? '✓ Notification gesendet' : pushStatus ? pushStatus : 'Push-Notification testen'}
+        </Btn>
         <Btn kind="ghost" onClick={exportData}>Daten exportieren (JSON)</Btn>
         <Btn kind="ghost" onClick={async () => {
           if ('caches' in window) {
