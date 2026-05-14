@@ -734,6 +734,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
   const [pushEnabled, setPushEnabled] = useStateL(() => localStorage.getItem('logbook-push-enabled') === 'true');
+  const pushStatusTimer = React.useRef(null);
   useEffectL(() => {
     if (!('caches' in window)) return;
     caches.keys().then(keys => {
@@ -748,8 +749,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
     localStorage.setItem('logbook-push-enabled', String(next));
   };
 
-  const testPushover = async () => {
-    setPushStatus('sending');
+  const testPushover = async (delaySeconds = 0) => {
+    clearTimeout(pushStatusTimer.current);
+    setPushStatus(delaySeconds > 0 ? `Sende… Screen jetzt sperren!` : 'Sende…');
     try {
       const res = await fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
         method: 'POST',
@@ -757,14 +759,20 @@ function SettingsScreen({ store, setStore, go, userId }) {
           'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: 'Pause vorbei — weiter gehts! 💪', title: 'Logbook Test' }),
+        body: JSON.stringify({ message: 'Pause vorbei — weiter gehts! 💪', title: 'Logbook Test', delaySeconds }),
       });
-      const data = await res.json();
-      setPushStatus(data.status === 1 ? 'ok' : `error: ${JSON.stringify(data)}`);
+      if (res.status === 202) {
+        setPushStatus(`✓ Geplant — Notification in ~${delaySeconds}s`);
+        pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000);
+      } else {
+        const data = await res.json();
+        setPushStatus(data.status === 1 ? '✓ Gesendet' : `Fehler: ${JSON.stringify(data)}`);
+        pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
+      }
     } catch (e) {
-      setPushStatus(`error: ${e.message}`);
+      setPushStatus(`Fehler: ${e.message}`);
+      pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
     }
-    setTimeout(() => setPushStatus(null), 5000);
   };
 
   const saveNickname = () => {
@@ -844,9 +852,18 @@ function SettingsScreen({ store, setStore, go, userId }) {
             </div>
           </div>
           {pushEnabled && (
-            <Btn kind="ghost" onClick={testPushover} style={{ marginTop: 10 }}>
-              {pushStatus === 'sending' ? 'Sende…' : pushStatus === 'ok' ? '✓ Notification gesendet' : pushStatus ? pushStatus : 'Test senden'}
-            </Btn>
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn kind="ghost" onClick={() => testPushover(0)} style={{ flex: 1, fontSize: 12 }}>Sofort</Btn>
+                <Btn kind="ghost" onClick={() => testPushover(10)} style={{ flex: 1, fontSize: 12 }}>10s Delay</Btn>
+                <Btn kind="ghost" onClick={() => testPushover(30)} style={{ flex: 1, fontSize: 12 }}>30s Delay</Btn>
+              </div>
+              {pushStatus && (
+                <div style={{ fontSize: 12, color: pushStatus.startsWith('✓') ? UI.gold : UI.inkSoft, textAlign: 'center' }}>
+                  {pushStatus}
+                </div>
+              )}
+            </div>
           )}
         </Card>
         <Btn kind="ghost" onClick={exportData}>Daten exportieren (JSON)</Btn>
