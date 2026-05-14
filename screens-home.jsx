@@ -292,7 +292,7 @@ function HomeScreen({ store, setStore, go }) {
   }
 
   return (
-    <Screen>
+    <Screen style={{ position: 'relative' }}>
       <TopBar
         title={`Hey ${store.user.name}`}
         sub={new Date().toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
@@ -302,20 +302,27 @@ function HomeScreen({ store, setStore, go }) {
       {store.inProgress && (() => {
         const activeSession = store.sessions.find(s => s.id === store.inProgress);
         return activeSession ? (
-          <button onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{
-            flexShrink: 0, margin: '0 18px',
-            marginTop: 14,
-            background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
-            borderRadius: 14, padding: '12px 16px',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            cursor: 'pointer', width: 'calc(100% - 36px)',
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 50,
+            background: 'rgba(212,164,55,0.08)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <div style={{ textAlign: 'left' }}>
-              <div style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginBottom: 2 }}>TRAINING LÄUFT</div>
-              <div style={{ fontSize: 15, fontWeight: 600, color: UI.ink }}>{activeSession.dayName}</div>
-            </div>
-            <div style={{ fontSize: 20, color: UI.gold }}>→</div>
-          </button>
+            <button onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{
+              background: UI.bgRaised, border: `1px solid ${UI.goldSoft}`,
+              borderRadius: 20, padding: '28px 32px',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+              cursor: 'pointer', boxShadow: `0 0 40px rgba(212,164,55,0.15)`,
+            }}>
+              <div style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.15em' }}>TRAINING LÄUFT</div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: UI.ink }}>{activeSession.dayName}</div>
+              <div style={{
+                marginTop: 4, background: UI.gold, color: '#0a0a0a',
+                borderRadius: 12, padding: '10px 28px',
+                fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi,
+              }}>Weitermachen →</div>
+            </button>
+          </div>
         ) : null;
       })()}
 
