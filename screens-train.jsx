@@ -152,36 +152,15 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   useEffectT(() => {
     if (!restStart) return;
     if (localStorage.getItem('logbook-push-enabled') !== 'true') return;
-    const endsAt = restStart + restDef * 1000;
-    const PUSH_URL = 'https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover';
-    const PUSH_HEADERS = {
-      'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
-      'Content-Type': 'application/json',
-    };
-    const PUSH_BODY = JSON.stringify({ message: 'Pause vorbei — weiter gehts! 💪' });
-
-    let localTimer = null;
-    let swUsed = false;
-
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.ready.then(reg => {
-        if (reg.active) {
-          swUsed = true;
-          reg.active.postMessage({ type: 'SCHEDULE_PUSHOVER', endsAt, url: PUSH_URL, headers: PUSH_HEADERS, body: PUSH_BODY });
-        } else {
-          localTimer = setTimeout(() => fetch(PUSH_URL, { method: 'POST', headers: PUSH_HEADERS, body: PUSH_BODY }).catch(() => {}), Math.max(0, endsAt - Date.now()));
-        }
-      }).catch(() => {
-        localTimer = setTimeout(() => fetch(PUSH_URL, { method: 'POST', headers: PUSH_HEADERS, body: PUSH_BODY }).catch(() => {}), Math.max(0, endsAt - Date.now()));
-      });
-    } else {
-      localTimer = setTimeout(() => fetch(PUSH_URL, { method: 'POST', headers: PUSH_HEADERS, body: PUSH_BODY }).catch(() => {}), Math.max(0, endsAt - Date.now()));
-    }
-
-    return () => {
-      clearTimeout(localTimer);
-      if (swUsed) navigator.serviceWorker.ready.then(reg => reg.active?.postMessage({ type: 'CANCEL_PUSHOVER' })).catch(() => {});
-    };
+    const delaySeconds = Math.round(Math.max(0, restStart + restDef * 1000 - Date.now()) / 1000);
+    fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ delaySeconds }),
+    }).catch(() => {});
   }, [restStart]);
 
   const [confirmEl, confirm] = useConfirm();

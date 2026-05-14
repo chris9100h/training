@@ -12,7 +12,11 @@ Deno.serve(async (req) => {
   const token = Deno.env.get('PUSHOVER_TOKEN') ?? 'a2vfbj4vu92hwzp5t9b6cbzkc18vw9';
   const user  = Deno.env.get('PUSHOVER_USER')  ?? 'uxrg8gh43b1tpw31pq4r4i4ebqrhjt';
 
-  const { message = 'Pause vorbei — weiter gehts! 💪', title = 'Logbook' } = await req.json().catch(() => ({}));
+  const { message = 'Pause vorbei — weiter gehts! 💪', title = 'Logbook', delaySeconds = 0 } = await req.json().catch(() => ({}));
+
+  if (delaySeconds > 0) {
+    await new Promise(r => setTimeout(r, Math.max(0, delaySeconds - 5) * 1000));
+  }
 
   const res = await fetch('https://api.pushover.net/1/messages.json', {
     method: 'POST',
