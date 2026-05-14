@@ -131,6 +131,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   // ── rest timer ────────────────────────────────────────────
   const [restStart, setRestStart] = useStateT(null);
   const [now, setNow] = useStateT(Date.now());
+  const restNotified = useRefT(false);
   useEffectT(() => {
     const t = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(t);
@@ -148,6 +149,24 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const restElapsed = restStart ? Math.floor((now - restStart) / 1000) : null;
   const restRemaining = restElapsed != null ? Math.max(0, restDef - restElapsed) : null;
   const restPct = restElapsed != null ? Math.min(100, (restElapsed / restDef) * 100) : 0;
+
+  useEffectT(() => {
+    if (restRemaining === 0 && !restNotified.current) {
+      restNotified.current = true;
+      navigator.vibrate?.([200, 100, 200, 100, 200]);
+      fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: 'Pause vorbei — weiter gehts! 💪' }),
+      }).catch(() => {});
+    }
+    if (restRemaining === null || restRemaining > 0) {
+      restNotified.current = false;
+    }
+  }, [restRemaining]);
 
   const [confirmEl, confirm] = useConfirm();
   const [finishOpen, setFinishOpen] = useStateT(false);
