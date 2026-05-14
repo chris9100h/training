@@ -299,6 +299,26 @@ function HomeScreen({ store, setStore, go }) {
         right={<Btn kind="icon" onClick={() => go({ name: 'settings' })} style={{ fontSize: 20 }}>⋯</Btn>}
       />
 
+      {store.inProgress && (() => {
+        const activeSession = store.sessions.find(s => s.id === store.inProgress);
+        return activeSession ? (
+          <button onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{
+            flexShrink: 0, margin: '0 18px',
+            marginTop: 14,
+            background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
+            borderRadius: 14, padding: '12px 16px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            cursor: 'pointer', width: 'calc(100% - 36px)',
+          }}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginBottom: 2 }}>TRAINING LÄUFT</div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: UI.ink }}>{activeSession.dayName}</div>
+            </div>
+            <div style={{ fontSize: 20, color: UI.gold }}>→</div>
+          </button>
+        ) : null;
+      })()}
+
       <div style={{ padding: '14px 18px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
 
         {/* period navigation */}
