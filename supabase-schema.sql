@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS public.user_settings (
   user_id                 uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   active_schedule_id      text,
   cycle_index             integer NOT NULL DEFAULT 0,
+  cycle_start_date        text,
   last_advanced_date      text,
   unit                    text NOT NULL DEFAULT 'kg',
   rest_default            integer NOT NULL DEFAULT 120,
