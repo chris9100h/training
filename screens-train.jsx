@@ -131,7 +131,6 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   // ── rest timer ────────────────────────────────────────────
   const [restStart, setRestStart] = useStateT(null);
   const [now, setNow] = useStateT(Date.now());
-  const restNotified = useRefT(false);
   useEffectT(() => {
     const t = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(t);
@@ -151,8 +150,9 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const restPct = restElapsed != null ? Math.min(100, (restElapsed / restDef) * 100) : 0;
 
   useEffectT(() => {
-    if (restRemaining === 0 && !restNotified.current) {
-      restNotified.current = true;
+    if (!restStart) return;
+    const msRemaining = Math.max(0, restDef * 1000 - (Date.now() - restStart));
+    const t = setTimeout(() => {
       fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
         method: 'POST',
         headers: {
@@ -161,11 +161,9 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         },
         body: JSON.stringify({ message: 'Pause vorbei — weiter gehts! 💪' }),
       }).catch(() => {});
-    }
-    if (restRemaining === null || restRemaining > 0) {
-      restNotified.current = false;
-    }
-  }, [restRemaining]);
+    }, msRemaining);
+    return () => clearTimeout(t);
+  }, [restStart]);
 
   const [confirmEl, confirm] = useConfirm();
   const [finishOpen, setFinishOpen] = useStateT(false);
