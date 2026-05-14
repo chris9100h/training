@@ -153,7 +153,6 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   useEffectT(() => {
     if (restRemaining === 0 && !restNotified.current) {
       restNotified.current = true;
-      navigator.vibrate?.([200, 100, 200, 100, 200]);
       fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
         method: 'POST',
         headers: {
