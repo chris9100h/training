@@ -151,6 +151,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   useEffectT(() => {
     if (!restStart) return;
+    if (localStorage.getItem('logbook-push-enabled') !== 'true') return;
     const msRemaining = Math.max(0, restDef * 1000 - (Date.now() - restStart));
     const t = setTimeout(() => {
       fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {

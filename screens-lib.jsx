@@ -733,6 +733,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [nickname, setNickname] = useStateL(store.user?.name || '');
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
+  const [pushEnabled, setPushEnabled] = useStateL(() => localStorage.getItem('logbook-push-enabled') === 'true');
   useEffectL(() => {
     if (!('caches' in window)) return;
     caches.keys().then(keys => {
@@ -740,6 +741,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
       if (name) setSwVersion(name.replace('logbook-', ''));
     });
   }, []);
+
+  const togglePush = () => {
+    const next = !pushEnabled;
+    setPushEnabled(next);
+    localStorage.setItem('logbook-push-enabled', String(next));
+  };
 
   const testPushover = async () => {
     setPushStatus('sending');
@@ -816,9 +823,32 @@ function SettingsScreen({ store, setStore, go, userId }) {
             onChange={(v) => setStore(s => ({ ...s, settings: { ...s.settings, restDefault: v } }))}
           />
         </Card>
-        <Btn kind="ghost" onClick={testPushover}>
-          {pushStatus === 'sending' ? 'Sende…' : pushStatus === 'ok' ? '✓ Notification gesendet' : pushStatus ? pushStatus : 'Push-Notification testen'}
-        </Btn>
+        <Card>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Label style={{ marginBottom: 0 }}>Push-Benachrichtigungen</Label>
+            <div
+              onClick={togglePush}
+              style={{
+                width: 44, height: 26, borderRadius: 13, cursor: 'pointer',
+                background: pushEnabled ? UI.gold : UI.bgInset,
+                border: `1px solid ${pushEnabled ? UI.gold : UI.inkFaint}`,
+                position: 'relative', transition: 'background 0.2s',
+              }}
+            >
+              <div style={{
+                position: 'absolute', top: 3, left: pushEnabled ? 21 : 3,
+                width: 18, height: 18, borderRadius: 9,
+                background: pushEnabled ? '#000' : UI.inkFaint,
+                transition: 'left 0.2s',
+              }} />
+            </div>
+          </div>
+          {pushEnabled && (
+            <Btn kind="ghost" onClick={testPushover} style={{ marginTop: 10 }}>
+              {pushStatus === 'sending' ? 'Sende…' : pushStatus === 'ok' ? '✓ Notification gesendet' : pushStatus ? pushStatus : 'Test senden'}
+            </Btn>
+          )}
+        </Card>
         <Btn kind="ghost" onClick={exportData}>Daten exportieren (JSON)</Btn>
         <Btn kind="ghost" onClick={async () => {
           if ('caches' in window) {
