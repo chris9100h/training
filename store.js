@@ -161,16 +161,27 @@ async function syncStore(prev, next, userId) {
     ops.push(_supabase.from('profiles').upsert({ id: userId, name: next.user.name }));
   }
 
-  ops.push(_supabase.from('user_settings').upsert({
-    user_id: userId,
-    active_schedule_id: next.activeScheduleId ?? null,
-    cycle_index: next.cycleIndex ?? 0,
-    cycle_start_date: next.cycleStartDate ?? null,
-    last_advanced_date: next.lastAdvancedDate ?? null,
-    unit: next.settings?.unit || 'kg',
-    rest_default: next.settings?.restDefault || 120,
-    in_progress_session_id: next.inProgress ?? null,
-  }));
+  const settingsChanged =
+    prev.activeScheduleId  !== next.activeScheduleId  ||
+    prev.cycleIndex        !== next.cycleIndex        ||
+    prev.cycleStartDate    !== next.cycleStartDate    ||
+    prev.lastAdvancedDate  !== next.lastAdvancedDate  ||
+    prev.inProgress        !== next.inProgress        ||
+    prev.settings?.unit       !== next.settings?.unit ||
+    prev.settings?.restDefault !== next.settings?.restDefault;
+
+  if (settingsChanged) {
+    ops.push(_supabase.from('user_settings').upsert({
+      user_id: userId,
+      active_schedule_id: next.activeScheduleId ?? null,
+      cycle_index: next.cycleIndex ?? 0,
+      cycle_start_date: next.cycleStartDate ?? null,
+      last_advanced_date: next.lastAdvancedDate ?? null,
+      unit: next.settings?.unit || 'kg',
+      rest_default: next.settings?.restDefault || 120,
+      in_progress_session_id: next.inProgress ?? null,
+    }));
+  }
 
   await Promise.all(ops);
 }
