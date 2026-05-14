@@ -15,14 +15,18 @@ Deno.serve(async (req) => {
   const { message = 'Pause vorbei — weiter gehts! 💪', title = 'Logbook', delaySeconds = 0 } = await req.json().catch(() => ({}));
 
   const send = async () => {
+    console.log(`[pushover] start, delaySeconds=${delaySeconds}`);
     if (delaySeconds > 0) {
       await new Promise(r => setTimeout(r, delaySeconds * 1000));
     }
-    await fetch('https://api.pushover.net/1/messages.json', {
+    console.log('[pushover] delay done, calling Pushover API');
+    const r = await fetch('https://api.pushover.net/1/messages.json', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, user, message, title }),
-    }).catch(() => {});
+    });
+    const body = await r.text();
+    console.log(`[pushover] response ${r.status}: ${body}`);
   };
 
   // Respond immediately so the client connection closes.
