@@ -14,19 +14,23 @@ Deno.serve(async (req) => {
 
   const { message = 'Pause vorbei — weiter gehts! 💪', title = 'Logbook', delaySeconds = 0 } = await req.json().catch(() => ({}));
 
-  if (delaySeconds > 0) {
-    await new Promise(r => setTimeout(r, Math.max(0, delaySeconds - 5) * 1000));
-  }
+  const send = async () => {
+    if (delaySeconds > 0) {
+      await new Promise(r => setTimeout(r, delaySeconds * 1000));
+    }
+    await fetch('https://api.pushover.net/1/messages.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, user, message, title }),
+    }).catch(() => {});
+  };
 
-  const res = await fetch('https://api.pushover.net/1/messages.json', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, user, message, title }),
-  });
+  // Respond immediately so the client connection closes.
+  // waitUntil keeps the function alive in the background until send() resolves.
+  EdgeRuntime.waitUntil(send());
 
-  const data = await res.json();
-  return new Response(JSON.stringify(data), {
-    status: res.status,
+  return new Response(JSON.stringify({ scheduled: true, delaySeconds }), {
+    status: 202,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 });
