@@ -1,6 +1,6 @@
 /* Library + History + Session detail + Settings */
 
-const { useState: useStateL, useMemo: useMemoL } = React;
+const { useState: useStateL, useMemo: useMemoL, useRef: useRefL, useEffect: useEffectL } = React;
 
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go }) {
@@ -441,6 +441,8 @@ function HistoryScreen({ store, go }) {
 function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
   const [confirmEl, confirm] = useConfirm();
   const [editing, setEditing] = useStateL(false);
+  const [capturing, setCapturing] = useStateL(false);
+  const captureRef = useRefL(null);
   const s = store.sessions.find(x => x.id === sessionId);
   if (!s) { go({ name: 'hist' }); return null; }
   const vol = totalVolume(s);
@@ -462,6 +464,32 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
     prevEntryMap[e.exId] = prev?.entries.find(en => en.exId === e.exId) ?? null;
   });
 
+  const takeScreenshot = async () => {
+    if (!captureRef.current || !window.html2canvas) return;
+    setCapturing(true);
+    try {
+      const canvas = await window.html2canvas(captureRef.current, {
+        backgroundColor: '#0a0a0a', scale: 2, useCORS: true, logging: false,
+      });
+      canvas.toBlob(async (blob) => {
+        const filename = `${s.dayName}-${s.date.slice(0,10)}.png`;
+        const file = new File([blob], filename, { type: 'image/png' });
+        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+          try { await navigator.share({ files: [file] }); } catch(_) {}
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = filename;
+          document.body.appendChild(a); a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+      }, 'image/png');
+    } finally {
+      setCapturing(false);
+    }
+  };
+
   const isImprovement = (st, prevSet) => {
     if (!prevSet || !st.done) return false;
     if (st.kg != null && prevSet.kg != null && st.kg > prevSet.kg) return true;
@@ -476,6 +504,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
         onBack={() => go({ name: justFinished ? 'home' : 'hist' })}
         right={
           <div style={{ display: 'flex', gap: 6 }}>
+            <Btn kind="ghost" onClick={takeScreenshot} disabled={capturing} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11 }}>
+              {capturing ? '…' : '↓'}
+            </Btn>
             <Btn kind="ghost" onClick={() => setEditing(true)} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11 }}>Bearbeiten</Btn>
             <Btn kind="ghost" onClick={deleteSession} style={{ minHeight: 32, padding: '4px 10px', fontSize: 11, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>Löschen</Btn>
           </div>
@@ -521,7 +552,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
                     fontFamily: UI.fontNum, fontSize: 12,
                     color: gold ? UI.goldLight : UI.ink,
                   }}>
-                    {st.kg ?? '—'}<span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                    {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
                   </span>
                 );
               })}
@@ -530,6 +561,58 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
           </Card>
         ))}
       </div>
+      {/* off-screen capture target */}
+      <div ref={captureRef} style={{
+        position: 'fixed', top: 0, left: '-9999px', width: 390,
+        background: '#0a0a0a', padding: '20px 18px 24px',
+        fontFamily: UI.fontUi, color: UI.ink,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 3 }}>
+              {new Date(s.date.slice(0,10) + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{s.dayName}</div>
+          </div>
+          <div style={{ fontSize: 10, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.15em', marginTop: 2 }}>LOGBOOK</div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
+          {[['DURATION', duration != null ? `${duration} min` : '—'], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} kg`], ['SETS', s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)]].map(([label, value]) => (
+            <div key={label} style={{ background: UI.bgRaised, borderRadius: 10, padding: '8px 12px' }}>
+              <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginBottom: 3 }}>{label}</div>
+              <div style={{ fontFamily: UI.fontNum, fontSize: 16 }}>{value}</div>
+            </div>
+          ))}
+        </div>
+        {s.entries.map((e, i) => (
+          <div key={i} style={{ background: UI.bgRaised, borderRadius: 10, padding: '7px 12px', marginBottom: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.02em' }}>{e.name}</div>
+              <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontNum }}>{e.sets.filter(x => x.done).length}/{e.sets.length}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {e.sets.map((st, j) => {
+                const prev = prevEntryMap[e.exId];
+                const gold = isImprovement(st, prev?.sets?.[j]);
+                return (
+                  <span key={j} style={{
+                    opacity: st.done ? 1 : 0.35,
+                    background: gold ? UI.goldFaint : UI.bgInset,
+                    border: `1px solid ${gold ? UI.goldSoft : 'transparent'}`,
+                    borderRadius: 6, padding: '2px 7px',
+                    fontFamily: UI.fontNum, fontSize: 11,
+                    color: gold ? UI.goldLight : UI.ink,
+                  }}>
+                    {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                  </span>
+                );
+              })}
+            </div>
+            {e.note && <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 4, fontStyle: 'italic' }}>"{e.note}"</div>}
+          </div>
+        ))}
+      </div>
+
       {editing && (
         <SessionEditSheet
           session={s}
@@ -648,6 +731,41 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
 function SettingsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateL(store.user?.name || '');
+  const [swVersion, setSwVersion] = useStateL('');
+  const [pushStatus, setPushStatus] = useStateL(null);
+  const [pushEnabled, setPushEnabled] = useStateL(() => localStorage.getItem('logbook-push-enabled') === 'true');
+  useEffectL(() => {
+    if (!('caches' in window)) return;
+    caches.keys().then(keys => {
+      const name = keys.find(k => k.startsWith('logbook-'));
+      if (name) setSwVersion(name.replace('logbook-', ''));
+    });
+  }, []);
+
+  const togglePush = () => {
+    const next = !pushEnabled;
+    setPushEnabled(next);
+    localStorage.setItem('logbook-push-enabled', String(next));
+  };
+
+  const testPushover = async () => {
+    setPushStatus('sending');
+    try {
+      const res = await fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: 'Pause vorbei — weiter gehts! 💪', title: 'Logbook Test' }),
+      });
+      const data = await res.json();
+      setPushStatus(data.status === 1 ? 'ok' : `error: ${JSON.stringify(data)}`);
+    } catch (e) {
+      setPushStatus(`error: ${e.message}`);
+    }
+    setTimeout(() => setPushStatus(null), 5000);
+  };
 
   const saveNickname = () => {
     const trimmed = nickname.trim();
@@ -705,6 +823,32 @@ function SettingsScreen({ store, setStore, go, userId }) {
             onChange={(v) => setStore(s => ({ ...s, settings: { ...s.settings, restDefault: v } }))}
           />
         </Card>
+        <Card>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Label style={{ marginBottom: 0 }}>Push-Benachrichtigungen</Label>
+            <div
+              onClick={togglePush}
+              style={{
+                width: 44, height: 26, borderRadius: 13, cursor: 'pointer',
+                background: pushEnabled ? UI.gold : UI.bgInset,
+                border: `1px solid ${pushEnabled ? UI.gold : UI.inkFaint}`,
+                position: 'relative', transition: 'background 0.2s',
+              }}
+            >
+              <div style={{
+                position: 'absolute', top: 3, left: pushEnabled ? 21 : 3,
+                width: 18, height: 18, borderRadius: 9,
+                background: pushEnabled ? '#000' : UI.inkFaint,
+                transition: 'left 0.2s',
+              }} />
+            </div>
+          </div>
+          {pushEnabled && (
+            <Btn kind="ghost" onClick={testPushover} style={{ marginTop: 10 }}>
+              {pushStatus === 'sending' ? 'Sende…' : pushStatus === 'ok' ? '✓ Notification gesendet' : pushStatus ? pushStatus : 'Test senden'}
+            </Btn>
+          )}
+        </Card>
         <Btn kind="ghost" onClick={exportData}>Daten exportieren (JSON)</Btn>
         <Btn kind="ghost" onClick={async () => {
           if ('caches' in window) {
@@ -720,7 +864,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           Alle Daten löschen
         </Btn>
         <div style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'center', marginTop: 8 }}>
-          Logbook · v1.0 · Daten in Supabase
+          Logbook · {swVersion || '…'} · Daten in Supabase
         </div>
       </div>
       {confirmEl}

@@ -292,12 +292,46 @@ function HomeScreen({ store, setStore, go }) {
   }
 
   return (
-    <Screen>
+    <Screen style={{ position: 'relative' }}>
       <TopBar
         title={`Hey ${store.user.name}`}
         sub={new Date().toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
         right={<Btn kind="icon" onClick={() => go({ name: 'settings' })} style={{ fontSize: 20 }}>⋯</Btn>}
       />
+
+      {store.inProgress && (() => {
+        const activeSession = store.sessions.find(s => s.id === store.inProgress);
+        return activeSession ? (
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 50,
+            background: 'rgba(212,164,55,0.08)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <div style={{
+              background: UI.bgRaised, border: `1px solid ${UI.goldSoft}`,
+              borderRadius: 20, padding: '28px 32px',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+              boxShadow: `0 0 40px rgba(212,164,55,0.15)`,
+            }}>
+              <div style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.15em' }}>TRAINING LÄUFT</div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: UI.ink }}>{activeSession.dayName}</div>
+              <button onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{
+                marginTop: 4, background: UI.gold, color: '#0a0a0a',
+                border: 'none', borderRadius: 12, padding: '10px 28px',
+                fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi, cursor: 'pointer', width: '100%',
+              }}>Weitermachen →</button>
+              <button onClick={async () => {
+                if (!await confirm('Session wird gelöscht.', { title: 'Training abbrechen?', ok: 'Abbrechen', cancel: 'Zurück', danger: true })) return;
+                setStore(s => ({ ...s, sessions: s.sessions.filter(x => x.id !== store.inProgress), inProgress: null }));
+              }} style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                fontSize: 13, color: UI.danger, fontFamily: UI.fontUi, padding: '4px 0',
+              }}>Training abbrechen</button>
+            </div>
+          </div>
+        ) : null;
+      })()}
 
       <div style={{ padding: '14px 18px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
 

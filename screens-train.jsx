@@ -149,6 +149,23 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const restRemaining = restElapsed != null ? Math.max(0, restDef - restElapsed) : null;
   const restPct = restElapsed != null ? Math.min(100, (restElapsed / restDef) * 100) : 0;
 
+  useEffectT(() => {
+    if (!restStart) return;
+    if (localStorage.getItem('logbook-push-enabled') !== 'true') return;
+    const msRemaining = Math.max(0, restDef * 1000 - (Date.now() - restStart));
+    const t = setTimeout(() => {
+      fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: 'Pause vorbei — weiter gehts! 💪' }),
+      }).catch(() => {});
+    }, msRemaining);
+    return () => clearTimeout(t);
+  }, [restStart]);
+
   const [confirmEl, confirm] = useConfirm();
   const [finishOpen, setFinishOpen] = useStateT(false);
   const [notePicker, setNotePicker] = useStateT(false);
