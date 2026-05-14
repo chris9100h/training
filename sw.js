@@ -1,4 +1,4 @@
-const CACHE = 'logbook-1.13';
+const CACHE = 'logbook-1.14';
 const ASSETS = [
   '/training/',
   '/training/index.html',
@@ -26,6 +26,27 @@ self.addEventListener('activate', e => {
       Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
+});
+
+let _pushTimer = null;
+let _pushCancel = null;
+
+self.addEventListener('message', e => {
+  if (e.data?.type === 'SCHEDULE_PUSHOVER') {
+    if (_pushTimer) { clearTimeout(_pushTimer); _pushCancel?.(); }
+    const { endsAt, url, headers, body } = e.data;
+    const delay = Math.max(0, endsAt - Date.now());
+    let resolve;
+    const p = new Promise(res => { resolve = res; }).catch(() => {});
+    _pushCancel = () => { _pushTimer = null; resolve(); };
+    _pushTimer = setTimeout(() => {
+      _pushTimer = null;
+      fetch(url, { method: 'POST', headers, body }).catch(() => {}).finally(resolve);
+    }, delay);
+    e.waitUntil(p);
+  } else if (e.data?.type === 'CANCEL_PUSHOVER') {
+    if (_pushTimer) { clearTimeout(_pushTimer); _pushCancel?.(); _pushTimer = null; }
+  }
 });
 
 self.addEventListener('fetch', e => {
