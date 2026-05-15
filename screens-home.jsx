@@ -474,24 +474,26 @@ function HomeScreen({ store, setStore, go }) {
             </div>
           </BracketFrame>
         ) : (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', padding: '4px 0' }}>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '4px 0' }}>
             <div className="micro-gold" style={{ marginBottom: 6 }}>{cardLabel}</div>
             <div className="display" style={{
               fontSize: 56, color: UI.gold,
               fontWeight: 300, fontStyle: 'italic',
-              letterSpacing: '0.04em', lineHeight: 1, marginBottom: 4,
+              letterSpacing: '0.04em', lineHeight: 1, marginBottom: 24,
             }}>
               {activeDay.name}
             </div>
-            <div style={{ display: 'flex', gap: 14, alignItems: 'baseline', marginBottom: 22 }}>
-              <span className="num" style={{ color: UI.inkSoft, fontSize: 11 }}>{activeDay.items.length} ÜBUNGEN</span>
-              <span style={{ color: UI.hair, fontSize: 7 }}>◆</span>
-              <span className="num" style={{ color: UI.inkSoft, fontSize: 11 }}>
-                ~{Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))} MIN
-              </span>
+
+            {/* Complications — 3 SubDials */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 28 }}>
+              <SubDial size={80} label="ÜBUNGEN" value={activeDay.items.length} />
+              <div style={{ width: '0.5px', height: 36, background: UI.hair }} />
+              <SubDial size={80} label="MIN" value={`~${Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))}`} />
+              <div style={{ width: '0.5px', height: 36, background: UI.hair }} />
+              <SubDial size={80} label="SÄTZE" value={activeDay.items.reduce((a,b) => a + b.sets, 0)} />
             </div>
 
-            {/* CTA */}
+            {/* CTAs */}
             {isSlotDone ? (
               <Frame style={{ padding: '14px 18px', width: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -505,12 +507,12 @@ function HomeScreen({ store, setStore, go }) {
                 </div>
               </Frame>
             ) : (
-              <>
-                <CrownButton onClick={startSession} size={170}>
+              <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
+                <CrownButton onClick={startSession} size={140}>
                   <span className="micro" style={{ color: 'rgba(10,8,5,0.65)', letterSpacing: '0.22em', fontWeight: 600 }}>
                     {isFutureSlot && !isViewingToday ? 'PLAN' : isViewingToday ? 'START' : 'LOG'}
                   </span>
-                  <svg width="26" height="26" viewBox="0 0 24 24" fill="#0a0805" style={{ marginTop: 2 }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="#0a0805" style={{ marginTop: 2 }}>
                     <path d="M8 5v14l11-7z"/>
                   </svg>
                   <span className="micro" style={{ color: 'rgba(10,8,5,0.55)', marginTop: 2 }}>
@@ -518,20 +520,17 @@ function HomeScreen({ store, setStore, go }) {
                   </span>
                 </CrownButton>
                 {!weekdayMode && isViewingToday && (
-                  <button onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{
-                    marginTop: 26,
-                    background: 'transparent',
-                    border: `0.5px solid ${UI.hairStrong}`,
-                    borderRadius: 999,
-                    color: UI.inkSoft,
-                    fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
-                    cursor: 'pointer', padding: '10px 22px',
-                    fontFamily: UI.fontUi, fontWeight: 500,
-                  }}>
-                    Tag überspringen
-                  </button>
+                  <CrownButton
+                    onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }}
+                    size={110}
+                    style={{ animation: 'none', opacity: 0.75 }}
+                  >
+                    <span className="micro" style={{ color: 'rgba(10,8,5,0.6)', letterSpacing: '0.18em', fontWeight: 600 }}>TAG</span>
+                    <span style={{ fontSize: 22, color: 'rgba(10,8,5,0.65)', fontFamily: UI.fontDisplay, fontStyle: 'italic', lineHeight: 1 }}>→</span>
+                    <span className="micro" style={{ color: 'rgba(10,8,5,0.45)', marginTop: 1 }}>SKIP</span>
+                  </CrownButton>
                 )}
-              </>
+              </div>
             )}
           </div>
         )}
