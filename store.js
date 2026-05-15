@@ -79,7 +79,7 @@ async function loadFromSupabase(userId) {
   // First login after email confirmation — profile not yet created
   if (!profileRes.data) {
     const { data: { user } } = await _supabase.auth.getUser();
-    const name = user?.user_metadata?.name || user?.email?.split('@')[0] || 'Athlet';
+    const name = user?.user_metadata?.name || user?.email?.split('@')[0] || 'Athlete';
     await setupNewUser(userId, name);
     return loadFromSupabase(userId);
   }

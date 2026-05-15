@@ -11,7 +11,7 @@ function UpdateBanner({ onUpdate }) {
       padding: '8px 16px', gap: 12,
     }}>
       <span style={{ fontSize: 13, color: UI.gold, fontFamily: UI.fontUi }}>
-        Neue Version verfügbar
+        New version available
       </span>
       <button onClick={onUpdate} style={{
         background: UI.gold, color: '#0a0a0a',
@@ -19,7 +19,7 @@ function UpdateBanner({ onUpdate }) {
         padding: '5px 12px', fontSize: 12, fontWeight: 600,
         fontFamily: UI.fontUi, cursor: 'pointer', flexShrink: 0,
       }}>
-        Jetzt updaten
+        Update now
       </button>
     </div>
   );
@@ -39,7 +39,7 @@ function LoadingScreen() {
         </div>
         <div style={{ fontSize: 18, fontWeight: 700, color: UI.ink, letterSpacing: '0.14em' }}>LOGBOOK</div>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginTop: 10, animation: 'timerPulse 1.6s ease-in-out infinite' }}>
-          Laden…
+          Loading…
         </div>
       </div>
     </Screen>
