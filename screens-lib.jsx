@@ -750,7 +750,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
                   );
                 })}
               </div>
-              {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic' }}>"{e.note}"</div>}
+              {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{e.note}</div>}
             </div>
             {i < s.entries.length - 1 && <div style={{ height: '0.5px', background: UI.hair, marginBottom: 14 }} />}
           </div>

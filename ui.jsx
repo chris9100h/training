@@ -13,6 +13,7 @@ const UI = {
   ink:      'var(--ink)',
   inkSoft:  'var(--ink-soft)',
   inkFaint: 'var(--ink-faint)',
+  inkGhost: 'var(--ink-ghost)',
   inkLine:  'var(--hair)',
   hair:     'var(--hair)',
   hairStrong: 'var(--hair-strong)',
