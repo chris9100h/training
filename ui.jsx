@@ -555,9 +555,9 @@ function CrownButton({ children, onClick, size = 180, disabled, style = {} }) {
 function Bezel({ children, style = {} }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 4px', ...style }}>
-      <Hairline />
+      <div style={{ flex: 1, height: '0.5px', background: UI.hair }} />
       <span className="micro" style={{ color: UI.inkFaint, whiteSpace: 'nowrap' }}>{children}</span>
-      <Hairline />
+      <div style={{ flex: 1, height: '0.5px', background: UI.hair }} />
     </div>
   );
 }
