@@ -422,11 +422,15 @@ function HistoryScreen({ store, go }) {
                   {date.toLocaleDateString('de-DE', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()} · {days === 0 ? 'HEUTE' : `${days}D HER`}
                 </div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 4 }}>
                 <div style={{ fontSize: 17, fontWeight: 600 }}>{s.dayName}</div>
-                <div style={{ fontSize: 12, color: UI.gold, fontFamily: UI.fontNum }}>{vol.toLocaleString('de-DE')} kg</div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: UI.gold, fontFamily: UI.fontNum, lineHeight: 1 }}>
+                    {vol.toLocaleString('de-DE')}<span style={{ fontSize: 11, fontWeight: 400, marginLeft: 2, color: UI.inkSoft }}>kg</span>
+                  </div>
+                </div>
               </div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2 }}>
+              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 4 }}>
                 {s.entries.length} Übungen · {setsLogged} Sets
               </div>
             </Card>

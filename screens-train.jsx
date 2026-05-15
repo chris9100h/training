@@ -295,7 +295,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       <div style={{ flex: 1, overflow: 'auto', padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* progress chips — clickable, horizontally scrollable */}
-        <div ref={chipRowRef} style={{ display: 'flex', gap: 6, margin: '-4px -18px 0', padding: '0 18px', overflowX: 'auto', scrollbarWidth: 'none' }}>
+        <div ref={chipRowRef} style={{ display: 'flex', gap: 6, margin: '-4px -18px 0', padding: '4px 18px', overflowX: 'auto', scrollbarWidth: 'none' }}>
           {session.entries.map((e, i) => {
             const done = e.sets.every(s => s.done);
             const active = i === exIdx;
@@ -303,23 +303,36 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               <button key={i}
                 onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
                 style={{
-                  flexShrink: 0, padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
+                  flexShrink: 0, padding: active ? '6px 14px' : '5px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
                   background: active ? UI.gold : done ? 'rgba(212,164,55,0.15)' : UI.bgRaised,
                   color: active ? '#0a0a0a' : done ? UI.gold : UI.inkSoft,
-                  fontSize: 11, fontFamily: UI.fontUi, fontWeight: active ? 600 : 400,
+                  fontSize: active ? 12 : 11, fontFamily: UI.fontUi, fontWeight: active ? 700 : done ? 500 : 400,
                   whiteSpace: 'nowrap',
+                  boxShadow: active ? '0 2px 16px rgba(212,164,55,0.5)' : 'none',
+                  WebkitTapHighlightColor: 'transparent',
                 }}>
-                {i + 1}. {e.name}
+                {done && !active ? '✓ ' : `${i + 1}. `}{e.name}
               </button>
             );
           })}
         </div>
 
-        {/* heading */}
-        <div>
+        {/* heading card */}
+        <div style={{
+          background: `linear-gradient(135deg, rgba(212,164,55,0.08) 0%, transparent 65%)`,
+          border: `1px solid rgba(212,164,55,0.14)`,
+          borderRadius: 16, padding: '14px 16px 14px 20px',
+          position: 'relative', overflow: 'hidden',
+        }}>
+          <div style={{
+            position: 'absolute', top: 0, left: 0, width: 4, height: '100%',
+            background: `linear-gradient(180deg, ${UI.gold}, ${UI.goldSoft})`,
+            borderRadius: '16px 0 0 16px',
+          }} />
           <div style={{ fontSize: 30, fontWeight: 700, lineHeight: 1.15, letterSpacing: '-0.01em' }}>{entry.name}</div>
-          <div style={{ fontSize: 14, color: UI.inkSoft, marginTop: 6 }}>
-            Satz {currentSetNum} von {entry.sets.length}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 13, color: UI.inkSoft }}>Satz {currentSetNum} von {entry.sets.length}</div>
+            {(exercise?.tags || []).map(t => <Pill key={t} gold style={{ fontSize: 9, padding: '2px 7px' }}>{t}</Pill>)}
           </div>
         </div>
 

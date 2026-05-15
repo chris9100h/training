@@ -29,12 +29,14 @@ function LoginScreen() {
       <div style={{ padding: '24px 24px', display: 'flex', flexDirection: 'column', gap: 20, justifyContent: 'center', flex: 1 }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{
-            width: 64, height: 64, margin: '0 auto 14px', borderRadius: '50%',
+            width: 80, height: 80, margin: '0 auto 18px', borderRadius: '50%',
             border: `1.5px solid ${UI.gold}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: UI.gold, fontSize: 28, fontWeight: 700,
+            color: UI.gold, fontSize: 36, fontWeight: 700, fontFamily: UI.fontNum,
+            boxShadow: `0 0 40px rgba(212,164,55,0.15)`,
+            animation: 'logoPulse 3s ease-in-out infinite',
           }}>L</div>
-          <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: '0.04em', color: UI.gold }}>LOGBOOK</div>
-          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginTop: 4 }}>
+          <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: '0.1em', color: UI.ink }}>LOGBOOK</div>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.14em', marginTop: 5 }}>
             iron · sweat · numbers
           </div>
         </div>
@@ -293,11 +295,33 @@ function HomeScreen({ store, setStore, go }) {
 
   return (
     <Screen style={{ position: 'relative' }}>
-      <TopBar
-        title={`Hey ${store.user.name}`}
-        sub={new Date().toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
-        right={<Btn kind="icon" onClick={() => go({ name: 'settings' })} style={{ fontSize: 20 }}>⋯</Btn>}
-      />
+      {/* Custom dramatic home header */}
+      <div style={{
+        flexShrink: 0,
+        padding: `calc(22px + env(safe-area-inset-top, 0px)) 20px 18px`,
+        borderBottom: `1px solid rgba(212,164,55,0.12)`,
+        position: 'sticky', top: 0, zIndex: 5,
+        backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+        background: 'rgba(10,10,10,0.92)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 5 }}>
+              {new Date().toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
+            </div>
+            <div style={{ fontSize: 26, fontWeight: 700, color: UI.ink, lineHeight: 1.1 }}>
+              Hey, <span style={{ color: UI.gold }}>{store.user.name}</span>
+            </div>
+          </div>
+          <button onClick={() => go({ name: 'settings' })} style={{
+            width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+            background: 'rgba(240,236,224,0.05)', border: `1px solid ${UI.inkLine}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', color: UI.inkSoft, fontSize: 20,
+            WebkitTapHighlightColor: 'transparent',
+          }}>⋯</button>
+        </div>
+      </div>
 
       {store.inProgress && (() => {
         const activeSession = store.sessions.find(s => s.id === store.inProgress);
@@ -338,12 +362,24 @@ function HomeScreen({ store, setStore, go }) {
       <div style={{ padding: '14px 18px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
 
         {/* period navigation */}
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <button onClick={goBack} style={navBtn(weekOffset <= minOffset)}>←</button>
-          <div style={{ flex: 1, textAlign: 'center', fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.08em' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button onClick={goBack} style={{
+            ...navBtn(weekOffset <= minOffset),
+            width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: weekOffset <= minOffset ? 'transparent' : 'rgba(240,236,224,0.05)',
+            border: `1px solid ${weekOffset <= minOffset ? 'transparent' : UI.inkLine}`,
+            fontSize: 18,
+          }}>‹</button>
+          <div style={{ flex: 1, textAlign: 'center', fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontNum, letterSpacing: '0.1em', fontWeight: 500 }}>
             {periodLabel}
           </div>
-          <button onClick={goForward} disabled={weekOffset === 0} style={navBtn(weekOffset === 0)}>→</button>
+          <button onClick={goForward} disabled={weekOffset === 0} style={{
+            ...navBtn(weekOffset === 0),
+            width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: weekOffset === 0 ? 'transparent' : 'rgba(240,236,224,0.05)',
+            border: `1px solid ${weekOffset === 0 ? 'transparent' : UI.inkLine}`,
+            fontSize: 18,
+          }}>›</button>
         </div>
 
         {/* day strip */}
@@ -420,9 +456,12 @@ function HomeScreen({ store, setStore, go }) {
               })}
             </div>
             {isSlotDone ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', color: UI.ok }}>
-                <span style={{ fontSize: 20, lineHeight: 1 }}>{'✓'}</span>
-                <span style={{ fontSize: 14, fontWeight: 500 }}>Training erledigt</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'rgba(127,176,105,0.08)', border: `1px solid rgba(127,176,105,0.2)`, borderRadius: 12, color: UI.ok }}>
+                <span style={{ fontSize: 24, lineHeight: 1 }}>✓</span>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>Training erledigt</div>
+                  <div style={{ fontSize: 12, opacity: 0.75 }}>Gut gemacht!</div>
+                </div>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
