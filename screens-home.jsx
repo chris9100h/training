@@ -486,11 +486,11 @@ function HomeScreen({ store, setStore, go }) {
 
             {/* Complications — 3 SubDials */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 28 }}>
-              <SubDial size={80} label="ÜBUNGEN" value={activeDay.items.length} />
+              <SubDial size={80} label="EXERCISES" value={activeDay.items.length} />
               <div style={{ width: '0.5px', height: 36, background: UI.hair }} />
               <SubDial size={80} label="MIN" value={`~${Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))}`} />
               <div style={{ width: '0.5px', height: 36, background: UI.hair }} />
-              <SubDial size={80} label="SÄTZE" value={activeDay.items.reduce((a,b) => a + b.sets, 0)} />
+              <SubDial size={80} label="SETS" value={activeDay.items.reduce((a,b) => a + b.sets, 0)} />
             </div>
 
             {/* CTAs */}
