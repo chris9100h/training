@@ -394,7 +394,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                 border: current ? `1px solid rgba(212,164,55,0.22)` : 'none',
                 borderBottom: !current ? `1px solid ${UI.inkLine}` : undefined,
                 opacity: s.done ? 0.45 : 1,
-                animation: flashSet === i ? 'rowFlash 0.65s ease forwards' : 'none',
+                animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
               }}>
                 {/* set number circle */}
                 <div style={{
