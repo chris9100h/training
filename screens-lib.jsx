@@ -28,15 +28,35 @@ function LibraryScreen({ store, setStore, go }) {
   };
 
   const recent = useMemoL(() => {
-    const seen = new Map();
-    [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||'')).forEach(s => {
-      s.entries.forEach(e => { if (!seen.has(e.exId)) seen.set(e.exId, s.ended); });
+    const sortedSessions = [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''));
+    const lastTwo = new Map();
+    const seenFirst = new Map();
+    sortedSessions.forEach(s => {
+      s.entries.forEach(e => {
+        const arr = lastTwo.get(e.exId) || [];
+        if (arr.length < 2) {
+          lastTwo.set(e.exId, [...arr, s]);
+          if (arr.length === 0) seenFirst.set(e.exId, s.ended);
+        }
+      });
     });
+    const e1rm = (entry) => entry
+      ? Math.max(0, ...(entry.sets || []).filter(s => s.kg && s.reps).map(s => s.kg * (1 + s.reps / 30)), 0)
+      : 0;
     return store.exercises
-      .filter(e => seen.has(e.id))
-      .sort((a,b) => (seen.get(b.id)||'').localeCompare(seen.get(a.id)||''))
+      .filter(e => seenFirst.has(e.id))
+      .sort((a,b) => (seenFirst.get(b.id)||'').localeCompare(seenFirst.get(a.id)||''))
       .slice(0, 12)
-      .map(e => ({ ex: e, last: seen.get(e.id) }));
+      .map(e => {
+        const [sess0, sess1] = lastTwo.get(e.id) || [];
+        const lastEntry = sess0?.entries.find(en => en.exId === e.id);
+        const prevEntry = sess1?.entries.find(en => en.exId === e.id);
+        const cur = e1rm(lastEntry), prev = e1rm(prevEntry);
+        const trend = cur > 0 && prev > 0
+          ? cur > prev * 1.005 ? 'up' : cur < prev * 0.995 ? 'down' : 'same'
+          : null;
+        return { ex: e, last: seenFirst.get(e.id), lastEntry, trend };
+      });
   }, [store.exercises, store.sessions]);
 
   const filtered = useMemoL(() => {
@@ -93,24 +113,30 @@ function LibraryScreen({ store, setStore, go }) {
         )}
 
         {tab === 'recent' && recent.length === 0 && (
-          <Empty title="Noch nichts trainiert" sub="Sobald du Sessions loggst, erscheinen Übungen hier." />
+          <Empty title="Noch nichts trainiert" sub="Sobald du Sessions loggst, erscheinen Übungen hier." icon={ICON_BARBELL} />
         )}
 
-        {tab === 'recent' && recent.map(({ ex, last }) => {
+        {tab === 'recent' && recent.map(({ ex, last, lastEntry, trend }) => {
           const days = Math.round((Date.now() - new Date(last)) / 86400000);
-          const lastEntry = LB.lastSessionForExercise(store, ex.id)?.entry;
           const top = lastEntry?.sets?.[0];
+          const trendColor = trend === 'up' ? UI.ok : trend === 'down' ? UI.danger : UI.inkFaint;
+          const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : trend === 'same' ? '→' : null;
           return (
             <Card key={ex.id} onClick={() => go({ name: 'exercise', exId: ex.id })} style={{ cursor: 'pointer', padding: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 600 }}>{ex.name}</div>
                   <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, marginTop: 2 }}>
                     {days === 0 ? 'heute' : `${days}d her`}
-                    {top && ` · letztes Set: ${top.kg}kg × ${top.reps}`}
+                    {top && ` · ${top.kg}kg × ${top.reps}`}
                   </div>
                 </div>
-                <span style={{ color: UI.gold, fontSize: 18 }}>›</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                  {trendIcon && (
+                    <span style={{ color: trendColor, fontSize: 15, fontFamily: UI.fontNum, fontWeight: 700, lineHeight: 1 }}>{trendIcon}</span>
+                  )}
+                  <ChevronRight />
+                </div>
               </div>
             </Card>
           );
@@ -126,8 +152,8 @@ function LibraryScreen({ store, setStore, go }) {
                 borderColor: isSelected ? UI.danger : undefined,
                 background: isSelected ? 'rgba(200,116,105,0.08)' : undefined,
               }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 600 }}>{e.name}</div>
                   <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
                     {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
@@ -143,14 +169,14 @@ function LibraryScreen({ store, setStore, go }) {
                     {isSelected && <span style={{ color: '#fff', fontSize: 13, lineHeight: 1 }}>✓</span>}
                   </div>
                 ) : (
-                  <span style={{ color: UI.gold, fontSize: 18 }}>›</span>
+                  <ChevronRight />
                 )}
               </div>
             </Card>
           );
         })}
         {tab === 'all' && filtered.length === 0 && (
-          <Empty title="Keine Übungen" action={<Btn onClick={() => setCreating(true)}>Übung anlegen</Btn>} />
+          <Empty title="Keine Übungen" action={<Btn onClick={() => setCreating(true)}>Übung anlegen</Btn>} icon={ICON_BARBELL} />
         )}
       </div>
 
@@ -408,7 +434,7 @@ function HistoryScreen({ store, go }) {
       <TopBar title="History" />
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {sessions.length === 0 && (
-          <Empty title="Keine Sessions" sub="Logge dein erstes Training, um Verlauf zu sehen." />
+          <Empty title="Keine Sessions" sub="Logge dein erstes Training, um Verlauf zu sehen." icon={ICON_HISTORY} />
         )}
         {sessions.map(s => {
           const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
@@ -517,13 +543,46 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
         }
       />
       <div style={{ padding: '8px 18px 18px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {justFinished && (
-          <Card accent style={{ textAlign: 'center', padding: '20px 14px' }}>
-            <div style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.15em', marginBottom: 6 }}>SESSION KOMPLETT</div>
-            <div style={{ fontSize: 26, fontWeight: 700, color: UI.gold }}>Stark gemacht 💪</div>
-            <div style={{ fontSize: 13, color: UI.inkSoft, marginTop: 6 }}>Ergebnis gespeichert.</div>
-          </Card>
-        )}
+        {justFinished && (() => {
+          const celebStats = [
+            { label: 'VOLUMEN', value: `${Math.round(vol).toLocaleString('de-DE')} kg`, gold: true },
+            ...(duration ? [{ label: 'DAUER', value: `${duration} min`, gold: false }] : []),
+            { label: 'SETS', value: String(s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)), gold: false },
+          ];
+          return (
+            <div style={{
+              background: `linear-gradient(160deg, rgba(212,164,55,0.16) 0%, rgba(212,164,55,0.04) 55%, transparent 100%)`,
+              border: `1px solid rgba(212,164,55,0.3)`,
+              borderRadius: 20, padding: '24px 20px 20px',
+              textAlign: 'center', marginBottom: 4,
+              boxShadow: '0 0 50px rgba(212,164,55,0.1), 0 4px 28px rgba(0,0,0,0.4)',
+              animation: 'fadeUp 0.45s ease',
+            }}>
+              <div style={{ fontSize: 16, letterSpacing: 10, color: UI.gold, opacity: 0.55, marginBottom: 14 }}>✦ ✦ ✦</div>
+              <div style={{
+                width: 80, height: 80, margin: '0 auto 16px', borderRadius: '50%',
+                border: `1.5px solid ${UI.gold}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 36, animation: 'logoPulse 3s ease-in-out infinite',
+              }}>🏆</div>
+              <div style={{ fontSize: 10, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.2em', marginBottom: 8 }}>SESSION KOMPLETT</div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: UI.ink, lineHeight: 1.15, marginBottom: 18 }}>
+                Stark gemacht <span style={{ fontSize: 30 }}>💪</span>
+              </div>
+              <div style={{ display: 'flex', borderTop: `1px solid ${UI.inkLine}`, paddingTop: 16 }}>
+                {celebStats.map((st, k) => (
+                  <div key={st.label} style={{
+                    flex: 1, borderRight: k < celebStats.length - 1 ? `1px solid ${UI.inkLine}` : 'none',
+                    padding: '2px 0',
+                  }}>
+                    <div style={{ fontFamily: UI.fontNum, fontSize: 20, fontWeight: 700, color: st.gold ? UI.gold : UI.ink, lineHeight: 1 }}>{st.value}</div>
+                    <div style={{ fontSize: 9, color: UI.inkFaint, marginTop: 5, letterSpacing: '0.1em' }}>{st.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
           <Card style={{ padding: '8px 12px' }}>
             <Label>Dauer</Label>

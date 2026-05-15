@@ -25,6 +25,7 @@ function Screen({ children, scroll = true, style = {} }) {
       background: UI.bg, color: UI.ink, fontFamily: UI.fontUi,
       display: 'flex', flexDirection: 'column',
       overflow: scroll ? 'auto' : 'hidden',
+      animation: 'screenIn 0.16s ease',
       ...style,
     }}>{children}</div>
   );
@@ -292,15 +293,46 @@ function Sheet({ open, onClose, title, children }) {
   );
 }
 
-function Empty({ title, sub, action }) {
+function Empty({ title, sub, action, icon }) {
   return (
     <div style={{ padding: '40px 20px', textAlign: 'center', color: UI.inkSoft }}>
+      {icon && <div style={{ marginBottom: 14, color: UI.inkLine, display: 'flex', justifyContent: 'center' }}>{icon}</div>}
       <div style={{ fontSize: 16, color: UI.ink, marginBottom: 4 }}>{title}</div>
       {sub && <div style={{ fontSize: 13 }}>{sub}</div>}
       {action && <div style={{ marginTop: 16 }}>{action}</div>}
     </div>
   );
 }
+
+function ChevronRight({ color }) {
+  return (
+    <svg width="10" height="18" viewBox="0 0 10 18" fill="none" stroke={color || UI.gold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1.5 1.5 8.5 9l-7 7.5"/>
+    </svg>
+  );
+}
+
+const ICON_HISTORY = (
+  <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 3"/>
+  </svg>
+);
+const ICON_BARBELL = (
+  <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="6" y1="12" x2="18" y2="12"/>
+    <rect x="1" y="9.5" width="3" height="5" rx="1"/>
+    <rect x="20" y="9.5" width="3" height="5" rx="1"/>
+    <rect x="4" y="10.5" width="2" height="3" rx="0.5"/>
+    <rect x="18" y="10.5" width="2" height="3" rx="0.5"/>
+  </svg>
+);
+const ICON_CALENDAR = (
+  <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="18" rx="2.5"/>
+    <path d="M16 2v4M8 2v4M3 10h18"/>
+    <circle cx="8" cy="16" r="1.2" fill="currentColor"/><circle cx="12" cy="16" r="1.2" fill="currentColor"/>
+  </svg>
+);
 
 function useConfirm() {
   const [state, setState] = React.useState(null);
@@ -324,4 +356,4 @@ function useConfirm() {
   return [el, confirm];
 }
 
-Object.assign(window, { UI, Screen, TopBar, TabBar, Btn, Card, Label, Input, Stepper, Pill, Sheet, Empty, btnPrimary, btnGhost, btnIcon, useConfirm, MUSCLES });
+Object.assign(window, { UI, Screen, TopBar, TabBar, Btn, Card, Label, Input, Stepper, Pill, Sheet, Empty, ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR, btnPrimary, btnGhost, btnIcon, useConfirm, MUSCLES });

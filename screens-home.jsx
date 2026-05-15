@@ -286,6 +286,7 @@ function HomeScreen({ store, setStore, go }) {
             title="Noch kein Plan"
             sub="Lege einen Trainingsplan an, um loszulegen."
             action={<Btn onClick={() => go({ name: 'schedule-new' })}>Plan anlegen</Btn>}
+            icon={ICON_CALENDAR}
           />
         </div>
         {confirmEl}
@@ -321,6 +322,22 @@ function HomeScreen({ store, setStore, go }) {
             WebkitTapHighlightColor: 'transparent',
           }}>⋯</button>
         </div>
+        {!weekdayMode && sch && dayCount > 0 && weekOffset === 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginBottom: 5 }}>
+              <span>ZYKLUS {currentCycleNum + 1}</span>
+              <span style={{ color: UI.gold }}>{dayIdx + 1} / {dayCount}</span>
+            </div>
+            <div style={{ height: 3, background: UI.inkLine, borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%',
+                width: `${Math.round(((dayIdx + 1) / dayCount) * 100)}%`,
+                background: `linear-gradient(90deg, ${UI.gold}, ${UI.goldLight})`,
+                borderRadius: 2,
+              }} />
+            </div>
+          </div>
+        )}
       </div>
 
       {store.inProgress && (() => {

@@ -57,6 +57,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const completeSet = (setIdx) => {
     updateSet(setIdx, { done: true });
     setRestStart(Date.now());
+    setFlashSet(setIdx);
+    setTimeout(() => setFlashSet(null), 400);
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
     if (updatedSets.every(st => st.done)) {
       setTimeout(() => navigate(1), 600);
@@ -162,6 +164,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       body: JSON.stringify({ delaySeconds, nonce: String(restStart) }),
     }).catch(() => {});
   }, [restStart]);
+
+  const [flashSet, setFlashSet] = useStateT(null);
 
   const [confirmEl, confirm] = useConfirm();
   const [finishOpen, setFinishOpen] = useStateT(false);
@@ -357,6 +361,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               fontSize: 18, fontWeight: 700, color: allDone ? '#0a0a0a' : 'transparent',
               opacity: anyMissingData && !allDone ? 0.3 : 1,
               WebkitTapHighlightColor: 'transparent',
+              animation: allDone ? 'checkBounce 0.35s cubic-bezier(0.34,1.56,0.64,1)' : 'none',
             }}>✓</button>
             <span />
           </div>
@@ -434,6 +439,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                     opacity: !s.done && (!s.kg || !s.reps) ? 0.35 : 1,
                     flexShrink: 0,
                     WebkitTapHighlightColor: 'transparent',
+                    animation: flashSet === i ? 'checkBounce 0.35s cubic-bezier(0.34,1.56,0.64,1)' : 'none',
                   }}>
                   ✓
                 </button>
