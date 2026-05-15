@@ -685,53 +685,80 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
       {/* off-screen capture target */}
       <div ref={captureRef} style={{
         position: 'fixed', top: 0, left: '-9999px', width: 390,
-        background: '#07060a', padding: '20px 18px 24px',
+        background: '#07060a', padding: '22px 20px 26px',
         fontFamily: UI.fontUi, color: UI.ink,
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+        {/* top gold rule */}
+        <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
+
+        {/* header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
           <div>
             <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 4 }}>
               {new Date(s.date.slice(0,10) + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
             </div>
-            <div className="display" style={{ fontSize: 22 }}>{s.dayName}</div>
+            <div className="display" style={{ fontSize: 24 }}>{s.dayName}</div>
           </div>
-          <div className="micro-gold" style={{ marginTop: 2 }}>LOGBOOK</div>
+          <div style={{ textAlign: 'right' }}>
+            <div className="micro-gold" style={{ letterSpacing: '0.18em' }}>LOGBOOK</div>
+            <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>HAUTE HORLOGERIE</div>
+          </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
-          {[['DURATION', duration != null ? `${duration} min` : '—'], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} kg`], ['SETS', s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)]].map(([label, value]) => (
-            <div key={label} style={{ background: UI.bgRaised, borderRadius: 10, padding: '8px 12px' }}>
-              <div className="micro" style={{ marginBottom: 3 }}>{label}</div>
-              <div className="num" style={{ fontSize: 16 }}>{value}</div>
+
+        {/* hairline divider */}
+        <div style={{ height: '0.5px', background: UI.hair, marginBottom: 14 }} />
+
+        {/* stats row — 3 columns with vertical hairlines */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', marginBottom: 14 }}>
+          {[['DURATION', duration != null ? `${duration} min` : '—'], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} kg`], ['SETS', s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)]].map(([label, value], idx) => (
+            <div key={label} style={{
+              padding: '6px 12px',
+              borderRight: idx < 2 ? `0.5px solid ${UI.hair}` : 'none',
+              textAlign: idx === 0 ? 'left' : idx === 2 ? 'right' : 'center',
+            }}>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{label}</div>
+              <div className="num" style={{ fontSize: 16, color: UI.gold }}>{value}</div>
             </div>
           ))}
         </div>
+
+        {/* gold divider before entries */}
+        <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />
+
+        {/* exercise entries as hairline rows */}
         {s.entries.map((e, i) => (
-          <div key={i} style={{ background: UI.bgRaised, borderRadius: 10, padding: '7px 12px', marginBottom: 6 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <div style={{ fontSize: 12, fontWeight: 600 }}>{e.name}</div>
-              <div className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{e.sets.filter(x => x.done).length}/{e.sets.length}</div>
+          <div key={i}>
+            <div style={{ paddingBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <div className="display" style={{ fontSize: 15 }}>{e.name}</div>
+                <div className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{e.sets.filter(x => x.done).length}/{e.sets.length}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {e.sets.map((st, j) => {
+                  const prev = prevEntryMap[e.exId];
+                  const gold = isImprovement(st, prev?.sets?.[j]);
+                  return (
+                    <span key={j} style={{
+                      opacity: st.done ? 1 : 0.35,
+                      background: gold ? UI.goldFaint : UI.bgInset,
+                      border: `0.5px solid ${gold ? UI.goldSoft : UI.hair}`,
+                      borderRadius: 4, padding: '2px 7px',
+                      fontFamily: UI.fontNum, fontSize: 11,
+                      color: gold ? UI.goldLight : UI.ink,
+                    }}>
+                      {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                    </span>
+                  );
+                })}
+              </div>
+              {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic' }}>"{e.note}"</div>}
             </div>
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              {e.sets.map((st, j) => {
-                const prev = prevEntryMap[e.exId];
-                const gold = isImprovement(st, prev?.sets?.[j]);
-                return (
-                  <span key={j} style={{
-                    opacity: st.done ? 1 : 0.35,
-                    background: gold ? UI.goldFaint : UI.bgInset,
-                    border: `0.5px solid ${gold ? UI.goldSoft : 'transparent'}`,
-                    borderRadius: 6, padding: '2px 7px',
-                    fontFamily: UI.fontNum, fontSize: 11,
-                    color: gold ? UI.goldLight : UI.ink,
-                  }}>
-                    {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
-                  </span>
-                );
-              })}
-            </div>
-            {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 4, fontStyle: 'italic' }}>"{e.note}"</div>}
+            {i < s.entries.length - 1 && <div style={{ height: '0.5px', background: UI.hair, marginBottom: 14 }} />}
           </div>
         ))}
+
+        {/* bottom gold rule */}
+        <div style={{ height: '0.5px', background: UI.gold, marginTop: 4 }} />
       </div>
 
       {editing && (
