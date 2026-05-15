@@ -130,17 +130,17 @@ function TabBar({ active, onChange }) {
         border: `0.5px solid ${UI.hair}`,
         borderRadius: 999,
         padding: 6,
-        display: 'flex',
-        position: 'relative',
         boxShadow: '0 20px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(236,228,208,0.05)',
       }}>
-        {/* moving gold indicator pill */}
+        {/* Inner wrapper — position: relative here so 100% = tabs' actual width, not outer padded width */}
+        <div style={{ display: 'flex', position: 'relative' }}>
+        {/* moving gold indicator pill — left/width now use inner width so centering is exact */}
         {idx >= 0 && (
           <div style={{
             position: 'absolute',
-            left: `calc(${(idx * 100) / tabs.length}% + 6px)`,
-            top: 6, bottom: 6,
-            width: `calc(${100 / tabs.length}% - 12px)`,
+            left: `calc(${(idx * 100) / tabs.length}% + 4px)`,
+            top: 0, bottom: 0,
+            width: `calc(${100 / tabs.length}% - 8px)`,
             background: 'linear-gradient(180deg, rgba(201,169,97,0.18), rgba(201,169,97,0.06))',
             border: `0.5px solid ${UI.goldSoft}`,
             borderRadius: 999,
@@ -148,12 +148,12 @@ function TabBar({ active, onChange }) {
             pointerEvents: 'none',
           }} />
         )}
-        {/* gold dot — pinned to exact center of each tab slot, independent of pill width */}
+        {/* gold dot — centered at tab midpoint; top: -2 peeks above inner wrapper into the 6px outer padding */}
         {idx >= 0 && (
           <div style={{
             position: 'absolute',
             left: `${(idx + 0.5) * 100 / tabs.length}%`,
-            top: 4,
+            top: -2,
             transform: 'translateX(-50%)',
             width: 3, height: 3, borderRadius: 2,
             background: UI.gold,
@@ -183,6 +183,7 @@ function TabBar({ active, onChange }) {
             </button>
           );
         })}
+        </div>
       </div>
     </div>
   );
