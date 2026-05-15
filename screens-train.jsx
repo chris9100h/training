@@ -329,7 +329,11 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             background: `linear-gradient(180deg, ${UI.gold}, ${UI.goldSoft})`,
             borderRadius: '16px 0 0 16px',
           }} />
-          <div style={{ fontSize: 30, fontWeight: 700, lineHeight: 1.15, letterSpacing: '-0.01em' }}>{entry.name}</div>
+          <div style={{
+            fontSize: Math.max(15, Math.min(30, Math.floor(500 / Math.max(entry.name.length, 1)))),
+            fontWeight: 700, lineHeight: 1.15, letterSpacing: '-0.01em',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>{entry.name}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
             <div style={{ fontSize: 13, color: UI.inkSoft }}>Satz {currentSetNum} von {entry.sets.length}</div>
             {(exercise?.tags || []).map(t => <Pill key={t} gold style={{ fontSize: 9, padding: '2px 7px' }}>{t}</Pill>)}
