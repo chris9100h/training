@@ -289,7 +289,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   };
 
   return (
-    <Screen scroll={false} style={{ position: 'relative' }}>
+    <Screen scroll={false}>
       {/* Top: close + session timer */}
       <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 8px', display: 'flex', alignItems: 'center', gap: 14 }}>
         <button onClick={abandon} style={{
@@ -332,7 +332,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         })}
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 124px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* Exercise name */}
         <div style={{ flexShrink: 0 }}>
@@ -603,10 +603,10 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
       {/* Footer nav */}
       <div style={{
-        position: 'absolute', bottom: 0, left: 0, right: 0,
-        padding: `12px 22px calc(env(safe-area-inset-bottom, 8px) + 12px)`,
-        background: 'linear-gradient(180deg, transparent, var(--bg) 30%)',
-        display: 'flex', gap: 10, zIndex: 5,
+        flexShrink: 0,
+        padding: `10px 22px calc(env(safe-area-inset-bottom, 8px) + 10px)`,
+        borderTop: `0.5px solid ${UI.hair}`,
+        display: 'flex', gap: 10,
       }}>
         <button onClick={() => navigate(-1)} disabled={exIdx === 0} style={{
           width: 56, minHeight: 50, borderRadius: 999,
