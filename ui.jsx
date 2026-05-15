@@ -110,10 +110,10 @@ const TAB_ICONS = {
 
 function TabBar({ active, onChange }) {
   const tabs = [
-    { id: 'home', label: 'Heute' },
+    { id: 'home', label: 'Today' },
     { id: 'plan', label: 'Plan' },
-    { id: 'lib',  label: 'Archiv' },
-    { id: 'hist', label: 'Historie' },
+    { id: 'lib',  label: 'Library' },
+    { id: 'hist', label: 'History' },
   ];
   const idx = tabs.findIndex(t => t.id === active);
 
@@ -254,9 +254,9 @@ function Label({ children, style = {} }) {
 }
 
 // ─── Constants ──────────────────────────────────────────────────────
-const MUSCLES = ['Brust','Rücken','Schultern','Bizeps','Trizeps','Bauch','Quads','Hamstrings','Glutes','Waden','Unterarme'];
-const WEEKDAYS = ['Mo','Di','Mi','Do','Fr','Sa','So'];
-const WEEKDAYS_FULL = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
+const MUSCLES = ['Chest','Back','Shoulders','Biceps','Triceps','Abs','Quads','Hamstrings','Glutes','Calves','Forearms'];
+const WEEKDAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const WEEKDAYS_FULL = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
 // ─── Input ──────────────────────────────────────────────────────────
 function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, style = {}, suffix, uppercase }) {
@@ -429,7 +429,7 @@ const ICON_CALENDAR = (
 // ─── useConfirm ─────────────────────────────────────────────────────
 function useConfirm() {
   const [state, setState] = React.useState(null);
-  const confirm = (message, { title = 'Bestätigen?', ok = 'OK', cancel = 'Abbrechen', danger = false } = {}) =>
+  const confirm = (message, { title = 'Confirm?', ok = 'OK', cancel = 'Cancel', danger = false } = {}) =>
     new Promise(resolve => setState({ message, title, ok, cancel, danger, resolve }));
   const close = (result) => { state?.resolve(result); setState(null); };
   const el = state && (

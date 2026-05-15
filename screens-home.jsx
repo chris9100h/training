@@ -20,7 +20,7 @@ function LoginScreen() {
     try {
       await LB.signIn(email.trim(), password);
     } catch (e) {
-      setError(e.message || 'Fehler beim Anmelden');
+      setError(e.message || 'Sign in failed');
     } finally {
       setLoading(false);
     }
@@ -65,11 +65,11 @@ function LoginScreen() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-          <Field label="E-Mail">
-            <TextInput value={email} onChange={setEmail} placeholder="du@beispiel.de" autoFocus />
+          <Field label="Email">
+            <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus />
           </Field>
-          <Field label="Passwort">
-            <TextInput value={password} onChange={setPassword} type="password" placeholder="mind. 6 Zeichen" />
+          <Field label="Password">
+            <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters" />
           </Field>
           {error && (
             <div style={{
@@ -84,7 +84,7 @@ function LoginScreen() {
             </div>
           )}
           <Btn onClick={submit} disabled={!canSubmit || loading} style={{ marginTop: 4, opacity: canSubmit && !loading ? 1 : 0.4 }}>
-            {loading ? 'Anmelden…' : 'Einloggen'}
+            {loading ? 'Signing in…' : 'Log in'}
           </Btn>
         </div>
       </div>
@@ -200,22 +200,22 @@ function HomeScreen({ store, setStore, go }) {
 
   const periodLabel = useMemo(() => {
     if (weekdayMode) {
-      if (weekOffset === 0) return 'DIESE WOCHE';
-      if (weekOffset === -1) return 'LETZTE WOCHE';
-      return `VOR ${-weekOffset} WOCHEN`;
+      if (weekOffset === 0) return 'THIS WEEK';
+      if (weekOffset === -1) return 'LAST WEEK';
+      return `${-weekOffset} WEEKS AGO`;
     }
     const cycleNum = currentCycleNum + weekOffset + 1;
-    return `ZYKLUS ${cycleNum}`;
+    return `CYCLE ${cycleNum}`;
   }, [weekdayMode, weekOffset, currentCycleNum]);
 
   const cardLabel = useMemo(() => {
     if (isViewingToday) {
       return weekdayMode
-        ? `HEUTE · ${WEEKDAYS_FULL[selectedWd].toUpperCase()}`
-        : `HEUTE · TAG ${selectedSlot + 1} VON ${dayCount}`;
+        ? `TODAY · ${WEEKDAYS_FULL[selectedWd].toUpperCase()}`
+        : `TODAY · DAY ${selectedSlot + 1} OF ${dayCount}`;
     }
-    const dateStr = sessionDate.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
-    return weekdayMode ? dateStr : `${dateStr} · TAG ${selectedSlot + 1} VON ${dayCount}`;
+    const dateStr = sessionDate.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
+    return weekdayMode ? dateStr : `${dateStr} · DAY ${selectedSlot + 1} OF ${dayCount}`;
   }, [isViewingToday, weekdayMode, selectedWd, selectedSlot, dayCount, sessionDate]);
 
   const lastSession = useMemo(() => {
@@ -299,14 +299,14 @@ function HomeScreen({ store, setStore, go }) {
       <Screen>
         <TopBar
           title={<span>Hey, <em style={{ fontFamily: UI.fontDisplay, fontStyle: 'italic', fontWeight: 300, color: UI.gold }}>{store.user.name}</em></span>}
-          sub={new Date().toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
+          sub={new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
           right={<button onClick={() => go({ name: 'settings' })} style={{ ...btnIcon, fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: '50%', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
         />
         <div style={{ padding: 22 }}>
           <Empty
-            title="Noch kein Plan"
-            sub="Lege einen Trainingsplan an, um loszulegen."
-            action={<Btn onClick={() => go({ name: 'schedule-new' })}>Plan anlegen</Btn>}
+            title="No plan yet"
+            sub="Create a training plan to get started."
+            action={<Btn onClick={() => go({ name: 'schedule-new' })}>Create plan</Btn>}
             icon={ICON_CALENDAR}
           />
         </div>
@@ -328,7 +328,7 @@ function HomeScreen({ store, setStore, go }) {
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <div className="micro">{new Date().toLocaleDateString('de-DE', { weekday:'long', day:'2-digit', month:'long' }).toUpperCase()}</div>
+            <div className="micro">{new Date().toLocaleDateString('en-US', { weekday:'long', day:'2-digit', month:'long' }).toUpperCase()}</div>
             <div style={{ marginTop: 6, fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
               Hey, <em style={{ fontStyle: 'italic', fontWeight: 300, color: UI.gold }}>{store.user.name}</em>
             </div>
@@ -361,22 +361,22 @@ function HomeScreen({ store, setStore, go }) {
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, textAlign: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{ width: 8, height: 8, borderRadius: 4, background: UI.gold, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
-                  <span className="micro-gold">TRAINING LÄUFT</span>
+                  <span className="micro-gold">TRAINING IN PROGRESS</span>
                 </div>
                 <div className="display" style={{ fontSize: 38, color: UI.gold, fontWeight: 300, fontStyle: 'italic', letterSpacing: '0.04em' }}>
                   {activeSession.dayName}
                 </div>
                 <Btn onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{ width: '100%', marginTop: 6 }}>
-                  Weitermachen →
+                  Continue →
                 </Btn>
                 <button onClick={async () => {
-                  if (!await confirm('Session wird gelöscht.', { title: 'Training abbrechen?', ok: 'Abbrechen', cancel: 'Zurück', danger: true })) return;
+                  if (!await confirm('The session will be deleted.', { title: 'Cancel training?', ok: 'Cancel', cancel: 'Back', danger: true })) return;
                   setStore(s => ({ ...s, sessions: s.sessions.filter(x => x.id !== store.inProgress), inProgress: null }));
                 }} style={{
                   background: 'none', border: 'none', cursor: 'pointer',
                   fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, padding: '4px 0',
                   letterSpacing: '0.12em', textTransform: 'uppercase',
-                }}>Training abbrechen</button>
+                }}>Cancel training</button>
               </div>
             </BracketFrame>
           </div>
@@ -419,7 +419,7 @@ function HomeScreen({ store, setStore, go }) {
             const r = !d.items?.length;
             const slotLabel = weekdayMode
               ? WEEKDAYS[i]
-              : d.date.toLocaleDateString('de-DE', { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
+              : d.date.toLocaleDateString('en-US', { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
             let isCompleted = false;
             if (!r) {
               if (weekdayMode) {
@@ -466,11 +466,11 @@ function HomeScreen({ store, setStore, go }) {
               Recover.
             </div>
             <div style={{ fontSize: 13, color: UI.inkFaint, marginBottom: 22, maxWidth: 220 }}>
-              Erholung ist Teil des Plans.
+              Recovery is part of the plan.
             </div>
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-              {!weekdayMode && isViewingToday && <Btn kind="ghost" onClick={skipRest} style={{ flex: 1 }}>Rest abhaken</Btn>}
-              <Btn kind="ghost" onClick={() => go({ name: 'plan' })} style={{ flex: 1 }}>Plan ansehen</Btn>
+              {!weekdayMode && isViewingToday && <Btn kind="ghost" onClick={skipRest} style={{ flex: 1 }}>Check off rest</Btn>}
+              <Btn kind="ghost" onClick={() => go({ name: 'plan' })} style={{ flex: 1 }}>View plan</Btn>
             </div>
           </BracketFrame>
         ) : (
@@ -501,8 +501,8 @@ function HomeScreen({ store, setStore, go }) {
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5"><path d="M2 6l2.5 2.5L10 3"/></svg>
                   </div>
                   <div>
-                    <div className="micro-gold" style={{ marginBottom: 2 }}>TRAINING ERLEDIGT</div>
-                    <div style={{ fontSize: 13, color: UI.inkSoft }}>Gut gemacht.</div>
+                    <div className="micro-gold" style={{ marginBottom: 2 }}>WORKOUT COMPLETE</div>
+                    <div style={{ fontSize: 13, color: UI.inkSoft }}>Well done.</div>
                   </div>
                 </div>
               </Frame>
@@ -523,20 +523,20 @@ function HomeScreen({ store, setStore, go }) {
                     <path d="M8 5v14l11-7z"/>
                   </svg>
                   <span className="micro" style={{ color: 'rgba(10,8,5,0.45)' }}>
-                    {isViewingToday ? 'TRAINING' : 'EINTRAGEN'}
+                    {isViewingToday ? 'WORKOUT' : 'LOG'}
                   </span>
                 </button>
                 {!weekdayMode && isViewingToday && (
-                  <button onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{
+                  <button onClick={async () => { if (await confirm('The current day will be skipped.', { title: 'Skip day?', ok: 'Skip' })) skipRest(); }} style={{
                     flex: 1, minHeight: 90, borderRadius: 18, cursor: 'pointer',
                     background: 'transparent',
                     border: `0.5px solid ${UI.hairStrong}`,
                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
                     WebkitTapHighlightColor: 'transparent',
                   }}>
-                    <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.22em', fontWeight: 600 }}>TAG</span>
+                    <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.22em', fontWeight: 600 }}>DAY</span>
                     <span style={{ fontSize: 24, color: UI.inkSoft, fontFamily: UI.fontDisplay, fontStyle: 'italic', lineHeight: 1 }}>→</span>
-                    <span className="micro" style={{ color: UI.inkFaint }}>ÜBERSPRINGEN</span>
+                    <span className="micro" style={{ color: UI.inkFaint }}>SKIP</span>
                   </button>
                 )}
               </div>
@@ -549,14 +549,14 @@ function HomeScreen({ store, setStore, go }) {
           <Frame onClick={() => go({ name: 'session', sessionId: lastSession.id })} style={{ flexShrink: 0, padding: '12px 16px', cursor: 'pointer' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="micro" style={{ marginBottom: 3 }}>LETZTE SESSION</div>
+                <div className="micro" style={{ marginBottom: 3 }}>LAST SESSION</div>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                   <span className="display" style={{ fontSize: 18, color: UI.ink, lineHeight: 1 }}>{lastSession.dayName}</span>
                   <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
-                    {new Date(lastSession.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('de-DE', { day:'2-digit', month:'short' }).toUpperCase()}
+                    {new Date(lastSession.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { day:'2-digit', month:'short' }).toUpperCase()}
                   </span>
                   <span className="num" style={{ color: UI.gold, fontSize: 11 }}>
-                    {totalVolume(lastSession).toLocaleString('de-DE')}<span style={{ color: UI.inkFaint }}>kg</span>
+                    {totalVolume(lastSession).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>kg</span>
                   </span>
                 </div>
               </div>

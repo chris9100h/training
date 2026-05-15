@@ -81,7 +81,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   };
 
   const removeSet = async (setIdx) => {
-    if (!await confirm(`Satz ${setIdx + 1} entfernen?`, { ok: 'Entfernen', danger: true })) return;
+    if (!await confirm(`Remove set ${setIdx + 1}?`, { ok: 'Remove', danger: true })) return;
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
@@ -129,7 +129,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   };
 
   const abandon = async () => {
-    if (!await confirm('Eingaben gehen verloren.', { title: 'Session abbrechen?', ok: 'Abbrechen', cancel: 'Weiter trainieren', danger: true })) return;
+    if (!await confirm('All inputs will be lost.', { title: 'Cancel session?', ok: 'Cancel', cancel: 'Keep training', danger: true })) return;
     cancelPushover();
     setStore(s => ({
       ...s,
@@ -202,7 +202,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   };
 
   const swapExercise = async () => {
-    if (!await confirm(`"${entry.name}" austauschen?`, { ok: 'Austauschen' })) return;
+    if (!await confirm(`Swap "${entry.name}"?`, { ok: 'Swap' })) return;
     setSwapOpen(true);
   };
 
@@ -280,7 +280,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   const checkAllSets = async () => {
     if (allDone || anyMissingData) return;
-    if (!await confirm(`Alle ${entry.sets.length} Sätze abhaken und weiter?`, { ok: 'Alle abhaken' })) return;
+    if (!await confirm(`Check off all ${entry.sets.length} sets and continue?`, { ok: 'Check all' })) return;
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
@@ -366,21 +366,21 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         {/* HERO CURRENT SET */}
         {allDone ? (
           <Frame accent style={{ padding: 28, textAlign: 'center' }}>
-            <div className="micro-gold" style={{ marginBottom: 10 }}>ALLE SÄTZE ERLEDIGT</div>
-            <div className="display" style={{ fontSize: 28, color: UI.gold, fontStyle: 'italic', fontWeight: 300, marginBottom: 6 }}>Geschafft.</div>
-            <div style={{ color: UI.inkSoft, fontSize: 13 }}>Nächste Übung wartet.</div>
+            <div className="micro-gold" style={{ marginBottom: 10 }}>ALL SETS DONE</div>
+            <div className="display" style={{ fontSize: 28, color: UI.gold, fontStyle: 'italic', fontWeight: 300, marginBottom: 6 }}>Done.</div>
+            <div style={{ color: UI.inkSoft, fontSize: 13 }}>Next exercise ready.</div>
             <Btn onClick={() => navigate(1)} style={{ marginTop: 18 }}>
-              {exIdx === session.entries.length - 1 ? 'Session beenden →' : 'Nächste Übung →'}
+              {exIdx === session.entries.length - 1 ? 'Finish session →' : 'Next exercise →'}
             </Btn>
           </Frame>
         ) : heroSet && (
           <BracketFrame gold padding={0}>
             <div style={{ padding: '12px 6px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '0 18px', marginBottom: 8 }}>
-                <span className="micro-gold">SATZ {String(currentSetNum).padStart(2, '0')} / {String(entry.sets.length).padStart(2, '0')}</span>
+                <span className="micro-gold">SET {String(currentSetNum).padStart(2, '0')} / {String(entry.sets.length).padStart(2, '0')}</span>
                 {prevHeroSet && prevHeroSet.kg ? (
                   <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>
-                    LETZTES MAL <span style={{ color: UI.inkSoft }}>{prevHeroSet.kg}kg × {prevHeroSet.reps}</span>
+                    LAST TIME <span style={{ color: UI.inkSoft }}>{prevHeroSet.kg}kg × {prevHeroSet.reps}</span>
                   </span>
                 ) : <span />}
               </div>
@@ -411,7 +411,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                       }),
                     }))}
                   />
-                  <div className="micro" style={{ marginTop: 2 }}>KILOGRAMM</div>
+                  <div className="micro" style={{ marginTop: 2 }}>KILOGRAMS</div>
                 </div>
                 <div style={{ fontSize: 32, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 200, fontStyle: 'italic', alignSelf: 'flex-start', marginTop: 6 }}>×</div>
                 <div style={{ flex: 1, textAlign: 'center' }}>
@@ -429,7 +429,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                       textAlign: 'center', width: '100%', padding: 0,
                     }}
                   />
-                  <div className="micro" style={{ marginTop: 2 }}>WIEDERHOLUNGEN</div>
+                  <div className="micro" style={{ marginTop: 2 }}>REPETITIONS</div>
                 </div>
               </div>
 
@@ -449,7 +449,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                     boxShadow: !heroSet.kg || !heroSet.reps ? 'none' : '0 8px 30px rgba(201,169,97,0.30)',
                     WebkitTapHighlightColor: 'transparent',
                   }}>
-                  ✓ Satz abhaken
+                  ✓ Check set
                 </button>
               </div>
             </div>
@@ -459,7 +459,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         {/* All sets list */}
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
-            <span className="micro">ALLE SÄTZE</span>
+            <span className="micro">ALL SETS</span>
             <button onClick={checkAllSets} disabled={anyMissingData && !allDone} style={{
               padding: '4px 10px', borderRadius: 999,
               background: allDone ? UI.goldFaint : 'transparent',
@@ -469,7 +469,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               fontFamily: UI.fontUi, fontWeight: 500,
               cursor: anyMissingData && !allDone ? 'default' : 'pointer',
               opacity: anyMissingData && !allDone ? 0.3 : 1,
-            }}>{allDone ? '✓ Alle' : 'Alle ✓'}</button>
+            }}>{allDone ? '✓ All' : 'All ✓'}</button>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -571,7 +571,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               color: entry.note ? UI.gold : UI.inkFaint, fontSize: 10,
               fontFamily: UI.fontUi, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
             }}>
-              {entry.note ? 'Notiz' : '+ Notiz'}
+              {entry.note ? 'Note' : '+ Note'}
             </button>
           </div>
         </div>
@@ -579,7 +579,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         {/* Exercise note (permanent, from exercise definition) */}
         {exercise?.note && (
           <Frame style={{ padding: 14 }}>
-            <div className="micro" style={{ marginBottom: 6 }}>NOTIZ · {entry.name.toUpperCase()}</div>
+            <div className="micro" style={{ marginBottom: 6 }}>NOTE · {entry.name.toUpperCase()}</div>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.inkSoft, lineHeight: 1.5, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>
               {exercise.note}
             </div>
@@ -590,7 +590,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         {restStart && restRemaining > 0 && (
           <Frame style={{ padding: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-              <span className="micro">PAUSE</span>
+              <span className="micro">REST</span>
               <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 400, lineHeight: 1 }}>
                 {Math.floor(restRemaining/60)}:{(restRemaining%60).toString().padStart(2,'0')}
               </span>
@@ -603,7 +603,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                 flex: 1, padding: '8px', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
                 color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
                 fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
-              }}>Überspringen</button>
+              }}>Skip</button>
               <button onClick={() => setRestStart(Date.now() - (restElapsed - 30) * 1000)} style={{
                 flex: 1, padding: '8px', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
                 color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
@@ -631,62 +631,62 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
         <Btn onClick={() => navigate(1)} style={{ flex: 1 }}>
-          {exIdx === session.entries.length - 1 ? 'Fertig →' : 'Nächste Übung →'}
+          {exIdx === session.entries.length - 1 ? 'Finish →' : 'Next exercise →'}
         </Btn>
       </div>
 
       {/* finish confirmation */}
-      <Sheet open={finishOpen} onClose={() => setFinishOpen(false)} title="Session beenden?">
+      <Sheet open={finishOpen} onClose={() => setFinishOpen(false)} title="End session?">
         <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 18, lineHeight: 1.6 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
-            <span>Sätze</span>
+            <span>Sets</span>
             <span className="num" style={{ color: UI.ink }}>
               {session.entries.reduce((c, e) => c + e.sets.filter(s => s.done).length, 0)} / {session.entries.reduce((c, e) => c + e.sets.length, 0)}
             </span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
-            <span>Volumen</span>
+            <span>Volume</span>
             <span className="num" style={{ color: UI.gold }}>
-              {Math.round(totalVolume(session)).toLocaleString('de-DE')} kg
+              {Math.round(totalVolume(session)).toLocaleString('en-US')} kg
             </span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
-            <span>Dauer</span>
+            <span>Duration</span>
             <span className="num" style={{ color: UI.ink }}>{sessionTimeStr}</span>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn kind="ghost" onClick={() => setFinishOpen(false)} style={{ flex: 1 }}>Weiter</Btn>
-          <Btn onClick={tryFinish} style={{ flex: 2 }}>Beenden ✓</Btn>
+          <Btn kind="ghost" onClick={() => setFinishOpen(false)} style={{ flex: 1 }}>Continue</Btn>
+          <Btn onClick={tryFinish} style={{ flex: 2 }}>Finish ✓</Btn>
         </div>
       </Sheet>
 
       {/* note type picker */}
-      <Sheet open={notePicker} onClose={() => setNotePicker(false)} title="Welche Notiz?">
+      <Sheet open={notePicker} onClose={() => setNotePicker(false)} title="Which note?">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button onClick={() => { setNotePicker(false); setSessionNoteOpen(true); }} style={{
             background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 12,
             padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
           }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Session-Notiz</div>
-            <div style={{ fontSize: 12, color: UI.inkSoft }}>Nur für dieses Training — z.B. wie sich der Satz angefühlt hat.</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Session note</div>
+            <div style={{ fontSize: 12, color: UI.inkSoft }}>Only for this workout — e.g. how the set felt.</div>
           </button>
           <button onClick={() => { setNotePicker(false); setExNoteVal(exercise?.note || ''); setExNoteOpen(true); }} style={{
             background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 12,
             padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
           }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Übungs-Notiz</div>
-            <div style={{ fontSize: 12, color: UI.inkSoft }}>Dauerhaft — bei jeder Session angezeigt. Einstellungen, Technikhinweise.</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Exercise note</div>
+            <div style={{ fontSize: 12, color: UI.inkSoft }}>Permanent — shown every session. Settings, technique cues.</div>
           </button>
         </div>
       </Sheet>
 
       {/* session note editor */}
-      <Sheet open={sessionNoteOpen} onClose={() => setSessionNoteOpen(false)} title="Session-Notiz">
+      <Sheet open={sessionNoteOpen} onClose={() => setSessionNoteOpen(false)} title="Session note">
         <textarea
           value={entry.note || ''}
           onChange={e => setNote(e.target.value)}
-          placeholder="z.B. Knie hat gezwickt, nächstes Mal Aufwärmsatz mehr"
+          placeholder="e.g. Right knee was acting up, add more warm-up sets next time"
           rows={4}
           style={{
             width: '100%', boxSizing: 'border-box',
@@ -695,15 +695,15 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             resize: 'vertical', outline: 'none',
           }}
         />
-        <Btn onClick={() => setSessionNoteOpen(false)} style={{ marginTop: 12, width: '100%' }}>Speichern</Btn>
+        <Btn onClick={() => setSessionNoteOpen(false)} style={{ marginTop: 12, width: '100%' }}>Save</Btn>
       </Sheet>
 
       {/* exercise note editor */}
-      <Sheet open={exNoteOpen} onClose={() => setExNoteOpen(false)} title="Übungs-Notiz">
+      <Sheet open={exNoteOpen} onClose={() => setExNoteOpen(false)} title="Exercise note">
         <textarea
           value={exNoteVal}
           onChange={e => setExNoteVal(e.target.value)}
-          placeholder="z.B. Kabelzug Pos 4, Griff neutral, langsam ablassen"
+          placeholder="e.g. Cable pos 4, neutral grip, slow on the way down"
           rows={4}
           style={{
             width: '100%', boxSizing: 'border-box',
@@ -712,12 +712,12 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             resize: 'vertical', outline: 'none',
           }}
         />
-        <Btn onClick={saveExNote} style={{ marginTop: 12, width: '100%' }}>Speichern</Btn>
+        <Btn onClick={saveExNote} style={{ marginTop: 12, width: '100%' }}>Save</Btn>
       </Sheet>
 
       {/* plan diff */}
-      <Sheet open={planDiffOpen} onClose={() => { setPlanDiffOpen(false); finish(); }} title="Plan updaten?">
-        <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>Änderungen gegenüber Plan:</div>
+      <Sheet open={planDiffOpen} onClose={() => { setPlanDiffOpen(false); finish(); }} title="Update plan?">
+        <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>Changes vs. plan:</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
           {planDiff.map((d, i) => (
             <div key={i} style={{
@@ -732,15 +732,15 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               ) : (
                 <>
                   <span style={{ color: UI.goldLight, fontSize: 14 }}>≡</span>
-                  <span><strong>{d.exName}</strong>{': '}<span style={{ color: UI.inkSoft }}>{d.oldSets}</span>{' → '}<strong>{d.newSets} Sätze</strong></span>
+                  <span><strong>{d.exName}</strong>{': '}<span style={{ color: UI.inkSoft }}>{d.oldSets}</span>{' → '}<strong>{d.newSets} sets</strong></span>
                 </>
               )}
             </div>
           ))}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn kind="ghost" onClick={() => { setPlanDiffOpen(false); finish(); }} style={{ flex: 1 }}>Nein</Btn>
-          <Btn onClick={() => { setPlanDiffOpen(false); applyPlanAndFinish(); }} style={{ flex: 2 }}>Ja, updaten</Btn>
+          <Btn kind="ghost" onClick={() => { setPlanDiffOpen(false); finish(); }} style={{ flex: 1 }}>No</Btn>
+          <Btn onClick={() => { setPlanDiffOpen(false); applyPlanAndFinish(); }} style={{ flex: 2 }}>Yes, update</Btn>
         </div>
       </Sheet>
 

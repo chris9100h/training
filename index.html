@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
@@ -128,7 +128,7 @@ setTimeout(function() {
   if (!document.getElementById('root').children.length) {
     var d = document.getElementById('err');
     d.style.display = 'block';
-    d.textContent += '[TIMEOUT] React hat nicht gemountet.\n';
+    d.textContent += '[TIMEOUT] React did not mount.\n';
     d.textContent += 'window.LB: ' + typeof window.LB + '\n';
     d.textContent += 'window.supabase: ' + typeof window.supabase + '\n';
     d.textContent += 'window.Screens: ' + JSON.stringify(Object.keys(window.Screens||{})) + '\n';

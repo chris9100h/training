@@ -22,7 +22,7 @@ function LibraryScreen({ store, setStore, go }) {
   });
 
   const deleteSelected = async () => {
-    if (!await confirm(`Bisherige Sessions bleiben erhalten.`, { title: `${selected.size} Übung${selected.size > 1 ? 'en' : ''} löschen?`, ok: 'Löschen', danger: true })) return;
+    if (!await confirm(`Previous sessions will be preserved.`, { title: `Delete ${selected.size} exercise${selected.size > 1 ? 's' : ''}?`, ok: 'Delete', danger: true })) return;
     setStore(s => ({ ...s, exercises: s.exercises.filter(e => !selected.has(e.id)) }));
     exitSelect();
   };
@@ -72,7 +72,7 @@ function LibraryScreen({ store, setStore, go }) {
 
   const topBarRight = selecting ? (
     <button onClick={exitSelect} style={{ background: 'none', border: 'none', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}>
-      Abbrechen
+      Cancel
     </button>
   ) : (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -81,7 +81,7 @@ function LibraryScreen({ store, setStore, go }) {
           background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
           borderRadius: 999, padding: '6px 12px', cursor: 'pointer',
           color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
-        }}>Auswählen</button>
+        }}>Select</button>
       )}
       <button onClick={() => setCreating(true)} style={{
         width: 32, height: 32, borderRadius: '50%',
@@ -94,11 +94,11 @@ function LibraryScreen({ store, setStore, go }) {
 
   return (
     <Screen>
-      <TopBar title="Archiv" right={topBarRight} />
+      <TopBar title="Library" right={topBarRight} />
 
       {/* Tab strip */}
       <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
-        {[['recent','Zuletzt'],['all','Alle']].map(([id,label]) => (
+        {[['recent','Recent'],['all','All']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)} style={{
             flex: 1, background: 'transparent', border: 'none',
             padding: '11px 0', cursor: 'pointer',
@@ -130,7 +130,7 @@ function LibraryScreen({ store, setStore, go }) {
         )}
 
         {tab === 'recent' && recent.length === 0 && (
-          <Empty title="Noch nichts trainiert" sub="Sobald du Sessions loggst, erscheinen Übungen hier." icon={ICON_BARBELL} />
+          <Empty title="Nothing logged yet" sub="Once you log sessions, exercises will appear here." icon={ICON_BARBELL} />
         )}
 
         {tab === 'recent' && recent.map(({ ex, last, lastEntry, trend }, ri) => {
@@ -150,7 +150,7 @@ function LibraryScreen({ store, setStore, go }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="display" style={{ fontSize: 19, color: UI.ink, lineHeight: 1.1, marginBottom: 3 }}>{ex.name}</div>
                 <div className="num" style={{ fontSize: 10, color: UI.inkFaint, letterSpacing: '0.05em' }}>
-                  {days === 0 ? 'heute' : `${days}d her`}
+                  {days === 0 ? 'today' : `${days}d ago`}
                   {top && ` · ${top.kg}kg × ${top.reps}`}
                 </div>
               </div>
@@ -198,7 +198,7 @@ function LibraryScreen({ store, setStore, go }) {
           );
         })}
         {tab === 'all' && filtered.length === 0 && (
-          <Empty title="Keine Übungen" action={<Btn onClick={() => setCreating(true)}>Übung anlegen</Btn>} icon={ICON_BARBELL} />
+          <Empty title="No exercises" action={<Btn onClick={() => setCreating(true)}>Add exercise</Btn>} icon={ICON_BARBELL} />
         )}
       </div>
 
@@ -214,12 +214,12 @@ function LibraryScreen({ store, setStore, go }) {
           zIndex: 15,
         }}>
           <span className="micro" style={{ color: UI.inkSoft }}>
-            {selected.size === 0 ? 'Übungen antippen zum Auswählen' : `${selected.size} ausgewählt`}
+            {selected.size === 0 ? 'Tap exercises to select' : `${selected.size} selected`}
           </span>
           <Btn kind="ghost" onClick={deleteSelected}
             disabled={selected.size === 0}
             style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
-            Löschen
+            Delete
           </Btn>
         </div>
       )}
@@ -242,13 +242,13 @@ function ExerciseCreator({ onClose, setStore, onCreated }) {
     onClose();
   };
   return (
-    <Sheet open={true} onClose={onClose} title="Neue Übung">
+    <Sheet open={true} onClose={onClose} title="New exercise">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <Field label="Name">
-          <TextInput value={name} onChange={setName} placeholder="z.B. Bankdrücken" autoFocus />
+          <TextInput value={name} onChange={setName} placeholder="e.g. Bench press" autoFocus />
         </Field>
         <div>
-          <span className="label">Muskelgruppe</span>
+          <span className="label">Muscle group</span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
             {MUSCLES.map(m => (
               <Pill key={m} gold={selectedTags.includes(m)} onClick={() => toggleTag(m)}
@@ -256,7 +256,7 @@ function ExerciseCreator({ onClose, setStore, onCreated }) {
             ))}
           </div>
         </div>
-        <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Anlegen</Btn>
+        <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Create</Btn>
       </div>
     </Sheet>
   );
@@ -289,7 +289,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
   };
 
   const deleteExercise = async () => {
-    if (!await confirm('Bisherige Sessions bleiben erhalten.', { title: `"${ex.name}" löschen?`, ok: 'Löschen', danger: true })) return;
+    if (!await confirm('Previous sessions will be preserved.', { title: `Delete "${ex.name}"?`, ok: 'Delete', danger: true })) return;
     setStore(s => ({ ...s, exercises: s.exercises.filter(e => e.id !== exId) }));
     go({ name: 'lib' });
   };
@@ -313,7 +313,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
   return (
     <Screen>
       <ScreenHead
-        ref_="ÜBUNG"
+        ref_="EXERCISE"
         title={editMode ? editName || ex.name : ex.name}
         onBack={() => { if (editMode) cancelEdit(); else go({ name: 'lib' }); }}
         right={
@@ -322,7 +322,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
               background: 'none', border: 'none', cursor: 'pointer',
               color: UI.gold, fontSize: 11, fontFamily: UI.fontUi, padding: '4px 8px',
               letterSpacing: '0.1em', textTransform: 'uppercase',
-            }}>{editMode ? 'Speichern' : 'Bearbeiten'}</button>
+            }}>{editMode ? 'Save' : 'Edit'}</button>
             {!editMode && <button onClick={deleteExercise} style={{
               background: 'none', border: 'none', cursor: 'pointer',
               width: 30, height: 30, borderRadius: '50%',
@@ -342,7 +342,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
               <TextInput value={editName} onChange={setEditName} />
             </Field>
             <div>
-              <span className="label">Muskelgruppe</span>
+              <span className="label">Muscle group</span>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                 {MUSCLES.map(m => (
                   <Pill key={m} gold={editTags.includes(m)} onClick={() => toggleEditTag(m)}
@@ -350,13 +350,13 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
                 ))}
               </div>
             </div>
-            <Btn kind="ghost" onClick={cancelEdit} style={{ fontSize: 11 }}>Abbrechen</Btn>
+            <Btn kind="ghost" onClick={cancelEdit} style={{ fontSize: 11 }}>Cancel</Btn>
           </div>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {(ex.tags || []).length > 0
               ? ex.tags.map(t => <Pill key={t} gold>{t}</Pill>)
-              : <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>Keine Muskelgruppe — Bearbeiten</span>}
+              : <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
           </div>
         )}
       </div>
@@ -366,7 +366,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
         {/* Stats — SubDials */}
         <div style={{ display: 'flex', justifyContent: 'space-around', padding: '6px 0' }}>
           <SubDial label="1RM PR" value={pr ? Math.round(pr) : '—'} sub="kg" size={90} gold />
-          <SubDial label="Letzte" value={last ? Math.round(last) : '—'} sub="kg" size={90} />
+          <SubDial label="Last" value={last ? Math.round(last) : '—'} sub="kg" size={90} />
           <SubDial label="Sessions" value={history.length} size={90} />
         </div>
 
@@ -374,19 +374,19 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
 
         {/* Note */}
         <div>
-          <Bezel>NOTIZ</Bezel>
+          <Bezel>NOTE</Bezel>
           <div style={{ marginTop: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <span />
               <button onClick={() => { setNoteVal(ex.note || ''); setEditNote(v => !v); }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.gold, fontSize: 10, fontFamily: UI.fontUi, padding: 0, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-                {editNote ? 'Abbrechen' : 'Bearbeiten'}
+                {editNote ? 'Cancel' : 'Edit'}
               </button>
             </div>
             {editNote ? (
               <div>
                 <textarea value={noteVal} onChange={e => setNoteVal(e.target.value)}
-                  placeholder="z.B. Kabelzug Pos 4, Griff neutral, langsam ablassen"
+                  placeholder="e.g. Cable pos 4, neutral grip, slow eccentric"
                   rows={3}
                   style={{
                     width: '100%', boxSizing: 'border-box', background: 'transparent',
@@ -395,11 +395,11 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
                     resize: 'none', outline: 'none',
                   }}
                 />
-                <Btn onClick={saveNote} style={{ marginTop: 12, width: '100%' }}>Speichern</Btn>
+                <Btn onClick={saveNote} style={{ marginTop: 12, width: '100%' }}>Save</Btn>
               </div>
             ) : (
               <div className="display-it" style={{ fontSize: 16, color: ex.note ? UI.inkSoft : UI.inkFaint, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                {ex.note || 'Noch keine Notiz.'}
+                {ex.note || 'No note yet.'}
               </div>
             )}
           </div>
@@ -407,7 +407,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
 
         {/* History */}
         <div>
-          <Bezel>VERLAUF</Bezel>
+          <Bezel>HISTORY</Bezel>
           <div style={{ marginTop: 8 }}>
             {history.slice(0, 10).map((h, hi) => (
               <div key={h.session.id}
@@ -420,7 +420,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
                 }}>
                 <div>
                   <div className="num" style={{ fontSize: 10, color: UI.inkFaint, letterSpacing: '0.05em', marginBottom: 5 }}>
-                    {new Date(h.session.ended).toLocaleDateString('de-DE', { day:'2-digit', month:'short', year:'2-digit' })}
+                    {new Date(h.session.ended).toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'2-digit' })}
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexFamily: UI.fontNum, fontSize: 13 }}>
                     {h.entry.sets.filter(s => s.kg).map((s, i) => (
@@ -434,7 +434,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
                 <span className="micro" style={{ color: UI.inkFaint }}>{h.session.dayName}</span>
               </div>
             ))}
-            {history.length === 0 && <Empty title="Noch nicht trainiert" />}
+            {history.length === 0 && <Empty title="Never trained" />}
           </div>
         </div>
       </div>
@@ -456,7 +456,7 @@ function ProgressChart({ points }) {
   const path = xy.map(([x,y], i) => `${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   return (
     <div style={{ padding: '10px 0' }}>
-      <div className="micro" style={{ marginBottom: 8, color: UI.inkFaint }}>GESCHÄTZTER 1RM · VERLAUF</div>
+      <div className="micro" style={{ marginBottom: 8, color: UI.inkFaint }}>EST. 1RM · HISTORY</div>
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
         <path d={path} fill="none" stroke={UI.gold} strokeWidth="1" opacity="0.6" />
         {xy.map(([x,y], i) => (
@@ -477,10 +477,10 @@ function HistoryScreen({ store, go }) {
 
   return (
     <Screen>
-      <TopBar title="Historie" />
+      <TopBar title="History" />
       <div style={{ padding: '6px 22px 22px', display: 'flex', flexDirection: 'column' }}>
         {sessions.length === 0 && (
-          <Empty title="Keine Sessions" sub="Logge dein erstes Training, um Verlauf zu sehen." icon={ICON_HISTORY} />
+          <Empty title="No sessions" sub="Log your first workout to see your history." icon={ICON_HISTORY} />
         )}
         {sessions.map((s, si) => {
           const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
@@ -498,16 +498,16 @@ function HistoryScreen({ store, go }) {
               }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>
-                  {date.toLocaleDateString('de-DE', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()} · {days === 0 ? 'HEUTE' : `${days}D HER`}
+                  {date.toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()} · {days === 0 ? 'TODAY' : `${days}D AGO`}
                 </div>
                 <div className="display" style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>{s.dayName}</div>
                 <div className="micro" style={{ color: UI.inkFaint }}>
-                  {s.entries.length} Übungen · {setsLogged} Sets
+                  {s.entries.length} Exercises · {setsLogged} Sets
                 </div>
               </div>
               <div style={{ textAlign: 'right', flexShrink: 0 }}>
                 <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
-                  {vol.toLocaleString('de-DE')}
+                  {vol.toLocaleString('en-US')}
                 </div>
                 <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>kg</div>
               </div>
@@ -531,7 +531,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
   const duration = s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null;
 
   const deleteSession = async () => {
-    if (!await confirm('Diese Session wird dauerhaft gelöscht.', { title: 'Session löschen?', ok: 'Löschen', danger: true })) return;
+    if (!await confirm('This session will be permanently deleted.', { title: 'Delete session?', ok: 'Delete', danger: true })) return;
     setStore(s => ({ ...s, sessions: s.sessions.filter(x => x.id !== sessionId) }));
     go({ name: 'hist' });
   };
@@ -581,7 +581,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
   return (
     <Screen>
       <ScreenHead
-        ref_={new Date(s.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
+        ref_={new Date(s.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
         title={s.dayName}
         onBack={() => go({ name: justFinished ? 'home' : 'hist' })}
         right={
@@ -595,7 +595,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
               background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
               borderRadius: 999, padding: '5px 10px', cursor: 'pointer',
               color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase',
-            }}>Bearbeiten</button>
+            }}>Edit</button>
             <button onClick={deleteSession} style={{
               width: 28, height: 28, borderRadius: '50%',
               boxShadow: `inset 0 0 0 0.5px rgba(200,116,105,0.25)`, background: 'transparent',
@@ -614,12 +614,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
           return (
             <BracketFrame gold style={{ marginBottom: 4 }}>
               <div style={{ textAlign: 'center', padding: '6px 0 10px' }}>
-                <div className="micro-gold" style={{ letterSpacing: '0.24em', marginBottom: 16 }}>SESSION KOMPLETT</div>
-                <div className="display-it" style={{ fontSize: 28, color: UI.gold, marginBottom: 18 }}>Stark gemacht.</div>
+                <div className="micro-gold" style={{ letterSpacing: '0.24em', marginBottom: 16 }}>SESSION COMPLETE</div>
+                <div className="display-it" style={{ fontSize: 28, color: UI.gold, marginBottom: 18 }}>Well done.</div>
                 <div style={{ display: 'flex', borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16, gap: 0 }}>
                   {[
-                    { label: 'Volumen', value: `${Math.round(vol).toLocaleString('de-DE')} kg`, gold: true },
-                    ...(duration ? [{ label: 'Dauer', value: `${duration} min`, gold: false }] : []),
+                    { label: 'Volume', value: `${Math.round(vol).toLocaleString('en-US')} kg`, gold: true },
+                    ...(duration ? [{ label: 'Duration', value: `${duration} min`, gold: false }] : []),
                     { label: 'Sets', value: String(s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)), gold: false },
                   ].map((st, k, arr) => (
                     <div key={st.label} style={{
@@ -640,15 +640,15 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
         {/* Stats row */}
         {!justFinished && (
           <div style={{ display: 'flex', justifyContent: 'space-around' }}>
-            <SubDial label="Dauer" value={duration ?? '—'} sub={duration ? 'min' : ''} size={90} />
-            <SubDial label="Volumen" value={Math.round(vol).toLocaleString('de-DE')} sub="kg" size={90} gold />
+            <SubDial label="Duration" value={duration ?? '—'} sub={duration ? 'min' : ''} size={90} />
+            <SubDial label="Volume" value={Math.round(vol).toLocaleString('en-US')} sub="kg" size={90} gold />
             <SubDial label="Sets" value={s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)} size={90} />
           </div>
         )}
 
         {/* Exercise entries */}
         <div>
-          <Bezel>ÜBUNGEN</Bezel>
+          <Bezel>EXERCISES</Bezel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
             {s.entries.map((e, i) => (
               <div key={i}>
@@ -815,16 +815,16 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
   };
 
   return (
-    <Sheet open={true} onClose={onClose} title="Session bearbeiten">
+    <Sheet open={true} onClose={onClose} title="Edit session">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 160 }}>
         <div>
-          <span className="label">Datum</span>
+          <span className="label">Date</span>
           <div style={{ width: '100%', overflow: 'hidden', borderRadius: 10, marginTop: 6 }}>
             <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} style={{ ...inputStyle, textAlign: 'center', textAlignLast: 'center' }} />
           </div>
         </div>
         <div>
-          <span className="label">Dauer</span>
+          <span className="label">Duration</span>
           <select value={draftDuration} onChange={e => setDraftDuration(e.target.value)} style={{ ...inputStyle, cursor: 'pointer', textAlignLast: 'center', marginTop: 6 }}>
             {Array.from({ length: 37 }, (_, i) => i * 5).map(m => (
               <option key={m} value={String(m)}>{m === 0 ? '—' : `${m} min`}</option>
@@ -857,8 +857,8 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
           ))}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn kind="ghost" onClick={onClose} style={{ flex: 1 }}>Abbrechen</Btn>
-          <Btn onClick={save} style={{ flex: 2 }}>Speichern</Btn>
+          <Btn kind="ghost" onClick={onClose} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={save} style={{ flex: 2 }}>Save</Btn>
         </div>
       </div>
     </Sheet>
@@ -889,7 +889,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
   const testPushover = async (delaySeconds = 0) => {
     clearTimeout(pushStatusTimer.current);
-    setPushStatus(delaySeconds > 0 ? `Sende… Screen jetzt sperren!` : 'Sende…');
+    setPushStatus(delaySeconds > 0 ? `Sending… Lock screen now!` : 'Sending…');
     try {
       const res = await fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
         method: 'POST',
@@ -897,18 +897,18 @@ function SettingsScreen({ store, setStore, go, userId }) {
           'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: 'Pause vorbei — weiter gehts! 💪', title: 'Logbook Test', delaySeconds, nonce: String(Date.now()) }),
+        body: JSON.stringify({ message: 'Rest done — keep going! 💪', title: 'Logbook Test', delaySeconds, nonce: String(Date.now()) }),
       });
       if (res.status === 202) {
-        setPushStatus(`✓ Geplant — Notification in ~${delaySeconds}s`);
+        setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`);
         pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000);
       } else {
         const data = await res.json();
-        setPushStatus(data.status === 1 ? '✓ Gesendet' : `Fehler: ${JSON.stringify(data)}`);
+        setPushStatus(data.status === 1 ? '✓ Sent' : `Error: ${JSON.stringify(data)}`);
         pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
       }
     } catch (e) {
-      setPushStatus(`Fehler: ${e.message}`);
+      setPushStatus(`Error: ${e.message}`);
       pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
     }
   };
@@ -933,26 +933,26 @@ function SettingsScreen({ store, setStore, go, userId }) {
   };
 
   const handleDeleteAll = async () => {
-    if (!await confirm('Diese Aktion ist nicht rückgängig zu machen.', { title: 'Alle Daten löschen?', ok: 'Alles löschen', danger: true })) return;
+    if (!await confirm('This action cannot be undone.', { title: 'Delete all data?', ok: 'Delete all', danger: true })) return;
     await LB.deleteAllData(userId);
     await LB.signOut();
   };
 
   return (
     <Screen>
-      <TopBar title="Einstellungen" onBack={() => go({ name: 'home' })} />
+      <TopBar title="Settings" onBack={() => go({ name: 'home' })} />
       <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
         {/* Account */}
         <Frame style={{ padding: '14px 16px' }}>
-          <span className="label">Spitzname</span>
+          <span className="label">Nickname</span>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
             <input
               value={nickname}
               onChange={e => setNickname(e.target.value)}
               onBlur={saveNickname}
               onKeyDown={e => e.key === 'Enter' && (e.target.blur())}
-              placeholder="Dein Name"
+              placeholder="Your name"
               style={{
                 flex: 1, background: 'transparent', border: 'none', outline: 'none',
                 color: UI.ink, fontFamily: UI.fontUi, fontSize: 16, padding: 0,
@@ -960,13 +960,13 @@ function SettingsScreen({ store, setStore, go, userId }) {
             />
           </div>
           <div className="micro" style={{ marginTop: 8 }}>
-            Eingeloggt als {store.user?.email || userId}
+            Logged in as {store.user?.email || userId}
           </div>
         </Frame>
 
-        {/* Pause Default */}
+        {/* Rest Default */}
         <Frame style={{ padding: '14px 16px' }}>
-          <span className="label">Pause Default</span>
+          <span className="label">Rest default</span>
           <div style={{ marginTop: 8 }}>
             <Stepper
               value={store.settings?.restDefault || 120}
@@ -979,7 +979,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
         {/* Push notifications */}
         <Frame style={{ padding: '14px 16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span className="label" style={{ marginBottom: 0 }}>Push-Benachrichtigungen</span>
+            <span className="label" style={{ marginBottom: 0 }}>Push notifications</span>
             <div
               onClick={togglePush}
               style={{
@@ -1000,7 +1000,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           {pushEnabled && (
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', gap: 8 }}>
-                <Btn kind="ghost" onClick={() => testPushover(0)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>Sofort</Btn>
+                <Btn kind="ghost" onClick={() => testPushover(0)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>Now</Btn>
                 <Btn kind="ghost" onClick={() => testPushover(10)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>10s</Btn>
                 <Btn kind="ghost" onClick={() => testPushover(30)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>30s</Btn>
               </div>
@@ -1013,24 +1013,24 @@ function SettingsScreen({ store, setStore, go, userId }) {
           )}
         </Frame>
 
-        <Bezel>DATEN</Bezel>
+        <Bezel>DATA</Bezel>
 
-        <Btn kind="ghost" onClick={exportData} style={{ fontSize: 12 }}>Daten exportieren (JSON)</Btn>
+        <Btn kind="ghost" onClick={exportData} style={{ fontSize: 12 }}>Export data (JSON)</Btn>
         <Btn kind="ghost" onClick={async () => {
           if ('caches' in window) {
             const keys = await caches.keys();
             await Promise.all(keys.map(k => caches.delete(k)));
           }
           window.location.reload(true);
-        }} style={{ fontSize: 12 }}>App-Cache leeren & neu laden</Btn>
+        }} style={{ fontSize: 12 }}>Clear app cache & reload</Btn>
         <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', fontSize: 12 }}>
-          Ausloggen
+          Sign out
         </Btn>
         <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', opacity: 0.6, fontSize: 12 }}>
-          Alle Daten löschen
+          Delete all data
         </Btn>
         <div className="micro" style={{ textAlign: 'center', marginTop: 8 }}>
-          Logbook · {swVersion || '…'} · Daten in Supabase
+          Logbook · {swVersion || '…'} · Data in Supabase
         </div>
       </div>
       {confirmEl}
