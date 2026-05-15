@@ -322,22 +322,37 @@ function HomeScreen({ store, setStore, go }) {
             WebkitTapHighlightColor: 'transparent',
           }}>⋯</button>
         </div>
-        {!weekdayMode && sch && dayCount > 0 && weekOffset === 0 && (
-          <div style={{ marginTop: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginBottom: 5 }}>
-              <span>ZYKLUS {currentCycleNum + 1}</span>
-              <span style={{ color: UI.gold }}>{dayIdx + 1} / {dayCount}</span>
+        {sch && weekOffset === 0 && (() => {
+          let label, progress, total;
+          if (weekdayMode) {
+            const training = week.filter(d => d.items.length > 0);
+            if (!training.length) return null;
+            const done = training.filter(d => {
+              const key = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
+              return completedDateKeys?.has(key);
+            }).length;
+            label = 'DIESE WOCHE'; progress = done; total = training.length;
+          } else {
+            if (!dayCount) return null;
+            label = `ZYKLUS ${currentCycleNum + 1}`; progress = dayIdx + 1; total = dayCount;
+          }
+          return (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginBottom: 5 }}>
+                <span>{label}</span>
+                <span style={{ color: UI.gold }}>{progress} / {total}</span>
+              </div>
+              <div style={{ height: 3, background: UI.inkLine, borderRadius: 2, overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%',
+                  width: `${Math.round((progress / total) * 100)}%`,
+                  background: `linear-gradient(90deg, ${UI.gold}, ${UI.goldLight})`,
+                  borderRadius: 2,
+                }} />
+              </div>
             </div>
-            <div style={{ height: 3, background: UI.inkLine, borderRadius: 2, overflow: 'hidden' }}>
-              <div style={{
-                height: '100%',
-                width: `${Math.round(((dayIdx + 1) / dayCount) * 100)}%`,
-                background: `linear-gradient(90deg, ${UI.gold}, ${UI.goldLight})`,
-                borderRadius: 2,
-              }} />
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {store.inProgress && (() => {
