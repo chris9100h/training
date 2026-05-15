@@ -332,7 +332,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         })}
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 124px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 124px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* Exercise name */}
         <div style={{ flexShrink: 0 }}>
