@@ -345,13 +345,14 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>kg</Label>
             <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>Reps</Label>
             <button onClick={checkAllSets} disabled={anyMissingData && !allDone} style={{
-              width: 36, height: 36, border: 'none', borderRadius: 8,
+              width: 44, height: 44, border: 'none', borderRadius: 12,
               cursor: anyMissingData && !allDone ? 'default' : 'pointer',
               background: allDone ? UI.gold : 'transparent',
               outline: `2px solid ${allDone ? UI.gold : UI.inkLine}`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 14, fontWeight: 700, color: allDone ? '#0a0a0a' : 'transparent',
+              fontSize: 18, fontWeight: 700, color: allDone ? '#0a0a0a' : 'transparent',
               opacity: anyMissingData && !allDone ? 0.3 : 1,
+              WebkitTapHighlightColor: 'transparent',
             }}>✓</button>
             <span />
           </div>
