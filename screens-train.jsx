@@ -36,6 +36,9 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const session = store.sessions.find(s => s.id === sessionId);
   if (!session) { go({ name: 'home' }); return null; }
 
+  const _sch = store.schedules?.find(s => s.id === session.scheduleId);
+  const isWeekdayMode = _sch ? LB.isWeekdayPlan(_sch) : false;
+
   const exIdx = session.currentExIdx || 0;
   const entry = session.entries[exIdx];
   const exercise = entry ? LB.findExercise(store, entry.exId) : null;
@@ -119,7 +122,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     setStore(s => ({
       ...s,
       inProgress: null,
-      cycleIndex: s.cycleIndex + 1,
+      ...(!isWeekdayMode && { cycleIndex: s.cycleIndex + 1 }),
       lastAdvancedDate: LB.todayISO(),
     }));
     go({ name: 'session', sessionId: session.id, justFinished: true });
