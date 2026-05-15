@@ -519,9 +519,14 @@ function HomeScreen({ store, setStore, go }) {
                 </CrownButton>
                 {!weekdayMode && isViewingToday && (
                   <button onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{
-                    background: 'transparent', border: 'none', color: UI.inkFaint,
-                    fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
-                    cursor: 'pointer', marginTop: 14, fontFamily: UI.fontUi, fontWeight: 500,
+                    marginTop: 26,
+                    background: 'transparent',
+                    border: `0.5px solid ${UI.hairStrong}`,
+                    borderRadius: 999,
+                    color: UI.inkSoft,
+                    fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+                    cursor: 'pointer', padding: '10px 22px',
+                    fontFamily: UI.fontUi, fontWeight: 500,
                   }}>
                     Tag überspringen
                   </button>
