@@ -313,8 +313,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         </span>
       </div>
 
-      {/* Exercise progress chips — clickable thin bars */}
-      <div ref={chipRowRef} style={{ flexShrink: 0, padding: '0 22px 14px', display: 'flex', gap: 4, overflowX: 'auto', scrollbarWidth: 'none' }}>
+      {/* Exercise chips */}
+      <div ref={chipRowRef} style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
         {session.entries.map((e, i) => {
           const done = e.sets.every(s => s.done);
           const active = i === exIdx;
@@ -322,12 +322,22 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             <button key={i}
               onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
               style={{
-                flex: 1, minWidth: 18, height: 3, borderRadius: 2, border: 'none', cursor: 'pointer',
-                background: active ? UI.gold : done ? UI.goldDeep : UI.hair,
-                opacity: active ? 1 : done ? 0.7 : 1,
-                transition: 'background 0.2s',
-                WebkitTapHighlightColor: 'transparent',
-              }}/>
+                flexShrink: 0, maxWidth: 110,
+                padding: '5px 11px', borderRadius: 999,
+                border: `0.5px solid ${active ? UI.gold : done ? UI.goldDeep : UI.hairStrong}`,
+                background: active ? UI.goldFaint : 'transparent',
+                cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                transition: 'all 0.15s',
+              }}>
+              <div style={{
+                fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em',
+                color: active ? UI.gold : done ? UI.goldDeep : UI.inkFaint,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                opacity: done && !active ? 0.65 : 1,
+              }}>
+                {e.name}
+              </div>
+            </button>
           );
         })}
       </div>
