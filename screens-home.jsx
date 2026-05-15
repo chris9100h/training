@@ -507,28 +507,38 @@ function HomeScreen({ store, setStore, go }) {
                 </div>
               </Frame>
             ) : (
-              <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
-                <CrownButton onClick={startSession} size={140}>
-                  <span className="micro" style={{ color: 'rgba(10,8,5,0.65)', letterSpacing: '0.22em', fontWeight: 600 }}>
+              <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
+                <button onClick={startSession} style={{
+                  flex: 1, minHeight: 130, borderRadius: 18, border: 'none', cursor: 'pointer',
+                  background: 'linear-gradient(160deg, var(--gold-light) 0%, var(--gold) 55%, var(--gold-deep) 100%)',
+                  boxShadow: '0 16px 50px rgba(201,169,97,0.35), 0 0 0 0.5px rgba(201,169,97,0.6), inset 0 1px 0 rgba(255,240,200,0.4)',
+                  animation: 'pulseGold 3.5s ease-out infinite',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <span className="micro" style={{ color: 'rgba(10,8,5,0.6)', letterSpacing: '0.22em', fontWeight: 600 }}>
                     {isFutureSlot && !isViewingToday ? 'PLAN' : isViewingToday ? 'START' : 'LOG'}
                   </span>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="#0a0805" style={{ marginTop: 2 }}>
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="#0a0805">
                     <path d="M8 5v14l11-7z"/>
                   </svg>
-                  <span className="micro" style={{ color: 'rgba(10,8,5,0.55)', marginTop: 2 }}>
+                  <span className="micro" style={{ color: 'rgba(10,8,5,0.45)' }}>
                     {isViewingToday ? 'TRAINING' : 'EINTRAGEN'}
                   </span>
-                </CrownButton>
+                </button>
                 {!weekdayMode && isViewingToday && (
-                  <CrownButton
-                    onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }}
-                    size={110}
-                    style={{ animation: 'none', opacity: 0.75 }}
-                  >
-                    <span className="micro" style={{ color: 'rgba(10,8,5,0.6)', letterSpacing: '0.18em', fontWeight: 600 }}>TAG</span>
-                    <span style={{ fontSize: 22, color: 'rgba(10,8,5,0.65)', fontFamily: UI.fontDisplay, fontStyle: 'italic', lineHeight: 1 }}>→</span>
-                    <span className="micro" style={{ color: 'rgba(10,8,5,0.45)', marginTop: 1 }}>SKIP</span>
-                  </CrownButton>
+                  <button onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{
+                    flex: 1, minHeight: 130, borderRadius: 18, border: 'none', cursor: 'pointer',
+                    background: 'linear-gradient(160deg, var(--gold-light) 0%, var(--gold) 55%, var(--gold-deep) 100%)',
+                    boxShadow: '0 8px 24px rgba(201,169,97,0.18), 0 0 0 0.5px rgba(201,169,97,0.4)',
+                    opacity: 0.72,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>
+                    <span className="micro" style={{ color: 'rgba(10,8,5,0.6)', letterSpacing: '0.22em', fontWeight: 600 }}>TAG</span>
+                    <span style={{ fontSize: 24, color: 'rgba(10,8,5,0.7)', fontFamily: UI.fontDisplay, fontStyle: 'italic', lineHeight: 1 }}>→</span>
+                    <span className="micro" style={{ color: 'rgba(10,8,5,0.45)' }}>ÜBERSPRINGEN</span>
+                  </button>
                 )}
               </div>
             )}
