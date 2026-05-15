@@ -764,7 +764,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: 'Pause vorbei — weiter gehts! 💪', title: 'Logbook Test', delaySeconds }),
+        body: JSON.stringify({ message: 'Pause vorbei — weiter gehts! 💪', title: 'Logbook Test', delaySeconds, nonce: String(Date.now()) }),
       });
       if (res.status === 202) {
         setPushStatus(`✓ Geplant — Notification in ~${delaySeconds}s`);
