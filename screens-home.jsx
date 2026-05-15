@@ -315,11 +315,13 @@ function HomeScreen({ store, setStore, go }) {
               boxShadow: `0 0 40px rgba(212,164,55,0.15)`,
             }}>
               <div style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.15em' }}>TRAINING LÄUFT</div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: UI.ink }}>{activeSession.dayName}</div>
+              <div style={{ fontSize: 26, fontWeight: 700, color: UI.ink }}>{activeSession.dayName}</div>
               <button onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{
                 marginTop: 4, background: UI.gold, color: '#0a0a0a',
-                border: 'none', borderRadius: 12, padding: '10px 28px',
-                fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi, cursor: 'pointer', width: '100%',
+                border: 'none', borderRadius: 12, padding: '13px 28px',
+                fontSize: 15, fontWeight: 600, fontFamily: UI.fontUi, cursor: 'pointer', width: '100%',
+                boxShadow: '0 4px 20px rgba(212,164,55,0.4)',
+                WebkitTapHighlightColor: 'transparent',
               }}>Weitermachen →</button>
               <button onClick={async () => {
                 if (!await confirm('Session wird gelöscht.', { title: 'Training abbrechen?', ok: 'Abbrechen', cancel: 'Zurück', danger: true })) return;
@@ -366,19 +368,20 @@ function HomeScreen({ store, setStore, go }) {
               <div key={d.id ?? i}
                 onClick={() => weekdayMode ? setSelectedWd(i) : setSelectedSlot(i)}
                 style={{
-                  flex: 1, padding: '7px 3px', textAlign: 'center',
+                  flex: 1, padding: '10px 3px 8px', textAlign: 'center',
                   background: isSelected ? UI.goldFaint : UI.bgRaised,
                   border: `1px solid ${isSelected ? UI.goldSoft : d.isToday ? UI.inkSoft : UI.inkLine}`,
                   borderRadius: 10, cursor: 'pointer',
+                  boxShadow: isSelected ? '0 2px 8px rgba(212,164,55,0.15)' : 'none',
                 }}>
                 <div style={{ fontSize: 9, color: isSelected ? UI.gold : d.isToday ? UI.inkSoft : UI.inkFaint, fontFamily: UI.fontNum }}>
                   {slotLabel}
                 </div>
-                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 3, color: r ? UI.inkSoft : isSelected ? UI.gold : UI.ink }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginTop: 3, color: r ? UI.inkSoft : isSelected ? UI.gold : UI.ink }}>
                   {r ? '—' : d.name.slice(0, 4)}
                 </div>
                 {isCompleted && (
-                  <div style={{ fontSize: 8, color: isSelected ? UI.gold : UI.inkSoft, marginTop: 2, lineHeight: 1 }}>{'✓'}</div>
+                  <div style={{ fontSize: 11, color: UI.gold, marginTop: 2, lineHeight: 1 }}>✓</div>
                 )}
               </div>
             );
@@ -401,7 +404,7 @@ function HomeScreen({ store, setStore, go }) {
         ) : (
           <Card accent>
             <Label style={{ color: UI.gold }}>{cardLabel}</Label>
-            <div style={{ fontSize: 28, fontWeight: 600, color: UI.gold, marginBottom: 4 }}>{activeDay.name}</div>
+            <div style={{ fontSize: 34, fontWeight: 700, color: UI.gold, marginBottom: 6, letterSpacing: '0.01em' }}>{activeDay.name}</div>
             <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>
               {activeDay.items.length} Übungen · ~{Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))} min
             </div>
@@ -423,7 +426,7 @@ function HomeScreen({ store, setStore, go }) {
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <Btn onClick={startSession} style={{ width: '100%' }}>
+                <Btn onClick={startSession} style={{ width: '100%', boxShadow: '0 4px 24px rgba(212,164,55,0.35)' }}>
                   {(isViewingToday || isFutureSlot) ? 'Training starten →' : 'Training nacherfassen →'}
                 </Btn>
                 {!weekdayMode && isViewingToday && (

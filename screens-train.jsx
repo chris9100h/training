@@ -277,7 +277,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', padding: '10px 18px 0' }}>
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-          height: 34, width: '100%', borderRadius: 999,
+          height: 38, width: '100%', borderRadius: 999,
           background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
         }}>
           <div style={{
@@ -317,22 +317,22 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
         {/* heading */}
         <div>
-          <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.2 }}>{entry.name}</div>
-          <div style={{ fontSize: 14, color: UI.inkSoft, marginTop: 4 }}>
-            Set {currentSetNum} of {entry.sets.length}
+          <div style={{ fontSize: 30, fontWeight: 700, lineHeight: 1.15, letterSpacing: '-0.01em' }}>{entry.name}</div>
+          <div style={{ fontSize: 14, color: UI.inkSoft, marginTop: 6 }}>
+            Satz {currentSetNum} von {entry.sets.length}
           </div>
         </div>
 
         {/* set table */}
         <div>
           {/* table header */}
-          <div style={{ display: 'grid', gridTemplateColumns: '36px 1fr 72px 72px 36px 24px', gap: 8, padding: '0 2px 8px', borderBottom: `1px solid ${UI.inkLine}` }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '36px 1fr 72px 72px 44px 24px', gap: 8, padding: '0 2px 10px', borderBottom: `1px solid ${UI.inkLine}` }}>
             <Label style={{ marginBottom: 0, fontSize: 11 }}>Set</Label>
             <Label style={{ marginBottom: 0, fontSize: 11 }}>Vorherige ↔</Label>
             <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>kg</Label>
             <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>Reps</Label>
             <button onClick={checkAllSets} disabled={anyMissingData && !allDone} style={{
-              width: 28, height: 28, border: 'none', borderRadius: 6,
+              width: 36, height: 36, border: 'none', borderRadius: 8,
               cursor: anyMissingData && !allDone ? 'default' : 'pointer',
               background: allDone ? UI.gold : 'transparent',
               outline: `2px solid ${allDone ? UI.gold : UI.inkLine}`,
@@ -349,14 +349,19 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             const current = !s.done && entry.sets.slice(0, i).every(x => x.done);
             return (
               <div key={i} style={{
-                display: 'grid', gridTemplateColumns: '36px 1fr 72px 72px 36px 24px', gap: 8,
-                alignItems: 'center', padding: '10px 2px',
-                borderBottom: `1px solid ${UI.inkLine}`,
+                display: 'grid', gridTemplateColumns: '36px 1fr 72px 72px 44px 24px', gap: 8,
+                alignItems: 'center',
+                padding: current ? '12px 10px' : '10px 2px',
+                margin: current ? '4px -10px' : '0',
+                borderRadius: current ? 12 : 0,
+                background: current ? 'rgba(212,164,55,0.07)' : 'transparent',
+                border: current ? `1px solid rgba(212,164,55,0.22)` : 'none',
+                borderBottom: !current ? `1px solid ${UI.inkLine}` : undefined,
                 opacity: s.done ? 0.45 : 1,
               }}>
                 {/* set number circle */}
                 <div style={{
-                  width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                  width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
                   background: current ? UI.goldFaint : 'transparent',
                   border: `2px solid ${current ? UI.gold : UI.inkLine}`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -403,13 +408,14 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                 <button onClick={() => s.done ? updateSet(i, { done: false }) : completeSet(i)}
                   disabled={!s.done && (!s.kg || !s.reps)}
                   style={{
-                    width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer',
+                    width: 44, height: 44, borderRadius: 12, border: 'none', cursor: 'pointer',
                     background: s.done ? UI.gold : 'transparent',
-                    outline: `2px solid ${s.done ? UI.gold : (!s.kg || !s.reps) ? UI.inkLine : UI.inkSoft}`,
+                    outline: `2px solid ${s.done ? UI.gold : (!s.kg || !s.reps) ? UI.inkLine : current ? UI.goldSoft : UI.inkSoft}`,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 14, fontWeight: 700, color: s.done ? '#0a0a0a' : 'transparent',
+                    fontSize: 18, fontWeight: 700, color: s.done ? '#0a0a0a' : 'transparent',
                     opacity: !s.done && (!s.kg || !s.reps) ? 0.35 : 1,
                     flexShrink: 0,
+                    WebkitTapHighlightColor: 'transparent',
                   }}>
                   ✓
                 </button>
@@ -457,7 +463,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           <Card style={{ padding: 12, background: UI.bgInset }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
               <Label style={{ marginBottom: 0 }}>Pause</Label>
-              <div style={{ fontFamily: UI.fontNum, fontSize: 22, color: UI.gold, fontWeight: 500 }}>
+              <div style={{ fontFamily: UI.fontNum, fontSize: 30, color: UI.gold, fontWeight: 600 }}>
                 {Math.floor(restRemaining/60)}:{(restRemaining%60).toString().padStart(2,'0')}
               </div>
             </div>
@@ -495,7 +501,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         background: UI.bg, display: 'flex', gap: 8, zIndex: 10,
       }}>
         <Btn kind="ghost" onClick={() => navigate(-1)} disabled={exIdx === 0} style={{ flex: 1, opacity: exIdx === 0 ? 0.3 : 1 }}>‹ zurück</Btn>
-        <Btn onClick={() => navigate(1)} style={{ flex: 2 }}>
+        <Btn onClick={() => navigate(1)} style={{ flex: 2, boxShadow: exIdx === session.entries.length - 1 ? '0 4px 20px rgba(212,164,55,0.35)' : 'none' }}>
           {exIdx === session.entries.length - 1 ? 'Fertig →' : 'Nächste Übung →'}
         </Btn>
       </div>
@@ -611,12 +617,12 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
 function setInputStyle(done, current) {
   return {
-    background: done ? 'transparent' : UI.bgInset,
+    background: done ? 'transparent' : current ? 'rgba(212,164,55,0.06)' : UI.bgInset,
     border: `1px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.inkLine}`,
     borderRadius: 8, outline: 'none',
     color: done ? UI.inkSoft : UI.ink,
     fontFamily: UI.fontNum, fontSize: 16, fontWeight: 500,
-    width: '100%', padding: '7px 4px', textAlign: 'center',
+    width: '100%', padding: '10px 4px', textAlign: 'center',
   };
 }
 

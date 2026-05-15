@@ -514,9 +514,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
       />
       <div style={{ padding: '8px 18px 18px', display: 'flex', flexDirection: 'column', gap: 6 }}>
         {justFinished && (
-          <Card accent style={{ textAlign: 'center', padding: 14 }}>
-            <div style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.15em' }}>SESSION KOMPLETT</div>
-            <div style={{ fontSize: 20, fontWeight: 600, color: UI.gold, marginTop: 4 }}>Stark gemacht 💪</div>
+          <Card accent style={{ textAlign: 'center', padding: '20px 14px' }}>
+            <div style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.15em', marginBottom: 6 }}>SESSION KOMPLETT</div>
+            <div style={{ fontSize: 26, fontWeight: 700, color: UI.gold }}>Stark gemacht 💪</div>
+            <div style={{ fontSize: 13, color: UI.inkSoft, marginTop: 6 }}>Ergebnis gespeichert.</div>
           </Card>
         )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>

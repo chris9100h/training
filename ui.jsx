@@ -117,7 +117,14 @@ function TabBar({ active, onChange }) {
             WebkitTapHighlightColor: 'transparent',
             transition: 'color 0.15s',
           }}>
-            {TAB_ICONS[t.id]}
+            <div style={{
+              padding: '4px 14px', borderRadius: 14, marginBottom: 2,
+              background: on ? UI.goldFaint : 'transparent',
+              border: `1px solid ${on ? 'rgba(212,164,55,0.22)' : 'transparent'}`,
+              transition: 'background 0.18s, border-color 0.18s',
+            }}>
+              {TAB_ICONS[t.id]}
+            </div>
             {t.label}
           </button>
         );
