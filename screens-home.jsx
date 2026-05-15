@@ -509,7 +509,7 @@ function HomeScreen({ store, setStore, go }) {
             ) : (
               <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', width: '100%' }}>
                 <button onClick={startSession} style={{
-                  flex: 1, minHeight: 130, borderRadius: 18, border: 'none', cursor: 'pointer',
+                  flex: 1, minHeight: 90, borderRadius: 18, border: 'none', cursor: 'pointer',
                   background: 'linear-gradient(160deg, var(--gold-light) 0%, var(--gold) 55%, var(--gold-deep) 100%)',
                   boxShadow: '0 16px 50px rgba(201,169,97,0.35), 0 0 0 0.5px rgba(201,169,97,0.6), inset 0 1px 0 rgba(255,240,200,0.4)',
                   animation: 'pulseGold 3.5s ease-out infinite',
@@ -528,7 +528,7 @@ function HomeScreen({ store, setStore, go }) {
                 </button>
                 {!weekdayMode && isViewingToday && (
                   <button onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{
-                    flex: 1, minHeight: 130, borderRadius: 18, cursor: 'pointer',
+                    flex: 1, minHeight: 90, borderRadius: 18, cursor: 'pointer',
                     background: 'transparent',
                     border: `0.5px solid ${UI.hairStrong}`,
                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
