@@ -13,7 +13,7 @@ function PlanScreen({ store, setStore, go }) {
         right={
           <button onClick={() => go({ name: 'schedule-new' })} style={{
             width: 32, height: 32, borderRadius: '50%',
-            border: `0.5px solid ${UI.goldSoft}`, background: UI.goldFaint,
+            boxShadow: `inset 0 0 0 0.5px ${UI.goldSoft}`, background: UI.goldFaint,
             color: UI.gold, cursor: 'pointer', fontSize: 20, lineHeight: 1,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>+</button>

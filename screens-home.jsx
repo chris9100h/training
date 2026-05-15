@@ -300,7 +300,7 @@ function HomeScreen({ store, setStore, go }) {
         <TopBar
           title={<span>Hey, <em style={{ fontFamily: UI.fontDisplay, fontStyle: 'italic', fontWeight: 300, color: UI.gold }}>{store.user.name}</em></span>}
           sub={new Date().toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
-          right={<button onClick={() => go({ name: 'settings' })} style={{ ...btnIcon, fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: '50%', border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
+          right={<button onClick={() => go({ name: 'settings' })} style={{ ...btnIcon, fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: '50%', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
         />
         <div style={{ padding: 22 }}>
           <Empty
@@ -335,7 +335,7 @@ function HomeScreen({ store, setStore, go }) {
           </div>
           <button onClick={() => go({ name: 'settings' })} style={{
             width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-            background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+            background: 'transparent', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             cursor: 'pointer', color: UI.inkSoft,
           }}>
@@ -390,7 +390,7 @@ function HomeScreen({ store, setStore, go }) {
           <button onClick={goBack} disabled={weekOffset <= minOffset} style={{
             width: 30, height: 30, borderRadius: '50%',
             background: 'transparent',
-            border: `0.5px solid ${weekOffset <= minOffset ? 'transparent' : UI.hairStrong}`,
+            boxShadow: `inset 0 0 0 0.5px ${weekOffset <= minOffset ? 'transparent' : UI.hairStrong}`,
             color: weekOffset <= minOffset ? UI.inkGhost : UI.inkSoft,
             cursor: weekOffset <= minOffset ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -403,7 +403,7 @@ function HomeScreen({ store, setStore, go }) {
           <button onClick={goForward} disabled={weekOffset === 0} style={{
             width: 30, height: 30, borderRadius: '50%',
             background: 'transparent',
-            border: `0.5px solid ${weekOffset === 0 ? 'transparent' : UI.hairStrong}`,
+            boxShadow: `inset 0 0 0 0.5px ${weekOffset === 0 ? 'transparent' : UI.hairStrong}`,
             color: weekOffset === 0 ? UI.inkGhost : UI.inkSoft,
             cursor: weekOffset === 0 ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -497,7 +497,7 @@ function HomeScreen({ store, setStore, go }) {
             {isSlotDone ? (
               <Frame style={{ padding: '14px 18px', width: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: UI.goldFaint, boxShadow: `inset 0 0 0 0.5px ${UI.goldSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5"><path d="M2 6l2.5 2.5L10 3"/></svg>
                   </div>
                   <div>

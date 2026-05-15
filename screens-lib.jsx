@@ -85,7 +85,7 @@ function LibraryScreen({ store, setStore, go }) {
       )}
       <button onClick={() => setCreating(true)} style={{
         width: 32, height: 32, borderRadius: '50%',
-        border: `0.5px solid ${UI.goldSoft}`, background: UI.goldFaint,
+        boxShadow: `inset 0 0 0 0.5px ${UI.goldSoft}`, background: UI.goldFaint,
         color: UI.gold, cursor: 'pointer', fontSize: 20, lineHeight: 1,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>+</button>
@@ -185,7 +185,7 @@ function LibraryScreen({ store, setStore, go }) {
               {selecting ? (
                 <div style={{
                   width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
-                  border: `0.5px solid ${isSelected ? UI.danger : UI.hairStrong}`,
+                  boxShadow: `inset 0 0 0 0.5px ${isSelected ? UI.danger : UI.hairStrong}`,
                   background: isSelected ? UI.danger : 'transparent',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
@@ -326,7 +326,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
             {!editMode && <button onClick={deleteExercise} style={{
               background: 'none', border: 'none', cursor: 'pointer',
               width: 30, height: 30, borderRadius: '50%',
-              border: `0.5px solid rgba(200,116,105,0.3)`,
+              boxShadow: `inset 0 0 0 0.5px rgba(200,116,105,0.3)`,
               color: UI.danger, fontSize: 16, lineHeight: 1,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>×</button>}
@@ -598,7 +598,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
             }}>Bearbeiten</button>
             <button onClick={deleteSession} style={{
               width: 28, height: 28, borderRadius: '50%',
-              border: `0.5px solid rgba(200,116,105,0.25)`, background: 'transparent',
+              boxShadow: `inset 0 0 0 0.5px rgba(200,116,105,0.25)`, background: 'transparent',
               color: UI.danger, cursor: 'pointer', fontSize: 16, lineHeight: 1,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>×</button>

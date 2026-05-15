@@ -300,7 +300,7 @@ function Stepper({ value, onChange, step = 2.5, min = 0, suffix, big = false }) 
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
       <button onClick={() => onChange(Math.max(min, round((+value || 0) - step)))} style={{
         width: big ? 44 : 36, height: big ? 44 : 36, padding: 0,
-        borderRadius: '50%', border: `0.5px solid ${UI.hairStrong}`,
+        borderRadius: '50%', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
         background: 'transparent', color: UI.ink, cursor: 'pointer',
         fontSize: big ? 22 : 18, lineHeight: 1, fontWeight: 300,
         WebkitTapHighlightColor: 'transparent',
@@ -312,7 +312,7 @@ function Stepper({ value, onChange, step = 2.5, min = 0, suffix, big = false }) 
       }}>{value ?? '—'}{suffix && <span style={{ fontSize: big ? 14 : 11, color: UI.inkFaint, marginLeft: 4 }}>{suffix}</span>}</div>
       <button onClick={() => onChange(round((+value || 0) + step))} style={{
         width: big ? 44 : 36, height: big ? 44 : 36, padding: 0,
-        borderRadius: '50%', border: `0.5px solid ${UI.hairStrong}`,
+        borderRadius: '50%', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
         background: 'transparent', color: UI.ink, cursor: 'pointer',
         fontSize: big ? 22 : 18, lineHeight: 1, fontWeight: 300,
         WebkitTapHighlightColor: 'transparent',
@@ -544,8 +544,8 @@ function CrownButton({ children, onClick, size = 180, disabled, style = {} }) {
       WebkitTapHighlightColor: 'transparent',
       ...style,
     }}>
-      <div style={{ position: 'absolute', inset: 8, borderRadius: '50%', border: '0.5px solid rgba(0,0,0,0.18)', pointerEvents: 'none' }} />
-      <div style={{ position: 'absolute', inset: 16, borderRadius: '50%', border: '0.5px solid rgba(0,0,0,0.12)', pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', inset: 8, borderRadius: '50%', boxShadow: 'inset 0 0 0 0.5px rgba(0,0,0,0.18)', pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', inset: 16, borderRadius: '50%', boxShadow: 'inset 0 0 0 0.5px rgba(0,0,0,0.12)', pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
         {children}
       </div>

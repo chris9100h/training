@@ -294,7 +294,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 8px', display: 'flex', alignItems: 'center', gap: 14 }}>
         <button onClick={abandon} style={{
           width: 32, height: 32, borderRadius: '50%',
-          border: `0.5px solid ${UI.hairStrong}`, background: 'transparent',
+          boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, background: 'transparent',
           color: UI.danger, cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, lineHeight: 1,
         }}>×</button>
@@ -486,7 +486,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                   <div style={{
                     width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
                     background: isCurrent ? UI.goldFaint : 'transparent',
-                    border: `0.5px solid ${isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.hairStrong}`,
+                    boxShadow: `inset 0 0 0 0.5px ${isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.hairStrong}`,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontFamily: UI.fontNum, fontSize: 10, fontWeight: 500,
                     color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
@@ -550,13 +550,13 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
             <button onClick={addSet} style={{
               width: 32, height: 32, borderRadius: '50%',
-              background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+              background: 'transparent', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
               color: UI.inkSoft, fontSize: 18, lineHeight: 1, cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>+</button>
             <button onClick={swapExercise} style={{
               width: 32, height: 32, borderRadius: '50%',
-              background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+              background: 'transparent', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
               color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>⇄</button>
