@@ -295,7 +295,7 @@ function HomeScreen({ store, setStore, go }) {
   }
 
   return (
-    <Screen style={{ position: 'relative' }}>
+    <Screen scroll={false} style={{ position: 'relative' }}>
       {/* Custom dramatic home header */}
       <div style={{
         flexShrink: 0,
@@ -391,10 +391,10 @@ function HomeScreen({ store, setStore, go }) {
         ) : null;
       })()}
 
-      <div style={{ padding: '14px 18px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ flex: 1, minHeight: 0, padding: '14px 18px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
 
         {/* period navigation */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
           <button onClick={goBack} style={{
             ...navBtn(weekOffset <= minOffset),
             width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -415,7 +415,7 @@ function HomeScreen({ store, setStore, go }) {
         </div>
 
         {/* day strip */}
-        <div style={{ display: 'flex', gap: 5 }}>
+        <div style={{ flexShrink: 0, display: 'flex', gap: 5 }}>
           {week.map((d, i) => {
             const isSelected = weekdayMode ? i === selectedWd : i === selectedSlot;
             const r = !d.items?.length;
@@ -456,9 +456,9 @@ function HomeScreen({ store, setStore, go }) {
           })}
         </div>
 
-        {/* day card */}
+        {/* day card — flex:1 so it fills all remaining vertical space */}
         {isActiveRest ? (
-          <Card>
+          <Card style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <Label>{cardLabel}</Label>
             <div style={{ fontSize: 28, fontWeight: 600, marginBottom: 4 }}>Rest Day</div>
             <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 14 }}>
@@ -470,56 +470,62 @@ function HomeScreen({ store, setStore, go }) {
             </div>
           </Card>
         ) : (
-          <Card accent>
-            <Label style={{ color: UI.gold }}>{cardLabel}</Label>
-            <div style={{ fontSize: 34, fontWeight: 700, color: UI.gold, marginBottom: 6, letterSpacing: '0.01em' }}>{activeDay.name}</div>
-            <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>
+          <Card accent style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <Label style={{ color: UI.gold, flexShrink: 0 }}>{cardLabel}</Label>
+            <div style={{ fontSize: 34, fontWeight: 700, color: UI.gold, marginBottom: 4, letterSpacing: '0.01em', flexShrink: 0 }}>{activeDay.name}</div>
+            <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 8, flexShrink: 0 }}>
               {activeDay.items.length} Übungen · ~{Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))} min
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
-              {activeDay.items.map((it, i) => {
-                const ex = LB.findExercise(store, it.exId);
-                return (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '6px 0', borderBottom: i < activeDay.items.length - 1 ? `1px dashed ${UI.goldSoft}` : 'none' }}>
-                    <span style={{ color: UI.ink }}>{ex?.name || '—'}</span>
-                    <span style={{ color: UI.gold, fontFamily: UI.fontNum, fontSize: 13 }}>{it.sets} × {it.reps}</span>
-                  </div>
-                );
-              })}
+            {/* exercise list — grows to fill space, clips gracefully */}
+            <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', marginBottom: 10 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                {activeDay.items.map((it, i) => {
+                  const ex = LB.findExercise(store, it.exId);
+                  return (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '5px 0', borderBottom: i < activeDay.items.length - 1 ? `1px dashed ${UI.goldSoft}` : 'none' }}>
+                      <span style={{ color: UI.ink }}>{ex?.name || '—'}</span>
+                      <span style={{ color: UI.gold, fontFamily: UI.fontNum, fontSize: 13 }}>{it.sets} × {it.reps}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-            {isSlotDone ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'rgba(127,176,105,0.08)', border: `1px solid rgba(127,176,105,0.2)`, borderRadius: 12, color: UI.ok }}>
-                <span style={{ fontSize: 24, lineHeight: 1 }}>✓</span>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 600 }}>Training erledigt</div>
-                  <div style={{ fontSize: 12, opacity: 0.75 }}>Gut gemacht!</div>
+            {/* CTA — always visible at the bottom */}
+            <div style={{ flexShrink: 0 }}>
+              {isSlotDone ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'rgba(127,176,105,0.08)', border: `1px solid rgba(127,176,105,0.2)`, borderRadius: 12, color: UI.ok }}>
+                  <span style={{ fontSize: 22, lineHeight: 1 }}>✓</span>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>Training erledigt</div>
+                    <div style={{ fontSize: 12, opacity: 0.75 }}>Gut gemacht!</div>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <Btn onClick={startSession} style={{ width: '100%', boxShadow: '0 4px 24px rgba(212,164,55,0.35)' }}>
-                  {(isViewingToday || isFutureSlot) ? 'Training starten →' : 'Training nacherfassen →'}
-                </Btn>
-                {!weekdayMode && isViewingToday && (
-                  <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>
-                    Tag überspringen
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <Btn onClick={startSession} style={{ width: '100%', boxShadow: '0 4px 24px rgba(212,164,55,0.35)' }}>
+                    {(isViewingToday || isFutureSlot) ? 'Training starten →' : 'Training nacherfassen →'}
                   </Btn>
-                )}
-              </div>
-            )}
+                  {!weekdayMode && isViewingToday && (
+                    <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>
+                      Tag überspringen
+                    </Btn>
+                  )}
+                </div>
+              )}
+            </div>
           </Card>
         )}
 
-        {/* last session preview */}
+        {/* last session preview — compact fixed-height strip */}
         {lastSession && (
-          <Card style={{ padding: 14 }}>
-            <Label>Letzte Session</Label>
+          <Card style={{ flexShrink: 0, padding: '10px 14px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: 15, fontWeight: 500 }}>{lastSession.dayName}</div>
-                <div style={{ fontSize: 12, color: UI.inkFaint }}>
-                  {new Date(lastSession.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('de-DE', { day:'numeric', month:'short' })} ·{' '}
-                  {totalVolume(lastSession).toLocaleString('de-DE')} kg
+                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginBottom: 2 }}>LETZTE SESSION</div>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>{lastSession.dayName}
+                  <span style={{ color: UI.inkFaint, fontSize: 12, fontWeight: 400, marginLeft: 8 }}>
+                    {new Date(lastSession.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('de-DE', { day:'numeric', month:'short' })} · {totalVolume(lastSession).toLocaleString('de-DE')} kg
+                  </span>
                 </div>
               </div>
               <Btn kind="icon" onClick={() => go({ name: 'session', sessionId: lastSession.id })} style={{ color: UI.gold, fontSize: 18 }}>→</Btn>

@@ -4,12 +4,6 @@ const { useState: useStateS, useMemo: useMemoS, useRef: useRefS } = React;
 
 const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','BACK','REST'];
 
-function nameHue(str) {
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) { h = ((h << 5) + h) ^ str.charCodeAt(i); h >>>= 0; }
-  return h % 360;
-}
-
 // ─── PlanScreen ────────────────────────────────────────────────────
 function PlanScreen({ store, setStore, go }) {
   return (
@@ -39,19 +33,15 @@ function PlanScreen({ store, setStore, go }) {
                   : `${s.days.length}-Tage-Zyklus · ${s.days.filter(d => d.items.length).length} Trainingstage`}
               </div>
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                {s.days.map((d) => {
-                  const hue = nameHue(d.name);
-                  const hasItems = d.items.length > 0;
-                  return (
-                    <div key={d.id} style={{
-                      fontSize: 10, padding: '3px 8px', borderRadius: 999,
-                      fontFamily: UI.fontNum, letterSpacing: '0.05em',
-                      background: hasItems ? `hsla(${hue}, 65%, 60%, 0.08)` : 'transparent',
-                      color: hasItems ? `hsla(${hue}, 75%, 72%, 1)` : UI.inkFaint,
-                      border: `1px ${hasItems ? 'solid' : 'dashed'} ${hasItems ? `hsla(${hue}, 65%, 60%, 0.35)` : UI.inkLine}`,
-                    }}>{d.name}</div>
-                  );
-                })}
+                {s.days.map((d) => (
+                  <div key={d.id} style={{
+                    fontSize: 10, padding: '3px 8px', borderRadius: 999,
+                    fontFamily: UI.fontNum, letterSpacing: '0.05em',
+                    background: d.items.length ? UI.bgInset : 'transparent',
+                    color: d.items.length ? UI.ink : UI.inkFaint,
+                    border: `1px ${d.items.length ? 'solid' : 'dashed'} ${UI.inkLine}`,
+                  }}>{d.name}</div>
+                ))}
               </div>
             </Card>
           );
@@ -127,19 +117,10 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
             LB.isWeekdayPlan(sch) ? d.weekday === todayWeekday : activeCycleDayIdx === i
           );
           const dayLabel = LB.isWeekdayPlan(sch) ? WEEKDAYS_FULL[d.weekday] : `Tag ${i+1}`;
-          const hue = nameHue(d.name);
-          const accentBar = !isRest && !isToday
-            ? `hsla(${hue}, 65%, 60%, 0.72)` : null;
           return (
             <Card key={d.id} accent={isToday}
               onClick={() => setEditingDay(d.id)}
-              style={{ cursor: 'pointer', padding: '14px 14px 14px 18px', position: 'relative', overflow: 'hidden' }}>
-              {accentBar && (
-                <div style={{
-                  position: 'absolute', top: 0, left: 0, width: 3, height: '100%',
-                  background: accentBar, borderRadius: '16px 0 0 16px',
-                }} />
-              )}
+              style={{ cursor: 'pointer', padding: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isRest ? 0 : 6 }}>
                 <div>
                   <Label style={{ marginBottom: 2 }}>{dayLabel}{isToday ? ' · heute' : ''}</Label>
