@@ -98,7 +98,20 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     updateSession(sess => ({ ...sess, currentExIdx: newIdx }));
   };
 
+  const cancelPushover = () => {
+    if (localStorage.getItem('logbook-push-enabled') !== 'true') return;
+    fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ nonce: `cancel-${Date.now()}`, cancel: true }),
+    }).catch(() => {});
+  };
+
   const finish = () => {
+    cancelPushover();
     updateSession(sess => ({ ...sess, ended: new Date().toISOString() }));
     setStore(s => ({
       ...s,
@@ -111,6 +124,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   const abandon = async () => {
     if (!await confirm('Eingaben gehen verloren.', { title: 'Session abbrechen?', ok: 'Abbrechen', cancel: 'Weiter trainieren', danger: true })) return;
+    cancelPushover();
     setStore(s => ({
       ...s,
       sessions: s.sessions.filter(x => x.id !== session.id),

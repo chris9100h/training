@@ -42,6 +42,7 @@ Deno.serve(async (req) => {
     delaySeconds = 0,
     nonce = '',   // unique token per rest period; empty = no cancellation check
     _relay = false,
+    cancel = false, // just invalidate the nonce, don't schedule delivery
   } = await req.json().catch(() => ({}));
 
   // First call only: register this nonce as the currently active one.
@@ -52,6 +53,15 @@ Deno.serve(async (req) => {
       headers: { 'Prefer': 'resolution=merge-duplicates' },
       body: JSON.stringify({ id: 'singleton', nonce }),
     }).catch(e => console.error('[pushover] nonce upsert error:', e));
+  }
+
+  // Cancel mode: nonce updated (old chain invalidated), nothing to schedule.
+  if (cancel) {
+    console.log('[pushover] cancelled by client');
+    return new Response(JSON.stringify({ cancelled: true }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   const run = async () => {
