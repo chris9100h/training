@@ -140,7 +140,7 @@ function TabBar({ active, onChange }) {
             position: 'absolute',
             left: `calc(${(idx * 100) / tabs.length}% + 6px)`,
             top: 6, bottom: 6,
-            width: `calc(${100 / tabs.length}% - 0px)`,
+            width: `calc(${100 / tabs.length}% - 12px)`,
             background: 'linear-gradient(180deg, rgba(201,169,97,0.18), rgba(201,169,97,0.06))',
             border: `0.5px solid ${UI.goldSoft}`,
             borderRadius: 999,
@@ -468,7 +468,7 @@ function TickRow({ count = 12, gold = false, style = {} }) {
 }
 
 // Frame with corner brackets — watch-case aesthetic
-function BracketFrame({ children, gold = false, style = {}, padding = 22 }) {
+function BracketFrame({ children, gold = false, style = {}, padding = 22, ...rest }) {
   const c = gold ? UI.gold : UI.hairStrong;
   const len = 14;
   const Corner = ({ pos }) => {
@@ -479,7 +479,7 @@ function BracketFrame({ children, gold = false, style = {}, padding = 22 }) {
     if (pos === 'br') return <div style={{ ...s, bottom: 0, right: 0, borderBottom: `0.5px solid ${c}`, borderRight: `0.5px solid ${c}` }} />;
   };
   return (
-    <div style={{ position: 'relative', padding, ...style }}>
+    <div style={{ position: 'relative', padding, ...style }} {...rest}>
       <Corner pos="tl" /><Corner pos="tr" /><Corner pos="bl" /><Corner pos="br" />
       {children}
     </div>
@@ -514,7 +514,7 @@ function SubDial({ label, value, sub, size = 110, gold = false, style = {} }) {
       ...style,
     }} className="guilloche">
       <span className="micro" style={{ position: 'absolute', top: size * 0.18, color: gold ? UI.gold : UI.inkFaint, fontSize: 9 }}>{label}</span>
-      <span className="num" style={{ fontSize: size * 0.28, color: gold ? UI.gold : UI.ink, fontWeight: 500, lineHeight: 1 }}>{value}</span>
+      <span className="num" style={{ fontSize: String(value).length > 5 ? size * 0.17 : String(value).length > 3 ? size * 0.22 : size * 0.28, color: gold ? UI.gold : UI.ink, fontWeight: 500, lineHeight: 1 }}>{value}</span>
       {sub && <span className="micro" style={{ position: 'absolute', bottom: size * 0.18, fontSize: 8 }}>{sub}</span>}
     </div>
   );
