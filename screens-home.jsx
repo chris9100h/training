@@ -1,4 +1,7 @@
-/* App screens — Login, Home, Schedules, Library, History */
+/* App screens — Login, Home — Haute Horlogerie redesign
+   Logic identical to original (Supabase auth, cycle/weekday modes,
+   in-progress overlay, skipRest, future-slot retroactive logging).
+*/
 
 const { useState, useEffect, useMemo, useRef } = React;
 
@@ -16,7 +19,6 @@ function LoginScreen() {
     setLoading(true); setError('');
     try {
       await LB.signIn(email.trim(), password);
-      // SIGNED_IN event → App loads data automatically
     } catch (e) {
       setError(e.message || 'Fehler beim Anmelden');
     } finally {
@@ -25,39 +27,72 @@ function LoginScreen() {
   };
 
   return (
-    <Screen scroll={false} style={{ justifyContent: 'center' }}>
-      <div style={{ padding: '24px 24px', display: 'flex', flexDirection: 'column', gap: 20, justifyContent: 'center', flex: 1 }}>
-        <div style={{ textAlign: 'center' }}>
+    <Screen scroll={false} style={{ position: 'relative', overflow: 'hidden' }}>
+      <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
+
+      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
+        <span className="micro">LOGBOOK · CAL. M.01</span>
+        <span className="micro">EST. 2024</span>
+      </div>
+
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
+          {/* Dial-style logo */}
           <div style={{
-            width: 80, height: 80, margin: '0 auto 18px', borderRadius: '50%',
-            border: `1.5px solid ${UI.gold}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: UI.gold, fontSize: 36, fontWeight: 700, fontFamily: UI.fontNum,
-            boxShadow: `0 0 40px rgba(212,164,55,0.15)`,
-            animation: 'logoPulse 3s ease-in-out infinite',
-          }}>L</div>
-          <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: '0.1em', color: UI.ink }}>LOGBOOK</div>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.14em', marginTop: 5 }}>
-            iron · sweat · numbers
+            width: 140, height: 140, borderRadius: '50%',
+            border: `0.5px solid ${UI.goldSoft}`,
+            background: `radial-gradient(circle at 50% 30%, rgba(201,169,97,0.10), transparent 60%), ${UI.bgRaised}`,
+            position: 'relative',
+            boxShadow: `0 0 0 6px ${UI.bg}, 0 0 0 6.5px ${UI.hair}, 0 0 80px rgba(201,169,97,0.12)`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} style={{
+                position: 'absolute', top: 5, left: '50%',
+                width: i % 3 === 0 ? 1 : 0.5,
+                height: i % 3 === 0 ? 9 : 5,
+                background: i % 3 === 0 ? UI.gold : UI.hairStrong,
+                transform: `translateX(-50%) rotate(${i * 30}deg)`,
+                transformOrigin: '50% 65px',
+              }} />
+            ))}
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 56, color: UI.gold, fontStyle: 'italic', fontWeight: 400, letterSpacing: '-0.04em' }}>L</span>
+            <span className="micro" style={{ position: 'absolute', bottom: 36, color: UI.inkFaint }}>AUTOMATIC</span>
+          </div>
+          <div style={{ marginTop: 26, textAlign: 'center' }}>
+            <div className="display" style={{ fontSize: 30, color: UI.ink, letterSpacing: '0.18em' }}>LOGBOOK</div>
+            <div className="micro" style={{ marginTop: 6 }}>FERRUM · SUDOR · NUMERI</div>
           </div>
         </div>
-        <div style={{ background: UI.bgRaised, border: `1px solid ${UI.inkLine}`, borderRadius: 16, overflow: 'hidden', marginTop: 8 }}>
-          <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Input label="E-Mail" value={email} onChange={setEmail} placeholder="du@beispiel.de" autoFocus uppercase={false} />
-            <Input label="Passwort" value={password} onChange={setPassword} type="password" placeholder="mind. 6 Zeichen" />
-            {error && (
-              <div style={{ fontSize: 12, color: UI.danger, padding: '8px 12px', background: 'rgba(200,116,105,0.08)', borderRadius: 8 }}>
-                {error}
-              </div>
-            )}
-            <Btn
-              onClick={submit}
-              disabled={!canSubmit || loading}
-              style={{ opacity: canSubmit && !loading ? 1 : 0.4, marginTop: 4 }}
-            >
-              {loading ? 'Bitte warten…' : 'Einloggen →'}
-            </Btn>
-          </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+          <Field label="E-Mail">
+            <TextInput value={email} onChange={setEmail} placeholder="du@beispiel.de" autoFocus />
+          </Field>
+          <Field label="Passwort">
+            <TextInput value={password} onChange={setPassword} type="password" placeholder="mind. 6 Zeichen" />
+          </Field>
+          {error && (
+            <div style={{
+              fontSize: 12, color: UI.danger,
+              padding: '10px 14px',
+              background: 'rgba(200,116,105,0.06)',
+              border: `0.5px solid rgba(200,116,105,0.25)`,
+              borderRadius: 10,
+              fontFamily: UI.fontUi,
+            }}>
+              {error}
+            </div>
+          )}
+          <Btn onClick={submit} disabled={!canSubmit || loading} style={{ marginTop: 4, opacity: canSubmit && !loading ? 1 : 0.4 }}>
+            {loading ? 'Anmelden…' : 'Einloggen'}
+          </Btn>
         </div>
+      </div>
+
+      <div style={{ flexShrink: 0, padding: '0 22px calc(env(safe-area-inset-bottom, 8px) + 18px)', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
+        <span className="micro">REF. LB-V2-2026</span>
+        <span className="micro">SWISS MADE</span>
       </div>
     </Screen>
   );
@@ -85,7 +120,6 @@ function HomeScreen({ store, setStore, go }) {
     }
   }, []); // eslint-disable-line
 
-  // Total days elapsed since cycle start (falls back to cycleIndex for legacy data)
   const todayN = useMemo(() => {
     if (weekdayMode || !store.cycleStartDate) return store.cycleIndex || 0;
     const today = new Date(); today.setHours(12, 0, 0, 0);
@@ -93,20 +127,17 @@ function HomeScreen({ store, setStore, go }) {
     return Math.max(0, Math.round((today.getTime() - start.getTime()) / 86400000));
   }, [store.cycleStartDate, store.cycleIndex, weekdayMode]);
 
-  // How many full cycles have been completed (0-indexed: 0 = first cycle still running)
   const currentCycleNum = dayCount > 0 ? Math.floor(todayN / dayCount) : 0;
 
-  // weekOffset: weeks back (weekday mode) or cycles back (cycle mode). 0 = current.
   const [weekOffset, setWeekOffset] = useState(0);
-  const [selectedWd, setSelectedWd] = useState(todayWd);        // weekday mode
-  const [selectedSlot, setSelectedSlot] = useState(dayIdx);     // cycle mode
+  const [selectedWd, setSelectedWd] = useState(todayWd);
+  const [selectedSlot, setSelectedSlot] = useState(dayIdx);
 
   const minOffset = weekdayMode ? -8 : -(currentCycleNum + 1);
   const goBack = () => {
     if (weekOffset <= minOffset) return;
     const next = weekOffset - 1;
     setWeekOffset(next);
-    // default to last slot of the previous cycle (most recent past day)
     if (!weekdayMode) setSelectedSlot(dayCount - 1);
   };
   const goForward = () => {
@@ -137,9 +168,7 @@ function HomeScreen({ store, setStore, go }) {
         };
       });
     }
-    // Cycle mode: show exactly dayCount slots (the full cycle), not a fixed 7
     return sch.days.map((d, i) => {
-      // days from today: cycleOffset * dayCount + i - dayIdx
       const daysFromToday = weekOffset * dayCount + i - dayIdx;
       const date = new Date(); date.setDate(date.getDate() + daysFromToday);
       return { ...d, slotIdx: i, date, isToday: weekOffset === 0 && i === dayIdx };
@@ -157,11 +186,10 @@ function HomeScreen({ store, setStore, go }) {
 
   const sessionDate = useMemo(() => {
     const d = new Date();
-    d.setHours(12, 0, 0, 0); // noon local time avoids UTC day boundary issues
+    d.setHours(12, 0, 0, 0);
     if (weekdayMode) {
       d.setDate(d.getDate() + selectedWd - todayWd + weekOffset * 7);
     } else {
-      // days from today for slot selectedSlot in cycle weekOffset
       d.setDate(d.getDate() + weekOffset * dayCount + selectedSlot - dayIdx);
     }
     return d;
@@ -177,27 +205,24 @@ function HomeScreen({ store, setStore, go }) {
       if (weekOffset === -1) return 'LETZTE WOCHE';
       return `VOR ${-weekOffset} WOCHEN`;
     }
-    const cycleNum = currentCycleNum + weekOffset + 1; // 1-indexed
+    const cycleNum = currentCycleNum + weekOffset + 1;
     return `ZYKLUS ${cycleNum}`;
   }, [weekdayMode, weekOffset, currentCycleNum]);
 
   const cardLabel = useMemo(() => {
     if (isViewingToday) {
       return weekdayMode
-        ? `Heute · ${WEEKDAYS_FULL[selectedWd]}`
-        : `Heute · Tag ${selectedSlot + 1} von ${dayCount}`;
+        ? `HEUTE · ${WEEKDAYS_FULL[selectedWd].toUpperCase()}`
+        : `HEUTE · TAG ${selectedSlot + 1} VON ${dayCount}`;
     }
-    const dateStr = sessionDate.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' });
-    return weekdayMode
-      ? dateStr
-      : `${dateStr} · Tag ${selectedSlot + 1} von ${dayCount}`;
+    const dateStr = sessionDate.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
+    return weekdayMode ? dateStr : `${dateStr} · TAG ${selectedSlot + 1} VON ${dayCount}`;
   }, [isViewingToday, weekdayMode, selectedWd, selectedSlot, dayCount, sessionDate]);
 
   const lastSession = useMemo(() => {
     return [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''))[0];
   }, [store.sessions]);
 
-  // cycle mode: set of absolute day-numbers (days since cycleStartDate) for completed sessions
   const completedCyclePos = useMemo(() => {
     if (weekdayMode || !sch) return null;
     const set = new Set();
@@ -213,7 +238,6 @@ function HomeScreen({ store, setStore, go }) {
     return set;
   }, [store.sessions, weekdayMode, sch, store.cycleStartDate]);
 
-  // weekday mode: plain date-key set
   const completedDateKeys = useMemo(() => {
     if (!weekdayMode) return null;
     const set = new Set();
@@ -270,18 +294,16 @@ function HomeScreen({ store, setStore, go }) {
     }
   };
 
-  const navBtn = (disabled) => ({
-    background: 'transparent', border: 'none', cursor: disabled ? 'default' : 'pointer',
-    color: disabled ? UI.inkLine : UI.inkSoft, fontSize: 16, padding: '0 4px', lineHeight: 1,
-  });
-
+  // ─── No-plan fallback
   if (!sch) {
     return (
       <Screen>
-        <TopBar title={`Hey ${store.user.name}`} sub={new Date().toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
-          right={<Btn kind="icon" onClick={() => go({ name: 'settings' })} style={{ fontSize: 20 }}>⋯</Btn>}
+        <TopBar
+          title={<span>Hey, <em style={{ fontFamily: UI.fontDisplay, fontStyle: 'italic', fontWeight: 300, color: UI.gold }}>{store.user.name}</em></span>}
+          sub={new Date().toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
+          right={<button onClick={() => go({ name: 'settings' })} style={{ ...btnIcon, fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: '50%', border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
         />
-        <div style={{ padding: 18 }}>
+        <div style={{ padding: 22 }}>
           <Empty
             title="Noch kein Plan"
             sub="Lege einen Trainingsplan an, um loszulegen."
@@ -296,126 +318,103 @@ function HomeScreen({ store, setStore, go }) {
 
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
-      {/* Custom dramatic home header */}
+      {/* Header */}
       <div style={{
         flexShrink: 0,
-        padding: `calc(22px + env(safe-area-inset-top, 0px)) 20px 18px`,
-        borderBottom: `1px solid rgba(212,164,55,0.12)`,
+        padding: `calc(env(safe-area-inset-top, 0px) + 16px) 22px 16px`,
+        borderBottom: `0.5px solid ${UI.hair}`,
         position: 'sticky', top: 0, zIndex: 5,
         backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-        background: 'rgba(10,10,10,0.92)',
+        background: 'rgba(7,6,10,0.85)',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 5 }}>
-              {new Date().toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })}
-            </div>
-            <div style={{ fontSize: 26, fontWeight: 700, color: UI.ink, lineHeight: 1.1 }}>
-              Hey, <span style={{ color: UI.gold }}>{store.user.name}</span>
+            <div className="micro">{new Date().toLocaleDateString('de-DE', { weekday:'long', day:'2-digit', month:'long' }).toUpperCase()}</div>
+            <div style={{ marginTop: 6, fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
+              Hey, <em style={{ fontStyle: 'italic', fontWeight: 300, color: UI.gold }}>{store.user.name}</em>
             </div>
           </div>
           <button onClick={() => go({ name: 'settings' })} style={{
-            width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
-            background: 'rgba(240,236,224,0.05)', border: `1px solid ${UI.inkLine}`,
+            width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+            background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', color: UI.inkSoft, fontSize: 20,
-            WebkitTapHighlightColor: 'transparent',
-          }}>⋯</button>
+            cursor: 'pointer', color: UI.inkSoft,
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
         </div>
-        {sch && weekOffset === 0 && (() => {
-          let label, progress, total;
-          if (weekdayMode) {
-            const training = week.filter(d => d.items.length > 0);
-            if (!training.length) return null;
-            const done = training.filter(d => {
-              const key = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
-              return completedDateKeys?.has(key);
-            }).length;
-            label = 'DIESE WOCHE'; progress = done; total = training.length;
-          } else {
-            if (!dayCount) return null;
-            label = `ZYKLUS ${currentCycleNum + 1}`; progress = dayIdx + 1; total = dayCount;
-          }
-          return (
-            <div style={{ marginTop: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginBottom: 5 }}>
-                <span>{label}</span>
-                <span style={{ color: UI.gold }}>{progress} / {total}</span>
-              </div>
-              <div style={{ height: 3, background: UI.inkLine, borderRadius: 2, overflow: 'hidden' }}>
-                <div style={{
-                  height: '100%',
-                  width: `${Math.round((progress / total) * 100)}%`,
-                  background: `linear-gradient(90deg, ${UI.gold}, ${UI.goldLight})`,
-                  borderRadius: 2,
-                }} />
-              </div>
-            </div>
-          );
-        })()}
       </div>
 
+      {/* In-progress overlay */}
       {store.inProgress && (() => {
         const activeSession = store.sessions.find(s => s.id === store.inProgress);
         return activeSession ? (
           <div style={{
             position: 'absolute', inset: 0, zIndex: 50,
-            background: 'rgba(212,164,55,0.08)',
-            backdropFilter: 'blur(2px)',
+            background: 'rgba(7,6,10,0.92)',
+            backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 28,
           }}>
-            <div style={{
-              background: UI.bgRaised, border: `1px solid ${UI.goldSoft}`,
-              borderRadius: 20, padding: '28px 32px',
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
-              boxShadow: `0 0 40px rgba(212,164,55,0.15)`,
-            }}>
-              <div style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '0.15em' }}>TRAINING LÄUFT</div>
-              <div style={{ fontSize: 26, fontWeight: 700, color: UI.ink }}>{activeSession.dayName}</div>
-              <button onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{
-                marginTop: 4, background: UI.gold, color: '#0a0a0a',
-                border: 'none', borderRadius: 12, padding: '13px 28px',
-                fontSize: 15, fontWeight: 600, fontFamily: UI.fontUi, cursor: 'pointer', width: '100%',
-                boxShadow: '0 4px 20px rgba(212,164,55,0.4)',
-                WebkitTapHighlightColor: 'transparent',
-              }}>Weitermachen →</button>
-              <button onClick={async () => {
-                if (!await confirm('Session wird gelöscht.', { title: 'Training abbrechen?', ok: 'Abbrechen', cancel: 'Zurück', danger: true })) return;
-                setStore(s => ({ ...s, sessions: s.sessions.filter(x => x.id !== store.inProgress), inProgress: null }));
-              }} style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                fontSize: 13, color: UI.danger, fontFamily: UI.fontUi, padding: '4px 0',
-              }}>Training abbrechen</button>
-            </div>
+            <BracketFrame gold padding={32} style={{ width: '100%', maxWidth: 360 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, textAlign: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: 4, background: UI.gold, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
+                  <span className="micro-gold">TRAINING LÄUFT</span>
+                </div>
+                <div className="display" style={{ fontSize: 38, color: UI.gold, fontWeight: 300, fontStyle: 'italic', letterSpacing: '0.04em' }}>
+                  {activeSession.dayName}
+                </div>
+                <Btn onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{ width: '100%', marginTop: 6 }}>
+                  Weitermachen →
+                </Btn>
+                <button onClick={async () => {
+                  if (!await confirm('Session wird gelöscht.', { title: 'Training abbrechen?', ok: 'Abbrechen', cancel: 'Zurück', danger: true })) return;
+                  setStore(s => ({ ...s, sessions: s.sessions.filter(x => x.id !== store.inProgress), inProgress: null }));
+                }} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, padding: '4px 0',
+                  letterSpacing: '0.12em', textTransform: 'uppercase',
+                }}>Training abbrechen</button>
+              </div>
+            </BracketFrame>
           </div>
         ) : null;
       })()}
 
-      <div style={{ flex: 1, minHeight: 0, padding: '14px 18px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ flex: 1, minHeight: 0, padding: '16px 22px 18px', display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
 
-        {/* period navigation */}
+        {/* Period navigation */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button onClick={goBack} style={{
-            ...navBtn(weekOffset <= minOffset),
-            width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: weekOffset <= minOffset ? 'transparent' : 'rgba(240,236,224,0.05)',
-            border: `1px solid ${weekOffset <= minOffset ? 'transparent' : UI.inkLine}`,
-            fontSize: 18,
-          }}>‹</button>
-          <div style={{ flex: 1, textAlign: 'center', fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontNum, letterSpacing: '0.1em', fontWeight: 500 }}>
-            {periodLabel}
+          <button onClick={goBack} disabled={weekOffset <= minOffset} style={{
+            width: 30, height: 30, borderRadius: '50%',
+            background: 'transparent',
+            border: `0.5px solid ${weekOffset <= minOffset ? 'transparent' : UI.hairStrong}`,
+            color: weekOffset <= minOffset ? UI.inkGhost : UI.inkSoft,
+            cursor: weekOffset <= minOffset ? 'default' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M6 1 1 6l5 5"/></svg>
+          </button>
+          <div style={{ flex: 1, textAlign: 'center' }}>
+            <span className="micro" style={{ color: UI.inkSoft }}>{periodLabel}</span>
           </div>
           <button onClick={goForward} disabled={weekOffset === 0} style={{
-            ...navBtn(weekOffset === 0),
-            width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: weekOffset === 0 ? 'transparent' : 'rgba(240,236,224,0.05)',
-            border: `1px solid ${weekOffset === 0 ? 'transparent' : UI.inkLine}`,
-            fontSize: 18,
-          }}>›</button>
+            width: 30, height: 30, borderRadius: '50%',
+            background: 'transparent',
+            border: `0.5px solid ${weekOffset === 0 ? 'transparent' : UI.hairStrong}`,
+            color: weekOffset === 0 ? UI.inkGhost : UI.inkSoft,
+            cursor: weekOffset === 0 ? 'default' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M2 1l5 5-5 5"/></svg>
+          </button>
         </div>
 
         {/* day strip */}
-        <div style={{ flexShrink: 0, display: 'flex', gap: 5 }}>
+        <div style={{ flexShrink: 0, display: 'flex', gap: 4 }}>
           {week.map((d, i) => {
             const isSelected = weekdayMode ? i === selectedWd : i === selectedSlot;
             const r = !d.items?.length;
@@ -436,106 +435,122 @@ function HomeScreen({ store, setStore, go }) {
               <div key={d.id ?? i}
                 onClick={() => weekdayMode ? setSelectedWd(i) : setSelectedSlot(i)}
                 style={{
-                  flex: 1, padding: '10px 3px 8px', textAlign: 'center',
-                  background: isSelected ? UI.goldFaint : UI.bgRaised,
-                  border: `1px solid ${isSelected ? UI.goldSoft : d.isToday ? UI.inkSoft : UI.inkLine}`,
-                  borderRadius: 10, cursor: 'pointer',
-                  boxShadow: isSelected ? '0 2px 8px rgba(212,164,55,0.15)' : 'none',
+                  flex: 1, padding: '10px 4px 8px', textAlign: 'center',
+                  background: isSelected ? UI.goldFaint : 'transparent',
+                  border: `0.5px solid ${isSelected ? UI.goldSoft : d.isToday ? UI.hairStrong : UI.hair}`,
+                  borderRadius: 8, cursor: 'pointer',
+                  minHeight: 56,
                 }}>
-                <div style={{ fontSize: 9, color: isSelected ? UI.gold : d.isToday ? UI.inkSoft : UI.inkFaint, fontFamily: UI.fontNum }}>
+                <div className="num" style={{ fontSize: 9, color: isSelected ? UI.gold : d.isToday ? UI.inkSoft : UI.inkFaint }}>
                   {slotLabel}
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 600, marginTop: 3, color: r ? UI.inkSoft : isSelected ? UI.gold : UI.ink }}>
+                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: r ? UI.inkFaint : isSelected ? UI.gold : UI.ink, letterSpacing: '0.06em' }}>
                   {r ? '—' : d.name.slice(0, 4)}
                 </div>
-                {isCompleted && (
-                  <div style={{ fontSize: 11, color: UI.gold, marginTop: 2, lineHeight: 1 }}>✓</div>
-                )}
+                <div style={{ height: 12, marginTop: 2 }}>
+                  {isCompleted && (
+                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5" style={{ display: 'block', margin: '0 auto' }}>
+                      <path d="M2 6l2.5 2.5L10 3"/>
+                    </svg>
+                  )}
+                </div>
               </div>
             );
           })}
         </div>
 
-        {/* day card — flex:1 so it fills all remaining vertical space */}
+        {/* day card — flex:1 so it fills */}
         {isActiveRest ? (
-          <Card style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-            <Label>{cardLabel}</Label>
-            <div style={{ fontSize: 28, fontWeight: 600, marginBottom: 4 }}>Rest Day</div>
-            <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 14 }}>
+          <BracketFrame style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: 28 }}>
+            <div className="micro" style={{ marginBottom: 8 }}>{cardLabel}</div>
+            <div className="display-it" style={{ fontSize: 44, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, letterSpacing: '0.02em', marginBottom: 6 }}>
+              Recover.
+            </div>
+            <div style={{ fontSize: 13, color: UI.inkFaint, marginBottom: 22, maxWidth: 220 }}>
               Erholung ist Teil des Plans.
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {!weekdayMode && isViewingToday && <Btn kind="ghost" onClick={skipRest} style={{ flex: 1 }}>Rest abhaken →</Btn>}
+            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+              {!weekdayMode && isViewingToday && <Btn kind="ghost" onClick={skipRest} style={{ flex: 1 }}>Rest abhaken</Btn>}
               <Btn kind="ghost" onClick={() => go({ name: 'plan' })} style={{ flex: 1 }}>Plan ansehen</Btn>
             </div>
-          </Card>
+          </BracketFrame>
         ) : (
-          <Card accent style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <Label style={{ color: UI.gold, flexShrink: 0 }}>{cardLabel}</Label>
-            <div style={{ fontSize: 34, fontWeight: 700, color: UI.gold, marginBottom: 4, letterSpacing: '0.01em', flexShrink: 0 }}>{activeDay.name}</div>
-            <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 8, flexShrink: 0 }}>
-              {activeDay.items.length} Übungen · ~{Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))} min
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', padding: '4px 0' }}>
+            <div className="micro-gold" style={{ marginBottom: 6 }}>{cardLabel}</div>
+            <div className="display" style={{
+              fontSize: 56, color: UI.gold,
+              fontWeight: 300, fontStyle: 'italic',
+              letterSpacing: '0.04em', lineHeight: 1, marginBottom: 4,
+            }}>
+              {activeDay.name}
             </div>
-            {/* exercise list — font scales with item count so it always fits */}
-            {(() => {
-              const n = activeDay.items.length;
-              const fs = n <= 5 ? 14 : n <= 7 ? 13 : n <= 9 ? 12 : n <= 11 ? 11 : 10;
-              const py = n <= 5 ? 5 : n <= 7 ? 4 : n <= 9 ? 3 : 2;
-              return (
-                <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', marginBottom: 10 }}>
-                  {activeDay.items.map((it, i) => {
-                    const ex = LB.findExercise(store, it.exId);
-                    return (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs, padding: `${py}px 0`, borderBottom: i < n - 1 ? `1px dashed ${UI.goldSoft}` : 'none' }}>
-                        <span style={{ color: UI.ink }}>{ex?.name || '—'}</span>
-                        <span style={{ color: UI.gold, fontFamily: UI.fontNum, fontSize: fs - 1 }}>{it.sets} × {it.reps}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-            {/* CTA — always visible at the bottom */}
-            <div style={{ flexShrink: 0 }}>
-              {isSlotDone ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'rgba(127,176,105,0.08)', border: `1px solid rgba(127,176,105,0.2)`, borderRadius: 12, color: UI.ok }}>
-                  <span style={{ fontSize: 22, lineHeight: 1 }}>✓</span>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'baseline', marginBottom: 22 }}>
+              <span className="num" style={{ color: UI.inkSoft, fontSize: 11 }}>{activeDay.items.length} ÜBUNGEN</span>
+              <span style={{ color: UI.hair, fontSize: 7 }}>◆</span>
+              <span className="num" style={{ color: UI.inkSoft, fontSize: 11 }}>
+                ~{Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))} MIN
+              </span>
+            </div>
+
+            {/* CTA */}
+            {isSlotDone ? (
+              <Frame style={{ padding: '14px 18px', width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5"><path d="M2 6l2.5 2.5L10 3"/></svg>
+                  </div>
                   <div>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>Training erledigt</div>
-                    <div style={{ fontSize: 12, opacity: 0.75 }}>Gut gemacht!</div>
+                    <div className="micro-gold" style={{ marginBottom: 2 }}>TRAINING ERLEDIGT</div>
+                    <div style={{ fontSize: 13, color: UI.inkSoft }}>Gut gemacht.</div>
                   </div>
                 </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <Btn onClick={startSession} style={{ width: '100%', boxShadow: '0 4px 24px rgba(212,164,55,0.35)' }}>
-                    {(isViewingToday || isFutureSlot) ? 'Training starten →' : 'Training nacherfassen →'}
-                  </Btn>
-                  {!weekdayMode && isViewingToday && (
-                    <Btn kind="ghost" onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{ width: '100%', fontSize: 13, opacity: 0.6 }}>
-                      Tag überspringen
-                    </Btn>
-                  )}
-                </div>
-              )}
-            </div>
-          </Card>
+              </Frame>
+            ) : (
+              <>
+                <CrownButton onClick={startSession} size={170}>
+                  <span className="micro" style={{ color: 'rgba(10,8,5,0.65)', letterSpacing: '0.22em', fontWeight: 600 }}>
+                    {isFutureSlot && !isViewingToday ? 'PLAN' : isViewingToday ? 'START' : 'LOG'}
+                  </span>
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="#0a0805" style={{ marginTop: 2 }}>
+                    <path d="M8 5v14l11-7z"/>
+                  </svg>
+                  <span className="micro" style={{ color: 'rgba(10,8,5,0.55)', marginTop: 2 }}>
+                    {isViewingToday ? 'TRAINING' : 'EINTRAGEN'}
+                  </span>
+                </CrownButton>
+                {!weekdayMode && isViewingToday && (
+                  <button onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{
+                    background: 'transparent', border: 'none', color: UI.inkFaint,
+                    fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
+                    cursor: 'pointer', marginTop: 14, fontFamily: UI.fontUi, fontWeight: 500,
+                  }}>
+                    Tag überspringen
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         )}
 
-        {/* last session preview — compact fixed-height strip */}
+        {/* last session strip */}
         {lastSession && (
-          <Card style={{ flexShrink: 0, padding: '10px 14px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginBottom: 2 }}>LETZTE SESSION</div>
-                <div style={{ fontSize: 14, fontWeight: 500 }}>{lastSession.dayName}
-                  <span style={{ color: UI.inkFaint, fontSize: 12, fontWeight: 400, marginLeft: 8 }}>
-                    {new Date(lastSession.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('de-DE', { day:'numeric', month:'short' })} · {totalVolume(lastSession).toLocaleString('de-DE')} kg
+          <Frame onClick={() => go({ name: 'session', sessionId: lastSession.id })} style={{ flexShrink: 0, padding: '12px 16px', cursor: 'pointer' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="micro" style={{ marginBottom: 3 }}>LETZTE SESSION</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <span className="display" style={{ fontSize: 18, color: UI.ink, lineHeight: 1 }}>{lastSession.dayName}</span>
+                  <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
+                    {new Date(lastSession.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('de-DE', { day:'2-digit', month:'short' }).toUpperCase()}
+                  </span>
+                  <span className="num" style={{ color: UI.gold, fontSize: 11 }}>
+                    {totalVolume(lastSession).toLocaleString('de-DE')}<span style={{ color: UI.inkFaint }}>kg</span>
                   </span>
                 </div>
               </div>
-              <Btn kind="icon" onClick={() => go({ name: 'session', sessionId: lastSession.id })} style={{ color: UI.gold, fontSize: 18 }}>→</Btn>
+              <ChevronRight />
             </div>
-          </Card>
+          </Frame>
         )}
       </div>
       {confirmEl}
