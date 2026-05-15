@@ -336,7 +336,11 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
         {/* Exercise name */}
         <div style={{ flexShrink: 0 }}>
-          <div className="display" style={{ fontSize: 32, color: UI.ink, lineHeight: 1.05, letterSpacing: '-0.01em', fontWeight: 400 }}>
+          <div className="display" style={{
+            fontSize: entry.name.length > 28 ? 16 : entry.name.length > 22 ? 20 : entry.name.length > 16 ? 26 : 32,
+            color: UI.ink, lineHeight: 1.05, letterSpacing: '-0.01em', fontWeight: 400,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
             {entry.name}
           </div>
           {(exercise?.tags || []).length > 0 && (

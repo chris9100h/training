@@ -134,7 +134,7 @@ function TabBar({ active, onChange }) {
         position: 'relative',
         boxShadow: '0 20px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(236,228,208,0.05)',
       }}>
-        {/* moving gold indicator — like a watch hand position */}
+        {/* moving gold indicator pill */}
         {idx >= 0 && (
           <div style={{
             position: 'absolute',
@@ -146,15 +146,22 @@ function TabBar({ active, onChange }) {
             borderRadius: 999,
             transition: 'left 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
             pointerEvents: 'none',
-          }}>
-            <div style={{
-              position: 'absolute',
-              top: -1, left: '50%', transform: 'translateX(-50%)',
-              width: 3, height: 3, borderRadius: 2,
-              background: UI.gold,
-              boxShadow: `0 0 4px ${UI.gold}`,
-            }} />
-          </div>
+          }} />
+        )}
+        {/* gold dot — pinned to exact center of each tab slot, independent of pill width */}
+        {idx >= 0 && (
+          <div style={{
+            position: 'absolute',
+            left: `${(idx + 0.5) * 100 / tabs.length}%`,
+            top: 4,
+            transform: 'translateX(-50%)',
+            width: 3, height: 3, borderRadius: 2,
+            background: UI.gold,
+            boxShadow: `0 0 4px ${UI.gold}`,
+            transition: 'left 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+            pointerEvents: 'none',
+            zIndex: 2,
+          }} />
         )}
         {tabs.map(t => {
           const on = t.id === active;
