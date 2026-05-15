@@ -512,18 +512,20 @@ function Frame({ children, accent = false, style = {}, padding = 18, onClick }) 
 
 // Chronograph sub-dial — circular metric
 function SubDial({ label, value, sub, size = 110, gold = false, style = {} }) {
+  const borderColor = gold ? UI.goldSoft : UI.hairStrong;
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%',
-      border: `0.5px solid ${gold ? UI.goldSoft : UI.hairStrong}`,
+      boxShadow: `inset 0 0 0 0.5px ${borderColor}`,
       background: 'radial-gradient(circle at 50% 30%, rgba(236,228,208,0.04), transparent 65%)',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      position: 'relative', flexShrink: 0, boxSizing: 'border-box',
+      gap: size * 0.05,
+      flexShrink: 0, boxSizing: 'border-box',
       ...style,
     }} className="guilloche">
-      <span className="micro" style={{ position: 'absolute', top: size * 0.18, color: gold ? UI.gold : UI.inkFaint, fontSize: 9 }}>{label}</span>
+      <span className="micro" style={{ fontSize: Math.max(7, size * 0.09), color: gold ? UI.gold : UI.inkFaint, lineHeight: 1 }}>{label}</span>
       <span className="num" style={{ fontSize: String(value).length > 5 ? size * 0.17 : String(value).length > 3 ? size * 0.22 : size * 0.28, color: gold ? UI.gold : UI.ink, fontWeight: 500, lineHeight: 1 }}>{value}</span>
-      {sub && <span className="micro" style={{ position: 'absolute', bottom: size * 0.18, fontSize: 8 }}>{sub}</span>}
+      {sub && <span className="micro" style={{ fontSize: Math.max(7, size * 0.08), lineHeight: 1 }}>{sub}</span>}
     </div>
   );
 }
