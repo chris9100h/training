@@ -507,7 +507,7 @@ function HomeScreen({ store, setStore, go }) {
                 </div>
               </Frame>
             ) : (
-              <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
+              <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', width: '100%' }}>
                 <button onClick={startSession} style={{
                   flex: 1, minHeight: 130, borderRadius: 18, border: 'none', cursor: 'pointer',
                   background: 'linear-gradient(160deg, var(--gold-light) 0%, var(--gold) 55%, var(--gold-deep) 100%)',
