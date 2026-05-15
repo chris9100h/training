@@ -58,7 +58,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     updateSet(setIdx, { done: true });
     setRestStart(Date.now());
     setFlashSet(setIdx);
-    setTimeout(() => setFlashSet(null), 50);
+    setTimeout(() => setFlashSet(null), 1400);
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
     if (updatedSets.every(st => st.done)) {
       setTimeout(() => navigate(1), 600);
