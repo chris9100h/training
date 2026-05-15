@@ -701,7 +701,6 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
           </div>
           <div style={{ textAlign: 'right' }}>
             <div className="micro-gold" style={{ letterSpacing: '0.18em' }}>LOGBOOK</div>
-            <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>HAUTE HORLOGERIE</div>
           </div>
         </div>
 
