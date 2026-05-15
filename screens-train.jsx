@@ -573,6 +573,16 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           </div>
         </div>
 
+        {/* Exercise note (permanent, from exercise definition) */}
+        {exercise?.note && (
+          <Frame style={{ padding: 14 }}>
+            <div className="micro" style={{ marginBottom: 6 }}>NOTIZ · {entry.name.toUpperCase()}</div>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.inkSoft, lineHeight: 1.5, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>
+              {exercise.note}
+            </div>
+          </Frame>
+        )}
+
         {/* Rest timer */}
         {restStart && restRemaining > 0 && (
           <Frame style={{ padding: 14 }}>
@@ -596,16 +606,6 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                 color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
                 fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
               }}>+30s</button>
-            </div>
-          </Frame>
-        )}
-
-        {/* Exercise note (permanent, from exercise definition) */}
-        {exercise?.note && (
-          <Frame style={{ padding: 14 }}>
-            <div className="micro" style={{ marginBottom: 6 }}>NOTIZ · {entry.name.toUpperCase()}</div>
-            <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.inkSoft, lineHeight: 1.5, fontStyle: 'italic' }}>
-              "{exercise.note}"
             </div>
           </Frame>
         )}

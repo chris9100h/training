@@ -429,7 +429,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
                       </span>
                     ))}
                   </div>
-                  {h.entry.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 4, fontStyle: 'italic' }}>"{h.entry.note}"</div>}
+                  {h.entry.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 4, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{h.entry.note}</div>}
                 </div>
                 <span className="micro" style={{ color: UI.inkFaint }}>{h.session.dayName}</span>
               </div>
@@ -674,7 +674,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
                     );
                   })}
                 </div>
-                {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic' }}>"{e.note}"</div>}
+                {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{e.note}</div>}
                 {i < s.entries.length - 1 && <Hairline style={{ marginTop: 14 }} />}
               </div>
             ))}
