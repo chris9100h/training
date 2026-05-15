@@ -528,16 +528,15 @@ function HomeScreen({ store, setStore, go }) {
                 </button>
                 {!weekdayMode && isViewingToday && (
                   <button onClick={async () => { if (await confirm('Der aktuelle Tag wird übersprungen.', { title: 'Tag überspringen?', ok: 'Überspringen' })) skipRest(); }} style={{
-                    flex: 1, minHeight: 130, borderRadius: 18, border: 'none', cursor: 'pointer',
-                    background: 'linear-gradient(160deg, var(--gold-light) 0%, var(--gold) 55%, var(--gold-deep) 100%)',
-                    boxShadow: '0 8px 24px rgba(201,169,97,0.18), 0 0 0 0.5px rgba(201,169,97,0.4)',
-                    opacity: 0.72,
+                    flex: 1, minHeight: 130, borderRadius: 18, cursor: 'pointer',
+                    background: 'transparent',
+                    border: `0.5px solid ${UI.hairStrong}`,
                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
                     WebkitTapHighlightColor: 'transparent',
                   }}>
-                    <span className="micro" style={{ color: 'rgba(10,8,5,0.6)', letterSpacing: '0.22em', fontWeight: 600 }}>TAG</span>
-                    <span style={{ fontSize: 24, color: 'rgba(10,8,5,0.7)', fontFamily: UI.fontDisplay, fontStyle: 'italic', lineHeight: 1 }}>→</span>
-                    <span className="micro" style={{ color: 'rgba(10,8,5,0.45)' }}>ÜBERSPRINGEN</span>
+                    <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.22em', fontWeight: 600 }}>TAG</span>
+                    <span style={{ fontSize: 24, color: UI.inkSoft, fontFamily: UI.fontDisplay, fontStyle: 'italic', lineHeight: 1 }}>→</span>
+                    <span className="micro" style={{ color: UI.inkFaint }}>ÜBERSPRINGEN</span>
                   </button>
                 )}
               </div>
