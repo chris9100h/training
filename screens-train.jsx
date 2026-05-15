@@ -292,10 +292,10 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       />
 
       {/* session timer pill */}
-      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', padding: '10px 18px 0' }}>
+      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', padding: '8px 18px 0' }}>
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-          height: 38, width: '100%', borderRadius: 999,
+          height: 32, width: '100%', borderRadius: 999,
           background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
         }}>
           <div style={{
@@ -310,7 +310,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '10px 18px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
 
         {/* progress chips — clickable, horizontally scrollable */}
         <div ref={chipRowRef} style={{ display: 'flex', gap: 6, margin: '-4px -18px 0', padding: '4px 18px', overflowX: 'auto', scrollbarWidth: 'none' }}>
@@ -339,8 +339,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         <div style={{
           background: `linear-gradient(135deg, rgba(212,164,55,0.08) 0%, transparent 65%)`,
           border: `1px solid rgba(212,164,55,0.14)`,
-          borderRadius: 16, padding: '14px 16px 14px 20px',
-          position: 'relative', overflow: 'hidden',
+          borderRadius: 16, padding: '9px 16px 9px 20px',
+          position: 'relative', overflow: 'hidden', flexShrink: 0,
         }}>
           <div style={{
             position: 'absolute', top: 0, left: 0, width: 4, height: '100%',
@@ -352,7 +352,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             fontWeight: 700, lineHeight: 1.15, letterSpacing: '-0.01em',
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>{entry.name}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3, flexWrap: 'wrap' }}>
             <div style={{ fontSize: 13, color: UI.inkSoft }}>Satz {currentSetNum} von {entry.sets.length}</div>
             {(exercise?.tags || []).map(t => <Pill key={t} gold style={{ fontSize: 9, padding: '2px 7px' }}>{t}</Pill>)}
           </div>

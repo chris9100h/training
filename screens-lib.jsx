@@ -85,8 +85,8 @@ function LibraryScreen({ store, setStore, go }) {
 
   return (
     <Screen>
-      <TopBar title="Library" right={topBarRight} />
-      <div style={{ display: 'flex', padding: '0 18px', gap: 0, borderBottom: `1px solid ${UI.inkLine}` }}>
+      <TopBar title="Library" sub={selecting ? undefined : `${store.exercises.length} Übungen`} right={topBarRight} />
+      <div style={{ display: 'flex', padding: '0 18px', gap: 0, borderBottom: `1px solid rgba(212,164,55,0.12)` }}>
         {[['recent','Zuletzt'],['all','Alle']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)} style={{
             flex: 1, background: 'transparent', border: 'none',
@@ -121,24 +121,34 @@ function LibraryScreen({ store, setStore, go }) {
           const top = lastEntry?.sets?.[0];
           const trendColor = trend === 'up' ? UI.ok : trend === 'down' ? UI.danger : UI.inkFaint;
           const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : trend === 'same' ? '→' : null;
+          const accentColor = trend === 'up' ? UI.ok : trend === 'down' ? UI.danger : UI.gold;
           return (
-            <Card key={ex.id} onClick={() => go({ name: 'exercise', exId: ex.id })} style={{ cursor: 'pointer', padding: 14 }}>
+            <div key={ex.id} onClick={() => go({ name: 'exercise', exId: ex.id })} style={{
+              cursor: 'pointer', position: 'relative', overflow: 'hidden',
+              background: UI.bgRaised, border: `1px solid ${UI.inkLine}`,
+              borderRadius: 16, padding: '12px 14px 12px 20px',
+              boxShadow: `0 2px 12px rgba(0,0,0,0.35)`,
+            }}>
+              <div style={{
+                position: 'absolute', top: 0, left: 0, width: 3, height: '100%',
+                background: accentColor, borderRadius: '16px 0 0 16px', opacity: 0.7,
+              }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 600 }}>{ex.name}</div>
-                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, marginTop: 2 }}>
-                    {days === 0 ? 'heute' : `${days}d her`}
-                    {top && ` · ${top.kg}kg × ${top.reps}`}
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, marginTop: 3 }}>
+                    {days === 0 ? 'HEUTE' : `${days}D HER`}
+                    {top && <span style={{ color: UI.inkSoft }}>{` · ${top.kg}kg × ${top.reps}`}</span>}
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
                   {trendIcon && (
-                    <span style={{ color: trendColor, fontSize: 15, fontFamily: UI.fontNum, fontWeight: 700, lineHeight: 1 }}>{trendIcon}</span>
+                    <span style={{ color: trendColor, fontSize: 16, fontFamily: UI.fontNum, fontWeight: 700, lineHeight: 1 }}>{trendIcon}</span>
                   )}
                   <ChevronRight />
                 </div>
               </div>
-            </Card>
+            </div>
           );
         })}
 
@@ -330,17 +340,17 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
 
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-          <Card style={{ padding: 12 }}>
-            <Label>PR (1RM)</Label>
-            <div style={{ fontFamily: UI.fontNum, fontSize: 22, color: UI.gold }}>{pr ? Math.round(pr) : '—'}</div>
+          <Card accent style={{ padding: 12 }}>
+            <Label style={{ color: UI.gold }}>PR (1RM)</Label>
+            <div style={{ fontFamily: UI.fontNum, fontSize: 22, fontWeight: 700, color: UI.gold }}>{pr ? Math.round(pr) : '—'}</div>
           </Card>
           <Card style={{ padding: 12 }}>
             <Label>Letzte</Label>
-            <div style={{ fontFamily: UI.fontNum, fontSize: 22 }}>{last ? Math.round(last) : '—'}</div>
+            <div style={{ fontFamily: UI.fontNum, fontSize: 22, fontWeight: 700 }}>{last ? Math.round(last) : '—'}</div>
           </Card>
           <Card style={{ padding: 12 }}>
             <Label>Sessions</Label>
-            <div style={{ fontFamily: UI.fontNum, fontSize: 22 }}>{history.length}</div>
+            <div style={{ fontFamily: UI.fontNum, fontSize: 22, fontWeight: 700 }}>{history.length}</div>
           </Card>
         </div>
 
@@ -431,8 +441,8 @@ function HistoryScreen({ store, go }) {
 
   return (
     <Screen>
-      <TopBar title="History" />
-      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <TopBar title="History" sub={sessions.length > 0 ? `${sessions.length} Sessions` : undefined} />
+      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {sessions.length === 0 && (
           <Empty title="Keine Sessions" sub="Logge dein erstes Training, um Verlauf zu sehen." icon={ICON_HISTORY} />
         )}
@@ -442,24 +452,35 @@ function HistoryScreen({ store, go }) {
           const date = new Date(s.date.slice(0, 10) + 'T12:00:00');
           const days = Math.round((Date.now() - date) / 86400000);
           return (
-            <Card key={s.id} onClick={() => go({ name: 'session', sessionId: s.id })} style={{ cursor: 'pointer', padding: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em' }}>
-                  {date.toLocaleDateString('de-DE', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()} · {days === 0 ? 'HEUTE' : `${days}D HER`}
-                </div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 4 }}>
-                <div style={{ fontSize: 17, fontWeight: 600 }}>{s.dayName}</div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: UI.gold, fontFamily: UI.fontNum, lineHeight: 1 }}>
-                    {vol.toLocaleString('de-DE')}<span style={{ fontSize: 11, fontWeight: 400, marginLeft: 2, color: UI.inkSoft }}>kg</span>
+            <div key={s.id} onClick={() => go({ name: 'session', sessionId: s.id })} style={{
+              cursor: 'pointer', position: 'relative', overflow: 'hidden',
+              background: UI.bgRaised, border: `1px solid ${UI.inkLine}`,
+              borderRadius: 16, padding: '12px 14px 12px 20px',
+              boxShadow: `0 2px 12px rgba(0,0,0,0.35)`,
+            }}>
+              <div style={{
+                position: 'absolute', top: 0, left: 0, width: 3, height: '100%',
+                background: `linear-gradient(180deg, ${UI.gold}, ${UI.goldSoft})`,
+                borderRadius: '16px 0 0 16px',
+              }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.12em', marginBottom: 3 }}>
+                    {date.toLocaleDateString('de-DE', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()} · {days === 0 ? 'HEUTE' : `${days}D HER`}
+                  </div>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: UI.ink, lineHeight: 1.2 }}>{s.dayName}</div>
+                  <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 4 }}>
+                    {s.entries.length} Übungen · {setsLogged} Sets
                   </div>
                 </div>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 }}>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: UI.gold, fontFamily: UI.fontNum, lineHeight: 1 }}>
+                    {vol.toLocaleString('de-DE')}
+                  </div>
+                  <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.08em', marginTop: 3 }}>KG VOLUMEN</div>
+                </div>
               </div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 4 }}>
-                {s.entries.length} Übungen · {setsLogged} Sets
-              </div>
-            </Card>
+            </div>
           );
         })}
       </div>
@@ -584,17 +605,17 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
           );
         })()}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-          <Card style={{ padding: '8px 12px' }}>
+          <Card style={{ padding: '10px 12px' }}>
             <Label>Dauer</Label>
-            <div style={{ fontFamily: UI.fontNum, fontSize: 18 }}>{duration ?? '—'}<span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 2 }}>min</span></div>
+            <div style={{ fontFamily: UI.fontNum, fontSize: 20, fontWeight: 700 }}>{duration ?? '—'}<span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 2, fontWeight: 400 }}>min</span></div>
           </Card>
-          <Card style={{ padding: '8px 12px' }}>
-            <Label>Volumen</Label>
-            <div style={{ fontFamily: UI.fontNum, fontSize: 18 }}>{Math.round(vol).toLocaleString('de-DE')}<span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 2 }}>kg</span></div>
+          <Card accent style={{ padding: '10px 12px' }}>
+            <Label style={{ color: UI.gold }}>Volumen</Label>
+            <div style={{ fontFamily: UI.fontNum, fontSize: 20, fontWeight: 700, color: UI.gold }}>{Math.round(vol).toLocaleString('de-DE')}<span style={{ fontSize: 11, color: UI.goldSoft, marginLeft: 2, fontWeight: 400 }}>kg</span></div>
           </Card>
-          <Card style={{ padding: '8px 12px' }}>
+          <Card style={{ padding: '10px 12px' }}>
             <Label>Sets</Label>
-            <div style={{ fontFamily: UI.fontNum, fontSize: 18 }}>{s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)}</div>
+            <div style={{ fontFamily: UI.fontNum, fontSize: 20, fontWeight: 700 }}>{s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)}</div>
           </Card>
         </div>
         {s.entries.map((e, i) => (
@@ -866,8 +887,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
   return (
     <Screen>
-      <TopBar title="Einstellungen" onBack={() => go({ name: 'home' })} />
-      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <TopBar title="Einstellungen" sub={store.user?.name} onBack={() => go({ name: 'home' })} />
+      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Card>
           <Label>Spitzname</Label>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>

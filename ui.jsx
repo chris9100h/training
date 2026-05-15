@@ -35,7 +35,7 @@ function TopBar({ title, sub, onBack, right }) {
     <div style={{
       padding: 'calc(14px + env(safe-area-inset-top, 0px)) 18px 12px',
       display: 'flex', alignItems: 'center', gap: 12,
-      borderBottom: `1px solid ${UI.inkLine}`,
+      borderBottom: `1px solid rgba(212,164,55,0.12)`,
       position: 'sticky', top: 0,
       background: 'rgba(10,10,10,0.85)',
       backdropFilter: 'blur(20px)',

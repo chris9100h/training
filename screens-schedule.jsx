@@ -6,13 +6,15 @@ const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','
 
 // ─── PlanScreen ────────────────────────────────────────────────────
 function PlanScreen({ store, setStore, go }) {
+  const activePlan = store.schedules.find(s => s.id === store.activeScheduleId);
   return (
     <Screen>
       <TopBar
         title="Plan"
+        sub={activePlan ? activePlan.name : `${store.schedules.length} Pläne`}
         right={<Btn kind="icon" onClick={() => go({ name: 'schedule-new' })} style={{ color: UI.gold, fontSize: 20, fontWeight: 400, background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`, borderRadius: 999, padding: '6px 16px' }}>+</Btn>}
       />
-      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {store.schedules.length === 0 && (
           <Empty title="Noch keine Pläne"
             sub="Leg einen Trainingsplan an, um Sessions zu starten."
@@ -21,29 +23,47 @@ function PlanScreen({ store, setStore, go }) {
         )}
         {store.schedules.map(s => {
           const isActive = s.id === store.activeScheduleId;
+          const trainingDays = s.days.filter(d => d.items.length);
           return (
-            <Card key={s.id} accent={isActive} onClick={() => go({ name: 'schedule', scheduleId: s.id })} style={{ cursor: 'pointer' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <div style={{ fontSize: 16, fontWeight: 600 }}>{s.name}</div>
+            <div key={s.id} onClick={() => go({ name: 'schedule', scheduleId: s.id })} style={{
+              cursor: 'pointer', position: 'relative', overflow: 'hidden',
+              background: isActive
+                ? `linear-gradient(160deg, rgba(212,164,55,0.12), transparent 60%)`
+                : UI.bgRaised,
+              border: `1px solid ${isActive ? UI.goldSoft : UI.inkLine}`,
+              borderRadius: 16, padding: isActive ? '14px 16px 14px 20px' : '14px 16px',
+              boxShadow: isActive
+                ? `0 4px 24px rgba(212,164,55,0.1), 0 1px 4px rgba(0,0,0,0.4)`
+                : `0 2px 12px rgba(0,0,0,0.35)`,
+            }}>
+              {isActive && (
+                <div style={{
+                  position: 'absolute', top: 0, left: 0, width: 3, height: '100%',
+                  background: `linear-gradient(180deg, ${UI.gold}, ${UI.goldSoft})`,
+                  borderRadius: '16px 0 0 16px',
+                }} />
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                <div style={{ fontSize: 17, fontWeight: 700, color: isActive ? UI.gold : UI.ink }}>{s.name}</div>
                 {isActive && <Pill gold>aktiv</Pill>}
               </div>
               <div style={{ fontSize: 12, color: UI.inkSoft, marginBottom: 10 }}>
                 {LB.isWeekdayPlan(s)
-                  ? `${s.days.length} Trainingstage · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`
-                  : `${s.days.length}-Tage-Zyklus · ${s.days.filter(d => d.items.length).length} Trainingstage`}
+                  ? `${trainingDays.length} Trainingstage · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`
+                  : `${s.days.length}-Tage-Zyklus · ${trainingDays.length} Trainingstage`}
               </div>
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {s.days.map((d) => (
                   <div key={d.id} style={{
                     fontSize: 10, padding: '3px 8px', borderRadius: 999,
                     fontFamily: UI.fontNum, letterSpacing: '0.05em',
-                    background: d.items.length ? UI.bgInset : 'transparent',
-                    color: d.items.length ? UI.ink : UI.inkFaint,
-                    border: `1px ${d.items.length ? 'solid' : 'dashed'} ${UI.inkLine}`,
+                    background: d.items.length ? (isActive ? UI.goldFaint : UI.bgInset) : 'transparent',
+                    color: d.items.length ? (isActive ? UI.gold : UI.ink) : UI.inkFaint,
+                    border: `1px ${d.items.length ? 'solid' : 'dashed'} ${d.items.length && isActive ? UI.goldSoft : UI.inkLine}`,
                   }}>{d.name}</div>
                 ))}
               </div>
-            </Card>
+            </div>
           );
         })}
       </div>
@@ -84,7 +104,7 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
         title={sch.name}
         sub={LB.isWeekdayPlan(sch) ? displayDays.map(d=>WEEKDAYS[d.weekday]).join(' · ') : `${sch.days.length}-Tage-Zyklus`}
         onBack={() => go({ name: 'plan' })}
-        right={<Btn kind="ghost" style={{ minHeight: 36, padding: '6px 12px', fontSize: 12 }} onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })}>bearbeiten</Btn>}
+        right={<Btn kind="ghost" style={{ minHeight: 36, padding: '6px 12px', fontSize: 12, color: UI.gold, borderColor: UI.goldSoft }} onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })}>bearbeiten</Btn>}
       />
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {sch.id !== store.activeScheduleId && (
@@ -118,31 +138,54 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
           );
           const dayLabel = LB.isWeekdayPlan(sch) ? WEEKDAYS_FULL[d.weekday] : `Tag ${i+1}`;
           return (
-            <Card key={d.id} accent={isToday}
-              onClick={() => setEditingDay(d.id)}
-              style={{ cursor: 'pointer', padding: 14 }}>
+            <div key={d.id} onClick={() => setEditingDay(d.id)} style={{
+              cursor: 'pointer', position: 'relative', overflow: 'hidden',
+              background: isToday
+                ? `linear-gradient(160deg, rgba(212,164,55,0.12), transparent 60%)`
+                : UI.bgRaised,
+              border: `1px solid ${isToday ? UI.goldSoft : UI.inkLine}`,
+              borderRadius: 16, padding: isToday ? '13px 14px 13px 20px' : '13px 14px',
+              boxShadow: isToday
+                ? `0 4px 24px rgba(212,164,55,0.1), 0 1px 4px rgba(0,0,0,0.4)`
+                : `0 2px 12px rgba(0,0,0,0.35)`,
+            }}>
+              {isToday && (
+                <div style={{
+                  position: 'absolute', top: 0, left: 0, width: 3, height: '100%',
+                  background: `linear-gradient(180deg, ${UI.gold}, ${UI.goldSoft})`,
+                  borderRadius: '16px 0 0 16px',
+                }} />
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isRest ? 0 : 6 }}>
                 <div>
-                  <Label style={{ marginBottom: 2 }}>{dayLabel}{isToday ? ' · heute' : ''}</Label>
-                  <div style={{ fontSize: 17, fontWeight: 600, color: isRest ? UI.inkSoft : isToday ? UI.gold : UI.ink }}>{d.name}</div>
+                  <div style={{ fontSize: 10, color: isToday ? UI.gold : UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 3 }}>
+                    {dayLabel}{isToday ? ' · heute' : ''}
+                  </div>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: isRest ? UI.inkSoft : isToday ? UI.gold : UI.ink }}>{d.name}</div>
                 </div>
-                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum }}>
+                <div style={{
+                  fontSize: 10, color: isRest ? UI.inkFaint : (isToday ? UI.gold : UI.inkSoft),
+                  fontFamily: UI.fontNum, letterSpacing: '0.06em',
+                  background: isToday && !isRest ? UI.goldFaint : 'transparent',
+                  border: `1px solid ${isToday && !isRest ? UI.goldSoft : 'transparent'}`,
+                  borderRadius: 8, padding: isToday && !isRest ? '3px 8px' : '0',
+                }}>
                   {isRest ? 'REST' : `${d.items.length} ÜB.`}
                 </div>
               </div>
               {!isRest && d.items.slice(0, 4).map((it, k) => {
                 const ex = LB.findExercise(store, it.exId);
                 return (
-                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: UI.inkSoft, padding: '2px 0' }}>
+                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: UI.inkSoft, padding: '2px 0', borderBottom: k < Math.min(d.items.length, 4) - 1 ? `1px dashed ${UI.inkLine}` : 'none' }}>
                     <span>{ex?.name || '—'}</span>
-                    <span style={{ fontFamily: UI.fontNum, fontSize: 12 }}>{it.sets}×{it.reps}</span>
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: isToday ? UI.gold : UI.inkSoft }}>{it.sets}×{it.reps}</span>
                   </div>
                 );
               })}
               {d.items.length > 4 && (
-                <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 4 }}>+ {d.items.length - 4} weitere</div>
+                <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 6, fontFamily: UI.fontNum }}>+ {d.items.length - 4} weitere</div>
               )}
-            </Card>
+            </div>
           );
         })}
       </div>
@@ -233,7 +276,7 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
           if (dirty && !await confirm('Ungespeicherte Änderungen gehen verloren.', { title: 'Änderungen verwerfen?', ok: 'Verwerfen', danger: true })) return;
           go({ name: 'schedule', scheduleId: draft.id });
         }}
-        right={<Btn kind="ghost" onClick={save} style={{ minHeight: 36, padding: '6px 12px', fontSize: 12, color: dirty ? UI.gold : UI.inkSoft, borderColor: dirty ? UI.goldSoft : UI.inkLine }}>speichern</Btn>}
+        right={<Btn kind="ghost" onClick={save} style={{ minHeight: 36, padding: '6px 14px', fontSize: 12, fontWeight: dirty ? 600 : 400, color: dirty ? UI.gold : UI.inkSoft, borderColor: dirty ? UI.goldSoft : UI.inkLine }}>Speichern</Btn>}
       />
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Input label="Name" value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v }))} />
