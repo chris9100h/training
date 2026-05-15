@@ -925,7 +925,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
     const a = document.createElement('a');
     a.href = url; a.download = `logbook-${LB.todayISO()}.json`;
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const handleSignOut = async () => {

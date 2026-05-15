@@ -295,7 +295,16 @@ function todaysDay(state) {
 function nextDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
-  const idx = (state.cycleIndex + 1) % sch.days.length;
+  let curIdx;
+  if (state.cycleStartDate) {
+    const today = new Date(); today.setHours(12, 0, 0, 0);
+    const start = new Date(state.cycleStartDate + 'T12:00:00');
+    const n = Math.round((today.getTime() - start.getTime()) / 86400000);
+    curIdx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
+  } else {
+    curIdx = (state.cycleIndex || 0) % sch.days.length;
+  }
+  const idx = (curIdx + 1) % sch.days.length;
   return { schedule: sch, day: sch.days[idx], idx };
 }
 
