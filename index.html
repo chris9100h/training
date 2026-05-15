@@ -53,7 +53,8 @@
     -webkit-text-fill-color: #f0ece0 !important;
     transition: background-color 5000s ease-in-out 0s;
   }
-  button { font: inherit; }
+  button { font: inherit; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  a { -webkit-tap-highlight-color: transparent; }
   ::-webkit-scrollbar { width: 0; height: 0; }
   @keyframes sheet-up { from { transform: translateY(20%); opacity: 0.7; } to { transform: translateY(0); opacity: 1; } }
   @keyframes sheet-fade { from { opacity: 0; } to { opacity: 1; } }

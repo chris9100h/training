@@ -36,10 +36,22 @@ function TopBar({ title, sub, onBack, right }) {
       padding: 'calc(14px + env(safe-area-inset-top, 0px)) 18px 12px',
       display: 'flex', alignItems: 'center', gap: 12,
       borderBottom: `1px solid ${UI.inkLine}`,
-      position: 'sticky', top: 0, background: UI.bg, zIndex: 5,
+      position: 'sticky', top: 0,
+      background: 'rgba(10,10,10,0.85)',
+      backdropFilter: 'blur(20px)',
+      WebkitBackdropFilter: 'blur(20px)',
+      zIndex: 5,
     }}>
       {onBack && (
-        <button onClick={onBack} style={{ ...btnIcon, fontSize: 22, lineHeight: 1 }}>‹</button>
+        <button onClick={onBack} style={{
+          ...btnIcon, padding: '4px 6px 4px 2px',
+          display: 'flex', alignItems: 'center', color: UI.gold,
+          WebkitTapHighlightColor: 'transparent',
+        }}>
+          <svg width="10" height="18" viewBox="0 0 10 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M8.5 1.5 1.5 9l7 7.5"/>
+          </svg>
+        </button>
       )}
       <div style={{ flex: 1, minWidth: 0, minHeight: 36, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         {sub && <div style={{ fontSize: 10, letterSpacing: '0.12em', color: UI.inkFaint, fontFamily: UI.fontNum, textTransform: 'uppercase' }}>{sub}</div>}
@@ -49,6 +61,32 @@ function TopBar({ title, sub, onBack, right }) {
     </div>
   );
 }
+
+const TAB_ICONS = {
+  home: (
+    <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H15v-5H9v5H4a1 1 0 0 1-1-1V10.5z"/>
+    </svg>
+  ),
+  plan: (
+    <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2.5"/>
+      <path d="M16 2v4M8 2v4M3 10h18"/>
+    </svg>
+  ),
+  lib: (
+    <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 19V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14H4z"/>
+      <path d="M4 19h16M8 7h8M8 11.5h5"/>
+    </svg>
+  ),
+  hist: (
+    <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M12 7v5l3.5 3"/>
+    </svg>
+  ),
+};
 
 function TabBar({ active, onChange }) {
   const tabs = [
@@ -61,8 +99,10 @@ function TabBar({ active, onChange }) {
     <div style={{
       flexShrink: 0,
       borderTop: `1px solid ${UI.inkLine}`,
-      background: '#0c0c0c',
-      padding: '10px 14px calc(env(safe-area-inset-bottom, 8px) + 10px)',
+      background: 'rgba(12,12,12,0.88)',
+      backdropFilter: 'blur(20px)',
+      WebkitBackdropFilter: 'blur(20px)',
+      padding: '6px 8px calc(env(safe-area-inset-bottom, 8px) + 6px)',
       display: 'flex', justifyContent: 'space-around',
       zIndex: 20,
     }}>
@@ -70,15 +110,14 @@ function TabBar({ active, onChange }) {
         const on = t.id === active;
         return (
           <button key={t.id} onClick={() => onChange(t.id)} style={{
-            background: 'none', border: 'none', padding: '4px 14px',
+            background: 'none', border: 'none', padding: '6px 18px',
             color: on ? UI.gold : UI.inkSoft, fontFamily: UI.fontUi,
-            fontSize: 12, letterSpacing: '0.03em', fontWeight: on ? 600 : 500,
-            cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+            fontSize: 10, letterSpacing: '0.02em', fontWeight: on ? 600 : 400,
+            cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+            WebkitTapHighlightColor: 'transparent',
+            transition: 'color 0.15s',
           }}>
-            <div style={{
-              width: 5, height: 5, borderRadius: 5,
-              background: on ? UI.gold : 'transparent',
-            }} />
+            {TAB_ICONS[t.id]}
             {t.label}
           </button>
         );
@@ -92,16 +131,19 @@ const btnPrimary = {
   border: 'none', borderRadius: 12,
   padding: '14px 18px', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 600,
   letterSpacing: '0.01em', cursor: 'pointer', minHeight: 48,
+  WebkitTapHighlightColor: 'transparent',
 };
 const btnGhost = {
   background: 'transparent', color: UI.ink,
   border: `1px solid ${UI.inkLine}`, borderRadius: 12,
   padding: '12px 16px', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 500,
   cursor: 'pointer', minHeight: 48,
+  WebkitTapHighlightColor: 'transparent',
 };
 const btnIcon = {
   background: 'transparent', border: 'none',
   color: UI.ink, padding: 4, cursor: 'pointer', fontSize: 18,
+  WebkitTapHighlightColor: 'transparent',
 };
 
 function Btn({ children, kind = 'primary', style = {}, ...rest }) {
@@ -112,9 +154,12 @@ function Btn({ children, kind = 'primary', style = {}, ...rest }) {
 function Card({ children, accent = false, style = {}, ...rest }) {
   return (
     <div style={{
-      background: accent ? `linear-gradient(180deg, ${UI.goldFaint}, transparent)` : UI.bgRaised,
+      background: accent ? `linear-gradient(160deg, rgba(212,164,55,0.12), transparent 60%)` : UI.bgRaised,
       border: `1px solid ${accent ? UI.goldSoft : UI.inkLine}`,
-      borderRadius: 14, padding: 16,
+      borderRadius: 16, padding: 16,
+      boxShadow: accent
+        ? `0 4px 24px rgba(212,164,55,0.1), 0 1px 4px rgba(0,0,0,0.4)`
+        : `0 2px 12px rgba(0,0,0,0.35)`,
       ...style,
     }} {...rest}>{children}</div>
   );
@@ -133,12 +178,17 @@ const WEEKDAYS_FULL = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Sa
 
 function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, style = {}, suffix, uppercase }) {
   const doUpper = uppercase !== undefined ? uppercase : type === 'text';
+  const [focused, setFocused] = React.useState(false);
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4, ...style }}>
       {label && <Label>{label}</Label>}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6,
-        background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+      <div style={{
+        display: 'flex', alignItems: 'baseline', gap: 6,
+        background: UI.bgInset,
+        border: `1px solid ${focused ? 'rgba(212,164,55,0.5)' : UI.inkLine}`,
         borderRadius: 10, padding: '12px 14px',
+        boxShadow: focused ? '0 0 0 3px rgba(212,164,55,0.08)' : 'none',
+        transition: 'border-color 0.15s, box-shadow 0.15s',
       }}>
         <input
           value={value ?? ''}
@@ -147,6 +197,8 @@ function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, 
           placeholder={placeholder}
           autoFocus={autoFocus}
           inputMode={type === 'number' ? 'decimal' : undefined}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           style={{
             flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
             color: UI.ink, fontFamily: type === 'number' ? UI.fontNum : UI.fontUi,
@@ -218,14 +270,15 @@ function Sheet({ open, onClose, title, children }) {
     }}>
       <div onClick={e => e.stopPropagation()} style={{
         width: '100%', maxWidth: 540, boxSizing: 'border-box',
-        background: UI.bgRaised, borderRadius: '20px 20px 0 0',
+        background: UI.bgRaised, borderRadius: '24px 24px 0 0',
         border: `1px solid ${UI.inkLine}`, borderBottom: 'none',
+        boxShadow: '0 -8px 40px rgba(0,0,0,0.5)',
         padding: `14px 18px ${kbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 18px)'}`,
         animation: 'sheet-up 0.22s ease',
         maxHeight: '85vh', overflow: 'auto',
       }}>
-        <div style={{ width: 36, height: 4, background: UI.inkLine, borderRadius: 4, margin: '0 auto 12px' }} />
-        {title && <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>{title}</div>}
+        <div style={{ width: 40, height: 4, background: 'rgba(240,236,224,0.18)', borderRadius: 4, margin: '0 auto 16px' }} />
+        {title && <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 14 }}>{title}</div>}
         {children}
       </div>
     </div>
