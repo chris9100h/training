@@ -476,20 +476,25 @@ function HomeScreen({ store, setStore, go }) {
             <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 8, flexShrink: 0 }}>
               {activeDay.items.length} Übungen · ~{Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))} min
             </div>
-            {/* exercise list — grows to fill space, clips gracefully */}
-            <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', marginBottom: 10 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                {activeDay.items.map((it, i) => {
-                  const ex = LB.findExercise(store, it.exId);
-                  return (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '5px 0', borderBottom: i < activeDay.items.length - 1 ? `1px dashed ${UI.goldSoft}` : 'none' }}>
-                      <span style={{ color: UI.ink }}>{ex?.name || '—'}</span>
-                      <span style={{ color: UI.gold, fontFamily: UI.fontNum, fontSize: 13 }}>{it.sets} × {it.reps}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            {/* exercise list — font scales with item count so it always fits */}
+            {(() => {
+              const n = activeDay.items.length;
+              const fs = n <= 5 ? 14 : n <= 7 ? 13 : n <= 9 ? 12 : n <= 11 ? 11 : 10;
+              const py = n <= 5 ? 5 : n <= 7 ? 4 : n <= 9 ? 3 : 2;
+              return (
+                <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', marginBottom: 10 }}>
+                  {activeDay.items.map((it, i) => {
+                    const ex = LB.findExercise(store, it.exId);
+                    return (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs, padding: `${py}px 0`, borderBottom: i < n - 1 ? `1px dashed ${UI.goldSoft}` : 'none' }}>
+                        <span style={{ color: UI.ink }}>{ex?.name || '—'}</span>
+                        <span style={{ color: UI.gold, fontFamily: UI.fontNum, fontSize: fs - 1 }}>{it.sets} × {it.reps}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
             {/* CTA — always visible at the bottom */}
             <div style={{ flexShrink: 0 }}>
               {isSlotDone ? (
