@@ -25,7 +25,7 @@ function Screen({ children, scroll = true, style = {} }) {
       background: UI.bg, color: UI.ink, fontFamily: UI.fontUi,
       display: 'flex', flexDirection: 'column',
       overflow: scroll ? 'auto' : 'hidden',
-      animation: 'screenIn 0.16s ease',
+      animation: 'screenIn 0.22s ease',
       ...style,
     }}>{children}</div>
   );
