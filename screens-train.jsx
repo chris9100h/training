@@ -57,6 +57,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const completeSet = (setIdx) => {
     updateSet(setIdx, { done: true });
     setRestStart(Date.now());
+    setFlashSet(setIdx);
+    setTimeout(() => setFlashSet(null), 1400);
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
     if (updatedSets.every(st => st.done)) {
       setTimeout(() => navigate(1), 600);
@@ -96,7 +98,20 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     updateSession(sess => ({ ...sess, currentExIdx: newIdx }));
   };
 
+  const cancelPushover = () => {
+    if (localStorage.getItem('logbook-push-enabled') !== 'true') return;
+    fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ nonce: `cancel-${Date.now()}`, cancel: true }),
+    }).catch(() => {});
+  };
+
   const finish = () => {
+    cancelPushover();
     updateSession(sess => ({ ...sess, ended: new Date().toISOString() }));
     setStore(s => ({
       ...s,
@@ -109,6 +124,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   const abandon = async () => {
     if (!await confirm('Eingaben gehen verloren.', { title: 'Session abbrechen?', ok: 'Abbrechen', cancel: 'Weiter trainieren', danger: true })) return;
+    cancelPushover();
     setStore(s => ({
       ...s,
       sessions: s.sessions.filter(x => x.id !== session.id),
@@ -159,9 +175,11 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ delaySeconds }),
+      body: JSON.stringify({ delaySeconds, nonce: String(restStart) }),
     }).catch(() => {});
   }, [restStart]);
+
+  const [flashSet, setFlashSet] = useStateT(null);
 
   const [confirmEl, confirm] = useConfirm();
   const [finishOpen, setFinishOpen] = useStateT(false);
@@ -277,7 +295,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', padding: '10px 18px 0' }}>
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-          height: 34, width: '100%', borderRadius: 999,
+          height: 38, width: '100%', borderRadius: 999,
           background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
         }}>
           <div style={{
@@ -295,7 +313,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       <div style={{ flex: 1, overflow: 'auto', padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* progress chips — clickable, horizontally scrollable */}
-        <div ref={chipRowRef} style={{ display: 'flex', gap: 6, margin: '-4px -18px 0', padding: '0 18px', overflowX: 'auto', scrollbarWidth: 'none' }}>
+        <div ref={chipRowRef} style={{ display: 'flex', gap: 6, margin: '-4px -18px 0', padding: '4px 18px', overflowX: 'auto', scrollbarWidth: 'none' }}>
           {session.entries.map((e, i) => {
             const done = e.sets.every(s => s.done);
             const active = i === exIdx;
@@ -303,42 +321,60 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               <button key={i}
                 onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
                 style={{
-                  flexShrink: 0, padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
+                  flexShrink: 0, padding: active ? '6px 14px' : '5px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
                   background: active ? UI.gold : done ? 'rgba(212,164,55,0.15)' : UI.bgRaised,
                   color: active ? '#0a0a0a' : done ? UI.gold : UI.inkSoft,
-                  fontSize: 11, fontFamily: UI.fontUi, fontWeight: active ? 600 : 400,
+                  fontSize: active ? 12 : 11, fontFamily: UI.fontUi, fontWeight: active ? 700 : done ? 500 : 400,
                   whiteSpace: 'nowrap',
+                  boxShadow: active ? '0 2px 16px rgba(212,164,55,0.5)' : 'none',
+                  WebkitTapHighlightColor: 'transparent',
                 }}>
-                {i + 1}. {e.name}
+                {done && !active ? '✓ ' : `${i + 1}. `}{e.name}
               </button>
             );
           })}
         </div>
 
-        {/* heading */}
-        <div>
-          <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.2 }}>{entry.name}</div>
-          <div style={{ fontSize: 14, color: UI.inkSoft, marginTop: 4 }}>
-            Set {currentSetNum} of {entry.sets.length}
+        {/* heading card */}
+        <div style={{
+          background: `linear-gradient(135deg, rgba(212,164,55,0.08) 0%, transparent 65%)`,
+          border: `1px solid rgba(212,164,55,0.14)`,
+          borderRadius: 16, padding: '14px 16px 14px 20px',
+          position: 'relative', overflow: 'hidden',
+        }}>
+          <div style={{
+            position: 'absolute', top: 0, left: 0, width: 4, height: '100%',
+            background: `linear-gradient(180deg, ${UI.gold}, ${UI.goldSoft})`,
+            borderRadius: '16px 0 0 16px',
+          }} />
+          <div style={{
+            fontSize: Math.max(15, Math.min(30, Math.floor(500 / Math.max(entry.name.length, 1)))),
+            fontWeight: 700, lineHeight: 1.15, letterSpacing: '-0.01em',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>{entry.name}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 13, color: UI.inkSoft }}>Satz {currentSetNum} von {entry.sets.length}</div>
+            {(exercise?.tags || []).map(t => <Pill key={t} gold style={{ fontSize: 9, padding: '2px 7px' }}>{t}</Pill>)}
           </div>
         </div>
 
         {/* set table */}
         <div>
           {/* table header */}
-          <div style={{ display: 'grid', gridTemplateColumns: '36px 1fr 72px 72px 36px 24px', gap: 8, padding: '0 2px 8px', borderBottom: `1px solid ${UI.inkLine}` }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '36px 1fr 72px 72px 44px 24px', gap: 8, padding: '0 2px 10px', borderBottom: `1px solid ${UI.inkLine}` }}>
             <Label style={{ marginBottom: 0, fontSize: 11 }}>Set</Label>
             <Label style={{ marginBottom: 0, fontSize: 11 }}>Vorherige ↔</Label>
             <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>kg</Label>
             <Label style={{ marginBottom: 0, fontSize: 11, textAlign: 'center' }}>Reps</Label>
             <button onClick={checkAllSets} disabled={anyMissingData && !allDone} style={{
-              width: 28, height: 28, border: 'none', borderRadius: 6,
+              width: 44, height: 44, border: 'none', borderRadius: 12,
               cursor: anyMissingData && !allDone ? 'default' : 'pointer',
               background: allDone ? UI.gold : 'transparent',
               outline: `2px solid ${allDone ? UI.gold : UI.inkLine}`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 14, fontWeight: 700, color: allDone ? '#0a0a0a' : 'transparent',
+              fontSize: 18, fontWeight: 700, color: allDone ? '#0a0a0a' : 'transparent',
               opacity: anyMissingData && !allDone ? 0.3 : 1,
+              WebkitTapHighlightColor: 'transparent',
             }}>✓</button>
             <span />
           </div>
@@ -349,14 +385,20 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             const current = !s.done && entry.sets.slice(0, i).every(x => x.done);
             return (
               <div key={i} style={{
-                display: 'grid', gridTemplateColumns: '36px 1fr 72px 72px 36px 24px', gap: 8,
-                alignItems: 'center', padding: '10px 2px',
-                borderBottom: `1px solid ${UI.inkLine}`,
+                display: 'grid', gridTemplateColumns: '36px 1fr 72px 72px 44px 24px', gap: 8,
+                alignItems: 'center',
+                padding: current ? '12px 10px' : '10px 2px',
+                margin: current ? '4px -10px' : '0',
+                borderRadius: current ? 12 : 0,
+                background: current ? 'rgba(212,164,55,0.07)' : 'transparent',
+                border: current ? `1px solid rgba(212,164,55,0.22)` : 'none',
+                borderBottom: !current ? `1px solid ${UI.inkLine}` : undefined,
                 opacity: s.done ? 0.45 : 1,
+                animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
               }}>
                 {/* set number circle */}
                 <div style={{
-                  width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                  width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
                   background: current ? UI.goldFaint : 'transparent',
                   border: `2px solid ${current ? UI.gold : UI.inkLine}`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -403,13 +445,14 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                 <button onClick={() => s.done ? updateSet(i, { done: false }) : completeSet(i)}
                   disabled={!s.done && (!s.kg || !s.reps)}
                   style={{
-                    width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer',
+                    width: 44, height: 44, borderRadius: 12, border: 'none', cursor: 'pointer',
                     background: s.done ? UI.gold : 'transparent',
-                    outline: `2px solid ${s.done ? UI.gold : (!s.kg || !s.reps) ? UI.inkLine : UI.inkSoft}`,
+                    outline: `2px solid ${s.done ? UI.gold : (!s.kg || !s.reps) ? UI.inkLine : current ? UI.goldSoft : UI.inkSoft}`,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 14, fontWeight: 700, color: s.done ? '#0a0a0a' : 'transparent',
+                    fontSize: 18, fontWeight: 700, color: s.done ? '#0a0a0a' : 'transparent',
                     opacity: !s.done && (!s.kg || !s.reps) ? 0.35 : 1,
                     flexShrink: 0,
+                    WebkitTapHighlightColor: 'transparent',
                   }}>
                   ✓
                 </button>
@@ -457,7 +500,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           <Card style={{ padding: 12, background: UI.bgInset }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
               <Label style={{ marginBottom: 0 }}>Pause</Label>
-              <div style={{ fontFamily: UI.fontNum, fontSize: 22, color: UI.gold, fontWeight: 500 }}>
+              <div style={{ fontFamily: UI.fontNum, fontSize: 30, color: UI.gold, fontWeight: 600 }}>
                 {Math.floor(restRemaining/60)}:{(restRemaining%60).toString().padStart(2,'0')}
               </div>
             </div>
@@ -495,7 +538,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         background: UI.bg, display: 'flex', gap: 8, zIndex: 10,
       }}>
         <Btn kind="ghost" onClick={() => navigate(-1)} disabled={exIdx === 0} style={{ flex: 1, opacity: exIdx === 0 ? 0.3 : 1 }}>‹ zurück</Btn>
-        <Btn onClick={() => navigate(1)} style={{ flex: 2 }}>
+        <Btn onClick={() => navigate(1)} style={{ flex: 2, boxShadow: exIdx === session.entries.length - 1 ? '0 4px 20px rgba(212,164,55,0.35)' : 'none' }}>
           {exIdx === session.entries.length - 1 ? 'Fertig →' : 'Nächste Übung →'}
         </Btn>
       </div>
@@ -611,12 +654,12 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
 function setInputStyle(done, current) {
   return {
-    background: done ? 'transparent' : UI.bgInset,
+    background: done ? 'transparent' : current ? 'rgba(212,164,55,0.06)' : UI.bgInset,
     border: `1px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.inkLine}`,
     borderRadius: 8, outline: 'none',
     color: done ? UI.inkSoft : UI.ink,
     fontFamily: UI.fontNum, fontSize: 16, fontWeight: 500,
-    width: '100%', padding: '7px 4px', textAlign: 'center',
+    width: '100%', padding: '10px 4px', textAlign: 'center',
   };
 }
 

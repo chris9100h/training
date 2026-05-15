@@ -16,7 +16,8 @@ function PlanScreen({ store, setStore, go }) {
         {store.schedules.length === 0 && (
           <Empty title="Noch keine Pläne"
             sub="Leg einen Trainingsplan an, um Sessions zu starten."
-            action={<Btn onClick={() => go({ name: 'schedule-new' })}>Plan anlegen</Btn>} />
+            action={<Btn onClick={() => go({ name: 'schedule-new' })}>Plan anlegen</Btn>}
+            icon={ICON_CALENDAR} />
         )}
         {store.schedules.map(s => {
           const isActive = s.id === store.activeScheduleId;

@@ -60,6 +60,15 @@ CREATE POLICY "own schedules" ON public.schedules     FOR ALL USING (auth.uid() 
 CREATE POLICY "own sessions"  ON public.sessions      FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY "own settings"  ON public.user_settings FOR ALL USING (auth.uid() = user_id);
 
+-- ── Pushover cancellation token ─────────────────────────────────────────────
+-- Single-row table; the edge function uses the service role key to read/write it.
+-- No RLS needed — never exposed to clients.
+
+CREATE TABLE IF NOT EXISTS public.pushover_active (
+  id    text PRIMARY KEY DEFAULT 'singleton',
+  nonce text NOT NULL DEFAULT ''
+);
+
 -- ── Trigger: create user_settings row on signup ──────────────────────────────
 
 CREATE OR REPLACE FUNCTION handle_new_user()

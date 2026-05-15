@@ -28,11 +28,17 @@ function UpdateBanner({ onUpdate }) {
 function LoadingScreen() {
   return (
     <Screen scroll={false} style={{ justifyContent: 'center', alignItems: 'center' }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 28, fontWeight: 600, color: UI.gold, letterSpacing: '0.06em', marginBottom: 10 }}>
-          LOGBOOK
+      <div style={{ textAlign: 'center', animation: 'fadeUp 0.4s ease' }}>
+        <div style={{
+          width: 90, height: 90, margin: '0 auto 24px', borderRadius: '50%',
+          border: `1.5px solid ${UI.gold}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          animation: 'logoPulse 2.4s ease-in-out infinite',
+        }}>
+          <div style={{ fontSize: 38, fontWeight: 700, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '-0.02em' }}>L</div>
         </div>
-        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em' }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: UI.ink, letterSpacing: '0.14em' }}>LOGBOOK</div>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginTop: 10, animation: 'timerPulse 1.6s ease-in-out infinite' }}>
           Laden…
         </div>
       </div>
