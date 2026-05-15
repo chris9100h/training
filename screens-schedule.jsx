@@ -10,9 +10,16 @@ function PlanScreen({ store, setStore, go }) {
     <Screen>
       <TopBar
         title="Plan"
-        right={<Btn kind="icon" onClick={() => go({ name: 'schedule-new' })} style={{ color: UI.gold, fontSize: 20, fontWeight: 400, background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`, borderRadius: 999, padding: '6px 16px' }}>+</Btn>}
+        right={
+          <button onClick={() => go({ name: 'schedule-new' })} style={{
+            width: 32, height: 32, borderRadius: '50%',
+            boxShadow: `inset 0 0 0 0.5px ${UI.goldSoft}`, background: UI.goldFaint,
+            color: UI.gold, cursor: 'pointer', fontSize: 20, lineHeight: 1,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>+</button>
+        }
       />
-      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {store.schedules.length === 0 && (
           <Empty title="Noch keine Pläne"
             sub="Leg einen Trainingsplan an, um Sessions zu starten."
@@ -21,29 +28,37 @@ function PlanScreen({ store, setStore, go }) {
         )}
         {store.schedules.map(s => {
           const isActive = s.id === store.activeScheduleId;
-          return (
-            <Card key={s.id} accent={isActive} onClick={() => go({ name: 'schedule', scheduleId: s.id })} style={{ cursor: 'pointer' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <div style={{ fontSize: 16, fontWeight: 600 }}>{s.name}</div>
-                {isActive && <Pill gold>aktiv</Pill>}
+          return isActive ? (
+            <BracketFrame key={s.id} gold onClick={() => go({ name: 'schedule', scheduleId: s.id })} style={{ cursor: 'pointer' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1 }}>{s.name}</div>
+                <Pill gold>aktiv</Pill>
               </div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, marginBottom: 10 }}>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>
                 {LB.isWeekdayPlan(s)
                   ? `${s.days.length} Trainingstage · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`
                   : `${s.days.length}-Tage-Zyklus · ${s.days.filter(d => d.items.length).length} Trainingstage`}
               </div>
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {s.days.map((d) => (
-                  <div key={d.id} style={{
-                    fontSize: 10, padding: '3px 8px', borderRadius: 999,
-                    fontFamily: UI.fontNum, letterSpacing: '0.05em',
-                    background: d.items.length ? UI.bgInset : 'transparent',
-                    color: d.items.length ? UI.ink : UI.inkFaint,
-                    border: `1px ${d.items.length ? 'solid' : 'dashed'} ${UI.inkLine}`,
-                  }}>{d.name}</div>
+                  <Pill key={d.id} gold={!!d.items.length}>{d.name}</Pill>
                 ))}
               </div>
-            </Card>
+            </BracketFrame>
+          ) : (
+            <Frame key={s.id} onClick={() => go({ name: 'schedule', scheduleId: s.id })} style={{ cursor: 'pointer', padding: '14px 16px' }}>
+              <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1, marginBottom: 6 }}>{s.name}</div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>
+                {LB.isWeekdayPlan(s)
+                  ? `${s.days.length} Trainingstage · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`
+                  : `${s.days.length}-Tage-Zyklus · ${s.days.filter(d => d.items.length).length} Trainingstage`}
+              </div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {s.days.map((d) => (
+                  <Pill key={d.id}>{d.name}</Pill>
+                ))}
+              </div>
+            </Frame>
           );
         })}
       </div>
@@ -84,65 +99,100 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
         title={sch.name}
         sub={LB.isWeekdayPlan(sch) ? displayDays.map(d=>WEEKDAYS[d.weekday]).join(' · ') : `${sch.days.length}-Tage-Zyklus`}
         onBack={() => go({ name: 'plan' })}
-        right={<Btn kind="ghost" style={{ minHeight: 36, padding: '6px 12px', fontSize: 12 }} onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })}>bearbeiten</Btn>}
+        right={
+          <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })} style={{
+            background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+            borderRadius: 999, padding: '5px 12px', cursor: 'pointer',
+            color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+          }}>Bearbeiten</button>
+        }
       />
-      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ padding: '14px 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {sch.id !== store.activeScheduleId && (
-          <Btn kind="ghost" onClick={setActive} style={{ marginBottom: 4 }}>Diesen Plan aktivieren</Btn>
+          <Btn kind="ghost" onClick={setActive} style={{ marginBottom: 4, fontSize: 12 }}>Diesen Plan aktivieren</Btn>
         )}
-        <Btn kind="ghost" onClick={duplicate} style={{ marginBottom: 4 }}>Plan duplizieren</Btn>
+        <Btn kind="ghost" onClick={duplicate} style={{ marginBottom: 4, fontSize: 12 }}>Plan duplizieren</Btn>
         {sch.id === store.activeScheduleId && !LB.isWeekdayPlan(sch) && (
-          <Card style={{ padding: 14 }}>
-            <Label>Zyklus-Startdatum (Tag 1)</Label>
-            <div style={{ overflow: 'hidden', borderRadius: 10 }}>
+          <Frame style={{ padding: '14px 16px' }}>
+            <span className="label">Zyklus-Startdatum (Tag 1)</span>
+            <div style={{ overflow: 'hidden', borderRadius: 8, marginTop: 8 }}>
               <input type="date"
                 value={store.cycleStartDate || ''}
                 onChange={e => { if (e.target.value) setStore(s => ({ ...s, cycleStartDate: e.target.value })); }}
                 style={{
-                  background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
-                  borderRadius: 10, padding: '11px 14px', color: UI.ink,
-                  fontFamily: UI.fontNum, fontSize: 16, outline: 'none',
+                  background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+                  borderRadius: 8, padding: '10px 14px', color: UI.ink,
+                  fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
                   width: '100%', boxSizing: 'border-box', display: 'block',
                 }}
               />
             </div>
-            <div style={{ fontSize: 12, color: UI.inkFaint, marginTop: 6 }}>
+            <div className="micro" style={{ marginTop: 8 }}>
               Heute = Tag {activeCycleDayIdx + 1} von {sch.days.length}
             </div>
-          </Card>
+          </Frame>
         )}
+
+        <Bezel>TAGE</Bezel>
+
         {displayDays.map((d, i) => {
           const isRest = !d.items.length;
           const isToday = sch.id === store.activeScheduleId && (
             LB.isWeekdayPlan(sch) ? d.weekday === todayWeekday : activeCycleDayIdx === i
           );
           const dayLabel = LB.isWeekdayPlan(sch) ? WEEKDAYS_FULL[d.weekday] : `Tag ${i+1}`;
-          return (
-            <Card key={d.id} accent={isToday}
+          return isToday ? (
+            <BracketFrame key={d.id} gold
               onClick={() => setEditingDay(d.id)}
-              style={{ cursor: 'pointer', padding: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isRest ? 0 : 6 }}>
+              style={{ cursor: 'pointer' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
                 <div>
-                  <Label style={{ marginBottom: 2 }}>{dayLabel}{isToday ? ' · heute' : ''}</Label>
-                  <div style={{ fontSize: 17, fontWeight: 600, color: isRest ? UI.inkSoft : isToday ? UI.gold : UI.ink }}>{d.name}</div>
+                  <div className="micro-gold" style={{ marginBottom: 4 }}>{dayLabel.toUpperCase()} · HEUTE</div>
+                  <div className="display" style={{ fontSize: 20, color: UI.gold, lineHeight: 1.1 }}>{d.name}</div>
                 </div>
-                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum }}>
+                <span className="num" style={{ color: UI.gold, fontSize: 11 }}>
                   {isRest ? 'REST' : `${d.items.length} ÜB.`}
-                </div>
+                </span>
               </div>
               {!isRest && d.items.slice(0, 4).map((it, k) => {
                 const ex = LB.findExercise(store, it.exId);
                 return (
-                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: UI.inkSoft, padding: '2px 0' }}>
-                    <span>{ex?.name || '—'}</span>
-                    <span style={{ fontFamily: UI.fontNum, fontSize: 12 }}>{it.sets}×{it.reps}</span>
+                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderTop: k === 0 ? `0.5px solid ${UI.goldSoft}` : 'none' }}>
+                    <span style={{ fontSize: 13, color: UI.inkSoft }}>{ex?.name || '—'}</span>
+                    <span className="num" style={{ fontSize: 11, color: UI.gold }}>{it.sets}×{it.reps}</span>
                   </div>
                 );
               })}
               {d.items.length > 4 && (
-                <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 4 }}>+ {d.items.length - 4} weitere</div>
+                <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>+ {d.items.length - 4} weitere</div>
               )}
-            </Card>
+            </BracketFrame>
+          ) : (
+            <Frame key={d.id}
+              onClick={() => setEditingDay(d.id)}
+              style={{ cursor: 'pointer', padding: '12px 16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: isRest ? 0 : 6 }}>
+                <div>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{dayLabel.toUpperCase()}</div>
+                  <div className="display" style={{ fontSize: 18, color: isRest ? UI.inkFaint : UI.ink, fontStyle: isRest ? 'italic' : 'normal', lineHeight: 1.1 }}>{d.name}</div>
+                </div>
+                <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>
+                  {isRest ? 'REST' : `${d.items.length} ÜB.`}
+                </span>
+              </div>
+              {!isRest && d.items.slice(0, 3).map((it, k) => {
+                const ex = LB.findExercise(store, it.exId);
+                return (
+                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: UI.inkSoft, padding: '2px 0' }}>
+                    <span>{ex?.name || '—'}</span>
+                    <span className="num" style={{ fontSize: 11 }}>{it.sets}×{it.reps}</span>
+                  </div>
+                );
+              })}
+              {d.items.length > 3 && (
+                <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>+ {d.items.length - 3} weitere</div>
+              )}
+            </Frame>
           );
         })}
       </div>
@@ -162,12 +212,12 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
   );
 }
 
-// ─── Edit screen — rename, manage pattern (reorder/add/remove days) ─
+// ─── Edit screen — rename, manage pattern ─
 function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
   const [confirmEl, confirm] = useConfirm();
   const original = store.schedules.find(s => s.id === scheduleId);
   const [draft, setDraft] = useStateS(original ? JSON.parse(JSON.stringify(original)) : null);
-  const [pickingType, setPickingType] = useStateS(null); // { afterIdx } or { replaceIdx }
+  const [pickingType, setPickingType] = useStateS(null);
   if (!draft) return null;
 
   const toggleWeekdayEdit = (idx) => {
@@ -233,85 +283,94 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
           if (dirty && !await confirm('Ungespeicherte Änderungen gehen verloren.', { title: 'Änderungen verwerfen?', ok: 'Verwerfen', danger: true })) return;
           go({ name: 'schedule', scheduleId: draft.id });
         }}
-        right={<Btn kind="ghost" onClick={save} style={{ minHeight: 36, padding: '6px 12px', fontSize: 12, color: dirty ? UI.gold : UI.inkSoft, borderColor: dirty ? UI.goldSoft : UI.inkLine }}>speichern</Btn>}
+        right={
+          <button onClick={save} style={{
+            background: dirty ? UI.goldFaint : 'transparent',
+            border: `0.5px solid ${dirty ? UI.goldSoft : UI.hairStrong}`,
+            borderRadius: 999, padding: '5px 12px', cursor: 'pointer',
+            color: dirty ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+          }}>Speichern</button>
+        }
       />
-      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Input label="Name" value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v }))} />
+      <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <Field label="Name">
+          <TextInput value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v }))} />
+        </Field>
 
         {LB.isWeekdayPlan(draft) ? (
           <div>
-            <Label>Trainingstage</Label>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+            <span className="label">Trainingstage</span>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '10px 0 14px' }}>
               {WEEKDAYS.map((wd, i) => {
                 const active = draft.days.some(d => d.weekday === i);
                 return (
                   <button key={i} onClick={() => toggleWeekdayEdit(i)} style={{
                     width: 44, height: 44, borderRadius: 999,
-                    border: `1px solid ${active ? UI.goldSoft : UI.inkLine}`,
+                    border: `0.5px solid ${active ? UI.goldSoft : UI.hairStrong}`,
                     background: active ? UI.goldFaint : 'transparent',
-                    color: active ? UI.gold : UI.inkSoft,
+                    color: active ? UI.gold : UI.inkFaint,
                     fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', fontWeight: active ? 600 : 400,
                   }}>{wd}</button>
                 );
               })}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {[...draft.days].sort((a,b)=>a.weekday-b.weekday).map(day => (
                 <div key={day.id} style={{
                   display: 'flex', alignItems: 'center', gap: 8,
-                  background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
-                  padding: '8px 10px', borderRadius: 10,
+                  background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+                  padding: '8px 12px', borderRadius: 10,
                 }}>
-                  <div style={{ width: 30, textAlign: 'center', color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[day.weekday]}</div>
+                  <div className="num" style={{ width: 30, textAlign: 'center', color: UI.inkSoft, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[day.weekday]}</div>
                   <button onClick={() => setPickingType({ replaceWeekday: day.weekday })} style={{
                     flex: 1, textAlign: 'left', background: 'transparent', border: 'none', cursor: 'pointer',
-                    padding: '8px 10px', borderRadius: 8,
-                    color: day.name === 'REST' ? UI.inkSoft : UI.ink, fontSize: 15, fontWeight: 600, fontFamily: UI.fontUi,
-                  }}>{day.name}<span style={{ marginLeft: 8, color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontNum, fontWeight: 400 }}>tippen zum ändern</span></button>
-                  <button onClick={() => toggleWeekdayEdit(day.weekday)} style={{ ...iconBtn, color: UI.danger, fontSize: 18 }}>×</button>
+                    padding: '6px 8px', borderRadius: 8,
+                    color: day.name === 'REST' ? UI.inkFaint : UI.ink, fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi,
+                  }}>{day.name}<span className="micro" style={{ marginLeft: 8, fontStyle: 'normal' }}>ändern</span></button>
+                  <button onClick={() => toggleWeekdayEdit(day.weekday)} style={{ ...dayEditIconBtn, color: UI.danger, fontSize: 18 }}>×</button>
                 </div>
               ))}
             </div>
           </div>
         ) : (
           <div>
-            <Label>Zyklus · {draft.days.length} Tage</Label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <span className="label">Zyklus · {draft.days.length} Tage</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
               {draft.days.map((day, i) => {
                 const isRest = day.name === 'REST' || !day.items.length;
                 return (
                   <div key={day.id} style={{
                     display: 'flex', alignItems: 'center', gap: 8,
-                    background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
-                    padding: '8px 10px', borderRadius: 10,
+                    background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+                    padding: '8px 12px', borderRadius: 10,
                   }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <button onClick={() => moveDay(i, -1)} disabled={i === 0} style={{ ...iconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
-                      <button onClick={() => moveDay(i, 1)} disabled={i === draft.days.length - 1} style={{ ...iconBtn, opacity: i === draft.days.length - 1 ? 0.3 : 1 }}>▼</button>
+                      <button onClick={() => moveDay(i, -1)} disabled={i === 0} style={{ ...dayEditIconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
+                      <button onClick={() => moveDay(i, 1)} disabled={i === draft.days.length - 1} style={{ ...dayEditIconBtn, opacity: i === draft.days.length - 1 ? 0.3 : 1 }}>▼</button>
                     </div>
-                    <div style={{ width: 26, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontNum, fontSize: 11 }}>{i+1}</div>
+                    <div className="num" style={{ width: 26, textAlign: 'center', color: UI.inkFaint, fontSize: 11 }}>{i+1}</div>
                     <button onClick={() => setPickingType({ replaceIdx: i })} style={{
                       flex: 1, textAlign: 'left', background: 'transparent', border: 'none', cursor: 'pointer',
-                      padding: '8px 10px', borderRadius: 8,
-                      color: isRest ? UI.inkSoft : UI.ink, fontSize: 15, fontWeight: 600, fontFamily: UI.fontUi,
-                    }}>{day.name}<span style={{ marginLeft: 8, color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontNum, fontWeight: 400 }}>tippen zum ändern</span></button>
-                    <button onClick={() => removeDay(i)} style={{ ...iconBtn, color: UI.danger, fontSize: 18 }}>×</button>
+                      padding: '6px 8px', borderRadius: 8,
+                      color: isRest ? UI.inkFaint : UI.ink, fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi,
+                    }}>{day.name}<span className="micro" style={{ marginLeft: 8, fontStyle: 'normal' }}>ändern</span></button>
+                    <button onClick={() => removeDay(i)} style={{ ...dayEditIconBtn, color: UI.danger, fontSize: 18 }}>×</button>
                   </div>
                 );
               })}
-              <Btn kind="ghost" onClick={() => setPickingType({ append: true })} style={{ borderStyle: 'dashed' }}>
+              <Btn kind="ghost" onClick={() => setPickingType({ append: true })} style={{ borderStyle: 'dashed', fontSize: 12 }}>
                 + Tag hinzufügen
               </Btn>
             </div>
           </div>
         )}
 
-        <div style={{ fontSize: 11, color: UI.inkFaint, lineHeight: 1.5 }}>
+        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.7 }}>
           Übungen pro Tag werden im Plan-Detail bearbeitet.<br/>
-          Eigene Tag-Typen kannst du beim Hinzufügen anlegen — perfekt für Splits wie PUSH1 / PUSH2.
+          Eigene Tag-Typen kannst du beim Hinzufügen anlegen.
         </div>
 
-        <Btn kind="ghost" onClick={deleteSch} style={{ marginTop: 4, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)' }}>Plan löschen</Btn>
+        <Btn kind="ghost" onClick={deleteSch} style={{ marginTop: 4, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', fontSize: 12 }}>Plan löschen</Btn>
       </div>
 
       {pickingType && (
@@ -331,13 +390,13 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
   );
 }
 
-const iconBtn = {
-  width: 22, height: 18, background: 'transparent', border: `1px solid ${UI.inkLine}`,
-  borderRadius: 4, color: UI.inkSoft, cursor: 'pointer', fontSize: 9,
+const dayEditIconBtn = {
+  width: 22, height: 18, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+  borderRadius: 4, color: UI.inkFaint, cursor: 'pointer', fontSize: 9,
   display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
 };
 
-// ─── Day-type picker (sheet) — standard + custom + create new ─────────
+// ─── Day-type picker (sheet) ─────────────────────────────────────────
 function DayTypePicker({ store, setStore, title, onClose, onPick }) {
   const [confirmEl, confirm] = useConfirm();
   const [creating, setCreating] = useStateS(false);
@@ -362,46 +421,44 @@ function DayTypePicker({ store, setStore, title, onClose, onPick }) {
 
   return (
     <Sheet open={true} onClose={onClose} title={title}>
-      <Label>Standard</Label>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
+      <span className="label">Standard</span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '8px 0 18px' }}>
         {STANDARD_DAY_TYPES.map(t => (
-          <button key={t} onClick={() => onPick(t)} style={chipStyle(t === 'REST')}>{t}</button>
+          <button key={t} onClick={() => onPick(t)} style={dayTypeChip(t === 'REST')}>{t}</button>
         ))}
       </div>
 
-      <Label>Eigene</Label>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+      <span className="label">Eigene</span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '8px 0 6px' }}>
         {custom.length === 0 && !creating && (
-          <div style={{ color: UI.inkFaint, fontSize: 12, padding: '6px 2px' }}>
-            Noch keine eigenen Typen. Leg z.B. <span style={{ fontFamily: UI.fontNum, color: UI.inkSoft }}>PUSH1 / PUSH2</span> an für Variations-Splits.
+          <div className="micro" style={{ color: UI.inkFaint, padding: '6px 2px', fontStyle: 'italic' }}>
+            Noch keine eigenen Typen. Z.B. PUSH1 / PUSH2.
           </div>
         )}
         {custom.map(t => (
-          <div key={t} style={{ display: 'flex', alignItems: 'stretch', borderRadius: 999, overflow: 'hidden', border: `1px solid ${UI.goldSoft}` }}>
+          <div key={t} style={{ display: 'flex', alignItems: 'stretch', borderRadius: 999, overflow: 'hidden', border: `0.5px solid ${UI.goldSoft}` }}>
             <button onClick={() => onPick(t)} style={{
-              ...chipStyle(false),
+              ...dayTypeChip(false),
               border: 'none', borderRadius: 0,
-              background: UI.goldFaint, color: UI.gold,
-              fontWeight: 600,
+              background: UI.goldFaint, color: UI.gold, fontWeight: 600,
             }}>{t}</button>
             <button onClick={() => removeCustom(t)} title="entfernen" style={{
-              background: UI.goldFaint, border: 'none', borderLeft: `1px solid ${UI.goldSoft}`,
+              background: UI.goldFaint, border: 'none', borderLeft: `0.5px solid ${UI.goldSoft}`,
               color: UI.gold, opacity: 0.55, padding: '0 8px', cursor: 'pointer', fontSize: 12,
             }}>×</button>
           </div>
         ))}
         {!creating && (
           <button onClick={() => setCreating(true)} style={{
-            ...chipStyle(true),
-            color: UI.gold, borderColor: UI.goldSoft,
-          }}>+ neuer Typ</button>
+            ...dayTypeChip(true), color: UI.gold, borderColor: UI.goldSoft,
+          }}>+ neu</button>
         )}
       </div>
 
       {creating && (
         <div style={{
           display: 'flex', gap: 8, alignItems: 'center', marginTop: 10,
-          padding: 10, background: UI.bgInset, border: `1px dashed ${UI.goldSoft}`, borderRadius: 10,
+          padding: 10, background: UI.bgInset, border: `0.5px dashed ${UI.goldSoft}`, borderRadius: 10,
         }}>
           <input
             autoFocus
@@ -410,30 +467,31 @@ function DayTypePicker({ store, setStore, title, onClose, onPick }) {
             onKeyDown={(e) => e.key === 'Enter' && createCustom()}
             placeholder="z.B. PUSH1"
             style={{
-              flex: 1, background: '#0a0a0a', border: `1px solid ${UI.inkLine}`,
-              borderRadius: 8, color: UI.gold, padding: '10px 12px',
+              flex: 1, background: 'transparent', border: 'none',
+              borderBottom: `0.5px solid ${UI.goldSoft}`,
+              color: UI.gold, padding: '8px 0',
               fontFamily: UI.fontNum, fontSize: 14, letterSpacing: '0.08em', outline: 'none',
             }}
           />
-          <Btn kind="ghost" onClick={() => { setCreating(false); setNewName(''); }} style={{ minHeight: 38, padding: '6px 10px', fontSize: 12 }}>×</Btn>
-          <Btn onClick={createCustom} disabled={!newName.trim()} style={{ minHeight: 38, padding: '6px 14px', fontSize: 12, opacity: newName.trim() ? 1 : 0.4 }}>anlegen & wählen</Btn>
+          <Btn kind="ghost" onClick={() => { setCreating(false); setNewName(''); }} style={{ minHeight: 36, padding: '4px 10px', fontSize: 11 }}>×</Btn>
+          <Btn onClick={createCustom} disabled={!newName.trim()} style={{ minHeight: 36, padding: '4px 12px', fontSize: 11, opacity: newName.trim() ? 1 : 0.4 }}>anlegen</Btn>
         </div>
       )}
 
-      <div style={{ marginTop: 18, fontSize: 11, color: UI.inkFaint, lineHeight: 1.5 }}>
-        Tipp: Für Pläne wie <span style={{ fontFamily: UI.fontNum, color: UI.inkSoft }}>PUSH1 / PULL1 / REST / LEGS1 / PUSH2 / REST / PULL2 / LEGS2 / REST</span> einfach mehrere eigene Typen anlegen.
+      <div className="micro" style={{ marginTop: 18, color: UI.inkFaint, lineHeight: 1.7 }}>
+        Für Pläne wie PUSH1 / PULL1 / REST / LEGS1 einfach mehrere eigene Typen anlegen.
       </div>
       {confirmEl}
     </Sheet>
   );
 }
 
-function chipStyle(dashed) {
+function dayTypeChip(dashed) {
   return {
-    padding: '8px 14px', borderRadius: 999,
+    padding: '7px 12px', borderRadius: 999,
     background: 'transparent',
-    border: `1px ${dashed ? 'dashed' : 'solid'} ${UI.inkLine}`,
-    color: UI.ink, fontFamily: UI.fontNum, fontSize: 12, letterSpacing: '0.06em',
+    border: `0.5px ${dashed ? 'dashed' : 'solid'} ${UI.hairStrong}`,
+    color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 11, letterSpacing: '0.08em',
     cursor: 'pointer',
   };
 }
@@ -452,17 +510,17 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
           {copyableDays.map(d => (
             <button key={d.id} onClick={() => onCopy(d.items)} style={{
-              background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+              background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
               borderRadius: 10, padding: '12px 14px', cursor: 'pointer',
               textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi,
             }}
-            onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.gold}
-            onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.inkLine}>
-              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{d.name}</div>
+            onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
+            onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.hairStrong}>
+              <div className="display" style={{ fontSize: 16, marginBottom: 4 }}>{d.name}</div>
               <div style={{ fontSize: 12, color: UI.inkSoft }}>
                 {d.items.map(it => LB.findExercise(store, it.exId)?.name || '—').join(' · ')}
               </div>
-              <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 4, fontFamily: UI.fontNum }}>
+              <div className="num" style={{ fontSize: 10, color: UI.inkFaint, marginTop: 4 }}>
                 {d.items.length} Übung{d.items.length !== 1 ? 'en' : ''}
               </div>
             </button>
@@ -480,31 +538,28 @@ function ExerciseItemEditor({ item, exName, onClose, onSave }) {
   const [note, setNote] = useStateS(item.note || '');
   return (
     <Sheet open={true} onClose={onClose} title={exName}>
-      <div style={{ display: 'flex', gap: 24, justifyContent: 'center', marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 24, justifyContent: 'center', marginBottom: 24 }}>
         <div style={{ textAlign: 'center', flex: 1 }}>
-          <Label style={{ textAlign: 'center' }}>Sätze</Label>
-          <Stepper value={sets} onChange={v => setSets(Math.max(1, Math.round(v)))} step={1} min={1} />
+          <span className="label" style={{ display: 'block', textAlign: 'center' }}>Sätze</span>
+          <div style={{ marginTop: 8 }}>
+            <Stepper value={sets} onChange={v => setSets(Math.max(1, Math.round(v)))} step={1} min={1} />
+          </div>
         </div>
         <div style={{ textAlign: 'center', flex: 1 }}>
-          <Label style={{ textAlign: 'center' }}>Wiederholungen</Label>
-          <Stepper value={reps} onChange={v => setReps(Math.max(1, Math.round(v)))} step={1} min={1} />
+          <span className="label" style={{ display: 'block', textAlign: 'center' }}>Wiederholungen</span>
+          <div style={{ marginTop: 8 }}>
+            <Stepper value={reps} onChange={v => setReps(Math.max(1, Math.round(v)))} step={1} min={1} />
+          </div>
         </div>
       </div>
-      <Label>Notiz (optional)</Label>
-      <textarea
-        value={note}
-        onChange={e => setNote(e.target.value)}
-        placeholder="z.B. Kabelzug Pos 4, langsam ablassen…"
-        rows={3}
-        style={{
-          width: '100%', boxSizing: 'border-box',
-          background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
-          borderRadius: 10, padding: 12, color: UI.ink,
-          fontFamily: UI.fontUi, fontSize: 14, resize: 'vertical', outline: 'none',
-          marginBottom: 14,
-        }}
-      />
-      <Btn onClick={() => onSave({ sets, reps, note })} style={{ width: '100%' }}>Übernehmen</Btn>
+      <Field label="Notiz (optional)">
+        <TextInput
+          value={note}
+          onChange={setNote}
+          placeholder="z.B. Kabelzug Pos 4, langsam ablassen…"
+        />
+      </Field>
+      <Btn onClick={() => onSave({ sets, reps, note })} style={{ width: '100%', marginTop: 20 }}>Übernehmen</Btn>
     </Sheet>
   );
 }
@@ -513,7 +568,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const [draft, setDraft] = useStateS(day);
   const [addingEx, setAddingEx] = useStateS(false);
   const [copyingFrom, setCopyingFrom] = useStateS(false);
-  const [editingItem, setEditingItem] = useStateS(null); // index
+  const [editingItem, setEditingItem] = useStateS(null);
 
   if (!draft) return null;
 
@@ -541,56 +596,58 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
 
   return (
     <Sheet open={true} onClose={onClose} title="Tag bearbeiten">
-      <Input label="Tagesname" value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v.toUpperCase() }))} />
+      <Field label="Tagesname">
+        <TextInput value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v.toUpperCase() }))} />
+      </Field>
       {draft.name === 'REST' ? (
-        <div style={{ marginTop: 14, padding: '20px 14px', textAlign: 'center',
-          border: `1px dashed ${UI.inkLine}`, borderRadius: 10, color: UI.inkFaint }}>
-          <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 4 }}>Ruhetag</div>
-          <div style={{ fontSize: 11 }}>Keine Übungen an einem REST-Tag.<br/>Tagesname ändern, um Übungen anzulegen.</div>
+        <div style={{ marginTop: 18, padding: '18px 14px', textAlign: 'center',
+          border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 10, color: UI.inkFaint }}>
+          <div className="display-it" style={{ fontSize: 16, color: UI.inkSoft, marginBottom: 4 }}>Ruhetag.</div>
+          <div className="micro">Tagesname ändern, um Übungen anzulegen.</div>
         </div>
       ) : (
-        <div style={{ marginTop: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <Label style={{ marginBottom: 0 }}>Übungen</Label>
+        <div style={{ marginTop: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span className="label" style={{ marginBottom: 0 }}>Übungen</span>
             {otherDaysWithExercises.length > 0 && (
               <button onClick={() => setCopyingFrom(true)} style={{
                 background: 'transparent', border: 'none', cursor: 'pointer',
-                color: UI.gold, fontSize: 12, fontFamily: UI.fontUi, padding: '2px 0',
+                color: UI.gold, fontSize: 10, fontFamily: UI.fontUi, padding: '2px 0',
+                letterSpacing: '0.1em', textTransform: 'uppercase',
               }}>Von Tag kopieren</button>
             )}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {draft.items.map((it, i) => {
               const ex = LB.findExercise(store, it.exId);
               return (
                 <div key={i} onClick={() => setEditingItem(i)} style={{
                   display: 'flex', gap: 8, alignItems: 'center',
-                  background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
-                  padding: '11px 12px', borderRadius: 12, cursor: 'pointer',
+                  background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+                  padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
                 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <button onClick={e => { e.stopPropagation(); moveItem(i, -1); }} disabled={i === 0} style={{ ...iconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
-                    <button onClick={e => { e.stopPropagation(); moveItem(i, 1); }} disabled={i === draft.items.length - 1} style={{ ...iconBtn, opacity: i === draft.items.length - 1 ? 0.3 : 1 }}>▼</button>
+                    <button onClick={e => { e.stopPropagation(); moveItem(i, -1); }} disabled={i === 0} style={{ ...dayEditIconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
+                    <button onClick={e => { e.stopPropagation(); moveItem(i, 1); }} disabled={i === draft.items.length - 1} style={{ ...dayEditIconBtn, opacity: i === draft.items.length - 1 ? 0.3 : 1 }}>▼</button>
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14, fontWeight: 500, color: UI.ink }}>{ex?.name || '—'}</div>
-                    {it.note ? <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{it.note}</div> : null}
+                    <div className="display" style={{ fontSize: 15, color: UI.ink, lineHeight: 1.1 }}>{ex?.name || '—'}</div>
+                    {it.note ? <div className="micro" style={{ color: UI.inkFaint, marginTop: 2, fontStyle: 'italic' }}>{it.note}</div> : null}
                   </div>
-                  <div style={{
-                    fontFamily: UI.fontNum, fontSize: 13, fontWeight: 600,
-                    color: UI.gold, background: UI.goldFaint,
-                    border: `1px solid ${UI.goldSoft}`, borderRadius: 8,
+                  <div className="num" style={{
+                    fontSize: 12, color: UI.gold, background: UI.goldFaint,
+                    border: `0.5px solid ${UI.goldSoft}`, borderRadius: 8,
                     padding: '3px 8px', whiteSpace: 'nowrap',
                   }}>{it.sets}×{it.reps}</div>
-                  <button onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...iconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
+                  <button onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...dayEditIconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
                 </div>
               );
             })}
-            <Btn kind="ghost" onClick={() => setAddingEx(true)} style={{ borderStyle: 'dashed', minHeight: 44 }}>+ Übung hinzufügen</Btn>
+            <Btn kind="ghost" onClick={() => setAddingEx(true)} style={{ borderStyle: 'dashed', minHeight: 42, fontSize: 12 }}>+ Übung hinzufügen</Btn>
           </div>
         </div>
       )}
-      <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+      <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
         <Btn kind="ghost" onClick={onClose} style={{ flex: 1 }}>Abbrechen</Btn>
         <Btn onClick={() => onSave(draft)} style={{ flex: 2 }}>Speichern</Btn>
       </div>
@@ -637,30 +694,30 @@ function ExercisePicker({ store, onClose, onPick }) {
 
   return (
     <Sheet open={true} onClose={onClose} title="Übung wählen">
-      <Input value={q} onChange={setQ} placeholder="SUCHEN ODER NEUE TIPPEN…" />
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+      <Field label="">
+        <TextInput value={q} onChange={setQ} placeholder="Suchen oder tippen…" />
+      </Field>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
         {MUSCLES.map(m => (
           <Pill key={m} gold={filterTags.includes(m)} onClick={() => toggleFilter(m)}
             style={{ cursor: 'pointer' }}>{m}</Pill>
         ))}
       </div>
-      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 300, overflow: 'auto' }}>
-        {list.map(e => (
+      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', maxHeight: 300, overflow: 'auto' }}>
+        {list.map((e, ei) => (
           <button key={e.id} onClick={() => onPick(e.id)} style={{
             background: 'transparent', border: 'none', textAlign: 'left',
-            padding: '10px 14px', borderRadius: 8, cursor: 'pointer',
-            color: UI.ink, fontSize: 15, fontFamily: UI.fontUi,
+            padding: '11px 0', cursor: 'pointer',
+            borderBottom: ei < list.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
-          }}
-          onMouseEnter={ev => ev.currentTarget.style.background = UI.bgInset}
-          onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}>
-            <span>{e.name}</span>
+          }}>
+            <span className="display" style={{ fontSize: 17, color: UI.ink }}>{e.name}</span>
             <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
               {(e.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
             </div>
           </button>
         ))}
-        {list.length === 0 && <div style={{ padding: '16px 0', textAlign: 'center', color: UI.inkFaint, fontSize: 13 }}>Keine Übungen gefunden</div>}
+        {list.length === 0 && <div className="micro" style={{ padding: '20px 0', textAlign: 'center', color: UI.inkFaint }}>Keine Übungen gefunden</div>}
         {q && !list.find(e => e.name.toUpperCase() === q.toUpperCase()) && (
           <button onClick={() => {
             if (window.__createExercise) {
@@ -668,9 +725,9 @@ function ExercisePicker({ store, onClose, onPick }) {
               onPick(newId);
             }
           }} style={{
-            background: UI.goldFaint, border: `1px dashed ${UI.goldSoft}`,
+            background: UI.goldFaint, border: `0.5px dashed ${UI.goldSoft}`,
             padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
-            color: UI.gold, fontSize: 14, marginTop: 6, fontFamily: UI.fontUi,
+            color: UI.gold, fontSize: 13, marginTop: 8, fontFamily: UI.fontUi, textAlign: 'left',
           }}>+ "{q}" anlegen</button>
         )}
       </div>
@@ -740,34 +797,39 @@ function ScheduleNewScreen({ store, setStore, go }) {
   return (
     <Screen>
       <TopBar title="Neuer Plan" onBack={() => step > 0 ? setStep(step - 1) : go({ name: 'plan' })} />
-      <div style={{ padding: '6px 18px 18px' }}>
-        <div style={{ display: 'flex', gap: 4, marginBottom: 18 }}>
+      <div style={{ padding: '14px 22px 22px' }}>
+
+        {/* Step progress bars */}
+        <div style={{ display: 'flex', gap: 4, marginBottom: 24 }}>
           {[0,1].map(i => (
-            <div key={i} style={{ flex: 1, height: 3, borderRadius: 2, background: i <= step ? UI.gold : UI.inkLine }} />
+            <div key={i} style={{ flex: 1, height: 2, borderRadius: 1, background: i <= step ? UI.gold : UI.hair, transition: 'background 0.3s' }} />
           ))}
         </div>
 
         {step === 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
             <div>
-              <div style={{ fontSize: 22, fontWeight: 600, marginBottom: 4 }}>Wie heißt dein Plan?</div>
+              <div className="display" style={{ fontSize: 26, color: UI.ink, lineHeight: 1.1, marginBottom: 6 }}>Wie heißt dein Plan?</div>
               <div style={{ fontSize: 13, color: UI.inkSoft }}>Du kannst das später ändern.</div>
             </div>
-            <Input value={name} onChange={setName} placeholder="z.B. 2 on 1 off PPL" autoFocus />
-            <Btn onClick={() => setStep(1)} style={{ width: '100%', opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Weiter →</Btn>
+            <Field label="Planname">
+              <TextInput value={name} onChange={setName} placeholder="z.B. 2 on 1 off PPL" autoFocus />
+            </Field>
+            <Btn onClick={() => setStep(1)} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Weiter →</Btn>
           </div>
         )}
 
         {step === 1 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             {/* Mode toggle */}
-            <div style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `1px solid ${UI.inkLine}`, borderRadius: 10, padding: 3 }}>
+            <div style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 10, padding: 3 }}>
               {[{key:'cycle',label:'Zyklus'},{key:'weekday',label:'Wochentage'}].map(m => (
                 <button key={m.key} onClick={() => setMode(m.key)} style={{
                   flex: 1, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer',
                   background: mode === m.key ? UI.bgRaised : 'transparent',
-                  color: mode === m.key ? UI.ink : UI.inkSoft,
-                  fontFamily: UI.fontUi, fontSize: 13, fontWeight: mode === m.key ? 600 : 400,
+                  color: mode === m.key ? UI.ink : UI.inkFaint,
+                  fontFamily: UI.fontUi, fontSize: 12, fontWeight: mode === m.key ? 600 : 400,
+                  letterSpacing: '0.06em',
                 }}>{m.label}</button>
               ))}
             </div>
@@ -775,44 +837,43 @@ function ScheduleNewScreen({ store, setStore, go }) {
             {mode === 'cycle' && (
               <>
                 <div>
-                  <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Zyklus zusammenstellen</div>
-                  <div style={{ fontSize: 13, color: UI.inkSoft }}>Tag-Typen anhängen — Zyklus wiederholt sich endlos.</div>
+                  <div className="display" style={{ fontSize: 22, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>Zyklus zusammenstellen</div>
+                  <div style={{ fontSize: 12, color: UI.inkSoft }}>Tag-Typen anhängen — Zyklus wiederholt sich endlos.</div>
                 </div>
                 <div>
-                  <Label>Dein Zyklus · {pattern.length} Tage</Label>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: 12, background: UI.bgInset, border: `1px solid ${UI.inkLine}`, borderRadius: 10, minHeight: 60 }}>
+                  <span className="label">Dein Zyklus · {pattern.length} Tage</span>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: 12, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 10, minHeight: 54, marginTop: 8 }}>
                     {pattern.map((p, i) => (
                       <button key={i} onClick={() => setPattern(pat => pat.filter((_,j) => j !== i))} style={{
-                        padding: '6px 10px', borderRadius: 8,
+                        padding: '5px 10px', borderRadius: 8,
                         background: p === 'REST' ? 'transparent' : UI.goldFaint,
-                        border: `1px ${p === 'REST' ? 'dashed' : 'solid'} ${p === 'REST' ? UI.inkLine : UI.goldSoft}`,
-                        color: p === 'REST' ? UI.inkSoft : UI.gold,
-                        fontSize: 12, fontFamily: UI.fontNum, letterSpacing: '0.06em', cursor: 'pointer',
-                        fontWeight: STANDARD_DAY_TYPES.includes(p) ? 400 : 600,
+                        border: `0.5px ${p === 'REST' ? 'dashed' : 'solid'} ${p === 'REST' ? UI.hairStrong : UI.goldSoft}`,
+                        color: p === 'REST' ? UI.inkFaint : UI.gold,
+                        fontSize: 11, fontFamily: UI.fontNum, letterSpacing: '0.06em', cursor: 'pointer',
                       }} title="Tippen zum Entfernen">{p} ×</button>
                     ))}
-                    {pattern.length === 0 && <div style={{ color: UI.inkFaint, fontSize: 12 }}>leer — tippe „Tag hinzufügen"</div>}
+                    {pattern.length === 0 && <div className="micro" style={{ color: UI.inkFaint, alignSelf: 'center' }}>leer — Tag hinzufügen</div>}
                   </div>
                 </div>
-                <Btn kind="ghost" onClick={() => setPickingType(true)} style={{ borderStyle: 'dashed' }}>+ Tag hinzufügen</Btn>
+                <Btn kind="ghost" onClick={() => setPickingType(true)} style={{ borderStyle: 'dashed', fontSize: 12 }}>+ Tag hinzufügen</Btn>
                 <div>
-                  <Label>Schnellauswahl</Label>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span className="label">Schnellauswahl</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
                     {presets.map(p => (
                       <button key={p.label} onClick={() => setPattern(p.val)} style={{
-                        background: UI.bgRaised, border: `1px solid ${UI.inkLine}`,
+                        background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
                         padding: '10px 14px', borderRadius: 10, cursor: 'pointer',
                         color: UI.ink, textAlign: 'left', fontFamily: UI.fontUi, fontSize: 13,
                         display: 'flex', justifyContent: 'space-between',
                       }}>
                         <span>{p.label}</span>
-                        <span style={{ color: UI.inkFaint, fontSize: 11, fontFamily: UI.fontNum }}>{p.val.length}d</span>
+                        <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>{p.val.length}d</span>
                       </button>
                     ))}
                   </div>
                 </div>
                 <Btn onClick={finish} style={{ opacity: pattern.length ? 1 : 0.4 }} disabled={!pattern.length}>Plan erstellen →</Btn>
-                <div style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'center', marginTop: -8 }}>
+                <div className="micro" style={{ textAlign: 'center', marginTop: -8 }}>
                   Übungen kannst du gleich danach in jeden Tag eintragen.
                 </div>
               </>
@@ -821,8 +882,8 @@ function ScheduleNewScreen({ store, setStore, go }) {
             {mode === 'weekday' && (
               <>
                 <div>
-                  <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Trainingstage wählen</div>
-                  <div style={{ fontSize: 13, color: UI.inkSoft }}>An welchen Wochentagen trainierst du?</div>
+                  <div className="display" style={{ fontSize: 22, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>Trainingstage wählen</div>
+                  <div style={{ fontSize: 12, color: UI.inkSoft }}>An welchen Wochentagen trainierst du?</div>
                 </div>
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
                   {WEEKDAYS.map((wd, i) => {
@@ -830,9 +891,9 @@ function ScheduleNewScreen({ store, setStore, go }) {
                     return (
                       <button key={i} onClick={() => toggleWeekday(i)} style={{
                         width: 42, height: 42, borderRadius: 999,
-                        border: `1px solid ${sel ? UI.goldSoft : UI.inkLine}`,
+                        border: `0.5px solid ${sel ? UI.goldSoft : UI.hairStrong}`,
                         background: sel ? UI.goldFaint : 'transparent',
-                        color: sel ? UI.gold : UI.inkSoft,
+                        color: sel ? UI.gold : UI.inkFaint,
                         fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', fontWeight: sel ? 600 : 400,
                       }}>{wd}</button>
                     );
@@ -840,21 +901,21 @@ function ScheduleNewScreen({ store, setStore, go }) {
                 </div>
                 {weekdayDays.length > 0 && (
                   <div>
-                    <Label>Typ pro Tag (tippen zum ändern)</Label>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <span className="label">Typ pro Tag</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
                       {[...weekdayDays].sort((a,b)=>a.weekday-b.weekday).map(d => (
                         <div key={d.weekday} style={{
                           display: 'flex', alignItems: 'center', gap: 10,
-                          background: UI.bgInset, border: `1px solid ${UI.inkLine}`,
+                          background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
                           padding: '8px 12px', borderRadius: 10,
                         }}>
-                          <div style={{ width: 30, color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[d.weekday]}</div>
+                          <div className="num" style={{ width: 30, color: UI.inkFaint, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[d.weekday]}</div>
                           <button onClick={() => setPickingWeekday(d.weekday)} style={{
                             flex: 1, textAlign: 'left', background: 'transparent', border: 'none',
-                            cursor: 'pointer', color: d.name === 'REST' ? UI.inkSoft : UI.gold,
-                            fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi, padding: 0,
+                            cursor: 'pointer', color: d.name === 'REST' ? UI.inkFaint : UI.gold,
+                            fontSize: 13, fontWeight: 600, fontFamily: UI.fontUi, padding: 0,
                           }}>
-                            {d.name} <span style={{ color: UI.inkFaint, fontSize: 10, fontWeight: 400 }}>ändern</span>
+                            {d.name} <span className="micro" style={{ fontStyle: 'normal' }}>ändern</span>
                           </button>
                         </div>
                       ))}
@@ -864,7 +925,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
                 <Btn onClick={finishWeekday} disabled={weekdayDays.length === 0} style={{ opacity: weekdayDays.length ? 1 : 0.4 }}>
                   Plan erstellen →
                 </Btn>
-                <div style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'center', marginTop: -8 }}>
+                <div className="micro" style={{ textAlign: 'center', marginTop: -8 }}>
                   Übungen kannst du gleich danach in jeden Tag eintragen.
                 </div>
               </>
