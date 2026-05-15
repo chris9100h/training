@@ -358,8 +358,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           </Frame>
         ) : heroSet && (
           <BracketFrame gold padding={0}>
-            <div style={{ padding: '20px 6px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '0 18px', marginBottom: 14 }}>
+            <div style={{ padding: '12px 6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '0 18px', marginBottom: 8 }}>
                 <span className="micro-gold">SATZ {String(currentSetNum).padStart(2, '0')} / {String(entry.sets.length).padStart(2, '0')}</span>
                 {prevHeroSet && prevHeroSet.kg ? (
                   <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>
@@ -378,7 +378,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                       background: 'transparent', border: 'none', outline: 'none',
                       color: UI.gold,
                       fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums',
-                      fontSize: 56, fontWeight: 300,
+                      fontSize: 44, fontWeight: 300,
                       letterSpacing: '-0.02em',
                       textAlign: 'center', width: '100%', padding: 0,
                     }}
@@ -396,7 +396,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                   />
                   <div className="micro" style={{ marginTop: 2 }}>KILOGRAMM</div>
                 </div>
-                <div style={{ fontSize: 40, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 200, fontStyle: 'italic', alignSelf: 'flex-start', marginTop: 12 }}>×</div>
+                <div style={{ fontSize: 32, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 200, fontStyle: 'italic', alignSelf: 'flex-start', marginTop: 6 }}>×</div>
                 <div style={{ flex: 1, textAlign: 'center' }}>
                   <input
                     type="number" inputMode="numeric"
@@ -407,7 +407,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                       background: 'transparent', border: 'none', outline: 'none',
                       color: UI.gold,
                       fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums',
-                      fontSize: 56, fontWeight: 300,
+                      fontSize: 44, fontWeight: 300,
                       letterSpacing: '-0.02em',
                       textAlign: 'center', width: '100%', padding: 0,
                     }}
@@ -417,12 +417,12 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               </div>
 
               {/* Big confirm button */}
-              <div style={{ marginTop: 20, padding: '0 18px' }}>
+              <div style={{ marginTop: 12, padding: '0 18px' }}>
                 <button
                   onClick={() => completeSet(currentSetIdx)}
                   disabled={!heroSet.kg || !heroSet.reps}
                   style={{
-                    width: '100%', minHeight: 52,
+                    width: '100%', minHeight: 44,
                     background: !heroSet.kg || !heroSet.reps ? 'transparent' : `linear-gradient(180deg, var(--gold-light), var(--gold))`,
                     border: !heroSet.kg || !heroSet.reps ? `0.5px solid ${UI.hairStrong}` : `0.5px solid var(--gold-deep)`,
                     color: !heroSet.kg || !heroSet.reps ? UI.inkFaint : '#0a0805',

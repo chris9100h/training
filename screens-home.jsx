@@ -57,7 +57,6 @@ function LoginScreen() {
               }} />
             ))}
             <span style={{ fontFamily: UI.fontDisplay, fontSize: 56, color: UI.gold, fontStyle: 'italic', fontWeight: 400, letterSpacing: '-0.04em' }}>L</span>
-            <span className="micro" style={{ position: 'absolute', bottom: 36, color: UI.inkFaint }}>AUTOMATIC</span>
           </div>
           <div style={{ marginTop: 26, textAlign: 'center' }}>
             <div className="display" style={{ fontSize: 30, color: UI.ink, letterSpacing: '0.18em' }}>LOGBOOK</div>
