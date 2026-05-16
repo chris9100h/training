@@ -605,7 +605,7 @@ function StatsTab({ store, sessions, go }) {
   const maxWeekVol = Math.max(...weeklyVolume.map(w => w.vol), 1);
 
   const StatCard = ({ label, value, sub }) => (
-    <div style={{ background: UI.bgInset, borderRadius: 12, padding: '12px 14px' }}>
+    <div style={{ background: UI.bgInset, borderRadius: 12, padding: '12px 14px', textAlign: 'center' }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{label}</div>
       <div className="num" style={{ fontSize: 22, color: UI.ink, lineHeight: 1 }}>{value}</div>
       {sub && <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>{sub}</div>}
@@ -662,7 +662,7 @@ function StatsTab({ store, sessions, go }) {
           <StatCard label="Avg Volume" value={avgVol.toLocaleString('en-US')} sub="kg / session" />
           <StatCard label="Avg Duration" value={avgDuration || '—'} sub={avgDuration ? 'min' : ''} />
           <StatCard label="Longest Session" value={maxDuration || '—'} sub={maxDuration ? 'min' : ''} />
-          <div style={{ gridColumn: '1 / -1', background: UI.bgInset, borderRadius: 12, padding: '12px 14px' }}>
+          <div style={{ gridColumn: '1 / -1', background: UI.bgInset, borderRadius: 12, padding: '12px 14px', textAlign: 'center' }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Total Time Trained</div>
             <div className="num" style={{ fontSize: 22, color: UI.ink, lineHeight: 1 }}>{totalTrainingMins ? totalTrainingStr : '—'}</div>
           </div>
