@@ -304,7 +304,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
   const points = history.map(h => {
     const best = (h.entry.sets || []).filter(s => s.kg && s.reps)
       .reduce((m, s) => Math.max(m, s.kg * (1 + s.reps / 30)), 0);
-    return { date: h.session.ended, est: best };
+    return { date: h.session.date, est: best };
   }).filter(p => p.est > 0).reverse();
 
   const pr = points.length ? Math.max(...points.map(p => p.est)) : 0;
@@ -420,7 +420,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
                 }}>
                 <div>
                   <div className="num" style={{ fontSize: 10, color: UI.inkFaint, letterSpacing: '0.05em', marginBottom: 5 }}>
-                    {new Date(h.session.ended).toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'2-digit' })}
+                    {new Date(h.session.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'2-digit' })}
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexFamily: UI.fontNum, fontSize: 13 }}>
                     {h.entry.sets.filter(s => s.kg).map((s, i) => (
