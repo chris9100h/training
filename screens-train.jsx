@@ -62,7 +62,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   const completeSet = (setIdx) => {
     updateSet(setIdx, { done: true });
-    setRestStart(Date.now());
+    persistRestStart(Date.now());
     setFlashSet(setIdx);
     setTimeout(() => setFlashSet(null), 1400);
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
@@ -150,8 +150,13 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     row.scrollLeft = target;
   }, [exIdx]);
 
-  // rest timer
-  const [restStart, setRestStart] = useStateT(null);
+  // rest timer — persisted in session so navigation doesn't kill it
+  const [restStart, setRestStart] = useStateT(() => session.restStart ?? null);
+
+  const persistRestStart = (val) => {
+    setRestStart(val);
+    updateSession(sess => ({ ...sess, restStart: val }));
+  };
   const [now, setNow] = useStateT(Date.now());
   useEffectT(() => {
     const t = setInterval(() => setNow(Date.now()), 250);
@@ -287,7 +292,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         ? { ...e, sets: e.sets.map(st => ({ ...st, done: true })) }
         : e),
     }));
-    setRestStart(Date.now());
+    persistRestStart(Date.now());
     setTimeout(() => navigate(1), 600);
   };
 
@@ -609,12 +614,12 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <button onClick={() => setRestStart(null)} style={{
+              <button onClick={() => persistRestStart(null)} style={{
                 flex: 1, padding: '8px', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
                 color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
                 fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
               }}>Skip</button>
-              <button onClick={() => setRestStart(Date.now() - (restElapsed - 30) * 1000)} style={{
+              <button onClick={() => persistRestStart(Date.now() - (restElapsed - 30) * 1000)} style={{
                 flex: 1, padding: '8px', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
                 color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
                 fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
