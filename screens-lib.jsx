@@ -263,9 +263,9 @@ function ExerciseCreator({ onClose, setStore, onCreated }) {
 }
 
 // ─── EXERCISE DETAIL ─────────────────────────────────────────────────
-function ExerciseDetailScreen({ store, setStore, go, exId }) {
+function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
   const ex = LB.findExercise(store, exId);
-  if (!ex) { go({ name: 'lib' }); return null; }
+  if (!ex) { go(back || { name: 'lib' }); return null; }
 
   const [confirmEl, confirm] = useConfirm();
   const [editMode, setEditMode] = useStateL(false);
@@ -318,7 +318,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
       <ScreenHead
         ref_="EXERCISE"
         title={editMode ? editName || ex.name : ex.name}
-        onBack={() => { if (editMode) cancelEdit(); else go({ name: 'lib' }); }}
+        onBack={() => { if (editMode) cancelEdit(); else go(back || { name: 'lib' }); }}
         right={
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             <button onClick={editMode ? saveEdit : startEdit} style={{
@@ -664,7 +664,7 @@ function StatsTab({ store, sessions, go }) {
       {bestSession && (
         <div>
           <div className="micro" style={{ marginBottom: 14 }}>BEST SESSION</div>
-          <Frame onClick={() => go({ name: 'session', sessionId: bestSession.id })} style={{ padding: '14px 16px', cursor: 'pointer' }}>
+          <Frame onClick={() => go({ name: 'session', sessionId: bestSession.id, back: { name: 'hist', initialTab: 'stats' } })} style={{ padding: '14px 16px', cursor: 'pointer' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div className="display" style={{ fontSize: 18, color: UI.ink }}>{bestSession.dayName}</div>
@@ -687,7 +687,7 @@ function StatsTab({ store, sessions, go }) {
           <div className="micro" style={{ marginBottom: 14 }}>TOP EXERCISES</div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {topExercises.map(({ id, name, count }, i) => (
-              <div key={id} onClick={() => go({ name: 'exercise', exId: id })} style={{
+              <div key={id} onClick={() => go({ name: 'exercise', exId: id, back: { name: 'hist', initialTab: 'stats' } })} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '11px 0',
                 borderBottom: i < topExercises.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
@@ -709,8 +709,8 @@ function StatsTab({ store, sessions, go }) {
 }
 
 // ─── HISTORY ─────────────────────────────────────────────────────────
-function HistoryScreen({ store, go }) {
-  const [tab, setTab] = useStateL('workouts');
+function HistoryScreen({ store, go, initialTab }) {
+  const [tab, setTab] = useStateL(initialTab || 'workouts');
   const sessions = useMemoL(() => {
     return [...store.sessions]
       .filter(s => s.ended)
@@ -781,7 +781,7 @@ function HistoryScreen({ store, go }) {
 }
 
 // ─── SESSION DETAIL ──────────────────────────────────────────────────
-function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
+function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, back }) {
   const [confirmEl, confirm] = useConfirm();
   const [editing, setEditing] = useStateL(false);
   const [capturing, setCapturing] = useStateL(false);
@@ -845,7 +845,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
       <ScreenHead
         ref_={new Date(s.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
         title={s.dayName}
-        onBack={() => go({ name: justFinished ? 'home' : 'hist' })}
+        onBack={() => go(justFinished ? { name: 'home' } : (back || { name: 'hist' }))}
         right={
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <button onClick={takeScreenshot} disabled={capturing} style={{
