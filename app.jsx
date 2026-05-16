@@ -147,10 +147,25 @@ function App() {
             if (cur) {
               // preserve in-progress session (may not be committed to Supabase yet)
               fresh.inProgress = cur.inProgress ?? fresh.inProgress;
+              const inProgressId = fresh.inProgress;
               fresh.sessions = fresh.sessions.map(s => {
                 const mem = cur.sessions?.find(x => x.id === s.id);
-                return mem ? { ...s, currentExIdx: mem.currentExIdx ?? 0, cyclePos: mem.cyclePos ?? null } : s;
+                if (!mem) return s;
+                const isActive = s.id === inProgressId;
+                return {
+                  ...s,
+                  currentExIdx: mem.currentExIdx ?? 0,
+                  cyclePos: mem.cyclePos ?? null,
+                  // for the active session, local entries/restStart are authoritative —
+                  // Supabase sync may still be in flight
+                  ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null } : {}),
+                };
               });
+              // if the in-progress session hasn't reached Supabase yet, keep the local copy
+              if (inProgressId && !fresh.sessions.find(x => x.id === inProgressId)) {
+                const localSession = cur.sessions?.find(x => x.id === inProgressId);
+                if (localSession) fresh.sessions = [localSession, ...fresh.sessions];
+              }
             }
             prevStore.current = fresh;
             setStore(fresh);

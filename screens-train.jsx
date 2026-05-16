@@ -317,12 +317,18 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           {restStart && restRemaining > 0 && (<>
             <div style={{ width: 0.5, height: 14, background: UI.hairStrong, flexShrink: 0 }} />
             <button onClick={() => setRestModalOpen(true)} style={{
-              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
               background: 'none', border: 'none', cursor: 'pointer', padding: 0,
             }}>
-              <span className="num" style={{ color: UI.inkSoft, fontSize: 14, letterSpacing: '0.14em', fontWeight: 500 }}>
+              <span className="num" style={{
+                color: UI.gold, fontSize: 14, letterSpacing: '0.14em', fontWeight: 500,
+                animation: 'timerPulse 1.6s ease-in-out infinite',
+              }}>
                 {Math.floor(restRemaining/60)}:{(restRemaining%60).toString().padStart(2,'0')}
               </span>
+              <div style={{ width: 44, height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+              </div>
             </button>
           </>)}
         </div>
