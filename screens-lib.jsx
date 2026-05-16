@@ -479,6 +479,26 @@ function StatsTab({ store, sessions, go }) {
   const monday = new Date(today); monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
   const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
 
+  // Determine whether we're in cycle mode and compute current cycle window
+  const sch = store.schedules.find(s => s.id === store.activeScheduleId);
+  const isCycleMode = sch && !LB.isWeekdayPlan(sch) && !!store.cycleStartDate;
+  const cycleWindowStart = (() => {
+    if (!isCycleMode) return null;
+    const start = new Date(store.cycleStartDate + 'T12:00:00');
+    const n = Math.round((today.getTime() - start.getTime()) / 86400000);
+    const idxInCycle = ((n % sch.days.length) + sch.days.length) % sch.days.length;
+    const d = new Date(today); d.setDate(today.getDate() - idxInCycle);
+    return d;
+  })();
+
+  // Sessions in the current training period (cycle or calendar week)
+  const thisPeriodSessions = useMemoL(() => sessions.filter(s => {
+    const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+    if (isCycleMode) return cycleWindowStart && d >= cycleWindowStart && d <= today;
+    return d >= monday && d <= sunday;
+  }), [sessions, isCycleMode, cycleWindowStart]);
+
+  // Calendar-week sessions — used for consistency card ("This Week")
   const thisWeekSessions = useMemoL(() => sessions.filter(s => {
     const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
     return d >= monday && d <= sunday;
@@ -492,7 +512,7 @@ function StatsTab({ store, sessions, go }) {
   // Weekly sets per muscle group
   const setsPerMuscle = useMemoL(() => {
     const counts = {};
-    thisWeekSessions.forEach(s => {
+    thisPeriodSessions.forEach(s => {
       s.entries.forEach(entry => {
         const ex = store.exercises.find(e => e.id === entry.exId);
         const muscles = (ex?.tags || []).filter(t => MUSCLES.includes(t));
@@ -501,7 +521,7 @@ function StatsTab({ store, sessions, go }) {
       });
     });
     return MUSCLES.map(m => ({ muscle: m, sets: counts[m] || 0 })).filter(x => x.sets > 0).sort((a, b) => b.sets - a.sets);
-  }, [thisWeekSessions, store.exercises]);
+  }, [thisPeriodSessions, store.exercises]);
 
   // Weekly volume over last 8 weeks
   const weeklyVolume = useMemoL(() => {
@@ -532,7 +552,6 @@ function StatsTab({ store, sessions, go }) {
 
   // Streaks — rest days are transparent, only missed training days break the streak
   const sessionDateSet = new Set(sessions.map(s => s.date.slice(0, 10)));
-  const sch = store.schedules.find(s => s.id === store.activeScheduleId);
 
   const isTrainingDay = (date) => {
     if (!sch) return true;
@@ -617,9 +636,9 @@ function StatsTab({ store, sessions, go }) {
 
       {/* Weekly sets per muscle */}
       <div>
-        <div className="micro" style={{ marginBottom: 14 }}>THIS WEEK · SETS PER MUSCLE</div>
+        <div className="micro" style={{ marginBottom: 14 }}>{isCycleMode ? 'THIS CYCLE · SETS PER MUSCLE' : 'THIS WEEK · SETS PER MUSCLE'}</div>
         {setsPerMuscle.length === 0 ? (
-          <div style={{ color: UI.inkFaint, fontSize: 13, fontFamily: UI.fontUi }}>No sessions this week yet.</div>
+          <div style={{ color: UI.inkFaint, fontSize: 13, fontFamily: UI.fontUi }}>{isCycleMode ? 'No sessions this cycle yet.' : 'No sessions this week yet.'}</div>
         ) : setsPerMuscle.map(({ muscle, sets }) => (
           <div key={muscle} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <div style={{ width: 100, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.05em' }}>{muscle}</div>
