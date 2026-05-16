@@ -442,12 +442,13 @@ function HomeScreen({ store, setStore, go }) {
                 <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: r ? UI.inkFaint : isSelected ? UI.gold : UI.ink, letterSpacing: '0.06em' }}>
                   {r ? '—' : d.name.slice(0, 4)}
                 </div>
-                <div style={{ height: 12, marginTop: 2 }}>
-                  {isCompleted && (
-                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5" style={{ display: 'block', margin: '0 auto' }}>
+                <div style={{ height: 12, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {isCompleted && !isSelected && (
+                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5" style={{ display: 'block' }}>
                       <path d="M2 6l2.5 2.5L10 3"/>
                     </svg>
                   )}
+                  {isSelected && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold }} />}
                 </div>
               </div>
             );
