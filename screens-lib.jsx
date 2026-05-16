@@ -500,7 +500,7 @@ function StatsTab({ store, sessions, go }) {
         muscles.forEach(m => { counts[m] = (counts[m] || 0) + done; });
       });
     });
-    return MUSCLES.map(m => ({ muscle: m, sets: counts[m] || 0 })).filter(x => x.sets > 0);
+    return MUSCLES.map(m => ({ muscle: m, sets: counts[m] || 0 })).filter(x => x.sets > 0).sort((a, b) => b.sets - a.sets);
   }, [thisWeekSessions, store.exercises]);
 
   // Weekly volume over last 8 weeks
