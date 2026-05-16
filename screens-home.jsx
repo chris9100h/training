@@ -432,7 +432,7 @@ function HomeScreen({ store, setStore, go }) {
                 style={{
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
                   background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : 'transparent',
-                  border: `0.5px solid ${isSelected ? UI.goldSoft : isCompleted ? UI.goldSoft : d.isToday ? UI.hairStrong : UI.hair}`,
+                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : d.isToday ? UI.hairStrong : UI.hair}`,
                   borderRadius: 8, cursor: 'pointer',
                   minHeight: 56,
                 }}>
