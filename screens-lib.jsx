@@ -231,13 +231,16 @@ function LibraryScreen({ store, setStore, go }) {
   );
 }
 
+const EXERCISE_SIZES = [['big','Big'],['medium','Medium'],['small','Small']];
+
 function ExerciseCreator({ onClose, setStore, onCreated }) {
   const [name, setName] = useStateL('');
   const [selectedTags, setSelectedTags] = useStateL([]);
+  const [category, setCategory] = useStateL(null);
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, note: '' };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, note: '' };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -257,6 +260,14 @@ function ExerciseCreator({ onClose, setStore, onCreated }) {
             ))}
           </div>
         </div>
+        <div>
+          <span className="label">Exercise size</span>
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            {EXERCISE_SIZES.map(([val, label]) => (
+              <Pill key={val} gold={category === val} onClick={() => setCategory(c => c === val ? null : val)} style={{ cursor: 'pointer' }}>{label}</Pill>
+            ))}
+          </div>
+        </div>
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Create</Btn>
       </div>
     </Sheet>
@@ -272,14 +283,15 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
   const [editMode, setEditMode] = useStateL(false);
   const [editName, setEditName] = useStateL('');
   const [editTags, setEditTags] = useStateL([]);
+  const [editCategory, setEditCategory] = useStateL(null);
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMode(true); };
   const cancelEdit = () => setEditMode(false);
   const saveEdit = () => {
     if (!editName.trim()) return;
-    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags } : e) }));
+    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null } : e) }));
     setEditMode(false);
   };
   const toggleEditTag = (m) => setEditTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
@@ -354,13 +366,21 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
                 ))}
               </div>
             </div>
+            <div>
+              <span className="label">Exercise size</span>
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                {EXERCISE_SIZES.map(([val, label]) => (
+                  <Pill key={val} gold={editCategory === val} onClick={() => setEditCategory(c => c === val ? null : val)} style={{ cursor: 'pointer' }}>{label}</Pill>
+                ))}
+              </div>
+            </div>
             <Btn kind="ghost" onClick={cancelEdit} style={{ fontSize: 11 }}>Cancel</Btn>
           </div>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {(ex.tags || []).length > 0
-              ? ex.tags.map(t => <Pill key={t} gold>{t}</Pill>)
-              : <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
+            {ex.category && <Pill gold>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
+            {(ex.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
+            {!ex.category && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
           </div>
         )}
       </div>
@@ -1219,6 +1239,7 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
 function SettingsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateL(store.user?.name || '');
+  const [restOpen, setRestOpen] = useStateL(false);
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
   const [pushEnabled, setPushEnabled] = useStateL(() => localStorage.getItem('logbook-push-enabled') === 'true');
@@ -1314,16 +1335,33 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </div>
         </Frame>
 
-        {/* Rest Default */}
+        {/* Rest Settings */}
         <Frame style={{ padding: '14px 16px' }}>
-          <span className="label">Rest default</span>
-          <div style={{ marginTop: 8 }}>
-            <Stepper
-              value={store.settings?.restDefault || 120}
-              step={15} min={0} suffix="s"
-              onChange={(v) => setStore(s => ({ ...s, settings: { ...s.settings, restDefault: v } }))}
-            />
-          </div>
+          <button onClick={() => setRestOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
+            <span className="label" style={{ marginBottom: 0 }}>Rest settings</span>
+            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: restOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+              <path d="M2 1l5 5-5 5"/>
+            </svg>
+          </button>
+          {restOpen && (
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {[
+                ['Default', 'restDefault', 120],
+                ['Big',     'restBig',     180],
+                ['Medium',  'restMedium',  120],
+                ['Small',   'restSmall',   90],
+              ].map(([label, key, def]) => (
+                <div key={key}>
+                  <div className="micro" style={{ marginBottom: 6 }}>{label.toUpperCase()}</div>
+                  <Stepper
+                    value={store.settings?.[key] || def}
+                    step={15} min={0} suffix="s"
+                    onChange={(v) => setStore(s => ({ ...s, settings: { ...s.settings, [key]: v } }))}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </Frame>
 
         {/* Push notifications */}

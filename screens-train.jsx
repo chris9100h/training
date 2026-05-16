@@ -184,7 +184,11 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     ? `${_sh}:${String(_sm).padStart(2,'0')}:${String(_ss).padStart(2,'0')}`
     : `${String(_sm).padStart(2,'0')}:${String(_ss).padStart(2,'0')}`;
 
-  const restDef = store.settings?.restDefault || 120;
+  const cat = exercise?.category;
+  const restDef = cat === 'big'    ? (store.settings?.restBig    || 180)
+                : cat === 'medium' ? (store.settings?.restMedium || 120)
+                : cat === 'small'  ? (store.settings?.restSmall  || 90)
+                :                    (store.settings?.restDefault || 120);
   const restElapsed = restStart ? Math.floor((now - restStart) / 1000) : null;
   const restRemaining = restElapsed != null ? Math.max(0, restDef - restElapsed) : null;
   const restPct = restElapsed != null ? Math.min(100, (restElapsed / restDef) * 100) : 0;
