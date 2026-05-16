@@ -586,10 +586,15 @@ function StatsTab({ store, sessions, go }) {
   }), [sessions]);
 
   const avgSessionsPerWeek = useMemoL(() => {
-    const anchor = planStart ?? (sessions.length ? new Date(sessions[sessions.length - 1].date.slice(0, 10) + 'T12:00:00') : null);
-    if (!anchor) return 0;
+    const relevant = planStart
+      ? sessions.filter(s => new Date(s.date.slice(0, 10) + 'T12:00:00') >= planStart)
+      : sessions;
+    if (!relevant.length) return '0.0';
+    const oldest = relevant.reduce((min, s) =>
+      s.date.slice(0, 10) < min ? s.date.slice(0, 10) : min, relevant[0].date.slice(0, 10));
+    const anchor = planStart ?? new Date(oldest + 'T12:00:00');
     const weeks = Math.max(1, (today.getTime() - anchor.getTime()) / (7 * 86400000));
-    return (sessions.length / weeks).toFixed(1);
+    return (relevant.length / weeks).toFixed(1);
   }, [sessions, planStart]);
   const exCounts = {};
   sessions.forEach(s => s.entries.forEach(e => { exCounts[e.exId] = (exCounts[e.exId] || 0) + 1; }));
