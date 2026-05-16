@@ -203,12 +203,15 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     }).catch(() => {});
   }, [restStart]);
 
-  // play a short two-tone beep when rest timer hits zero
+  // beep + auto-open modal when rest timer hits zero
   const prevRestRemaining = useRefT(null);
   useEffectT(() => {
     const prev = prevRestRemaining.current;
     prevRestRemaining.current = restRemaining;
     if (prev !== null && prev > 0 && restRemaining === 0) {
+      // visual: open the rest modal so it's impossible to miss
+      setRestModalOpen(true);
+      // audio: two beeps + higher tone (blocked by iOS silent switch, but nice to have)
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
         const beep = (t, freq, dur) => {
@@ -821,11 +824,20 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, paddingBottom: 8 }}>
           {/* big countdown */}
           <div style={{ textAlign: 'center' }}>
-            <div className="num" style={{ fontSize: 72, fontWeight: 300, color: restRemaining > 0 ? UI.gold : UI.inkFaint, letterSpacing: '-0.02em', lineHeight: 1 }}>
+            <div className="num" style={{
+              fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1,
+              color: UI.gold,
+              animation: restRemaining === 0 ? 'timerPulse 0.8s ease-in-out infinite' : 'none',
+            }}>
               {restRemaining != null
                 ? `${Math.floor(restRemaining/60)}:${(restRemaining%60).toString().padStart(2,'0')}`
                 : '—'}
             </div>
+            {restRemaining === 0 && (
+              <div style={{ marginTop: 10, fontSize: 11, letterSpacing: '0.18em', color: UI.gold, fontFamily: UI.fontUi, fontWeight: 600 }}>
+                GO
+              </div>
+            )}
             {/* progress bar */}
             <div style={{ height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden', marginTop: 18, width: 200 }}>
               <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
