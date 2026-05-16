@@ -530,21 +530,48 @@ function StatsTab({ store, sessions, go }) {
   // Best session by volume
   const bestSession = sessions.length ? sessions.reduce((best, s) => totalVolume(s) > totalVolume(best) ? s : best, sessions[0]) : null;
 
-  // Streaks (consecutive calendar days with a session)
+  // Streaks — rest days are transparent, only missed training days break the streak
   const sessionDateSet = new Set(sessions.map(s => s.date.slice(0, 10)));
+  const sch = store.schedules.find(s => s.id === store.activeScheduleId);
+
+  const isTrainingDay = (date) => {
+    if (!sch) return true;
+    if (LB.isWeekdayPlan(sch)) {
+      const js = date.getDay();
+      const wd = js === 0 ? 6 : js - 1;
+      const day = sch.days.find(d => d.weekday === wd);
+      return day ? day.items.length > 0 : false;
+    }
+    if (!store.cycleStartDate) return true;
+    const start = new Date(store.cycleStartDate + 'T12:00:00');
+    const n = Math.round((date.getTime() - start.getTime()) / 86400000);
+    if (n < 0) return true;
+    const day = sch.days[((n % sch.days.length) + sch.days.length) % sch.days.length];
+    return day ? day.items.length > 0 : false;
+  };
+
   let currentStreak = 0;
-  for (let i = 0; i <= 365; i++) {
-    const d = new Date(today); d.setDate(today.getDate() - i);
-    if (sessionDateSet.has(d.toISOString().slice(0, 10))) currentStreak++;
-    else if (i > 0) break;
+  for (let i = 0; i <= 730; i++) {
+    const d = new Date(today); d.setDate(today.getDate() - i); d.setHours(12, 0, 0, 0);
+    const key = d.toISOString().slice(0, 10);
+    if (sessionDateSet.has(key)) { currentStreak++; }
+    else if (i === 0) { /* today not done yet — don't break */ }
+    else if (isTrainingDay(d)) { break; }
+    // rest day → continue without breaking or counting
   }
+
   let longestStreak = 0, ls = 0;
-  [...sessionDateSet].sort().forEach((key, i, arr) => {
-    if (i === 0) { ls = 1; longestStreak = 1; return; }
-    const diff = Math.round((new Date(key + 'T12:00:00') - new Date(arr[i-1] + 'T12:00:00')) / 86400000);
-    ls = diff === 1 ? ls + 1 : 1;
-    longestStreak = Math.max(longestStreak, ls);
-  });
+  if (sessions.length > 0) {
+    const earliest = new Date(sessions[sessions.length - 1].date.slice(0, 10) + 'T12:00:00');
+    const dayCount = Math.round((today.getTime() - earliest.getTime()) / 86400000) + 1;
+    for (let i = 0; i < dayCount; i++) {
+      const d = new Date(earliest); d.setDate(earliest.getDate() + i); d.setHours(12, 0, 0, 0);
+      const key = d.toISOString().slice(0, 10);
+      if (sessionDateSet.has(key)) { ls++; longestStreak = Math.max(longestStreak, ls); }
+      else if (isTrainingDay(d)) { ls = 0; }
+      // rest day → ls unchanged
+    }
+  }
 
   // Top 5 exercises by session count
   const exCounts = {};
