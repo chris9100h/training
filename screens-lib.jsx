@@ -135,6 +135,7 @@ function LibraryScreen({ store, setStore, go }) {
 
         {tab === 'recent' && recent.map(({ ex, last, lastEntry, trend }, ri) => {
           const days = Math.round((Date.now() - new Date(last)) / 86400000);
+          const isToday = days === 0;
           const top = lastEntry?.sets?.find(s => s.kg);
           const trendColor = trend === 'up' ? UI.ok : trend === 'down' ? UI.danger : UI.inkFaint;
           const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : trend === 'same' ? '→' : null;
@@ -148,9 +149,9 @@ function LibraryScreen({ store, setStore, go }) {
                 cursor: 'pointer',
               }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="display" style={{ fontSize: 19, color: UI.ink, lineHeight: 1.1, marginBottom: 3 }}>{ex.name}</div>
-                <div className="num" style={{ fontSize: 10, color: UI.inkFaint, letterSpacing: '0.05em' }}>
-                  {days === 0 ? 'today' : `${days}d ago`}
+                <div className="display" style={{ fontSize: 19, color: isToday ? UI.gold : UI.ink, lineHeight: 1.1, marginBottom: 3 }}>{ex.name}</div>
+                <div className="num" style={{ fontSize: 10, color: isToday ? UI.gold : UI.inkFaint, letterSpacing: '0.05em' }}>
+                  {isToday ? 'today' : `${days}d ago`}
                   {top && ` · ${top.kg}kg × ${top.reps}`}
                 </div>
               </div>
@@ -784,38 +785,67 @@ function HistoryScreen({ store, go, initialTab }) {
           {sessions.length === 0 && (
             <Empty title="No sessions" sub="Log your first workout to see your history." icon={ICON_HISTORY} />
           )}
-          {sessions.map((s, si) => {
-            const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
-            const vol = totalVolume(s);
-            const date = new Date(s.date.slice(0, 10) + 'T12:00:00');
-            const days = Math.round((Date.now() - date) / 86400000);
-            return (
-              <div key={s.id}
-                onClick={() => go({ name: 'session', sessionId: s.id })}
-                style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
-                  padding: '16px 0',
-                  borderBottom: si < sessions.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
-                  cursor: 'pointer',
-                }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>
-                    {date.toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()} · {days === 0 ? 'TODAY' : `${days}D AGO`}
+          {(() => {
+            const now = new Date(); now.setHours(12,0,0,0);
+            const dow = now.getDay();
+            const monday = new Date(now); monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
+            const lastMonday = new Date(monday); lastMonday.setDate(monday.getDate() - 7);
+            const getGroup = (dateStr) => {
+              const d = new Date(dateStr.slice(0,10) + 'T12:00:00');
+              if (d >= monday) return 'THIS WEEK';
+              if (d >= lastMonday) return 'LAST WEEK';
+              return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
+            };
+            const items = [];
+            let lastGroup = null;
+            sessions.forEach(s => {
+              const group = getGroup(s.date);
+              const firstInGroup = group !== lastGroup;
+              if (firstInGroup) { items.push({ type: 'header', label: group, key: `h-${group}`, isFirst: items.length === 0 }); lastGroup = group; }
+              items.push({ type: 'session', session: s, key: s.id, firstInGroup });
+            });
+            return items.map(item => {
+              if (item.type === 'header') {
+                return (
+                  <div key={item.key} className="micro" style={{ marginTop: item.isFirst ? 6 : 24, marginBottom: 10, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>
+                    {item.label}
                   </div>
-                  <div className="display" style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>{s.dayName}</div>
-                  <div className="micro" style={{ color: UI.inkFaint }}>
-                    {s.entries.length} Exercises · {setsLogged} Sets
+                );
+              }
+              const s = item.session;
+              const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
+              const vol = totalVolume(s);
+              const date = new Date(s.date.slice(0,10) + 'T12:00:00');
+              const days = Math.round((Date.now() - date) / 86400000);
+              const isToday = days === 0;
+              return (
+                <div key={item.key}
+                  onClick={() => go({ name: 'session', sessionId: s.id })}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+                    padding: '16px 0',
+                    borderTop: !item.firstInGroup ? `0.5px solid ${UI.hair}` : 'none',
+                    cursor: 'pointer',
+                  }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="micro" style={{ color: isToday ? UI.gold : UI.inkFaint, marginBottom: 5 }}>
+                      {date.toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()} · {isToday ? 'TODAY' : `${days}D AGO`}
+                    </div>
+                    <div className="display" style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>{s.dayName}</div>
+                    <div className="micro" style={{ color: UI.inkFaint }}>
+                      {s.entries.length} Exercises · {setsLogged} Sets
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
+                      {vol.toLocaleString('en-US')}
+                    </div>
+                    <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>kg</div>
                   </div>
                 </div>
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
-                    {vol.toLocaleString('en-US')}
-                  </div>
-                  <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>kg</div>
-                </div>
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
         </div>
       )}
 
