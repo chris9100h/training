@@ -346,39 +346,35 @@ function HomeScreen({ store, setStore, go }) {
         </div>
       </div>
 
-      {/* In-progress overlay */}
+      {/* In-progress banner */}
       {store.inProgress && (() => {
         const activeSession = store.sessions.find(s => s.id === store.inProgress);
         return activeSession ? (
           <div style={{
-            position: 'absolute', inset: 0, zIndex: 50,
-            background: 'rgba(7,6,10,0.92)',
-            backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: 28,
+            flexShrink: 0,
+            padding: '10px 16px',
+            background: UI.goldFaint,
+            borderBottom: `0.5px solid ${UI.goldSoft}`,
+            display: 'flex', alignItems: 'center', gap: 10,
           }}>
-            <BracketFrame gold padding={32} style={{ width: '100%', maxWidth: 360 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, textAlign: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: 4, background: UI.gold, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
-                  <span className="micro-gold">TRAINING IN PROGRESS</span>
-                </div>
-                <div className="display" style={{ fontSize: 38, color: UI.gold, fontWeight: 300, fontStyle: 'italic', letterSpacing: '0.04em' }}>
-                  {activeSession.dayName}
-                </div>
-                <Btn onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{ width: '100%', marginTop: 6 }}>
-                  Continue →
-                </Btn>
-                <button onClick={async () => {
-                  if (!await confirm('The session will be deleted.', { title: 'Cancel training?', ok: 'Cancel', cancel: 'Back', danger: true })) return;
-                  setStore(s => ({ ...s, sessions: s.sessions.filter(x => x.id !== store.inProgress), inProgress: null }));
-                }} style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, padding: '4px 0',
-                  letterSpacing: '0.12em', textTransform: 'uppercase',
-                }}>Cancel training</button>
-              </div>
-            </BracketFrame>
+            <div style={{ width: 7, height: 7, borderRadius: '50%', background: UI.gold, flexShrink: 0, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
+            <span style={{ flex: 1, fontSize: 13, color: UI.gold, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {activeSession.dayName}
+            </span>
+            <button onClick={async () => {
+              if (!await confirm('The session will be deleted.', { title: 'Cancel training?', ok: 'Cancel', cancel: 'Back', danger: true })) return;
+              setStore(s => ({ ...s, sessions: s.sessions.filter(x => x.id !== store.inProgress), inProgress: null }));
+            }} style={{
+              background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0,
+              fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, padding: '4px 0',
+              letterSpacing: '0.10em', textTransform: 'uppercase',
+            }}>Cancel</button>
+            <button onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{
+              flexShrink: 0, padding: '6px 14px', borderRadius: 999,
+              background: UI.gold, border: 'none', cursor: 'pointer',
+              fontSize: 12, fontWeight: 600, fontFamily: UI.fontUi, color: '#0a0805',
+              letterSpacing: '0.08em',
+            }}>Continue →</button>
           </div>
         ) : null;
       })()}

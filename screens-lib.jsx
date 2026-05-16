@@ -263,9 +263,9 @@ function ExerciseCreator({ onClose, setStore, onCreated }) {
 }
 
 // ─── EXERCISE DETAIL ─────────────────────────────────────────────────
-function ExerciseDetailScreen({ store, setStore, go, exId }) {
+function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
   const ex = LB.findExercise(store, exId);
-  if (!ex) { go({ name: 'lib' }); return null; }
+  if (!ex) { go(back || { name: 'lib' }); return null; }
 
   const [confirmEl, confirm] = useConfirm();
   const [editMode, setEditMode] = useStateL(false);
@@ -304,18 +304,21 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
   const points = history.map(h => {
     const best = (h.entry.sets || []).filter(s => s.kg && s.reps)
       .reduce((m, s) => Math.max(m, s.kg * (1 + s.reps / 30)), 0);
-    return { date: h.session.ended, est: best };
+    return { date: h.session.date, est: best };
   }).filter(p => p.est > 0).reverse();
 
   const pr = points.length ? Math.max(...points.map(p => p.est)) : 0;
-  const last = points[points.length - 1]?.est;
+
+  const volPr = history.length ? Math.max(...history.map(h =>
+    (h.entry.sets || []).filter(s => s.kg != null && s.reps).reduce((sum, s) => sum + s.kg * s.reps, 0)
+  )) : 0;
 
   return (
     <Screen>
       <ScreenHead
         ref_="EXERCISE"
         title={editMode ? editName || ex.name : ex.name}
-        onBack={() => { if (editMode) cancelEdit(); else go({ name: 'lib' }); }}
+        onBack={() => { if (editMode) cancelEdit(); else go(back || { name: 'lib' }); }}
         right={
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             <button onClick={editMode ? saveEdit : startEdit} style={{
@@ -366,8 +369,8 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
         {/* Stats — SubDials */}
         <div style={{ display: 'flex', justifyContent: 'space-around', padding: '6px 0' }}>
           <SubDial label="1RM PR" value={pr ? Math.round(pr) : '—'} sub="kg" size={90} gold />
-          <SubDial label="Last" value={last ? Math.round(last) : '—'} sub="kg" size={90} />
           <SubDial label="Sessions" value={history.length} size={90} />
+          <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub="kg" size={90} gold />
         </div>
 
         {points.length > 1 && <ProgressChart points={points} />}
@@ -420,7 +423,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
                 }}>
                 <div>
                   <div className="num" style={{ fontSize: 10, color: UI.inkFaint, letterSpacing: '0.05em', marginBottom: 5 }}>
-                    {new Date(h.session.ended).toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'2-digit' })}
+                    {new Date(h.session.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'2-digit' })}
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexFamily: UI.fontNum, fontSize: 13 }}>
                     {h.entry.sets.filter(s => s.kg).map((s, i) => (
@@ -467,8 +470,269 @@ function ProgressChart({ points }) {
   );
 }
 
+// ─── STATS TAB ───────────────────────────────────────────────────────
+function StatsTab({ store, sessions, go }) {
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+
+  // Monday of current week
+  const dow = today.getDay();
+  const monday = new Date(today); monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
+  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+
+  const thisWeekSessions = useMemoL(() => sessions.filter(s => {
+    const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+    return d >= monday && d <= sunday;
+  }), [sessions]);
+
+  const thisMonthSessions = useMemoL(() => sessions.filter(s => {
+    const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+    return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+  }), [sessions]);
+
+  // Weekly sets per muscle group
+  const setsPerMuscle = useMemoL(() => {
+    const counts = {};
+    thisWeekSessions.forEach(s => {
+      s.entries.forEach(entry => {
+        const ex = store.exercises.find(e => e.id === entry.exId);
+        const muscles = (ex?.tags || []).filter(t => MUSCLES.includes(t));
+        const done = entry.sets.filter(st => st.done).length;
+        muscles.forEach(m => { counts[m] = (counts[m] || 0) + done; });
+      });
+    });
+    return MUSCLES.map(m => ({ muscle: m, sets: counts[m] || 0 })).filter(x => x.sets > 0).sort((a, b) => b.sets - a.sets);
+  }, [thisWeekSessions, store.exercises]);
+
+  // Weekly volume over last 8 weeks
+  const weeklyVolume = useMemoL(() => {
+    const weeks = [];
+    for (let w = 7; w >= 0; w--) {
+      const wMon = new Date(monday); wMon.setDate(monday.getDate() - w * 7);
+      const wSun = new Date(wMon); wSun.setDate(wMon.getDate() + 6);
+      const vol = sessions
+        .filter(s => { const d = new Date(s.date.slice(0,10)+'T12:00:00'); return d >= wMon && d <= wSun; })
+        .reduce((sum, s) => sum + totalVolume(s), 0);
+      const label = wMon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      weeks.push({ label, vol });
+    }
+    return weeks;
+  }, [sessions]);
+
+  // All-time stats
+  const totalVol = sessions.reduce((sum, s) => sum + totalVolume(s), 0);
+  const totalSets = sessions.reduce((sum, s) => sum + s.entries.reduce((c, e) => c + e.sets.filter(st => st.done).length, 0), 0);
+  const totalReps = sessions.reduce((sum, s) => sum + s.entries.reduce((c, e) => c + e.sets.filter(st => st.done).reduce((r, st) => r + (+st.reps || 0), 0), 0), 0);
+  const avgVol = sessions.length ? Math.round(totalVol / sessions.length) : 0;
+  const durations = sessions.filter(s => s.startedAt && s.ended).map(s => Math.round((new Date(s.ended) - new Date(s.startedAt)) / 60000));
+  const avgDuration = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0;
+  const maxDuration = durations.length ? Math.max(...durations) : 0;
+
+  // Best session by volume
+  const bestSession = sessions.length ? sessions.reduce((best, s) => totalVolume(s) > totalVolume(best) ? s : best, sessions[0]) : null;
+
+  // Streaks — rest days are transparent, only missed training days break the streak
+  const sessionDateSet = new Set(sessions.map(s => s.date.slice(0, 10)));
+  const sch = store.schedules.find(s => s.id === store.activeScheduleId);
+
+  const isTrainingDay = (date) => {
+    if (!sch) return true;
+    if (LB.isWeekdayPlan(sch)) {
+      const js = date.getDay();
+      const wd = js === 0 ? 6 : js - 1;
+      const day = sch.days.find(d => d.weekday === wd);
+      return day ? day.items.length > 0 : false;
+    }
+    if (!store.cycleStartDate) return true;
+    const start = new Date(store.cycleStartDate + 'T12:00:00');
+    const n = Math.round((date.getTime() - start.getTime()) / 86400000);
+    if (n < 0) return false; // before plan start → streak-neutral
+    const day = sch.days[((n % sch.days.length) + sch.days.length) % sch.days.length];
+    return day ? day.items.length > 0 : false;
+  };
+
+  const planStart = store.cycleStartDate ? new Date(store.cycleStartDate + 'T12:00:00') : null;
+
+  let currentStreak = 0;
+  for (let i = 0; i <= 730; i++) {
+    const d = new Date(today); d.setDate(today.getDate() - i); d.setHours(12, 0, 0, 0);
+    if (planStart && d < planStart) break; // don't count before plan start
+    const key = d.toISOString().slice(0, 10);
+    if (sessionDateSet.has(key)) { currentStreak++; }
+    else if (i === 0) { /* today not done yet — don't break */ }
+    else if (isTrainingDay(d)) { break; }
+    // rest day → continue without breaking or counting
+  }
+
+  let longestStreak = 0, ls = 0;
+  if (sessions.length > 0) {
+    const earliest = planStart ?? new Date(sessions[sessions.length - 1].date.slice(0, 10) + 'T12:00:00');
+    const dayCount = Math.round((today.getTime() - earliest.getTime()) / 86400000) + 1;
+    for (let i = 0; i < dayCount; i++) {
+      const d = new Date(earliest); d.setDate(earliest.getDate() + i); d.setHours(12, 0, 0, 0);
+      const key = d.toISOString().slice(0, 10);
+      if (sessionDateSet.has(key)) { ls++; longestStreak = Math.max(longestStreak, ls); }
+      else if (isTrainingDay(d)) { ls = 0; }
+      // rest day → ls unchanged
+    }
+  }
+
+  const totalTrainingMins = durations.reduce((a, b) => a + b, 0);
+  const totalTrainingStr = totalTrainingMins >= 60
+    ? `${Math.floor(totalTrainingMins / 60)}h ${totalTrainingMins % 60}m`
+    : `${totalTrainingMins}m`;
+
+  const thisYearSessions = useMemoL(() => sessions.filter(s => {
+    return new Date(s.date.slice(0, 10) + 'T12:00:00').getFullYear() === today.getFullYear();
+  }), [sessions]);
+
+  const avgSessionsPerWeek = useMemoL(() => {
+    const relevant = planStart
+      ? sessions.filter(s => new Date(s.date.slice(0, 10) + 'T12:00:00') >= planStart)
+      : sessions;
+    if (!relevant.length) return '0.0';
+    const oldest = relevant.reduce((min, s) =>
+      s.date.slice(0, 10) < min ? s.date.slice(0, 10) : min, relevant[0].date.slice(0, 10));
+    const anchor = planStart ?? new Date(oldest + 'T12:00:00');
+    const weeks = Math.max(1, (today.getTime() - anchor.getTime()) / (7 * 86400000));
+    return (relevant.length / weeks).toFixed(1);
+  }, [sessions, planStart]);
+  const exCounts = {};
+  sessions.forEach(s => s.entries.forEach(e => { exCounts[e.exId] = (exCounts[e.exId] || 0) + 1; }));
+  const topExercises = Object.entries(exCounts).sort((a, b) => b[1] - a[1]).slice(0, 5)
+    .map(([id, count]) => ({ id, name: store.exercises.find(e => e.id === id)?.name || '?', count }));
+
+  const maxSets = Math.max(...setsPerMuscle.map(x => x.sets), 1);
+  const maxWeekVol = Math.max(...weeklyVolume.map(w => w.vol), 1);
+
+  const StatCard = ({ label, value, sub }) => (
+    <div style={{ background: UI.bgInset, borderRadius: 12, padding: '12px 14px', textAlign: 'center' }}>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{label}</div>
+      <div className="num" style={{ fontSize: 22, color: UI.ink, lineHeight: 1 }}>{value}</div>
+      {sub && <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px 40px', display: 'flex', flexDirection: 'column', gap: 28 }}>
+
+      {/* Weekly sets per muscle */}
+      <div>
+        <div className="micro" style={{ marginBottom: 14 }}>THIS WEEK · SETS PER MUSCLE</div>
+        {setsPerMuscle.length === 0 ? (
+          <div style={{ color: UI.inkFaint, fontSize: 13, fontFamily: UI.fontUi }}>No sessions this week yet.</div>
+        ) : setsPerMuscle.map(({ muscle, sets }) => (
+          <div key={muscle} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <div style={{ width: 100, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.05em' }}>{muscle}</div>
+            <div style={{ flex: 1, height: 3, background: UI.hair, borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${(sets / maxSets) * 100}%`, background: UI.gold, borderRadius: 2 }} />
+            </div>
+            <div className="num" style={{ width: 24, textAlign: 'right', fontSize: 13, color: UI.gold }}>{sets}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Weekly volume trend */}
+      <div>
+        <div className="micro" style={{ marginBottom: 14 }}>WEEKLY VOLUME · LAST 8 WEEKS</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 60 }}>
+          {weeklyVolume.map(({ label, vol }, i) => (
+            <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' }}>
+              <div style={{
+                width: '100%', borderRadius: 3,
+                height: `${Math.max(3, (vol / maxWeekVol) * 52)}px`,
+                background: i === 7 ? UI.gold : UI.hair,
+              }} />
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+          {weeklyVolume.map(({ label }, i) => (
+            <div key={i} style={{ flex: 1, fontSize: 8, fontFamily: UI.fontUi, color: i === 7 ? UI.gold : UI.inkFaint, textAlign: 'center', letterSpacing: '0.03em' }}>
+              {i === 7 ? 'NOW' : ''}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* All time */}
+      <div>
+        <div className="micro" style={{ marginBottom: 14 }}>ALL TIME</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <StatCard label="Sessions" value={sessions.length} />
+          <StatCard label="Avg Volume" value={avgVol.toLocaleString('en-US')} sub="kg / session" />
+          <StatCard label="Avg Duration" value={avgDuration || '—'} sub={avgDuration ? 'min' : ''} />
+          <StatCard label="Longest Session" value={maxDuration || '—'} sub={maxDuration ? 'min' : ''} />
+          <div style={{ gridColumn: '1 / -1', background: UI.bgInset, borderRadius: 12, padding: '12px 14px', textAlign: 'center' }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Total Time Trained</div>
+            <div className="num" style={{ fontSize: 22, color: UI.ink, lineHeight: 1 }}>{totalTrainingMins ? totalTrainingStr : '—'}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Consistency */}
+      <div>
+        <div className="micro" style={{ marginBottom: 14 }}>CONSISTENCY</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <StatCard label="This Year" value={thisYearSessions.length} sub="sessions" />
+          <StatCard label="This Month" value={thisMonthSessions.length} sub="sessions" />
+          <StatCard label="This Week" value={thisWeekSessions.length} sub="sessions" />
+          <StatCard label="Avg / Week" value={avgSessionsPerWeek} sub="sessions" />
+          <StatCard label="Current Streak" value={currentStreak} sub={currentStreak === 1 ? 'day' : 'days'} />
+          <StatCard label="Longest Streak" value={longestStreak} sub={longestStreak === 1 ? 'day' : 'days'} />
+        </div>
+      </div>
+
+      {/* Best session */}
+      {bestSession && (
+        <div>
+          <div className="micro" style={{ marginBottom: 14 }}>BEST SESSION</div>
+          <Frame onClick={() => go({ name: 'session', sessionId: bestSession.id, back: { name: 'hist', initialTab: 'stats' } })} style={{ padding: '14px 16px', cursor: 'pointer' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div className="display" style={{ fontSize: 18, color: UI.ink }}>{bestSession.dayName}</div>
+                <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>
+                  {new Date(bestSession.date.slice(0,10)+'T12:00:00').toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div className="num" style={{ fontSize: 22, color: UI.gold }}>{Math.round(totalVolume(bestSession)).toLocaleString('en-US')}</div>
+                <div className="micro" style={{ color: UI.inkFaint }}>kg</div>
+              </div>
+            </div>
+          </Frame>
+        </div>
+      )}
+
+      {/* Top exercises */}
+      {topExercises.length > 0 && (
+        <div>
+          <div className="micro" style={{ marginBottom: 14 }}>TOP EXERCISES</div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {topExercises.map(({ id, name, count }, i) => (
+              <div key={id} onClick={() => go({ name: 'exercise', exId: id, back: { name: 'hist', initialTab: 'stats' } })} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '11px 0',
+                borderBottom: i < topExercises.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                cursor: 'pointer',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span className="num" style={{ fontSize: 11, color: UI.inkFaint, width: 16 }}>{i + 1}</span>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>{name}</span>
+                </div>
+                <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{count}×</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
 // ─── HISTORY ─────────────────────────────────────────────────────────
-function HistoryScreen({ store, go }) {
+function HistoryScreen({ store, go, initialTab }) {
+  const [tab, setTab] = useStateL(initialTab || 'workouts');
   const sessions = useMemoL(() => {
     return [...store.sessions]
       .filter(s => s.ended)
@@ -476,51 +740,70 @@ function HistoryScreen({ store, go }) {
   }, [store.sessions]);
 
   return (
-    <Screen>
+    <Screen scroll={false}>
       <TopBar title="History" />
-      <div style={{ padding: '6px 22px 22px', display: 'flex', flexDirection: 'column' }}>
-        {sessions.length === 0 && (
-          <Empty title="No sessions" sub="Log your first workout to see your history." icon={ICON_HISTORY} />
-        )}
-        {sessions.map((s, si) => {
-          const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
-          const vol = totalVolume(s);
-          const date = new Date(s.date.slice(0, 10) + 'T12:00:00');
-          const days = Math.round((Date.now() - date) / 86400000);
-          return (
-            <div key={s.id}
-              onClick={() => go({ name: 'session', sessionId: s.id })}
-              style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
-                padding: '16px 0',
-                borderBottom: si < sessions.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
-                cursor: 'pointer',
-              }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>
-                  {date.toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()} · {days === 0 ? 'TODAY' : `${days}D AGO`}
-                </div>
-                <div className="display" style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>{s.dayName}</div>
-                <div className="micro" style={{ color: UI.inkFaint }}>
-                  {s.entries.length} Exercises · {setsLogged} Sets
-                </div>
-              </div>
-              <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
-                  {vol.toLocaleString('en-US')}
-                </div>
-                <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>kg</div>
-              </div>
-            </div>
-          );
-        })}
+      {/* Tab strip */}
+      <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
+        {[['workouts','Workouts'],['stats','Stats']].map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)} style={{
+            flex: 1, background: 'transparent', border: 'none',
+            padding: '11px 0', cursor: 'pointer',
+            color: tab === id ? UI.gold : UI.inkFaint,
+            fontFamily: UI.fontUi, fontSize: 10, fontWeight: tab === id ? 600 : 400,
+            letterSpacing: '0.14em', textTransform: 'uppercase',
+            borderBottom: `0.5px solid ${tab === id ? UI.gold : 'transparent'}`,
+            marginBottom: -0.5, transition: 'color 0.2s',
+          }}>{label}</button>
+        ))}
       </div>
+
+      {tab === 'workouts' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px', display: 'flex', flexDirection: 'column' }}>
+          {sessions.length === 0 && (
+            <Empty title="No sessions" sub="Log your first workout to see your history." icon={ICON_HISTORY} />
+          )}
+          {sessions.map((s, si) => {
+            const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
+            const vol = totalVolume(s);
+            const date = new Date(s.date.slice(0, 10) + 'T12:00:00');
+            const days = Math.round((Date.now() - date) / 86400000);
+            return (
+              <div key={s.id}
+                onClick={() => go({ name: 'session', sessionId: s.id })}
+                style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+                  padding: '16px 0',
+                  borderBottom: si < sessions.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                  cursor: 'pointer',
+                }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>
+                    {date.toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()} · {days === 0 ? 'TODAY' : `${days}D AGO`}
+                  </div>
+                  <div className="display" style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>{s.dayName}</div>
+                  <div className="micro" style={{ color: UI.inkFaint }}>
+                    {s.entries.length} Exercises · {setsLogged} Sets
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
+                    {vol.toLocaleString('en-US')}
+                  </div>
+                  <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>kg</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'stats' && <StatsTab store={store} sessions={sessions} go={go} />}
     </Screen>
   );
 }
 
 // ─── SESSION DETAIL ──────────────────────────────────────────────────
-function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
+function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, back }) {
   const [confirmEl, confirm] = useConfirm();
   const [editing, setEditing] = useStateL(false);
   const [capturing, setCapturing] = useStateL(false);
@@ -573,9 +856,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
 
   const isImprovement = (st, prevSet) => {
     if (!prevSet || !st.done) return false;
-    if (st.kg != null && prevSet.kg != null && st.kg > prevSet.kg) return true;
-    if (st.kg === prevSet.kg && st.reps != null && prevSet.reps != null && st.reps > prevSet.reps) return true;
-    return false;
+    const kg = st.kg != null && prevSet.kg != null;
+    const reps = st.reps != null && prevSet.reps != null;
+    if (!kg || !reps) return false;
+    return st.kg >= prevSet.kg && st.reps >= prevSet.reps && (st.kg > prevSet.kg || st.reps > prevSet.reps);
   };
 
   return (
@@ -583,7 +867,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished }) {
       <ScreenHead
         ref_={new Date(s.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
         title={s.dayName}
-        onBack={() => go({ name: justFinished ? 'home' : 'hist' })}
+        onBack={() => go(justFinished ? { name: 'home' } : (back || { name: 'hist' }))}
         right={
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <button onClick={takeScreenshot} disabled={capturing} style={{

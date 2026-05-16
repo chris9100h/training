@@ -147,10 +147,25 @@ function App() {
             if (cur) {
               // preserve in-progress session (may not be committed to Supabase yet)
               fresh.inProgress = cur.inProgress ?? fresh.inProgress;
+              const inProgressId = fresh.inProgress;
               fresh.sessions = fresh.sessions.map(s => {
                 const mem = cur.sessions?.find(x => x.id === s.id);
-                return mem ? { ...s, currentExIdx: mem.currentExIdx ?? 0, cyclePos: mem.cyclePos ?? null } : s;
+                if (!mem) return s;
+                const isActive = s.id === inProgressId;
+                return {
+                  ...s,
+                  currentExIdx: mem.currentExIdx ?? 0,
+                  cyclePos: mem.cyclePos ?? null,
+                  // for the active session, local entries/restStart are authoritative —
+                  // Supabase sync may still be in flight
+                  ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null } : {}),
+                };
               });
+              // if the in-progress session hasn't reached Supabase yet, keep the local copy
+              if (inProgressId && !fresh.sessions.find(x => x.id === inProgressId)) {
+                const localSession = cur.sessions?.find(x => x.id === inProgressId);
+                if (localSession) fresh.sessions = [localSession, ...fresh.sessions];
+              }
             }
             prevStore.current = fresh;
             setStore(fresh);
@@ -225,9 +240,9 @@ function App() {
     case 'schedule-edit': screen = <window.Screens.ScheduleEditScreen {...props} scheduleId={route.scheduleId} />; break;
     case 'train':         screen = <window.Screens.TrainingScreen {...props} sessionId={route.sessionId} />; break;
     case 'lib':           screen = <window.Screens.LibraryScreen {...props} />; break;
-    case 'exercise':      screen = <window.Screens.ExerciseDetailScreen {...props} exId={route.exId} />; break;
-    case 'hist':          screen = <window.Screens.HistoryScreen {...props} />; break;
-    case 'session':       screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} />; break;
+    case 'exercise':      screen = <window.Screens.ExerciseDetailScreen {...props} exId={route.exId} back={route.back} />; break;
+    case 'hist':          screen = <window.Screens.HistoryScreen {...props} initialTab={route.initialTab} />; break;
+    case 'session':       screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'settings':      screen = <window.Screens.SettingsScreen {...props} />; break;
     default:              screen = <window.Screens.HomeScreen {...props} />; break;
   }

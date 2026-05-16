@@ -60,11 +60,24 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     }));
   };
 
+  const isImprovement = (st, prevSet) => {
+    if (!prevSet) return false;
+    const kg = st.kg != null && prevSet.kg != null;
+    const reps = st.reps != null && prevSet.reps != null;
+    if (!kg || !reps) return false;
+    return st.kg >= prevSet.kg && st.reps >= prevSet.reps && (st.kg > prevSet.kg || st.reps > prevSet.reps);
+  };
+
   const completeSet = (setIdx) => {
     updateSet(setIdx, { done: true });
-    setRestStart(Date.now());
+    persistRestStart(Date.now());
     setFlashSet(setIdx);
     setTimeout(() => setFlashSet(null), 1400);
+    const prevSet = last?.entry?.sets?.[setIdx];
+    if (isImprovement(entry.sets[setIdx], prevSet)) {
+      setImprovedSet(true);
+      setTimeout(() => setImprovedSet(false), 2200);
+    }
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
     if (updatedSets.every(st => st.done)) {
       setTimeout(() => navigate(1), 600);
@@ -150,8 +163,13 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     row.scrollLeft = target;
   }, [exIdx]);
 
-  // rest timer
-  const [restStart, setRestStart] = useStateT(null);
+  // rest timer — persisted in session so navigation doesn't kill it
+  const [restStart, setRestStart] = useStateT(() => session.restStart ?? null);
+
+  const persistRestStart = (val) => {
+    setRestStart(val);
+    updateSession(sess => ({ ...sess, restStart: val }));
+  };
   const [now, setNow] = useStateT(Date.now());
   useEffectT(() => {
     const t = setInterval(() => setNow(Date.now()), 250);
@@ -185,7 +203,37 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     }).catch(() => {});
   }, [restStart]);
 
+  // beep + auto-open modal when rest timer hits zero
+  const prevRestRemaining = useRefT(null);
+  useEffectT(() => {
+    const prev = prevRestRemaining.current;
+    prevRestRemaining.current = restRemaining;
+    if (prev !== null && prev > 0 && restRemaining === 0) {
+      // visual: open the rest modal so it's impossible to miss
+      setRestModalOpen(true);
+      // audio: two beeps + higher tone (blocked by iOS silent switch, but nice to have)
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const beep = (t, freq, dur) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.type = 'sine'; osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.35, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+          osc.start(t); osc.stop(t + dur);
+        };
+        beep(ctx.currentTime,        880, 0.14);
+        beep(ctx.currentTime + 0.18, 880, 0.14);
+        beep(ctx.currentTime + 0.36, 1320, 0.28);
+        setTimeout(() => ctx.close(), 1200);
+      } catch (_) {}
+    }
+  }, [restRemaining]);
+
   const [flashSet, setFlashSet] = useStateT(null);
+  const [improvedSet, setImprovedSet] = useStateT(false);
+  const [restModalOpen, setRestModalOpen] = useStateT(false);
   const [confirmEl, confirm] = useConfirm();
   const [finishOpen, setFinishOpen] = useStateT(false);
   const [notePicker, setNotePicker] = useStateT(false);
@@ -276,7 +324,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const heroSet = currentSetIdx >= 0 ? entry.sets[currentSetIdx] : null;
   const prevHeroSet = last?.entry?.sets?.[currentSetIdx >= 0 ? currentSetIdx : 0];
 
-  const anyMissingData = entry.sets.some(st => !st.done && (!st.kg || !st.reps));
+  const anyMissingData = entry.sets.some(st => !st.done && (st.kg == null || !st.reps));
 
   const checkAllSets = async () => {
     if (allDone || anyMissingData) return;
@@ -287,12 +335,31 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         ? { ...e, sets: e.sets.map(st => ({ ...st, done: true })) }
         : e),
     }));
-    setRestStart(Date.now());
+    persistRestStart(Date.now());
     setTimeout(() => navigate(1), 600);
   };
 
   return (
     <Screen scroll={false}>
+      {/* Improvement toast */}
+      <div style={{
+        position: 'absolute', top: 'calc(env(safe-area-inset-top, 0px) + 62px)', left: 0, right: 0,
+        display: 'flex', justifyContent: 'center', zIndex: 20, pointerEvents: 'none',
+        transition: 'opacity 0.3s ease, transform 0.3s ease',
+        opacity: improvedSet ? 1 : 0,
+        transform: improvedSet ? 'translateY(0)' : 'translateY(-8px)',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 7,
+          background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`,
+          borderRadius: 999, padding: '6px 14px',
+          backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+        }}>
+          <span style={{ fontSize: 13, color: UI.gold }}>↑</span>
+          <span style={{ fontSize: 12, color: UI.gold, fontFamily: UI.fontUi, fontWeight: 500, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Improvement</span>
+        </div>
+      </div>
+
       {/* Top: close + session timer */}
       <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 8px', display: 'flex', alignItems: 'center', gap: 14 }}>
         <button onClick={abandon} style={{
@@ -301,11 +368,42 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           color: UI.danger, cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, lineHeight: 1,
         }}>×</button>
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
-          <div style={{ width: 6, height: 6, borderRadius: 3, background: UI.gold, animation: 'pulseDot 1.6s ease-in-out infinite' }} />
-          <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }}>{sessionTimeStr}</span>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+          {/* session time */}
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
+            <div style={{ width: 6, height: 6, borderRadius: 3, background: UI.gold, animation: 'pulseDot 1.6s ease-in-out infinite' }} />
+            <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }}>{sessionTimeStr}</span>
+          </div>
+          {/* rest countdown — only when active */}
+          {restStart && restRemaining > 0 && (<>
+            <div style={{ width: 0.5, height: 14, background: UI.hairStrong, flexShrink: 0 }} />
+            <button onClick={() => setRestModalOpen(true)} style={{
+              flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
+              background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+            }}>
+              <span className="num" style={{
+                color: UI.gold, fontSize: 14, letterSpacing: '0.14em', fontWeight: 500,
+                animation: 'timerPulse 1.6s ease-in-out infinite',
+              }}>
+                {Math.floor(restRemaining/60)}:{(restRemaining%60).toString().padStart(2,'0')}
+              </span>
+              <div style={{ width: 44, height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+              </div>
+            </button>
+          </>)}
         </div>
-        <div style={{ width: 32 }} />
+        <button onClick={() => go({ name: 'home' })} style={{
+          width: 32, height: 32, borderRadius: '50%',
+          boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, background: 'transparent',
+          color: UI.inkSoft, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/>
+            <path d="M9 21V12h6v9"/>
+          </svg>
+        </button>
       </div>
 
       {/* Day name + exercise position */}
@@ -437,16 +535,16 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               <div style={{ marginTop: 12, padding: '0 18px' }}>
                 <button
                   onClick={() => completeSet(currentSetIdx)}
-                  disabled={!heroSet.kg || !heroSet.reps}
+                  disabled={heroSet.kg == null || !heroSet.reps}
                   style={{
                     width: '100%', minHeight: 44,
-                    background: !heroSet.kg || !heroSet.reps ? 'transparent' : `linear-gradient(180deg, var(--gold-light), var(--gold))`,
-                    border: !heroSet.kg || !heroSet.reps ? `0.5px solid ${UI.hairStrong}` : `0.5px solid var(--gold-deep)`,
-                    color: !heroSet.kg || !heroSet.reps ? UI.inkFaint : '#0a0805',
+                    background: heroSet.kg == null || !heroSet.reps ? 'transparent' : `linear-gradient(180deg, var(--gold-light), var(--gold))`,
+                    border: heroSet.kg == null || !heroSet.reps ? `0.5px solid ${UI.hairStrong}` : `0.5px solid var(--gold-deep)`,
+                    color: heroSet.kg == null || !heroSet.reps ? UI.inkFaint : '#0a0805',
                     borderRadius: 999,
                     fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em', textTransform: 'uppercase',
-                    cursor: !heroSet.kg || !heroSet.reps ? 'default' : 'pointer',
-                    boxShadow: !heroSet.kg || !heroSet.reps ? 'none' : '0 8px 30px rgba(201,169,97,0.30)',
+                    cursor: heroSet.kg == null || !heroSet.reps ? 'default' : 'pointer',
+                    boxShadow: heroSet.kg == null || !heroSet.reps ? 'none' : '0 8px 30px rgba(201,169,97,0.30)',
                     WebkitTapHighlightColor: 'transparent',
                   }}>
                   ✓ Check set
@@ -526,14 +624,14 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                   />
 
                   <button onClick={() => s.done ? updateSet(i, { done: false }) : completeSet(i)}
-                    disabled={!s.done && (!s.kg || !s.reps)}
+                    disabled={!s.done && (s.kg == null || !s.reps)}
                     style={{
                       width: 26, height: 26, borderRadius: 5, border: 'none', cursor: 'pointer',
                       background: s.done ? UI.gold : 'transparent',
-                      outline: `0.5px solid ${s.done ? UI.gold : (!s.kg || !s.reps) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
+                      outline: `0.5px solid ${s.done ? UI.gold : (s.kg == null || !s.reps) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 14, fontWeight: 700, color: s.done ? '#0a0805' : 'transparent',
-                      opacity: !s.done && (!s.kg || !s.reps) ? 0.35 : 1,
+                      opacity: !s.done && (s.kg == null || !s.reps) ? 0.35 : 1,
                       flexShrink: 0,
                       WebkitTapHighlightColor: 'transparent',
                     }}>✓</button>
@@ -586,32 +684,6 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           </Frame>
         )}
 
-        {/* Rest timer */}
-        {restStart && restRemaining > 0 && (
-          <Frame style={{ padding: 14 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-              <span className="micro">REST</span>
-              <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 400, lineHeight: 1 }}>
-                {Math.floor(restRemaining/60)}:{(restRemaining%60).toString().padStart(2,'0')}
-              </span>
-            </div>
-            <div style={{ height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <button onClick={() => setRestStart(null)} style={{
-                flex: 1, padding: '8px', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-                color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
-                fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
-              }}>Skip</button>
-              <button onClick={() => setRestStart(Date.now() - (restElapsed - 30) * 1000)} style={{
-                flex: 1, padding: '8px', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-                color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
-                fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
-              }}>+30s</button>
-            </div>
-          </Frame>
-        )}
       </div>
 
       {/* Footer nav */}
@@ -746,6 +818,54 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
       {/* exercise swap picker */}
       {swapOpen && <window.Screens.ExercisePicker store={store} onClose={() => setSwapOpen(false)} onPick={doSwap} />}
+
+      {/* rest timer modal */}
+      <Sheet open={restModalOpen} onClose={() => setRestModalOpen(false)} title="Rest">
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, paddingBottom: 8 }}>
+          {/* big countdown */}
+          <div style={{ textAlign: 'center' }}
+            onClick={restRemaining === 0 ? () => { persistRestStart(null); setRestModalOpen(false); } : undefined}
+          >
+            <div className="num" style={{
+              fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1,
+              color: UI.gold,
+              animation: restRemaining === 0 ? 'timerPulse 0.8s ease-in-out infinite' : 'none',
+              cursor: restRemaining === 0 ? 'pointer' : 'default',
+            }}>
+              {restRemaining != null
+                ? `${Math.floor(restRemaining/60)}:${(restRemaining%60).toString().padStart(2,'0')}`
+                : '—'}
+            </div>
+            {restRemaining === 0 && (
+              <div style={{ marginTop: 10, fontSize: 11, letterSpacing: '0.18em', color: UI.gold, fontFamily: UI.fontUi, fontWeight: 600 }}>
+                GO
+              </div>
+            )}
+            {/* progress bar */}
+            <div style={{ height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden', marginTop: 18, width: 200 }}>
+              <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+            </div>
+          </div>
+          {/* controls */}
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button onClick={() => { persistRestStart(null); setRestModalOpen(false); }} style={{
+              flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
+              fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
+            }}>Skip</button>
+            <button onClick={() => persistRestStart(restStart - 30000)} style={{
+              flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
+              fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
+            }}>−30s</button>
+            <button onClick={() => persistRestStart(restStart + 30000)} style={{
+              flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
+              fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
+            }}>+30s</button>
+          </div>
+        </div>
+      </Sheet>
 
       {confirmEl}
     </Screen>
