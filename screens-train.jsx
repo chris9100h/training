@@ -203,6 +203,31 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     }).catch(() => {});
   }, [restStart]);
 
+  // play a short two-tone beep when rest timer hits zero
+  const prevRestRemaining = useRefT(null);
+  useEffectT(() => {
+    const prev = prevRestRemaining.current;
+    prevRestRemaining.current = restRemaining;
+    if (prev !== null && prev > 0 && restRemaining === 0) {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const beep = (t, freq, dur) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.type = 'sine'; osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.35, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+          osc.start(t); osc.stop(t + dur);
+        };
+        beep(ctx.currentTime,        880, 0.14);
+        beep(ctx.currentTime + 0.18, 880, 0.14);
+        beep(ctx.currentTime + 0.36, 1320, 0.28);
+        setTimeout(() => ctx.close(), 1200);
+      } catch (_) {}
+    }
+  }, [restRemaining]);
+
   const [flashSet, setFlashSet] = useStateT(null);
   const [improvedSet, setImprovedSet] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(false);
