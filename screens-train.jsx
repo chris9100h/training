@@ -296,7 +296,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const heroSet = currentSetIdx >= 0 ? entry.sets[currentSetIdx] : null;
   const prevHeroSet = last?.entry?.sets?.[currentSetIdx >= 0 ? currentSetIdx : 0];
 
-  const anyMissingData = entry.sets.some(st => !st.done && (!st.kg || !st.reps));
+  const anyMissingData = entry.sets.some(st => !st.done && (st.kg == null || !st.reps));
 
   const checkAllSets = async () => {
     if (allDone || anyMissingData) return;
@@ -507,16 +507,16 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               <div style={{ marginTop: 12, padding: '0 18px' }}>
                 <button
                   onClick={() => completeSet(currentSetIdx)}
-                  disabled={!heroSet.kg || !heroSet.reps}
+                  disabled={heroSet.kg == null || !heroSet.reps}
                   style={{
                     width: '100%', minHeight: 44,
-                    background: !heroSet.kg || !heroSet.reps ? 'transparent' : `linear-gradient(180deg, var(--gold-light), var(--gold))`,
-                    border: !heroSet.kg || !heroSet.reps ? `0.5px solid ${UI.hairStrong}` : `0.5px solid var(--gold-deep)`,
-                    color: !heroSet.kg || !heroSet.reps ? UI.inkFaint : '#0a0805',
+                    background: heroSet.kg == null || !heroSet.reps ? 'transparent' : `linear-gradient(180deg, var(--gold-light), var(--gold))`,
+                    border: heroSet.kg == null || !heroSet.reps ? `0.5px solid ${UI.hairStrong}` : `0.5px solid var(--gold-deep)`,
+                    color: heroSet.kg == null || !heroSet.reps ? UI.inkFaint : '#0a0805',
                     borderRadius: 999,
                     fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em', textTransform: 'uppercase',
-                    cursor: !heroSet.kg || !heroSet.reps ? 'default' : 'pointer',
-                    boxShadow: !heroSet.kg || !heroSet.reps ? 'none' : '0 8px 30px rgba(201,169,97,0.30)',
+                    cursor: heroSet.kg == null || !heroSet.reps ? 'default' : 'pointer',
+                    boxShadow: heroSet.kg == null || !heroSet.reps ? 'none' : '0 8px 30px rgba(201,169,97,0.30)',
                     WebkitTapHighlightColor: 'transparent',
                   }}>
                   ✓ Check set
@@ -596,14 +596,14 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                   />
 
                   <button onClick={() => s.done ? updateSet(i, { done: false }) : completeSet(i)}
-                    disabled={!s.done && (!s.kg || !s.reps)}
+                    disabled={!s.done && (s.kg == null || !s.reps)}
                     style={{
                       width: 26, height: 26, borderRadius: 5, border: 'none', cursor: 'pointer',
                       background: s.done ? UI.gold : 'transparent',
-                      outline: `0.5px solid ${s.done ? UI.gold : (!s.kg || !s.reps) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
+                      outline: `0.5px solid ${s.done ? UI.gold : (s.kg == null || !s.reps) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 14, fontWeight: 700, color: s.done ? '#0a0805' : 'transparent',
-                      opacity: !s.done && (!s.kg || !s.reps) ? 0.35 : 1,
+                      opacity: !s.done && (s.kg == null || !s.reps) ? 0.35 : 1,
                       flexShrink: 0,
                       WebkitTapHighlightColor: 'transparent',
                     }}>✓</button>
