@@ -60,11 +60,23 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     }));
   };
 
+  const isImprovement = (st, prevSet) => {
+    if (!prevSet) return false;
+    if (st.kg != null && prevSet.kg != null && st.kg > prevSet.kg) return true;
+    if (st.kg === prevSet.kg && st.reps != null && prevSet.reps != null && st.reps > prevSet.reps) return true;
+    return false;
+  };
+
   const completeSet = (setIdx) => {
     updateSet(setIdx, { done: true });
     persistRestStart(Date.now());
     setFlashSet(setIdx);
     setTimeout(() => setFlashSet(null), 1400);
+    const prevSet = last?.entry?.sets?.[setIdx];
+    if (isImprovement(entry.sets[setIdx], prevSet)) {
+      setImprovedSet(true);
+      setTimeout(() => setImprovedSet(false), 2200);
+    }
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
     if (updatedSets.every(st => st.done)) {
       setTimeout(() => navigate(1), 600);
@@ -191,6 +203,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   }, [restStart]);
 
   const [flashSet, setFlashSet] = useStateT(null);
+  const [improvedSet, setImprovedSet] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(false);
   const [confirmEl, confirm] = useConfirm();
   const [finishOpen, setFinishOpen] = useStateT(false);
@@ -299,6 +312,25 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   return (
     <Screen scroll={false}>
+      {/* Improvement toast */}
+      <div style={{
+        position: 'absolute', top: 'calc(env(safe-area-inset-top, 0px) + 62px)', left: 0, right: 0,
+        display: 'flex', justifyContent: 'center', zIndex: 20, pointerEvents: 'none',
+        transition: 'opacity 0.3s ease, transform 0.3s ease',
+        opacity: improvedSet ? 1 : 0,
+        transform: improvedSet ? 'translateY(0)' : 'translateY(-8px)',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 7,
+          background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`,
+          borderRadius: 999, padding: '6px 14px',
+          backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+        }}>
+          <span style={{ fontSize: 13, color: UI.gold }}>↑</span>
+          <span style={{ fontSize: 12, color: UI.gold, fontFamily: UI.fontUi, fontWeight: 500, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Improvement</span>
+        </div>
+      </div>
+
       {/* Top: close + session timer */}
       <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 8px', display: 'flex', alignItems: 'center', gap: 14 }}>
         <button onClick={abandon} style={{
