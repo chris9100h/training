@@ -550,9 +550,12 @@ function StatsTab({ store, sessions, go }) {
     return day ? day.items.length > 0 : false;
   };
 
+  const planStart = store.cycleStartDate ? new Date(store.cycleStartDate + 'T12:00:00') : null;
+
   let currentStreak = 0;
   for (let i = 0; i <= 730; i++) {
     const d = new Date(today); d.setDate(today.getDate() - i); d.setHours(12, 0, 0, 0);
+    if (planStart && d < planStart) break; // don't count before plan start
     const key = d.toISOString().slice(0, 10);
     if (sessionDateSet.has(key)) { currentStreak++; }
     else if (i === 0) { /* today not done yet — don't break */ }
@@ -562,7 +565,7 @@ function StatsTab({ store, sessions, go }) {
 
   let longestStreak = 0, ls = 0;
   if (sessions.length > 0) {
-    const earliest = new Date(sessions[sessions.length - 1].date.slice(0, 10) + 'T12:00:00');
+    const earliest = planStart ?? new Date(sessions[sessions.length - 1].date.slice(0, 10) + 'T12:00:00');
     const dayCount = Math.round((today.getTime() - earliest.getTime()) / 86400000) + 1;
     for (let i = 0; i < dayCount; i++) {
       const d = new Date(earliest); d.setDate(earliest.getDate() + i); d.setHours(12, 0, 0, 0);
