@@ -580,7 +580,7 @@ function StatsTab({ store, sessions, go }) {
   const exCounts = {};
   sessions.forEach(s => s.entries.forEach(e => { exCounts[e.exId] = (exCounts[e.exId] || 0) + 1; }));
   const topExercises = Object.entries(exCounts).sort((a, b) => b[1] - a[1]).slice(0, 5)
-    .map(([id, count]) => ({ name: store.exercises.find(e => e.id === id)?.name || '?', count }));
+    .map(([id, count]) => ({ id, name: store.exercises.find(e => e.id === id)?.name || '?', count }));
 
   const maxSets = Math.max(...setsPerMuscle.map(x => x.sets), 1);
   const maxWeekVol = Math.max(...weeklyVolume.map(w => w.vol), 1);
@@ -686,11 +686,12 @@ function StatsTab({ store, sessions, go }) {
         <div>
           <div className="micro" style={{ marginBottom: 14 }}>TOP EXERCISES</div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {topExercises.map(({ name, count }, i) => (
-              <div key={name} style={{
+            {topExercises.map(({ id, name, count }, i) => (
+              <div key={id} onClick={() => go({ name: 'exercise', exId: id })} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '11px 0',
                 borderBottom: i < topExercises.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                cursor: 'pointer',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span className="num" style={{ fontSize: 11, color: UI.inkFaint, width: 16 }}>{i + 1}</span>
