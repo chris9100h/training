@@ -369,8 +369,8 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
         {/* Stats — SubDials */}
         <div style={{ display: 'flex', justifyContent: 'space-around', padding: '6px 0' }}>
           <SubDial label="1RM PR" value={pr ? Math.round(pr) : '—'} sub="kg" size={90} gold />
-          <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub="kg" size={90} />
           <SubDial label="Sessions" value={history.length} size={90} />
+          <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub="kg" size={90} gold />
         </div>
 
         {points.length > 1 && <ProgressChart points={points} />}
