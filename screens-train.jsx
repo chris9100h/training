@@ -305,7 +305,17 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           <div style={{ width: 6, height: 6, borderRadius: 3, background: UI.gold, animation: 'pulseDot 1.6s ease-in-out infinite' }} />
           <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }}>{sessionTimeStr}</span>
         </div>
-        <div style={{ width: 32 }} />
+        <button onClick={() => go({ name: 'home' })} style={{
+          width: 32, height: 32, borderRadius: '50%',
+          boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, background: 'transparent',
+          color: UI.inkSoft, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/>
+            <path d="M9 21V12h6v9"/>
+          </svg>
+        </button>
       </div>
 
       {/* Day name + exercise position */}
