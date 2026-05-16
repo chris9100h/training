@@ -308,7 +308,10 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
   }).filter(p => p.est > 0).reverse();
 
   const pr = points.length ? Math.max(...points.map(p => p.est)) : 0;
-  const last = points[points.length - 1]?.est;
+
+  const volPr = history.length ? Math.max(...history.map(h =>
+    (h.entry.sets || []).filter(s => s.kg != null && s.reps).reduce((sum, s) => sum + s.kg * s.reps, 0)
+  )) : 0;
 
   return (
     <Screen>
@@ -366,7 +369,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId }) {
         {/* Stats — SubDials */}
         <div style={{ display: 'flex', justifyContent: 'space-around', padding: '6px 0' }}>
           <SubDial label="1RM PR" value={pr ? Math.round(pr) : '—'} sub="kg" size={90} gold />
-          <SubDial label="Last" value={last ? Math.round(last) : '—'} sub="kg" size={90} />
+          <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub="kg" size={90} />
           <SubDial label="Sessions" value={history.length} size={90} />
         </div>
 
