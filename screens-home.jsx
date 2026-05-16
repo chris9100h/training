@@ -368,13 +368,13 @@ function HomeScreen({ store, setStore, go }) {
               background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0,
               fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, padding: '4px 0',
               letterSpacing: '0.10em', textTransform: 'uppercase',
-            }}>Abbrechen</button>
+            }}>Cancel</button>
             <button onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{
               flexShrink: 0, padding: '6px 14px', borderRadius: 999,
               background: UI.gold, border: 'none', cursor: 'pointer',
               fontSize: 12, fontWeight: 600, fontFamily: UI.fontUi, color: '#0a0805',
               letterSpacing: '0.08em',
-            }}>Weiter →</button>
+            }}>Continue →</button>
           </div>
         ) : null;
       })()}
