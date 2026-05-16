@@ -424,19 +424,21 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
               style={{
                 flexShrink: 0, maxWidth: 110,
-                padding: '5px 11px', borderRadius: 999,
-                border: `0.5px solid ${active ? UI.gold : done ? UI.goldDeep : UI.hairStrong}`,
-                background: active ? UI.goldFaint : 'transparent',
+                padding: '5px 11px 4px', borderRadius: 999,
+                border: `0.5px solid ${active ? UI.gold : done ? UI.goldSoft : UI.hairStrong}`,
+                background: active ? UI.goldFaint : done ? 'rgba(201,169,97,0.05)' : 'transparent',
                 cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                 transition: 'all 0.15s',
               }}>
               <div style={{
                 fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em',
-                color: active ? UI.gold : done ? UI.goldDeep : UI.inkFaint,
+                color: active ? UI.gold : done ? UI.inkSoft : UI.inkFaint,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                opacity: done && !active ? 0.65 : 1,
               }}>
                 {e.name}
+              </div>
+              <div style={{ height: 3, marginTop: 3, display: 'flex', justifyContent: 'center' }}>
+                {done && !active && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold, marginTop: -1 }} />}
               </div>
             </button>
           );

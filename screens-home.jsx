@@ -431,8 +431,8 @@ function HomeScreen({ store, setStore, go }) {
                 onClick={() => weekdayMode ? setSelectedWd(i) : setSelectedSlot(i)}
                 style={{
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
-                  background: isSelected ? UI.goldFaint : 'transparent',
-                  border: `0.5px solid ${isSelected ? UI.goldSoft : d.isToday ? UI.hairStrong : UI.hair}`,
+                  background: isSelected ? UI.goldFaint : isCompleted ? 'rgba(201,169,97,0.05)' : 'transparent',
+                  border: `0.5px solid ${isSelected ? UI.goldSoft : isCompleted ? UI.goldSoft : d.isToday ? UI.hairStrong : UI.hair}`,
                   borderRadius: 8, cursor: 'pointer',
                   minHeight: 56,
                 }}>

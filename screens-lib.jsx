@@ -413,31 +413,45 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
         <div>
           <Bezel>HISTORY</Bezel>
           <div style={{ marginTop: 8 }}>
-            {history.slice(0, 10).map((h, hi) => (
-              <div key={h.session.id}
-                onClick={() => go({ name: 'session', sessionId: h.session.id })}
-                style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-                  padding: '12px 0',
-                  borderBottom: hi < Math.min(history.length, 10) - 1 ? `0.5px solid ${UI.hair}` : 'none',
-                  cursor: 'pointer',
-                }}>
-                <div>
-                  <div className="num" style={{ fontSize: 10, color: UI.inkFaint, letterSpacing: '0.05em', marginBottom: 5 }}>
-                    {new Date(h.session.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'2-digit' })}
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, flexFamily: UI.fontNum, fontSize: 13 }}>
-                    {h.entry.sets.filter(s => s.kg).map((s, i) => (
-                      <span key={i} className="num" style={{ fontSize: 13 }}>
-                        {s.kg}<span style={{ color: UI.inkFaint }}>×</span>{s.reps}
+            {history.slice(0, 10).map((h, hi) => {
+              const e1rm = (s) => (s.kg && s.reps) ? s.kg * (1 + s.reps / 30) : 0;
+              const setsWithData = h.entry.sets.filter(s => s.kg && s.reps);
+              const sessionBest = setsWithData.length ? Math.max(...setsWithData.map(e1rm)) : 0;
+              const isPR = pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01;
+              return (
+                <div key={h.session.id}
+                  onClick={() => go({ name: 'session', sessionId: h.session.id })}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                    padding: '12px 0',
+                    borderBottom: hi < Math.min(history.length, 10) - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                    cursor: 'pointer',
+                  }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                      <span className="num" style={{ fontSize: 10, color: isPR ? UI.gold : UI.inkFaint, letterSpacing: '0.05em' }}>
+                        {new Date(h.session.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'2-digit' })}
                       </span>
-                    ))}
+                      {isPR && (
+                        <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.gold, background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 5px' }}>PR</span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {h.entry.sets.filter(s => s.kg).map((s, i) => {
+                        const isBest = sessionBest > 0 && Math.abs(e1rm(s) - sessionBest) < 0.01;
+                        return (
+                          <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink }}>
+                            {s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{s.reps}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    {h.entry.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 4, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{h.entry.note}</div>}
                   </div>
-                  {h.entry.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 4, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{h.entry.note}</div>}
+                  <span className="micro" style={{ color: UI.inkFaint }}>{h.session.dayName}</span>
                 </div>
-                <span className="micro" style={{ color: UI.inkFaint }}>{h.session.dayName}</span>
-              </div>
-            ))}
+              );
+            })}
             {history.length === 0 && <Empty title="Never trained" />}
           </div>
         </div>
