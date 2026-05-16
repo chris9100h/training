@@ -823,11 +823,14 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       <Sheet open={restModalOpen} onClose={() => setRestModalOpen(false)} title="Rest">
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, paddingBottom: 8 }}>
           {/* big countdown */}
-          <div style={{ textAlign: 'center' }}>
+          <div style={{ textAlign: 'center' }}
+            onClick={restRemaining === 0 ? () => { persistRestStart(null); setRestModalOpen(false); } : undefined}
+          >
             <div className="num" style={{
               fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1,
               color: UI.gold,
               animation: restRemaining === 0 ? 'timerPulse 0.8s ease-in-out infinite' : 'none',
+              cursor: restRemaining === 0 ? 'pointer' : 'default',
             }}>
               {restRemaining != null
                 ? `${Math.floor(restRemaining/60)}:${(restRemaining%60).toString().padStart(2,'0')}`
