@@ -191,6 +191,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   }, [restStart]);
 
   const [flashSet, setFlashSet] = useStateT(null);
+  const [restModalOpen, setRestModalOpen] = useStateT(false);
   const [confirmEl, confirm] = useConfirm();
   const [finishOpen, setFinishOpen] = useStateT(false);
   const [notePicker, setNotePicker] = useStateT(false);
@@ -306,9 +307,24 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           color: UI.danger, cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, lineHeight: 1,
         }}>×</button>
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
-          <div style={{ width: 6, height: 6, borderRadius: 3, background: UI.gold, animation: 'pulseDot 1.6s ease-in-out infinite' }} />
-          <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }}>{sessionTimeStr}</span>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+          {/* session time */}
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
+            <div style={{ width: 6, height: 6, borderRadius: 3, background: UI.gold, animation: 'pulseDot 1.6s ease-in-out infinite' }} />
+            <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }}>{sessionTimeStr}</span>
+          </div>
+          {/* rest countdown — only when active */}
+          {restStart && restRemaining > 0 && (<>
+            <div style={{ width: 0.5, height: 14, background: UI.hairStrong, flexShrink: 0 }} />
+            <button onClick={() => setRestModalOpen(true)} style={{
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+            }}>
+              <span className="num" style={{ color: UI.inkSoft, fontSize: 14, letterSpacing: '0.14em', fontWeight: 500 }}>
+                {Math.floor(restRemaining/60)}:{(restRemaining%60).toString().padStart(2,'0')}
+              </span>
+            </button>
+          </>)}
         </div>
         <button onClick={() => go({ name: 'home' })} style={{
           width: 32, height: 32, borderRadius: '50%',
@@ -601,32 +617,6 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           </Frame>
         )}
 
-        {/* Rest timer */}
-        {restStart && restRemaining > 0 && (
-          <Frame style={{ padding: 14 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-              <span className="micro">REST</span>
-              <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 400, lineHeight: 1 }}>
-                {Math.floor(restRemaining/60)}:{(restRemaining%60).toString().padStart(2,'0')}
-              </span>
-            </div>
-            <div style={{ height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <button onClick={() => persistRestStart(null)} style={{
-                flex: 1, padding: '8px', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-                color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
-                fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
-              }}>Skip</button>
-              <button onClick={() => persistRestStart(Date.now() - (restElapsed - 30) * 1000)} style={{
-                flex: 1, padding: '8px', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-                color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
-                fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
-              }}>+30s</button>
-            </div>
-          </Frame>
-        )}
       </div>
 
       {/* Footer nav */}
@@ -761,6 +751,42 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
       {/* exercise swap picker */}
       {swapOpen && <window.Screens.ExercisePicker store={store} onClose={() => setSwapOpen(false)} onPick={doSwap} />}
+
+      {/* rest timer modal */}
+      <Sheet open={restModalOpen} onClose={() => setRestModalOpen(false)} title="Rest">
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, paddingBottom: 8 }}>
+          {/* big countdown */}
+          <div style={{ textAlign: 'center' }}>
+            <div className="num" style={{ fontSize: 72, fontWeight: 300, color: restRemaining > 0 ? UI.gold : UI.inkFaint, letterSpacing: '-0.02em', lineHeight: 1 }}>
+              {restRemaining != null
+                ? `${Math.floor(restRemaining/60)}:${(restRemaining%60).toString().padStart(2,'0')}`
+                : '—'}
+            </div>
+            {/* progress bar */}
+            <div style={{ height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden', marginTop: 18, width: 200 }}>
+              <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+            </div>
+          </div>
+          {/* controls */}
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button onClick={() => { persistRestStart(null); setRestModalOpen(false); }} style={{
+              flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
+              fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
+            }}>Skip</button>
+            <button onClick={() => persistRestStart(restStart - 30000)} style={{
+              flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
+              fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
+            }}>−30s</button>
+            <button onClick={() => persistRestStart(restStart + 30000)} style={{
+              flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
+              fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
+            }}>+30s</button>
+          </div>
+        </div>
+      </Sheet>
 
       {confirmEl}
     </Screen>
