@@ -623,11 +623,11 @@ function StatsTab({ store, sessions, go }) {
   const maxSets = Math.max(...setsPerMuscle.map(x => x.sets), 1);
   const maxWeekVol = Math.max(...weeklyVolume.map(w => w.vol), 1);
 
-  const StatCard = ({ label, value, sub }) => (
-    <div style={{ background: UI.bgInset, borderRadius: 12, padding: '12px 14px', textAlign: 'center' }}>
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{label}</div>
-      <div className="num" style={{ fontSize: 22, color: UI.ink, lineHeight: 1 }}>{value}</div>
-      {sub && <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>{sub}</div>}
+  const StatCard = ({ label, value, sub, gold }) => (
+    <div style={{ background: gold ? UI.goldFaint : UI.bgInset, borderRadius: 12, padding: '12px 14px', textAlign: 'center', border: gold ? `0.5px solid ${UI.goldSoft}` : 'none' }}>
+      <div className="micro" style={{ color: gold ? UI.gold : UI.inkFaint, marginBottom: 6 }}>{label}</div>
+      <div className="num" style={{ fontSize: 22, color: gold ? UI.gold : UI.ink, lineHeight: 1 }}>{value}</div>
+      {sub && <div className="micro" style={{ color: gold ? UI.gold : UI.inkFaint, marginTop: 3, opacity: gold ? 0.7 : 1 }}>{sub}</div>}
     </div>
   );
 
@@ -636,7 +636,7 @@ function StatsTab({ store, sessions, go }) {
 
       {/* Weekly sets per muscle */}
       <div>
-        <div className="micro" style={{ marginBottom: 14 }}>{isCycleMode ? 'THIS CYCLE · SETS PER MUSCLE' : 'THIS WEEK · SETS PER MUSCLE'}</div>
+        <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>{isCycleMode ? 'THIS CYCLE · SETS PER MUSCLE' : 'THIS WEEK · SETS PER MUSCLE'}</div>
         {setsPerMuscle.length === 0 ? (
           <div style={{ color: UI.inkFaint, fontSize: 13, fontFamily: UI.fontUi }}>{isCycleMode ? 'No sessions this cycle yet.' : 'No sessions this week yet.'}</div>
         ) : setsPerMuscle.map(({ muscle, sets }) => (
@@ -652,22 +652,22 @@ function StatsTab({ store, sessions, go }) {
 
       {/* Weekly volume trend */}
       <div>
-        <div className="micro" style={{ marginBottom: 14 }}>WEEKLY VOLUME · LAST 8 WEEKS</div>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 60 }}>
+        <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>WEEKLY VOLUME · LAST 8 WEEKS</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 80 }}>
           {weeklyVolume.map(({ label, vol }, i) => (
             <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' }}>
               <div style={{
                 width: '100%', borderRadius: 3,
-                height: `${Math.max(3, (vol / maxWeekVol) * 52)}px`,
+                height: `${Math.max(3, (vol / maxWeekVol) * 68)}px`,
                 background: i === 7 ? UI.gold : UI.hair,
               }} />
             </div>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+        <div style={{ display: 'flex', gap: 4, marginTop: 5 }}>
           {weeklyVolume.map(({ label }, i) => (
             <div key={i} style={{ flex: 1, fontSize: 8, fontFamily: UI.fontUi, color: i === 7 ? UI.gold : UI.inkFaint, textAlign: 'center', letterSpacing: '0.03em' }}>
-              {i === 7 ? 'NOW' : ''}
+              {i === 7 ? 'NOW' : i % 2 === 0 ? label : ''}
             </div>
           ))}
         </div>
@@ -675,7 +675,7 @@ function StatsTab({ store, sessions, go }) {
 
       {/* All time */}
       <div>
-        <div className="micro" style={{ marginBottom: 14 }}>ALL TIME</div>
+        <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>ALL TIME</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <StatCard label="Sessions" value={sessions.length} />
           <StatCard label="Avg Volume" value={avgVol.toLocaleString('en-US')} sub="kg / session" />
@@ -690,27 +690,30 @@ function StatsTab({ store, sessions, go }) {
 
       {/* Consistency */}
       <div>
-        <div className="micro" style={{ marginBottom: 14 }}>CONSISTENCY</div>
+        <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>CONSISTENCY</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <StatCard label="Current Streak" value={currentStreak} sub={currentStreak === 1 ? 'day' : 'days'} gold />
+          <StatCard label="Longest Streak" value={longestStreak} sub={longestStreak === 1 ? 'day' : 'days'} gold />
           <StatCard label="This Year" value={thisYearSessions.length} sub="sessions" />
           <StatCard label="This Month" value={thisMonthSessions.length} sub="sessions" />
           <StatCard label="This Week" value={thisWeekSessions.length} sub="sessions" />
           <StatCard label="Avg / Week" value={avgSessionsPerWeek} sub="sessions" />
-          <StatCard label="Current Streak" value={currentStreak} sub={currentStreak === 1 ? 'day' : 'days'} />
-          <StatCard label="Longest Streak" value={longestStreak} sub={longestStreak === 1 ? 'day' : 'days'} />
         </div>
       </div>
 
       {/* Best session */}
       {bestSession && (
         <div>
-          <div className="micro" style={{ marginBottom: 14 }}>BEST SESSION</div>
+          <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>BEST SESSION</div>
           <Frame onClick={() => go({ name: 'session', sessionId: bestSession.id, back: { name: 'hist', initialTab: 'stats' } })} style={{ padding: '14px 16px', cursor: 'pointer' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div className="display" style={{ fontSize: 18, color: UI.ink }}>{bestSession.dayName}</div>
                 <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>
                   {new Date(bestSession.date.slice(0,10)+'T12:00:00').toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()}
+                </div>
+                <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>
+                  {bestSession.entries.length} exercises · {bestSession.entries.reduce((sum, e) => sum + e.sets.filter(st => st.done).length, 0)} sets
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
@@ -725,7 +728,7 @@ function StatsTab({ store, sessions, go }) {
       {/* Top exercises */}
       {topExercises.length > 0 && (
         <div>
-          <div className="micro" style={{ marginBottom: 14 }}>TOP EXERCISES</div>
+          <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>TOP EXERCISES</div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {topExercises.map(({ id, name, count }, i) => (
               <div key={id} onClick={() => go({ name: 'exercise', exId: id, back: { name: 'hist', initialTab: 'stats' } })} style={{
@@ -735,10 +738,10 @@ function StatsTab({ store, sessions, go }) {
                 cursor: 'pointer',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span className="num" style={{ fontSize: 11, color: UI.inkFaint, width: 16 }}>{i + 1}</span>
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>{name}</span>
+                  <span className="num" style={{ fontSize: i === 0 ? 13 : 11, color: i === 0 ? UI.gold : UI.inkFaint, width: 16 }}>{i + 1}</span>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 14, color: i === 0 ? UI.gold : UI.ink }}>{name}</span>
                 </div>
-                <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{count}×</span>
+                <span className="num" style={{ fontSize: 13, color: i === 0 ? UI.gold : UI.inkSoft }}>{count}×</span>
               </div>
             ))}
           </div>
