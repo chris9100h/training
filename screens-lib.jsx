@@ -576,7 +576,21 @@ function StatsTab({ store, sessions, go }) {
     }
   }
 
-  // Top 5 exercises by session count
+  const totalTrainingMins = durations.reduce((a, b) => a + b, 0);
+  const totalTrainingStr = totalTrainingMins >= 60
+    ? `${Math.floor(totalTrainingMins / 60)}h ${totalTrainingMins % 60}m`
+    : `${totalTrainingMins}m`;
+
+  const thisYearSessions = useMemoL(() => sessions.filter(s => {
+    return new Date(s.date.slice(0, 10) + 'T12:00:00').getFullYear() === today.getFullYear();
+  }), [sessions]);
+
+  const avgSessionsPerWeek = useMemoL(() => {
+    const anchor = planStart ?? (sessions.length ? new Date(sessions[sessions.length - 1].date.slice(0, 10) + 'T12:00:00') : null);
+    if (!anchor) return 0;
+    const weeks = Math.max(1, (today.getTime() - anchor.getTime()) / (7 * 86400000));
+    return (sessions.length / weeks).toFixed(1);
+  }, [sessions, planStart]);
   const exCounts = {};
   sessions.forEach(s => s.entries.forEach(e => { exCounts[e.exId] = (exCounts[e.exId] || 0) + 1; }));
   const topExercises = Object.entries(exCounts).sort((a, b) => b[1] - a[1]).slice(0, 5)
@@ -640,12 +654,13 @@ function StatsTab({ store, sessions, go }) {
         <div className="micro" style={{ marginBottom: 14 }}>ALL TIME</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <StatCard label="Sessions" value={sessions.length} />
-          <StatCard label="Total Volume" value={Math.round(totalVol).toLocaleString('en-US')} sub="kg" />
           <StatCard label="Avg Volume" value={avgVol.toLocaleString('en-US')} sub="kg / session" />
           <StatCard label="Avg Duration" value={avgDuration || '—'} sub={avgDuration ? 'min' : ''} />
-          <StatCard label="Total Sets" value={totalSets.toLocaleString('en-US')} />
-          <StatCard label="Total Reps" value={totalReps.toLocaleString('en-US')} />
           <StatCard label="Longest Session" value={maxDuration || '—'} sub={maxDuration ? 'min' : ''} />
+          <div style={{ gridColumn: '1 / -1', background: UI.bgInset, borderRadius: 12, padding: '12px 14px' }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Total Time Trained</div>
+            <div className="num" style={{ fontSize: 22, color: UI.ink, lineHeight: 1 }}>{totalTrainingMins ? totalTrainingStr : '—'}</div>
+          </div>
         </div>
       </div>
 
@@ -653,8 +668,10 @@ function StatsTab({ store, sessions, go }) {
       <div>
         <div className="micro" style={{ marginBottom: 14 }}>CONSISTENCY</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <StatCard label="This Week" value={thisWeekSessions.length} sub="sessions" />
+          <StatCard label="This Year" value={thisYearSessions.length} sub="sessions" />
           <StatCard label="This Month" value={thisMonthSessions.length} sub="sessions" />
+          <StatCard label="This Week" value={thisWeekSessions.length} sub="sessions" />
+          <StatCard label="Avg / Week" value={avgSessionsPerWeek} sub="sessions" />
           <StatCard label="Current Streak" value={currentStreak} sub={currentStreak === 1 ? 'day' : 'days'} />
           <StatCard label="Longest Streak" value={longestStreak} sub={longestStreak === 1 ? 'day' : 'days'} />
         </div>
