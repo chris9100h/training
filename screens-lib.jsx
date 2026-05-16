@@ -545,7 +545,7 @@ function StatsTab({ store, sessions, go }) {
     if (!store.cycleStartDate) return true;
     const start = new Date(store.cycleStartDate + 'T12:00:00');
     const n = Math.round((date.getTime() - start.getTime()) / 86400000);
-    if (n < 0) return true;
+    if (n < 0) return false; // before plan start → streak-neutral
     const day = sch.days[((n % sch.days.length) + sch.days.length) % sch.days.length];
     return day ? day.items.length > 0 : false;
   };
