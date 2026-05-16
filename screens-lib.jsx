@@ -135,6 +135,7 @@ function LibraryScreen({ store, setStore, go }) {
 
         {tab === 'recent' && recent.map(({ ex, last, lastEntry, trend }, ri) => {
           const days = Math.round((Date.now() - new Date(last)) / 86400000);
+          const isToday = days === 0;
           const top = lastEntry?.sets?.find(s => s.kg);
           const trendColor = trend === 'up' ? UI.ok : trend === 'down' ? UI.danger : UI.inkFaint;
           const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : trend === 'same' ? '→' : null;
@@ -148,9 +149,9 @@ function LibraryScreen({ store, setStore, go }) {
                 cursor: 'pointer',
               }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="display" style={{ fontSize: 19, color: UI.ink, lineHeight: 1.1, marginBottom: 3 }}>{ex.name}</div>
-                <div className="num" style={{ fontSize: 10, color: UI.inkFaint, letterSpacing: '0.05em' }}>
-                  {days === 0 ? 'today' : `${days}d ago`}
+                <div className="display" style={{ fontSize: 19, color: isToday ? UI.gold : UI.ink, lineHeight: 1.1, marginBottom: 3 }}>{ex.name}</div>
+                <div className="num" style={{ fontSize: 10, color: isToday ? UI.gold : UI.inkFaint, letterSpacing: '0.05em' }}>
+                  {isToday ? 'today' : `${days}d ago`}
                   {top && ` · ${top.kg}kg × ${top.reps}`}
                 </div>
               </div>
@@ -230,13 +231,16 @@ function LibraryScreen({ store, setStore, go }) {
   );
 }
 
+const EXERCISE_SIZES = [['big','Big'],['medium','Medium'],['small','Small']];
+
 function ExerciseCreator({ onClose, setStore, onCreated }) {
   const [name, setName] = useStateL('');
   const [selectedTags, setSelectedTags] = useStateL([]);
+  const [category, setCategory] = useStateL(null);
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, note: '' };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, note: '' };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -256,6 +260,14 @@ function ExerciseCreator({ onClose, setStore, onCreated }) {
             ))}
           </div>
         </div>
+        <div>
+          <span className="label">Exercise size</span>
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            {EXERCISE_SIZES.map(([val, label]) => (
+              <Pill key={val} gold={category === val} onClick={() => setCategory(c => c === val ? null : val)} style={{ cursor: 'pointer' }}>{label}</Pill>
+            ))}
+          </div>
+        </div>
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Create</Btn>
       </div>
     </Sheet>
@@ -271,14 +283,15 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
   const [editMode, setEditMode] = useStateL(false);
   const [editName, setEditName] = useStateL('');
   const [editTags, setEditTags] = useStateL([]);
+  const [editCategory, setEditCategory] = useStateL(null);
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMode(true); };
   const cancelEdit = () => setEditMode(false);
   const saveEdit = () => {
     if (!editName.trim()) return;
-    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags } : e) }));
+    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null } : e) }));
     setEditMode(false);
   };
   const toggleEditTag = (m) => setEditTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
@@ -353,13 +366,21 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
                 ))}
               </div>
             </div>
+            <div>
+              <span className="label">Exercise size</span>
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                {EXERCISE_SIZES.map(([val, label]) => (
+                  <Pill key={val} gold={editCategory === val} onClick={() => setEditCategory(c => c === val ? null : val)} style={{ cursor: 'pointer' }}>{label}</Pill>
+                ))}
+              </div>
+            </div>
             <Btn kind="ghost" onClick={cancelEdit} style={{ fontSize: 11 }}>Cancel</Btn>
           </div>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {(ex.tags || []).length > 0
-              ? ex.tags.map(t => <Pill key={t} gold>{t}</Pill>)
-              : <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
+            {ex.category && <Pill gold>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
+            {(ex.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
+            {!ex.category && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
           </div>
         )}
       </div>
@@ -412,31 +433,45 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
         <div>
           <Bezel>HISTORY</Bezel>
           <div style={{ marginTop: 8 }}>
-            {history.slice(0, 10).map((h, hi) => (
-              <div key={h.session.id}
-                onClick={() => go({ name: 'session', sessionId: h.session.id })}
-                style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-                  padding: '12px 0',
-                  borderBottom: hi < Math.min(history.length, 10) - 1 ? `0.5px solid ${UI.hair}` : 'none',
-                  cursor: 'pointer',
-                }}>
-                <div>
-                  <div className="num" style={{ fontSize: 10, color: UI.inkFaint, letterSpacing: '0.05em', marginBottom: 5 }}>
-                    {new Date(h.session.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'2-digit' })}
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, flexFamily: UI.fontNum, fontSize: 13 }}>
-                    {h.entry.sets.filter(s => s.kg).map((s, i) => (
-                      <span key={i} className="num" style={{ fontSize: 13 }}>
-                        {s.kg}<span style={{ color: UI.inkFaint }}>×</span>{s.reps}
+            {history.slice(0, 10).map((h, hi) => {
+              const e1rm = (s) => (s.kg && s.reps) ? s.kg * (1 + s.reps / 30) : 0;
+              const setsWithData = h.entry.sets.filter(s => s.kg && s.reps);
+              const sessionBest = setsWithData.length ? Math.max(...setsWithData.map(e1rm)) : 0;
+              const isPR = pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01;
+              return (
+                <div key={h.session.id}
+                  onClick={() => go({ name: 'session', sessionId: h.session.id })}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                    padding: '12px 0',
+                    borderBottom: hi < Math.min(history.length, 10) - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                    cursor: 'pointer',
+                  }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                      <span className="num" style={{ fontSize: 10, color: isPR ? UI.gold : UI.inkFaint, letterSpacing: '0.05em' }}>
+                        {new Date(h.session.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'2-digit' })}
                       </span>
-                    ))}
+                      {isPR && (
+                        <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.gold, background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 5px' }}>PR</span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {h.entry.sets.filter(s => s.kg).map((s, i) => {
+                        const isBest = sessionBest > 0 && Math.abs(e1rm(s) - sessionBest) < 0.01;
+                        return (
+                          <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink }}>
+                            {s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{s.reps}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    {h.entry.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 4, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{h.entry.note}</div>}
                   </div>
-                  {h.entry.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 4, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{h.entry.note}</div>}
+                  <span className="micro" style={{ color: UI.inkFaint }}>{h.session.dayName}</span>
                 </div>
-                <span className="micro" style={{ color: UI.inkFaint }}>{h.session.dayName}</span>
-              </div>
-            ))}
+              );
+            })}
             {history.length === 0 && <Empty title="Never trained" />}
           </div>
         </div>
@@ -623,11 +658,11 @@ function StatsTab({ store, sessions, go }) {
   const maxSets = Math.max(...setsPerMuscle.map(x => x.sets), 1);
   const maxWeekVol = Math.max(...weeklyVolume.map(w => w.vol), 1);
 
-  const StatCard = ({ label, value, sub }) => (
-    <div style={{ background: UI.bgInset, borderRadius: 12, padding: '12px 14px', textAlign: 'center' }}>
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{label}</div>
-      <div className="num" style={{ fontSize: 22, color: UI.ink, lineHeight: 1 }}>{value}</div>
-      {sub && <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>{sub}</div>}
+  const StatCard = ({ label, value, sub, gold }) => (
+    <div style={{ background: gold ? UI.goldFaint : UI.bgInset, borderRadius: 12, padding: '12px 14px', textAlign: 'center', border: gold ? `0.5px solid ${UI.goldSoft}` : 'none' }}>
+      <div className="micro" style={{ color: gold ? UI.gold : UI.inkFaint, marginBottom: 6 }}>{label}</div>
+      <div className="num" style={{ fontSize: 22, color: gold ? UI.gold : UI.ink, lineHeight: 1 }}>{value}</div>
+      {sub && <div className="micro" style={{ color: gold ? UI.gold : UI.inkFaint, marginTop: 3, opacity: gold ? 0.7 : 1 }}>{sub}</div>}
     </div>
   );
 
@@ -636,7 +671,7 @@ function StatsTab({ store, sessions, go }) {
 
       {/* Weekly sets per muscle */}
       <div>
-        <div className="micro" style={{ marginBottom: 14 }}>{isCycleMode ? 'THIS CYCLE · SETS PER MUSCLE' : 'THIS WEEK · SETS PER MUSCLE'}</div>
+        <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>{isCycleMode ? 'THIS CYCLE · SETS PER MUSCLE' : 'THIS WEEK · SETS PER MUSCLE'}</div>
         {setsPerMuscle.length === 0 ? (
           <div style={{ color: UI.inkFaint, fontSize: 13, fontFamily: UI.fontUi }}>{isCycleMode ? 'No sessions this cycle yet.' : 'No sessions this week yet.'}</div>
         ) : setsPerMuscle.map(({ muscle, sets }) => (
@@ -652,22 +687,22 @@ function StatsTab({ store, sessions, go }) {
 
       {/* Weekly volume trend */}
       <div>
-        <div className="micro" style={{ marginBottom: 14 }}>WEEKLY VOLUME · LAST 8 WEEKS</div>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 60 }}>
+        <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>WEEKLY VOLUME · LAST 8 WEEKS</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 80 }}>
           {weeklyVolume.map(({ label, vol }, i) => (
             <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' }}>
               <div style={{
                 width: '100%', borderRadius: 3,
-                height: `${Math.max(3, (vol / maxWeekVol) * 52)}px`,
+                height: `${Math.max(3, (vol / maxWeekVol) * 68)}px`,
                 background: i === 7 ? UI.gold : UI.hair,
               }} />
             </div>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+        <div style={{ display: 'flex', gap: 4, marginTop: 5 }}>
           {weeklyVolume.map(({ label }, i) => (
             <div key={i} style={{ flex: 1, fontSize: 8, fontFamily: UI.fontUi, color: i === 7 ? UI.gold : UI.inkFaint, textAlign: 'center', letterSpacing: '0.03em' }}>
-              {i === 7 ? 'NOW' : ''}
+              {i === 7 ? 'NOW' : i % 2 === 0 ? label : ''}
             </div>
           ))}
         </div>
@@ -675,7 +710,7 @@ function StatsTab({ store, sessions, go }) {
 
       {/* All time */}
       <div>
-        <div className="micro" style={{ marginBottom: 14 }}>ALL TIME</div>
+        <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>ALL TIME</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <StatCard label="Sessions" value={sessions.length} />
           <StatCard label="Avg Volume" value={avgVol.toLocaleString('en-US')} sub="kg / session" />
@@ -690,27 +725,30 @@ function StatsTab({ store, sessions, go }) {
 
       {/* Consistency */}
       <div>
-        <div className="micro" style={{ marginBottom: 14 }}>CONSISTENCY</div>
+        <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>CONSISTENCY</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <StatCard label="Current Streak" value={currentStreak} sub={currentStreak === 1 ? 'day' : 'days'} gold />
+          <StatCard label="Longest Streak" value={longestStreak} sub={longestStreak === 1 ? 'day' : 'days'} gold />
           <StatCard label="This Year" value={thisYearSessions.length} sub="sessions" />
           <StatCard label="This Month" value={thisMonthSessions.length} sub="sessions" />
           <StatCard label="This Week" value={thisWeekSessions.length} sub="sessions" />
           <StatCard label="Avg / Week" value={avgSessionsPerWeek} sub="sessions" />
-          <StatCard label="Current Streak" value={currentStreak} sub={currentStreak === 1 ? 'day' : 'days'} />
-          <StatCard label="Longest Streak" value={longestStreak} sub={longestStreak === 1 ? 'day' : 'days'} />
         </div>
       </div>
 
       {/* Best session */}
       {bestSession && (
         <div>
-          <div className="micro" style={{ marginBottom: 14 }}>BEST SESSION</div>
+          <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>BEST SESSION</div>
           <Frame onClick={() => go({ name: 'session', sessionId: bestSession.id, back: { name: 'hist', initialTab: 'stats' } })} style={{ padding: '14px 16px', cursor: 'pointer' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div className="display" style={{ fontSize: 18, color: UI.ink }}>{bestSession.dayName}</div>
                 <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>
                   {new Date(bestSession.date.slice(0,10)+'T12:00:00').toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()}
+                </div>
+                <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>
+                  {bestSession.entries.length} exercises · {bestSession.entries.reduce((sum, e) => sum + e.sets.filter(st => st.done).length, 0)} sets
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
@@ -725,7 +763,7 @@ function StatsTab({ store, sessions, go }) {
       {/* Top exercises */}
       {topExercises.length > 0 && (
         <div>
-          <div className="micro" style={{ marginBottom: 14 }}>TOP EXERCISES</div>
+          <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>TOP EXERCISES</div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {topExercises.map(({ id, name, count }, i) => (
               <div key={id} onClick={() => go({ name: 'exercise', exId: id, back: { name: 'hist', initialTab: 'stats' } })} style={{
@@ -735,10 +773,10 @@ function StatsTab({ store, sessions, go }) {
                 cursor: 'pointer',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span className="num" style={{ fontSize: 11, color: UI.inkFaint, width: 16 }}>{i + 1}</span>
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>{name}</span>
+                  <span className="num" style={{ fontSize: i === 0 ? 13 : 11, color: i === 0 ? UI.gold : UI.inkFaint, width: 16 }}>{i + 1}</span>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 14, color: i === 0 ? UI.gold : UI.ink }}>{name}</span>
                 </div>
-                <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{count}×</span>
+                <span className="num" style={{ fontSize: 13, color: i === 0 ? UI.gold : UI.inkSoft }}>{count}×</span>
               </div>
             ))}
           </div>
@@ -781,38 +819,67 @@ function HistoryScreen({ store, go, initialTab }) {
           {sessions.length === 0 && (
             <Empty title="No sessions" sub="Log your first workout to see your history." icon={ICON_HISTORY} />
           )}
-          {sessions.map((s, si) => {
-            const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
-            const vol = totalVolume(s);
-            const date = new Date(s.date.slice(0, 10) + 'T12:00:00');
-            const days = Math.round((Date.now() - date) / 86400000);
-            return (
-              <div key={s.id}
-                onClick={() => go({ name: 'session', sessionId: s.id })}
-                style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
-                  padding: '16px 0',
-                  borderBottom: si < sessions.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
-                  cursor: 'pointer',
-                }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>
-                    {date.toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()} · {days === 0 ? 'TODAY' : `${days}D AGO`}
+          {(() => {
+            const now = new Date(); now.setHours(12,0,0,0);
+            const dow = now.getDay();
+            const monday = new Date(now); monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
+            const lastMonday = new Date(monday); lastMonday.setDate(monday.getDate() - 7);
+            const getGroup = (dateStr) => {
+              const d = new Date(dateStr.slice(0,10) + 'T12:00:00');
+              if (d >= monday) return 'THIS WEEK';
+              if (d >= lastMonday) return 'LAST WEEK';
+              return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
+            };
+            const items = [];
+            let lastGroup = null;
+            sessions.forEach(s => {
+              const group = getGroup(s.date);
+              const firstInGroup = group !== lastGroup;
+              if (firstInGroup) { items.push({ type: 'header', label: group, key: `h-${group}`, isFirst: items.length === 0 }); lastGroup = group; }
+              items.push({ type: 'session', session: s, key: s.id, firstInGroup });
+            });
+            return items.map(item => {
+              if (item.type === 'header') {
+                return (
+                  <div key={item.key} className="micro" style={{ marginTop: item.isFirst ? 6 : 24, marginBottom: 10, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>
+                    {item.label}
                   </div>
-                  <div className="display" style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>{s.dayName}</div>
-                  <div className="micro" style={{ color: UI.inkFaint }}>
-                    {s.entries.length} Exercises · {setsLogged} Sets
+                );
+              }
+              const s = item.session;
+              const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
+              const vol = totalVolume(s);
+              const date = new Date(s.date.slice(0,10) + 'T12:00:00');
+              const days = Math.round((Date.now() - date) / 86400000);
+              const isToday = days === 0;
+              return (
+                <div key={item.key}
+                  onClick={() => go({ name: 'session', sessionId: s.id })}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+                    padding: '16px 0',
+                    borderTop: !item.firstInGroup ? `0.5px solid ${UI.hair}` : 'none',
+                    cursor: 'pointer',
+                  }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="micro" style={{ color: isToday ? UI.gold : UI.inkFaint, marginBottom: 5 }}>
+                      {date.toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()} · {isToday ? 'TODAY' : `${days}D AGO`}
+                    </div>
+                    <div className="display" style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>{s.dayName}</div>
+                    <div className="micro" style={{ color: UI.inkFaint }}>
+                      {s.entries.length} Exercises · {setsLogged} Sets
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
+                      {vol.toLocaleString('en-US')}
+                    </div>
+                    <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>kg</div>
                   </div>
                 </div>
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
-                    {vol.toLocaleString('en-US')}
-                  </div>
-                  <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>kg</div>
-                </div>
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
         </div>
       )}
 
@@ -1172,6 +1239,7 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
 function SettingsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateL(store.user?.name || '');
+  const [restOpen, setRestOpen] = useStateL(false);
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
   const [pushEnabled, setPushEnabled] = useStateL(() => localStorage.getItem('logbook-push-enabled') === 'true');
@@ -1267,16 +1335,33 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </div>
         </Frame>
 
-        {/* Rest Default */}
+        {/* Rest Settings */}
         <Frame style={{ padding: '14px 16px' }}>
-          <span className="label">Rest default</span>
-          <div style={{ marginTop: 8 }}>
-            <Stepper
-              value={store.settings?.restDefault || 120}
-              step={15} min={0} suffix="s"
-              onChange={(v) => setStore(s => ({ ...s, settings: { ...s.settings, restDefault: v } }))}
-            />
-          </div>
+          <button onClick={() => setRestOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
+            <span className="label" style={{ marginBottom: 0 }}>Rest settings</span>
+            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: restOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+              <path d="M2 1l5 5-5 5"/>
+            </svg>
+          </button>
+          {restOpen && (
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {[
+                ['Default', 'restDefault', 120],
+                ['Big',     'restBig',     180],
+                ['Medium',  'restMedium',  120],
+                ['Small',   'restSmall',   90],
+              ].map(([label, key, def]) => (
+                <div key={key}>
+                  <div className="micro" style={{ marginBottom: 6 }}>{label.toUpperCase()}</div>
+                  <Stepper
+                    value={store.settings?.[key] || def}
+                    step={15} min={0} suffix="s"
+                    onChange={(v) => setStore(s => ({ ...s, settings: { ...s.settings, [key]: v } }))}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </Frame>
 
         {/* Push notifications */}
