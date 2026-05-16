@@ -470,8 +470,216 @@ function ProgressChart({ points }) {
   );
 }
 
+// ─── STATS TAB ───────────────────────────────────────────────────────
+function StatsTab({ store, sessions, go }) {
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+
+  // Monday of current week
+  const dow = today.getDay();
+  const monday = new Date(today); monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
+  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+
+  const thisWeekSessions = useMemoL(() => sessions.filter(s => {
+    const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+    return d >= monday && d <= sunday;
+  }), [sessions]);
+
+  const thisMonthSessions = useMemoL(() => sessions.filter(s => {
+    const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+    return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+  }), [sessions]);
+
+  // Weekly sets per muscle group
+  const setsPerMuscle = useMemoL(() => {
+    const counts = {};
+    thisWeekSessions.forEach(s => {
+      s.entries.forEach(entry => {
+        const ex = store.exercises.find(e => e.id === entry.exId);
+        const muscles = (ex?.tags || []).filter(t => MUSCLES.includes(t));
+        const done = entry.sets.filter(st => st.done).length;
+        muscles.forEach(m => { counts[m] = (counts[m] || 0) + done; });
+      });
+    });
+    return MUSCLES.map(m => ({ muscle: m, sets: counts[m] || 0 })).filter(x => x.sets > 0);
+  }, [thisWeekSessions, store.exercises]);
+
+  // Weekly volume over last 8 weeks
+  const weeklyVolume = useMemoL(() => {
+    const weeks = [];
+    for (let w = 7; w >= 0; w--) {
+      const wMon = new Date(monday); wMon.setDate(monday.getDate() - w * 7);
+      const wSun = new Date(wMon); wSun.setDate(wMon.getDate() + 6);
+      const vol = sessions
+        .filter(s => { const d = new Date(s.date.slice(0,10)+'T12:00:00'); return d >= wMon && d <= wSun; })
+        .reduce((sum, s) => sum + totalVolume(s), 0);
+      const label = wMon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      weeks.push({ label, vol });
+    }
+    return weeks;
+  }, [sessions]);
+
+  // All-time stats
+  const totalVol = sessions.reduce((sum, s) => sum + totalVolume(s), 0);
+  const totalSets = sessions.reduce((sum, s) => sum + s.entries.reduce((c, e) => c + e.sets.filter(st => st.done).length, 0), 0);
+  const totalReps = sessions.reduce((sum, s) => sum + s.entries.reduce((c, e) => c + e.sets.filter(st => st.done).reduce((r, st) => r + (+st.reps || 0), 0), 0), 0);
+  const avgVol = sessions.length ? Math.round(totalVol / sessions.length) : 0;
+  const durations = sessions.filter(s => s.startedAt && s.ended).map(s => Math.round((new Date(s.ended) - new Date(s.startedAt)) / 60000));
+  const avgDuration = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0;
+  const maxDuration = durations.length ? Math.max(...durations) : 0;
+
+  // Best session by volume
+  const bestSession = sessions.length ? sessions.reduce((best, s) => totalVolume(s) > totalVolume(best) ? s : best, sessions[0]) : null;
+
+  // Streaks (consecutive calendar days with a session)
+  const sessionDateSet = new Set(sessions.map(s => s.date.slice(0, 10)));
+  let currentStreak = 0;
+  for (let i = 0; i <= 365; i++) {
+    const d = new Date(today); d.setDate(today.getDate() - i);
+    if (sessionDateSet.has(d.toISOString().slice(0, 10))) currentStreak++;
+    else if (i > 0) break;
+  }
+  let longestStreak = 0, ls = 0;
+  [...sessionDateSet].sort().forEach((key, i, arr) => {
+    if (i === 0) { ls = 1; longestStreak = 1; return; }
+    const diff = Math.round((new Date(key + 'T12:00:00') - new Date(arr[i-1] + 'T12:00:00')) / 86400000);
+    ls = diff === 1 ? ls + 1 : 1;
+    longestStreak = Math.max(longestStreak, ls);
+  });
+
+  // Top 5 exercises by session count
+  const exCounts = {};
+  sessions.forEach(s => s.entries.forEach(e => { exCounts[e.exId] = (exCounts[e.exId] || 0) + 1; }));
+  const topExercises = Object.entries(exCounts).sort((a, b) => b[1] - a[1]).slice(0, 5)
+    .map(([id, count]) => ({ name: store.exercises.find(e => e.id === id)?.name || '?', count }));
+
+  const maxSets = Math.max(...setsPerMuscle.map(x => x.sets), 1);
+  const maxWeekVol = Math.max(...weeklyVolume.map(w => w.vol), 1);
+
+  const StatCard = ({ label, value, sub }) => (
+    <div style={{ background: UI.bgInset, borderRadius: 12, padding: '12px 14px' }}>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{label}</div>
+      <div className="num" style={{ fontSize: 22, color: UI.ink, lineHeight: 1 }}>{value}</div>
+      {sub && <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px 40px', display: 'flex', flexDirection: 'column', gap: 28 }}>
+
+      {/* Weekly sets per muscle */}
+      <div>
+        <div className="micro" style={{ marginBottom: 14 }}>THIS WEEK · SETS PER MUSCLE</div>
+        {setsPerMuscle.length === 0 ? (
+          <div style={{ color: UI.inkFaint, fontSize: 13, fontFamily: UI.fontUi }}>No sessions this week yet.</div>
+        ) : setsPerMuscle.map(({ muscle, sets }) => (
+          <div key={muscle} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <div style={{ width: 100, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.05em' }}>{muscle}</div>
+            <div style={{ flex: 1, height: 3, background: UI.hair, borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${(sets / maxSets) * 100}%`, background: UI.gold, borderRadius: 2 }} />
+            </div>
+            <div className="num" style={{ width: 24, textAlign: 'right', fontSize: 13, color: UI.gold }}>{sets}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Weekly volume trend */}
+      <div>
+        <div className="micro" style={{ marginBottom: 14 }}>WEEKLY VOLUME · LAST 8 WEEKS</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 60 }}>
+          {weeklyVolume.map(({ label, vol }, i) => (
+            <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' }}>
+              <div style={{
+                width: '100%', borderRadius: 3,
+                height: `${Math.max(3, (vol / maxWeekVol) * 52)}px`,
+                background: i === 7 ? UI.gold : UI.hair,
+              }} />
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+          {weeklyVolume.map(({ label }, i) => (
+            <div key={i} style={{ flex: 1, fontSize: 8, fontFamily: UI.fontUi, color: i === 7 ? UI.gold : UI.inkFaint, textAlign: 'center', letterSpacing: '0.03em' }}>
+              {i === 7 ? 'NOW' : ''}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* All time */}
+      <div>
+        <div className="micro" style={{ marginBottom: 14 }}>ALL TIME</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <StatCard label="Sessions" value={sessions.length} />
+          <StatCard label="Total Volume" value={Math.round(totalVol).toLocaleString('en-US')} sub="kg" />
+          <StatCard label="Avg Volume" value={avgVol.toLocaleString('en-US')} sub="kg / session" />
+          <StatCard label="Avg Duration" value={avgDuration || '—'} sub={avgDuration ? 'min' : ''} />
+          <StatCard label="Total Sets" value={totalSets.toLocaleString('en-US')} />
+          <StatCard label="Total Reps" value={totalReps.toLocaleString('en-US')} />
+          <StatCard label="Longest Session" value={maxDuration || '—'} sub={maxDuration ? 'min' : ''} />
+        </div>
+      </div>
+
+      {/* Consistency */}
+      <div>
+        <div className="micro" style={{ marginBottom: 14 }}>CONSISTENCY</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <StatCard label="This Week" value={thisWeekSessions.length} sub="sessions" />
+          <StatCard label="This Month" value={thisMonthSessions.length} sub="sessions" />
+          <StatCard label="Current Streak" value={currentStreak} sub={currentStreak === 1 ? 'day' : 'days'} />
+          <StatCard label="Longest Streak" value={longestStreak} sub={longestStreak === 1 ? 'day' : 'days'} />
+        </div>
+      </div>
+
+      {/* Best session */}
+      {bestSession && (
+        <div>
+          <div className="micro" style={{ marginBottom: 14 }}>BEST SESSION</div>
+          <Frame onClick={() => go({ name: 'session', sessionId: bestSession.id })} style={{ padding: '14px 16px', cursor: 'pointer' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div className="display" style={{ fontSize: 18, color: UI.ink }}>{bestSession.dayName}</div>
+                <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>
+                  {new Date(bestSession.date.slice(0,10)+'T12:00:00').toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div className="num" style={{ fontSize: 22, color: UI.gold }}>{Math.round(totalVolume(bestSession)).toLocaleString('en-US')}</div>
+                <div className="micro" style={{ color: UI.inkFaint }}>kg</div>
+              </div>
+            </div>
+          </Frame>
+        </div>
+      )}
+
+      {/* Top exercises */}
+      {topExercises.length > 0 && (
+        <div>
+          <div className="micro" style={{ marginBottom: 14 }}>TOP EXERCISES</div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {topExercises.map(({ name, count }, i) => (
+              <div key={name} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '11px 0',
+                borderBottom: i < topExercises.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span className="num" style={{ fontSize: 11, color: UI.inkFaint, width: 16 }}>{i + 1}</span>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>{name}</span>
+                </div>
+                <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{count}×</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
 // ─── HISTORY ─────────────────────────────────────────────────────────
 function HistoryScreen({ store, go }) {
+  const [tab, setTab] = useStateL('workouts');
   const sessions = useMemoL(() => {
     return [...store.sessions]
       .filter(s => s.ended)
@@ -479,45 +687,64 @@ function HistoryScreen({ store, go }) {
   }, [store.sessions]);
 
   return (
-    <Screen>
+    <Screen scroll={false}>
       <TopBar title="History" />
-      <div style={{ padding: '6px 22px 22px', display: 'flex', flexDirection: 'column' }}>
-        {sessions.length === 0 && (
-          <Empty title="No sessions" sub="Log your first workout to see your history." icon={ICON_HISTORY} />
-        )}
-        {sessions.map((s, si) => {
-          const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
-          const vol = totalVolume(s);
-          const date = new Date(s.date.slice(0, 10) + 'T12:00:00');
-          const days = Math.round((Date.now() - date) / 86400000);
-          return (
-            <div key={s.id}
-              onClick={() => go({ name: 'session', sessionId: s.id })}
-              style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
-                padding: '16px 0',
-                borderBottom: si < sessions.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
-                cursor: 'pointer',
-              }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>
-                  {date.toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()} · {days === 0 ? 'TODAY' : `${days}D AGO`}
-                </div>
-                <div className="display" style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>{s.dayName}</div>
-                <div className="micro" style={{ color: UI.inkFaint }}>
-                  {s.entries.length} Exercises · {setsLogged} Sets
-                </div>
-              </div>
-              <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
-                  {vol.toLocaleString('en-US')}
-                </div>
-                <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>kg</div>
-              </div>
-            </div>
-          );
-        })}
+      {/* Tab strip */}
+      <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
+        {[['workouts','Workouts'],['stats','Stats']].map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)} style={{
+            flex: 1, background: 'transparent', border: 'none',
+            padding: '11px 0', cursor: 'pointer',
+            color: tab === id ? UI.gold : UI.inkFaint,
+            fontFamily: UI.fontUi, fontSize: 10, fontWeight: tab === id ? 600 : 400,
+            letterSpacing: '0.14em', textTransform: 'uppercase',
+            borderBottom: `0.5px solid ${tab === id ? UI.gold : 'transparent'}`,
+            marginBottom: -0.5, transition: 'color 0.2s',
+          }}>{label}</button>
+        ))}
       </div>
+
+      {tab === 'workouts' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px', display: 'flex', flexDirection: 'column' }}>
+          {sessions.length === 0 && (
+            <Empty title="No sessions" sub="Log your first workout to see your history." icon={ICON_HISTORY} />
+          )}
+          {sessions.map((s, si) => {
+            const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
+            const vol = totalVolume(s);
+            const date = new Date(s.date.slice(0, 10) + 'T12:00:00');
+            const days = Math.round((Date.now() - date) / 86400000);
+            return (
+              <div key={s.id}
+                onClick={() => go({ name: 'session', sessionId: s.id })}
+                style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+                  padding: '16px 0',
+                  borderBottom: si < sessions.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                  cursor: 'pointer',
+                }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>
+                    {date.toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()} · {days === 0 ? 'TODAY' : `${days}D AGO`}
+                  </div>
+                  <div className="display" style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>{s.dayName}</div>
+                  <div className="micro" style={{ color: UI.inkFaint }}>
+                    {s.entries.length} Exercises · {setsLogged} Sets
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
+                    {vol.toLocaleString('en-US')}
+                  </div>
+                  <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>kg</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'stats' && <StatsTab store={store} sessions={sessions} go={go} />}
     </Screen>
   );
 }
