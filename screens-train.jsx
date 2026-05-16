@@ -62,9 +62,10 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   const isImprovement = (st, prevSet) => {
     if (!prevSet) return false;
-    if (st.kg != null && prevSet.kg != null && st.kg > prevSet.kg) return true;
-    if (st.kg === prevSet.kg && st.reps != null && prevSet.reps != null && st.reps > prevSet.reps) return true;
-    return false;
+    const kg = st.kg != null && prevSet.kg != null;
+    const reps = st.reps != null && prevSet.reps != null;
+    if (!kg || !reps) return false;
+    return st.kg >= prevSet.kg && st.reps >= prevSet.reps && (st.kg > prevSet.kg || st.reps > prevSet.reps);
   };
 
   const completeSet = (setIdx) => {
