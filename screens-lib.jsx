@@ -248,10 +248,11 @@ function ExerciseCreator({ onClose, setStore, onCreated }) {
   const [name, setName] = useStateL('');
   const [selectedTags, setSelectedTags] = useStateL([]);
   const [category, setCategory] = useStateL(null);
+  const [unilateral, setUnilateral] = useStateL(false);
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, note: '' };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral, note: '' };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -279,6 +280,12 @@ function ExerciseCreator({ onClose, setStore, onCreated }) {
             ))}
           </div>
         </div>
+        <div>
+          <span className="label">Movement type</span>
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            <Pill gold={unilateral} onClick={() => setUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
+          </div>
+        </div>
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Create</Btn>
       </div>
     </Sheet>
@@ -295,14 +302,15 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
   const [editName, setEditName] = useStateL('');
   const [editTags, setEditTags] = useStateL([]);
   const [editCategory, setEditCategory] = useStateL(null);
+  const [editUnilateral, setEditUnilateral] = useStateL(false);
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditUnilateral(!!ex.unilateral); setEditMode(true); };
   const cancelEdit = () => setEditMode(false);
   const saveEdit = () => {
     if (!editName.trim()) return;
-    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null } : e) }));
+    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral } : e) }));
     setEditMode(false);
   };
   const toggleEditTag = (m) => setEditTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
@@ -325,9 +333,14 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
       .map(s => ({ session: s, entry: s.entries.find(e => e.exId === exId) }));
   }, [store.sessions, exId]);
 
+  const e1rmForSet = (s) => {
+    if (s.kg == null) return 0;
+    if (s.repsL != null || s.repsR != null) return s.kg * (1 + Math.max(s.repsL || 0, s.repsR || 0) / 30);
+    return s.reps ? s.kg * (1 + s.reps / 30) : 0;
+  };
+
   const points = history.map(h => {
-    const best = (h.entry.sets || []).filter(s => s.kg && s.reps)
-      .reduce((m, s) => Math.max(m, s.kg * (1 + s.reps / 30)), 0);
+    const best = (h.entry.sets || []).reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
     return { date: h.session.date, est: best };
   }).filter(p => p.est > 0).reverse();
 
@@ -385,13 +398,20 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
                 ))}
               </div>
             </div>
+            <div>
+              <span className="label">Movement type</span>
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                <Pill gold={editUnilateral} onClick={() => setEditUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
+              </div>
+            </div>
             <Btn kind="ghost" onClick={cancelEdit} style={{ fontSize: 11 }}>Cancel</Btn>
           </div>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {ex.category && <Pill gold>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
+            {ex.unilateral && <Pill gold>Unilateral</Pill>}
             {(ex.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
-            {!ex.category && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
+            {!ex.category && !ex.unilateral && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
           </div>
         )}
       </div>
@@ -445,9 +465,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
           <Bezel>HISTORY</Bezel>
           <div style={{ marginTop: 8 }}>
             {history.slice(0, 10).map((h, hi) => {
-              const e1rm = (s) => (s.kg && s.reps) ? s.kg * (1 + s.reps / 30) : 0;
-              const setsWithData = h.entry.sets.filter(s => s.kg && s.reps);
-              const sessionBest = setsWithData.length ? Math.max(...setsWithData.map(e1rm)) : 0;
+              const sessionBest = h.entry.sets.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
               const isPR = pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01;
               return (
                 <div key={h.session.id}
@@ -469,10 +487,13 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       {h.entry.sets.filter(s => s.kg).map((s, i) => {
-                        const isBest = sessionBest > 0 && Math.abs(e1rm(s) - sessionBest) < 0.01;
+                        const isBest = sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01;
+                        const repsStr = (s.repsL != null || s.repsR != null)
+                          ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
+                          : s.reps;
                         return (
                           <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink }}>
-                            {s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{s.reps}
+                            {s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{repsStr}
                           </span>
                         );
                       })}
@@ -1071,7 +1092,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           fontFamily: UI.fontNum, fontSize: 12,
                           color: gold ? UI.goldLight : UI.ink,
                         }}>
-                          {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                          {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
                         </span>
                       );
                     })}
@@ -1161,7 +1182,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       fontFamily: UI.fontNum, fontSize: 11,
                       color: gold ? UI.goldLight : UI.ink,
                     }}>
-                      {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                      {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
                     </span>
                   );
                 })}

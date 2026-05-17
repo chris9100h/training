@@ -69,7 +69,7 @@ async function setupNewUser(userId, name) {
 async function loadFromSupabase(userId) {
   const [profileRes, exRes, schRes, sessRes, settRes] = await Promise.all([
     _supabase.from('profiles').select('id, name').eq('id', userId).maybeSingle(),
-    _supabase.from('exercises').select('id, name, tags, note, category').eq('user_id', userId),
+    _supabase.from('exercises').select('id, name, tags, note, category, unilateral').eq('user_id', userId),
     _supabase.from('schedules').select('id, name, days').eq('user_id', userId),
     _supabase.from('sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries')
       .eq('user_id', userId).order('date', { ascending: false }),
@@ -140,7 +140,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('exercises').delete().in('id', removed.map(e => e.id)));
   }
 
