@@ -3,7 +3,7 @@
 const { useState: useStateL, useMemo: useMemoL, useRef: useRefL, useEffect: useEffectL } = React;
 
 // Persists library filter state across navigation (survives remounts)
-const _lib = { tab: 'recent', q: '', filterTags: [], filterNoCategory: false };
+const _lib = { tab: 'recent', q: '', filterTags: [], filterRestCats: [], filterUnilateral: null };
 
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go }) {
@@ -14,12 +14,14 @@ function LibraryScreen({ store, setStore, go }) {
   const [selecting, setSelecting] = useStateL(false);
   const [selected, setSelected] = useStateL(new Set());
   const [filterTags, setFilterTags] = useStateL(_lib.filterTags);
-  const [filterNoCategory, setFilterNoCategory] = useStateL(_lib.filterNoCategory);
+  const [filterRestCats, setFilterRestCats] = useStateL(_lib.filterRestCats);
+  const [filterUnilateral, setFilterUnilateral] = useStateL(_lib.filterUnilateral);
   const toggleFilter = (m) => setFilterTags(t => { const n = t.includes(m) ? t.filter(x => x !== m) : [...t, m]; _lib.filterTags = n; return n; });
+  const toggleRestCat = (v) => setFilterRestCats(t => { const n = t.includes(v) ? t.filter(x => x !== v) : [...t, v]; _lib.filterRestCats = n; return n; });
+  const toggleUni = (v) => { const n = filterUnilateral === v ? null : v; _lib.filterUnilateral = n; setFilterUnilateral(n); };
 
   useEffectL(() => { _lib.tab = tab; }, [tab]);
   useEffectL(() => { _lib.q = q; }, [q]);
-  useEffectL(() => { _lib.filterNoCategory = filterNoCategory; }, [filterNoCategory]);
 
   const exitSelect = () => { setSelecting(false); setSelected(new Set()); };
 
@@ -73,11 +75,14 @@ function LibraryScreen({ store, setStore, go }) {
       .filter(e => {
         const matchSearch = !q || e.name.toUpperCase().includes(ql) || e.tags?.some(t => t.toUpperCase().includes(ql));
         const matchTags = filterTags.length === 0 || filterTags.some(ft => e.tags?.includes(ft));
-        const matchNoCategory = !filterNoCategory || !e.category;
-        return matchSearch && matchTags && matchNoCategory;
+        const matchRest = filterRestCats.length === 0 ||
+          (filterRestCats.includes('none') && !e.category) ||
+          (e.category && filterRestCats.includes(e.category));
+        const matchUnilateral = filterUnilateral === null || !!e.unilateral === filterUnilateral;
+        return matchSearch && matchTags && matchRest && matchUnilateral;
       })
       .sort((a,b) => a.name.localeCompare(b.name));
-  }, [store.exercises, q, filterTags, filterNoCategory]);
+  }, [store.exercises, q, filterTags, filterRestCats, filterUnilateral]);
 
   const topBarRight = selecting ? (
     <button onClick={exitSelect} style={{ background: 'none', border: 'none', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}>
@@ -129,13 +134,37 @@ function LibraryScreen({ store, setStore, go }) {
                 <TextInput value={q} onChange={setQ} placeholder="Suchen…" />
               </Field>
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
-              {MUSCLES.map(m => (
-                <Pill key={m} gold={filterTags.includes(m)} onClick={() => toggleFilter(m)}
-                  style={{ cursor: 'pointer' }}>{m}</Pill>
-              ))}
-              <Pill gold={filterNoCategory} onClick={() => setFilterNoCategory(v => !v)}
-                style={{ cursor: 'pointer' }}>No rest assigned</Pill>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 6 }}>
+              <div>
+                <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 8 }}>
+                  <span className="micro" style={{ color: UI.gold }}>MUSCLE GROUP</span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {MUSCLES.map(m => (
+                    <Pill key={m} gold={filterTags.includes(m)} onClick={() => toggleFilter(m)} style={{ cursor: 'pointer' }}>{m}</Pill>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 8 }}>
+                  <span className="micro" style={{ color: UI.gold }}>REST</span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  <Pill gold={filterRestCats.includes('none')} onClick={() => toggleRestCat('none')} style={{ cursor: 'pointer' }}>No rest assigned</Pill>
+                  <Pill gold={filterRestCats.includes('big')} onClick={() => toggleRestCat('big')} style={{ cursor: 'pointer' }}>Big</Pill>
+                  <Pill gold={filterRestCats.includes('medium')} onClick={() => toggleRestCat('medium')} style={{ cursor: 'pointer' }}>Medium</Pill>
+                  <Pill gold={filterRestCats.includes('small')} onClick={() => toggleRestCat('small')} style={{ cursor: 'pointer' }}>Small</Pill>
+                </div>
+              </div>
+              <div>
+                <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 8 }}>
+                  <span className="micro" style={{ color: UI.gold }}>MOVEMENT</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <Pill gold={filterUnilateral === true} onClick={() => toggleUni(true)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
+                  <Pill gold={filterUnilateral === false} onClick={() => toggleUni(false)} style={{ cursor: 'pointer' }}>Bilateral</Pill>
+                </div>
+              </div>
             </div>
           </>
         )}
