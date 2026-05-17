@@ -3,7 +3,7 @@
 const { useState: useStateL, useMemo: useMemoL, useRef: useRefL, useEffect: useEffectL } = React;
 
 // Persists library filter state across navigation (survives remounts)
-const _lib = { tab: 'recent', q: '', filterTags: [], filterRestCats: [], filterUnilateral: null };
+const _lib = { tab: 'recent', q: '', filterTags: [], filterRestCats: [], filterUnilateral: null, filterPlan: null };
 
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go }) {
@@ -19,6 +19,12 @@ function LibraryScreen({ store, setStore, go }) {
   const toggleFilter = (m) => setFilterTags(t => { const n = t.includes(m) ? t.filter(x => x !== m) : [...t, m]; _lib.filterTags = n; return n; });
   const toggleRestCat = (v) => setFilterRestCats(t => { const n = t.includes(v) ? t.filter(x => x !== v) : [...t, v]; _lib.filterRestCats = n; return n; });
   const toggleUni = (v) => { const n = filterUnilateral === v ? null : v; _lib.filterUnilateral = n; setFilterUnilateral(n); };
+  const [filterPlan, setFilterPlan] = useStateL(_lib.filterPlan);
+  const togglePlan = (v) => { const n = filterPlan === v ? null : v; _lib.filterPlan = n; setFilterPlan(n); };
+
+  const planExIds = useMemoL(() => new Set(
+    store.schedules.flatMap(s => s.days.flatMap(d => (d.items || []).map(it => it.exId)))
+  ), [store.schedules]);
 
   useEffectL(() => { _lib.tab = tab; }, [tab]);
   useEffectL(() => { _lib.q = q; }, [q]);
@@ -79,10 +85,11 @@ function LibraryScreen({ store, setStore, go }) {
           (filterRestCats.includes('none') && !e.category) ||
           (e.category && filterRestCats.includes(e.category));
         const matchUnilateral = filterUnilateral === null || !!e.unilateral === filterUnilateral;
-        return matchSearch && matchTags && matchRest && matchUnilateral;
+        const matchPlan = filterPlan === null || (filterPlan === 'in' ? planExIds.has(e.id) : !planExIds.has(e.id));
+        return matchSearch && matchTags && matchRest && matchUnilateral && matchPlan;
       })
       .sort((a,b) => a.name.localeCompare(b.name));
-  }, [store.exercises, q, filterTags, filterRestCats, filterUnilateral]);
+  }, [store.exercises, q, filterTags, filterRestCats, filterUnilateral, filterPlan, planExIds]);
 
   const topBarRight = selecting ? (
     <button onClick={exitSelect} style={{ background: 'none', border: 'none', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}>
@@ -163,6 +170,15 @@ function LibraryScreen({ store, setStore, go }) {
                 <div style={{ display: 'flex', gap: 6 }}>
                   <Pill gold={filterUnilateral === true} onClick={() => toggleUni(true)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
                   <Pill gold={filterUnilateral === false} onClick={() => toggleUni(false)} style={{ cursor: 'pointer' }}>Bilateral</Pill>
+                </div>
+              </div>
+              <div>
+                <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 8 }}>
+                  <span className="micro" style={{ color: UI.gold }}>PLAN</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <Pill gold={filterPlan === 'in'} onClick={() => togglePlan('in')} style={{ cursor: 'pointer' }}>In plan</Pill>
+                  <Pill gold={filterPlan === 'out'} onClick={() => togglePlan('out')} style={{ cursor: 'pointer' }}>Not in plan</Pill>
                 </div>
               </div>
             </div>
