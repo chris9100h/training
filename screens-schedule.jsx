@@ -603,7 +603,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
       }
       const gid = LB.uid();
       items[idx] = { ...a, supersetGroup: gid };
-      items[idx + 1] = { ...b, supersetGroup: gid };
+      items[idx + 1] = { ...b, supersetGroup: gid, sets: a.sets };
       return { ...d, items };
     });
   };
@@ -670,7 +670,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                 if (linkedToNext) {
                   els.push(
                     <div key={`conn-${i}`} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', background: UI.goldFaint, borderLeft: `0.5px solid ${UI.goldSoft}`, borderRight: `0.5px solid ${UI.goldSoft}`, padding: '1px 12px', marginBottom: 0 }}>
-                      <button onClick={e => { e.stopPropagation(); toggleSuperset(i); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.gold, fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.12em', padding: '2px 0' }}>LINKED ×</button>
+                      <button onClick={e => { e.stopPropagation(); toggleSuperset(i); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.gold, fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.12em', padding: '2px 0' }}>SUPERSET ×</button>
                     </div>
                   );
                 } else {
