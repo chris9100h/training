@@ -213,8 +213,15 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     const prev = prevRestRemaining.current;
     prevRestRemaining.current = restRemaining;
     if (prev !== null && prev > 0 && restRemaining === 0) {
-      // visual: open the rest modal so it's impossible to miss
       setRestModalOpen(true);
+      // gold screen flash 3×
+      let i = 0;
+      const flash = () => {
+        if (i >= 3) return;
+        setScreenFlash(true);
+        setTimeout(() => { setScreenFlash(false); i++; setTimeout(flash, 140); }, 220);
+      };
+      flash();
       // audio: two beeps + higher tone (blocked by iOS silent switch, but nice to have)
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -237,6 +244,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   const [flashSet, setFlashSet] = useStateT(null);
   const [improvedSet, setImprovedSet] = useStateT(false);
+  const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(false);
   const [confirmEl, confirm] = useConfirm();
   const [finishOpen, setFinishOpen] = useStateT(false);
@@ -345,6 +353,10 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   return (
     <Screen scroll={false}>
+      {/* Gold screen flash overlay */}
+      {screenFlash && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />
+      )}
       {/* Improvement toast */}
       <div style={{
         position: 'absolute', top: 'calc(env(safe-area-inset-top, 0px) + 62px)', left: 0, right: 0,
