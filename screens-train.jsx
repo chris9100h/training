@@ -70,7 +70,6 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   const completeSet = (setIdx) => {
     updateSet(setIdx, { done: true });
-    persistRestStart(Date.now());
     setFlashSet(setIdx);
     setTimeout(() => setFlashSet(null), 1400);
     const prevSet = last?.entry?.sets?.[setIdx];
@@ -79,8 +78,37 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       setTimeout(() => setImprovedSet(false), 2200);
     }
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
-    if (updatedSets.every(st => st.done)) {
-      setTimeout(() => navigate(1), 600);
+    const group = entry.supersetGroup;
+    if (group) {
+      const newDoneCount = updatedSets.filter(s => s.done).length;
+      const partners = session.entries.map((e, i) => ({ e, i })).filter(({ e, i }) => e.supersetGroup === group && i !== exIdx);
+      const nextPartner = partners.find(({ e }) => e.sets.filter(s => s.done).length < newDoneCount);
+      if (nextPartner) {
+        // Mid-round: jump to partner, no rest
+        setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), 300);
+      } else {
+        // Round complete: start rest
+        persistRestStart(Date.now());
+        const allGroupDone = updatedSets.every(s => s.done) && partners.every(({ e }) => e.sets.every(s => s.done));
+        if (allGroupDone) {
+          const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
+          setTimeout(() => {
+            if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
+            else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
+          }, 600);
+        } else {
+          const allGroup = session.entries.map((e, i) => ({ e, i })).filter(({ e }) => e.supersetGroup === group);
+          const firstIncomplete = allGroup.find(({ e, i }) =>
+            i === exIdx ? !updatedSets.every(s => s.done) : e.sets.some(s => !s.done)
+          );
+          if (firstIncomplete) setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: firstIncomplete.i })), 600);
+        }
+      }
+    } else {
+      persistRestStart(Date.now());
+      if (updatedSets.every(st => st.done)) {
+        setTimeout(() => navigate(1), 600);
+      }
     }
   };
 
@@ -432,11 +460,13 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
       {/* Exercise chips */}
       <div ref={chipRowRef} style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
-        {session.entries.map((e, i) => {
+        {session.entries.flatMap((e, i) => {
           const done = e.sets.every(s => s.done);
           const active = i === exIdx;
-          return (
-            <button key={i}
+          const nextE = session.entries[i + 1];
+          const linkedToNext = e.supersetGroup && e.supersetGroup === nextE?.supersetGroup;
+          const chip = (
+            <button key={`chip-${i}`}
               onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
               style={{
                 flexShrink: 0, maxWidth: 110,
@@ -458,6 +488,10 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               </div>
             </button>
           );
+          if (linkedToNext) {
+            return [chip, <span key={`ss-${i}`} style={{ flexShrink: 0, alignSelf: 'center', fontSize: 10, color: UI.goldSoft, lineHeight: 1 }}>⟷</span>];
+          }
+          return [chip];
         })}
       </div>
 

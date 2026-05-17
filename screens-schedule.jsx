@@ -592,6 +592,22 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     setCopyingFrom(false);
   };
 
+  const toggleSuperset = (idx) => {
+    setDraft(d => {
+      const items = d.items.map(it => ({ ...it }));
+      const a = items[idx], b = items[idx + 1];
+      if (!b) return d;
+      if (a.supersetGroup && a.supersetGroup === b.supersetGroup) {
+        const gid = a.supersetGroup;
+        return { ...d, items: items.map(it => it.supersetGroup === gid ? { ...it, supersetGroup: null } : it) };
+      }
+      const gid = LB.uid();
+      items[idx] = { ...a, supersetGroup: gid };
+      items[idx + 1] = { ...b, supersetGroup: gid };
+      return { ...d, items };
+    });
+  };
+
   const otherDaysWithExercises = schedule ? schedule.days.filter(d => d.id !== draft.id && d.items.length > 0) : [];
 
   return (
@@ -617,14 +633,22 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
               }}>Copy from day</button>
             )}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {draft.items.map((it, i) => {
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {draft.items.flatMap((it, i) => {
               const ex = LB.findExercise(store, it.exId);
-              return (
-                <div key={i} onClick={() => setEditingItem(i)} style={{
+              const nextIt = draft.items[i + 1];
+              const prevIt = draft.items[i - 1];
+              const linkedToNext = it.supersetGroup && it.supersetGroup === nextIt?.supersetGroup;
+              const linkedToPrev = it.supersetGroup && it.supersetGroup === prevIt?.supersetGroup;
+              const inGroup = linkedToNext || linkedToPrev;
+              const els = [];
+              els.push(
+                <div key={`item-${i}`} onClick={() => setEditingItem(i)} style={{
                   display: 'flex', gap: 8, alignItems: 'center',
-                  background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-                  padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
+                  background: inGroup ? UI.goldFaint : UI.bgInset,
+                  border: `0.5px solid ${inGroup ? UI.goldSoft : UI.hairStrong}`,
+                  borderRadius: linkedToPrev && linkedToNext ? 0 : linkedToPrev ? '0 0 10px 10px' : linkedToNext ? '10px 10px 0 0' : 10,
+                  padding: '10px 12px', cursor: 'pointer', marginBottom: linkedToNext ? 0 : 6,
                 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <button onClick={e => { e.stopPropagation(); moveItem(i, -1); }} disabled={i === 0} style={{ ...dayEditIconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
@@ -642,6 +666,22 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                   <button onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...dayEditIconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
                 </div>
               );
+              if (i < draft.items.length - 1) {
+                if (linkedToNext) {
+                  els.push(
+                    <div key={`conn-${i}`} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', background: UI.goldFaint, borderLeft: `0.5px solid ${UI.goldSoft}`, borderRight: `0.5px solid ${UI.goldSoft}`, padding: '1px 12px', marginBottom: 0 }}>
+                      <button onClick={e => { e.stopPropagation(); toggleSuperset(i); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.gold, fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.12em', padding: '2px 0' }}>SUPERSET ×</button>
+                    </div>
+                  );
+                } else {
+                  els.push(
+                    <div key={`conn-${i}`} style={{ display: 'flex', justifyContent: 'center', marginBottom: 6 }}>
+                      <button onClick={e => { e.stopPropagation(); toggleSuperset(i); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.1em', padding: '1px 8px' }}>SS</button>
+                    </div>
+                  );
+                }
+              }
+              return els;
             })}
             <Btn kind="ghost" onClick={() => setAddingEx(true)} style={{ borderStyle: 'dashed', minHeight: 42, fontSize: 12 }}>+ Add exercise</Btn>
           </div>

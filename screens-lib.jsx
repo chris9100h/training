@@ -1020,34 +1020,69 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         <div>
           <Bezel>EXERCISES</Bezel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
-            {s.entries.map((e, i) => (
-              <div key={i}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-                  <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{e.name}</div>
-                  <Pill>{e.sets.filter(x => x.done).length} / {e.sets.length}</Pill>
+            {(() => {
+              // Group entries: consecutive entries with the same supersetGroup are bundled
+              const groups = [];
+              let idx = 0;
+              while (idx < s.entries.length) {
+                const e = s.entries[idx];
+                if (e.supersetGroup) {
+                  const members = [{ entry: e, idx }];
+                  let j = idx + 1;
+                  while (j < s.entries.length && s.entries[j].supersetGroup === e.supersetGroup) {
+                    members.push({ entry: s.entries[j], idx: j });
+                    j++;
+                  }
+                  groups.push({ type: 'superset', members });
+                  idx = j;
+                } else {
+                  groups.push({ type: 'standalone', entry: e, idx });
+                  idx++;
+                }
+              }
+
+              const renderEntry = (e, i) => (
+                <div key={i}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{e.name}</div>
+                    <Pill>{e.sets.filter(x => x.done).length} / {e.sets.length}</Pill>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {e.sets.map((st, j) => {
+                      const prev = prevEntryMap[e.exId];
+                      const gold = isImprovement(st, prev?.sets?.[j]);
+                      return (
+                        <span key={j} style={{
+                          opacity: st.done ? 1 : 0.3,
+                          background: gold ? UI.goldFaint : 'transparent',
+                          border: `0.5px solid ${gold ? UI.goldSoft : UI.hair}`,
+                          borderRadius: 6, padding: '3px 8px',
+                          fontFamily: UI.fontNum, fontSize: 12,
+                          color: gold ? UI.goldLight : UI.ink,
+                        }}>
+                          {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{e.note}</div>}
                 </div>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {e.sets.map((st, j) => {
-                    const prev = prevEntryMap[e.exId];
-                    const gold = isImprovement(st, prev?.sets?.[j]);
-                    return (
-                      <span key={j} style={{
-                        opacity: st.done ? 1 : 0.3,
-                        background: gold ? UI.goldFaint : 'transparent',
-                        border: `0.5px solid ${gold ? UI.goldSoft : UI.hair}`,
-                        borderRadius: 6, padding: '3px 8px',
-                        fontFamily: UI.fontNum, fontSize: 12,
-                        color: gold ? UI.goldLight : UI.ink,
-                      }}>
-                        {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
-                      </span>
-                    );
-                  })}
+              );
+
+              return groups.map((g, gi) => (
+                <div key={gi}>
+                  {g.type === 'superset' ? (
+                    <div style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 12 }}>
+                      <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>SUPERSET</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                        {g.members.map(({ entry: e, idx: i }) => renderEntry(e, i))}
+                      </div>
+                    </div>
+                  ) : renderEntry(g.entry, g.idx)}
+                  {gi < groups.length - 1 && <Hairline style={{ marginTop: 14 }} />}
                 </div>
-                {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{e.note}</div>}
-                {i < s.entries.length - 1 && <Hairline style={{ marginTop: 14 }} />}
-              </div>
-            ))}
+              ));
+            })()}
           </div>
         </div>
       </div>
