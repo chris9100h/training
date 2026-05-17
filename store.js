@@ -69,7 +69,7 @@ async function setupNewUser(userId, name) {
 async function loadFromSupabase(userId) {
   const [profileRes, exRes, schRes, sessRes, settRes] = await Promise.all([
     _supabase.from('profiles').select('id, name').eq('id', userId).maybeSingle(),
-    _supabase.from('exercises').select('id, name, tags, note').eq('user_id', userId),
+    _supabase.from('exercises').select('id, name, tags, note, category').eq('user_id', userId),
     _supabase.from('schedules').select('id, name, days').eq('user_id', userId),
     _supabase.from('sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries')
       .eq('user_id', userId).order('date', { ascending: false }),
@@ -109,7 +109,14 @@ async function loadFromSupabase(userId) {
     lastAdvancedDate: sett.last_advanced_date ?? null,
     inProgress: sett.in_progress_session_id ?? null,
     customDayTypes: [],
-    settings: { unit: sett.unit || 'kg', restDefault: sett.rest_default || 120 },
+    settings: {
+        unit: sett.unit || 'kg',
+        restDefault: sett.rest_default || 120,
+        restBig:     sett.rest_big     || 180,
+        restMedium:  sett.rest_medium  || 120,
+        restSmall:   sett.rest_small   || 90,
+        pushEnabled: sett.push_enabled ?? false,
+      },
   };
 }
 
@@ -133,7 +140,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -162,13 +169,17 @@ async function syncStore(prev, next, userId) {
   }
 
   const settingsChanged =
-    prev.activeScheduleId  !== next.activeScheduleId  ||
-    prev.cycleIndex        !== next.cycleIndex        ||
-    prev.cycleStartDate    !== next.cycleStartDate    ||
-    prev.lastAdvancedDate  !== next.lastAdvancedDate  ||
-    prev.inProgress        !== next.inProgress        ||
-    prev.settings?.unit       !== next.settings?.unit ||
-    prev.settings?.restDefault !== next.settings?.restDefault;
+    prev.activeScheduleId          !== next.activeScheduleId          ||
+    prev.cycleIndex                !== next.cycleIndex                ||
+    prev.cycleStartDate            !== next.cycleStartDate            ||
+    prev.lastAdvancedDate          !== next.lastAdvancedDate          ||
+    prev.inProgress                !== next.inProgress                ||
+    prev.settings?.unit            !== next.settings?.unit            ||
+    prev.settings?.restDefault     !== next.settings?.restDefault     ||
+    prev.settings?.restBig         !== next.settings?.restBig         ||
+    prev.settings?.restMedium      !== next.settings?.restMedium      ||
+    prev.settings?.restSmall       !== next.settings?.restSmall       ||
+    prev.settings?.pushEnabled     !== next.settings?.pushEnabled;
 
   if (settingsChanged) {
     ops.push(_supabase.from('user_settings').upsert({
@@ -179,6 +190,10 @@ async function syncStore(prev, next, userId) {
       last_advanced_date: next.lastAdvancedDate ?? null,
       unit: next.settings?.unit || 'kg',
       rest_default: next.settings?.restDefault || 120,
+      rest_big:     next.settings?.restBig     || 180,
+      rest_medium:  next.settings?.restMedium  || 120,
+      rest_small:   next.settings?.restSmall   || 90,
+      push_enabled: next.settings?.pushEnabled ?? false,
       in_progress_session_id: next.inProgress ?? null,
     }));
   }
