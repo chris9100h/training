@@ -670,13 +670,13 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                 if (linkedToNext) {
                   els.push(
                     <div key={`conn-${i}`} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', background: UI.goldFaint, borderLeft: `0.5px solid ${UI.goldSoft}`, borderRight: `0.5px solid ${UI.goldSoft}`, padding: '1px 12px', marginBottom: 0 }}>
-                      <button onClick={e => { e.stopPropagation(); toggleSuperset(i); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.gold, fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.12em', padding: '2px 0' }}>SUPERSET ×</button>
+                      <button onClick={e => { e.stopPropagation(); toggleSuperset(i); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.gold, fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.12em', padding: '2px 0' }}>LINKED ×</button>
                     </div>
                   );
                 } else {
                   els.push(
                     <div key={`conn-${i}`} style={{ display: 'flex', justifyContent: 'center', marginBottom: 6 }}>
-                      <button onClick={e => { e.stopPropagation(); toggleSuperset(i); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.1em', padding: '1px 8px' }}>SS</button>
+                      <button onClick={e => { e.stopPropagation(); toggleSuperset(i); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.1em', padding: '1px 8px' }}>Link ↕</button>
                     </div>
                   );
                 }
