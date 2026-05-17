@@ -146,7 +146,7 @@ function LibraryScreen({ store, setStore, go }) {
                     <TextInput value={q} onChange={setQ} placeholder="Suchen…" />
                   </Field>
                 </div>
-                <button onClick={() => setFiltersOpen(v => !v)} style={{
+                <button onClick={() => setFiltersOpen(true)} style={{
                   flexShrink: 0, background: activeCount > 0 ? UI.goldFaint : 'transparent',
                   border: `0.5px solid ${activeCount > 0 ? UI.goldSoft : UI.hairStrong}`,
                   borderRadius: 999, padding: '6px 12px', cursor: 'pointer',
@@ -154,52 +154,9 @@ function LibraryScreen({ store, setStore, go }) {
                   fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
                   display: 'flex', alignItems: 'center', gap: 5,
                 }}>
-                  {filtersOpen ? 'Close' : 'Filter'}{activeCount > 0 && <span style={{ background: UI.gold, color: '#0a0805', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{activeCount}</span>}
+                  Filter{activeCount > 0 && <span style={{ background: UI.gold, color: '#0a0805', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{activeCount}</span>}
                 </button>
               </div>
-              {filtersOpen && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 6 }}>
-                  <div>
-                    <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 8 }}>
-                      <span className="micro" style={{ color: UI.gold }}>MUSCLE GROUP</span>
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {MUSCLES.map(m => (
-                        <Pill key={m} gold={filterTags.includes(m)} onClick={() => toggleFilter(m)} style={{ cursor: 'pointer' }}>{m}</Pill>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 8 }}>
-                      <span className="micro" style={{ color: UI.gold }}>REST</span>
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      <Pill gold={filterRestCats.includes('none')} onClick={() => toggleRestCat('none')} style={{ cursor: 'pointer' }}>No rest assigned</Pill>
-                      <Pill gold={filterRestCats.includes('big')} onClick={() => toggleRestCat('big')} style={{ cursor: 'pointer' }}>Big</Pill>
-                      <Pill gold={filterRestCats.includes('medium')} onClick={() => toggleRestCat('medium')} style={{ cursor: 'pointer' }}>Medium</Pill>
-                      <Pill gold={filterRestCats.includes('small')} onClick={() => toggleRestCat('small')} style={{ cursor: 'pointer' }}>Small</Pill>
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 8 }}>
-                      <span className="micro" style={{ color: UI.gold }}>MOVEMENT</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <Pill gold={filterUnilateral === true} onClick={() => toggleUni(true)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
-                      <Pill gold={filterUnilateral === false} onClick={() => toggleUni(false)} style={{ cursor: 'pointer' }}>Bilateral</Pill>
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 8 }}>
-                      <span className="micro" style={{ color: UI.gold }}>PLAN</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <Pill gold={filterPlan === 'in'} onClick={() => togglePlan('in')} style={{ cursor: 'pointer' }}>In plan</Pill>
-                      <Pill gold={filterPlan === 'out'} onClick={() => togglePlan('out')} style={{ cursor: 'pointer' }}>Not in plan</Pill>
-                    </div>
-                  </div>
-                </div>
-              )}
             </>
           );
         })()}
@@ -225,9 +182,15 @@ function LibraryScreen({ store, setStore, go }) {
               }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="display" style={{ fontSize: 19, color: isToday ? UI.gold : UI.ink, lineHeight: 1.1, marginBottom: 3 }}>{ex.name}</div>
-                <div className="num" style={{ fontSize: 10, color: isToday ? UI.gold : UI.inkFaint, letterSpacing: '0.05em' }}>
+                <div className="num" style={{ fontSize: 10, color: isToday ? UI.gold : UI.inkFaint, letterSpacing: '0.05em', marginBottom: 4 }}>
                   {isToday ? 'today' : `${days}d ago`}
                   {top && ` · ${top.kg}kg × ${top.reps}`}
+                </div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {ex.tags?.map(t => <Pill key={t}>{t}</Pill>)}
+                  {ex.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
+                  {ex.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
+                  {planExIds.has(ex.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
@@ -254,8 +217,11 @@ function LibraryScreen({ store, setStore, go }) {
               }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="display" style={{ fontSize: 19, color: isSelected ? UI.danger : UI.ink, lineHeight: 1.1 }}>{e.name}</div>
-                <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                   {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
+                  {e.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{e.category.charAt(0).toUpperCase() + e.category.slice(1)}</Pill>}
+                  {e.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
+                  {planExIds.has(e.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
               {selecting ? (
@@ -301,6 +267,54 @@ function LibraryScreen({ store, setStore, go }) {
       )}
 
       {creating && <ExerciseCreator onClose={() => setCreating(false)} setStore={setStore} />}
+
+      {filtersOpen && (
+        <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div>
+              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                <span className="micro" style={{ color: UI.gold }}>MUSCLE GROUP</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {MUSCLES.map(m => (
+                  <Pill key={m} gold={filterTags.includes(m)} onClick={() => toggleFilter(m)} style={{ cursor: 'pointer' }}>{m}</Pill>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                <span className="micro" style={{ color: UI.gold }}>REST</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <Pill gold={filterRestCats.includes('none')} onClick={() => toggleRestCat('none')} style={{ cursor: 'pointer' }}>No rest assigned</Pill>
+                <Pill gold={filterRestCats.includes('big')} onClick={() => toggleRestCat('big')} style={{ cursor: 'pointer' }}>Big</Pill>
+                <Pill gold={filterRestCats.includes('medium')} onClick={() => toggleRestCat('medium')} style={{ cursor: 'pointer' }}>Medium</Pill>
+                <Pill gold={filterRestCats.includes('small')} onClick={() => toggleRestCat('small')} style={{ cursor: 'pointer' }}>Small</Pill>
+              </div>
+            </div>
+            <div>
+              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                <span className="micro" style={{ color: UI.gold }}>MOVEMENT</span>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <Pill gold={filterUnilateral === true} onClick={() => toggleUni(true)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
+                <Pill gold={filterUnilateral === false} onClick={() => toggleUni(false)} style={{ cursor: 'pointer' }}>Bilateral</Pill>
+              </div>
+            </div>
+            <div>
+              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                <span className="micro" style={{ color: UI.gold }}>PLAN</span>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <Pill gold={filterPlan === 'in'} onClick={() => togglePlan('in')} style={{ cursor: 'pointer' }}>In plan</Pill>
+                <Pill gold={filterPlan === 'out'} onClick={() => togglePlan('out')} style={{ cursor: 'pointer' }}>Not in plan</Pill>
+              </div>
+            </div>
+            <Btn onClick={() => setFiltersOpen(false)}>Done</Btn>
+          </div>
+        </Sheet>
+      )}
+
       {confirmEl}
     </Screen>
   );
