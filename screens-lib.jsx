@@ -2,17 +2,24 @@
 
 const { useState: useStateL, useMemo: useMemoL, useRef: useRefL, useEffect: useEffectL } = React;
 
+// Persists library filter state across navigation (survives remounts)
+const _lib = { tab: 'recent', q: '', filterTags: [], filterNoCategory: false };
+
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go }) {
   const [confirmEl, confirm] = useConfirm();
-  const [tab, setTab] = useStateL('recent');
-  const [q, setQ] = useStateL('');
+  const [tab, setTab] = useStateL(_lib.tab);
+  const [q, setQ] = useStateL(_lib.q);
   const [creating, setCreating] = useStateL(false);
   const [selecting, setSelecting] = useStateL(false);
   const [selected, setSelected] = useStateL(new Set());
-  const [filterTags, setFilterTags] = useStateL([]);
-  const [filterNoCategory, setFilterNoCategory] = useStateL(false);
-  const toggleFilter = (m) => setFilterTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
+  const [filterTags, setFilterTags] = useStateL(_lib.filterTags);
+  const [filterNoCategory, setFilterNoCategory] = useStateL(_lib.filterNoCategory);
+  const toggleFilter = (m) => setFilterTags(t => { const n = t.includes(m) ? t.filter(x => x !== m) : [...t, m]; _lib.filterTags = n; return n; });
+
+  useEffectL(() => { _lib.tab = tab; }, [tab]);
+  useEffectL(() => { _lib.q = q; }, [q]);
+  useEffectL(() => { _lib.filterNoCategory = filterNoCategory; }, [filterNoCategory]);
 
   const exitSelect = () => { setSelecting(false); setSelected(new Set()); };
 
@@ -128,7 +135,7 @@ function LibraryScreen({ store, setStore, go }) {
                   style={{ cursor: 'pointer' }}>{m}</Pill>
               ))}
               <Pill gold={filterNoCategory} onClick={() => setFilterNoCategory(v => !v)}
-                style={{ cursor: 'pointer' }}>No size</Pill>
+                style={{ cursor: 'pointer' }}>No rest assigned</Pill>
             </div>
           </>
         )}
