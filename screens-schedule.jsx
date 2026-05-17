@@ -572,7 +572,15 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
 
   if (!draft) return null;
 
-  const updateItem = (idx, patch) => setDraft(d => ({ ...d, items: d.items.map((it, i) => i === idx ? { ...it, ...patch } : it) }));
+  const updateItem = (idx, patch) => setDraft(d => {
+    const item = d.items[idx];
+    const gid = item?.supersetGroup;
+    return { ...d, items: d.items.map((it, i) => {
+      if (i === idx) return { ...it, ...patch };
+      if (gid && it.supersetGroup === gid && patch.sets !== undefined) return { ...it, sets: patch.sets };
+      return it;
+    })};
+  });
   const removeItem = (idx) => setDraft(d => ({ ...d, items: d.items.filter((_, i) => i !== idx) }));
   const addExercise = (exId) => {
     setDraft(d => ({ ...d, items: [...d.items, { exId, sets: 3, reps: 8 }] }));
