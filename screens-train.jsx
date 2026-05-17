@@ -842,7 +842,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, paddingBottom: 8 }}>
           {/* big countdown */}
           <div style={{ textAlign: 'center' }}
-            onClick={restRemaining === 0 ? () => { persistRestStart(null); setRestModalOpen(false); } : undefined}
+            onClick={restRemaining === 0 ? () => { cancelPushover(); persistRestStart(null); setRestModalOpen(false); } : undefined}
           >
             <div className="num" style={{
               fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1,
@@ -866,7 +866,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           </div>
           {/* controls */}
           <div style={{ display: 'flex', gap: 10, width: '100%' }}>
-            <button onClick={() => { persistRestStart(null); setRestModalOpen(false); }} style={{
+            <button onClick={() => { cancelPushover(); persistRestStart(null); setRestModalOpen(false); }} style={{
               flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
               color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
