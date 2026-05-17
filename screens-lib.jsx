@@ -11,6 +11,7 @@ function LibraryScreen({ store, setStore, go }) {
   const [selecting, setSelecting] = useStateL(false);
   const [selected, setSelected] = useStateL(new Set());
   const [filterTags, setFilterTags] = useStateL([]);
+  const [filterNoCategory, setFilterNoCategory] = useStateL(false);
   const toggleFilter = (m) => setFilterTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
 
   const exitSelect = () => { setSelecting(false); setSelected(new Set()); };
@@ -65,10 +66,11 @@ function LibraryScreen({ store, setStore, go }) {
       .filter(e => {
         const matchSearch = !q || e.name.toUpperCase().includes(ql) || e.tags?.some(t => t.toUpperCase().includes(ql));
         const matchTags = filterTags.length === 0 || filterTags.some(ft => e.tags?.includes(ft));
-        return matchSearch && matchTags;
+        const matchNoCategory = !filterNoCategory || !e.category;
+        return matchSearch && matchTags && matchNoCategory;
       })
       .sort((a,b) => a.name.localeCompare(b.name));
-  }, [store.exercises, q, filterTags]);
+  }, [store.exercises, q, filterTags, filterNoCategory]);
 
   const topBarRight = selecting ? (
     <button onClick={exitSelect} style={{ background: 'none', border: 'none', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}>
@@ -125,6 +127,8 @@ function LibraryScreen({ store, setStore, go }) {
                 <Pill key={m} gold={filterTags.includes(m)} onClick={() => toggleFilter(m)}
                   style={{ cursor: 'pointer' }}>{m}</Pill>
               ))}
+              <Pill gold={filterNoCategory} onClick={() => setFilterNoCategory(v => !v)}
+                style={{ cursor: 'pointer' }}>No size</Pill>
             </div>
           </>
         )}
