@@ -310,7 +310,9 @@ function LibraryScreen({ store, setStore, go }) {
                 <Pill gold={filterPlan === 'out'} onClick={() => togglePlan('out')} style={{ cursor: 'pointer' }}>Not in plan</Pill>
               </div>
             </div>
-            <Btn onClick={() => setFiltersOpen(false)}>Done</Btn>
+            <Btn onClick={() => setFiltersOpen(false)} disabled={filtered.length === 0} style={{ opacity: filtered.length === 0 ? 0.4 : 1 }}>
+              {filtered.length === 0 ? 'No results' : `Show ${filtered.length} exercise${filtered.length === 1 ? '' : 's'}`}
+            </Btn>
           </div>
         </Sheet>
       )}
