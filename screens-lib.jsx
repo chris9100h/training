@@ -1242,7 +1242,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [restOpen, setRestOpen] = useStateL(false);
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
-  const [pushEnabled, setPushEnabled] = useStateL(() => localStorage.getItem('logbook-push-enabled') === 'true');
+  const [pushEnabled, setPushEnabled] = useStateL(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
   const pushStatusTimer = React.useRef(null);
   useEffectL(() => {
     if (!('caches' in window)) return;
@@ -1256,6 +1256,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
     const next = !pushEnabled;
     setPushEnabled(next);
     localStorage.setItem('logbook-push-enabled', String(next));
+    setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: next } }));
   };
 
   const testPushover = async (delaySeconds = 0) => {

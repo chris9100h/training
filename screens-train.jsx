@@ -118,7 +118,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   };
 
   const cancelPushover = () => {
-    if (localStorage.getItem('logbook-push-enabled') !== 'true') return;
+    if (!store.settings?.pushEnabled) return;
     fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
       method: 'POST',
       headers: {
@@ -195,7 +195,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   useEffectT(() => {
     if (!restStart) return;
-    if (localStorage.getItem('logbook-push-enabled') !== 'true') return;
+    if (!store.settings?.pushEnabled) return;
     const delaySeconds = Math.round(Math.max(0, restStart + restDef * 1000 - Date.now()) / 1000);
     fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
       method: 'POST',
