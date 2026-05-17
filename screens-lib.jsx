@@ -1036,7 +1036,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       canvas.toBlob(async (blob) => {
         const filename = `${s.dayName}-${s.date.slice(0,10)}.png`;
         const file = new File([blob], filename, { type: 'image/png' });
-        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
           try { await navigator.share({ files: [file] }); } catch(_) {}
         } else {
           const url = URL.createObjectURL(blob);
