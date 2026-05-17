@@ -70,7 +70,6 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   const completeSet = (setIdx) => {
     updateSet(setIdx, { done: true });
-    persistRestStart(Date.now());
     setFlashSet(setIdx);
     setTimeout(() => setFlashSet(null), 1400);
     const prevSet = last?.entry?.sets?.[setIdx];
@@ -79,17 +78,51 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       setTimeout(() => setImprovedSet(false), 2200);
     }
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
-    if (updatedSets.every(st => st.done)) {
-      setTimeout(() => navigate(1), 600);
+    const group = entry.supersetGroup;
+    if (group) {
+      const newDoneCount = updatedSets.filter(s => s.done).length;
+      const partners = session.entries.map((e, i) => ({ e, i })).filter(({ e, i }) => e.supersetGroup === group && i !== exIdx);
+      const nextPartner = partners.find(({ e }) => e.sets.filter(s => s.done).length < newDoneCount);
+      if (nextPartner) {
+        // Mid-round: jump to partner, no rest
+        setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), 300);
+      } else {
+        // Round complete: start rest
+        persistRestStart(Date.now());
+        const allGroupDone = updatedSets.every(s => s.done) && partners.every(({ e }) => e.sets.every(s => s.done));
+        if (allGroupDone) {
+          const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
+          setTimeout(() => {
+            if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
+            else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
+          }, 600);
+        } else {
+          const allGroup = session.entries.map((e, i) => ({ e, i })).filter(({ e }) => e.supersetGroup === group);
+          const firstIncomplete = allGroup.find(({ e, i }) =>
+            i === exIdx ? !updatedSets.every(s => s.done) : e.sets.some(s => !s.done)
+          );
+          if (firstIncomplete) setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: firstIncomplete.i })), 600);
+        }
+      }
+    } else {
+      persistRestStart(Date.now());
+      if (updatedSets.every(st => st.done)) {
+        setTimeout(() => navigate(1), 600);
+      }
     }
   };
 
   const addSet = () => {
     updateSession(sess => ({
       ...sess,
-      entries: sess.entries.map((e, i) => i === exIdx
-        ? { ...e, sets: [...e.sets, { kg: e.sets[e.sets.length-1]?.kg ?? null, reps: e.sets[e.sets.length-1]?.reps ?? null, done: false }] }
-        : e),
+      entries: sess.entries.map((e, i) => {
+        if (i !== exIdx) return e;
+        const last = e.sets[e.sets.length - 1];
+        const newSet = isUnilateral
+          ? { kg: last?.kg ?? null, repsL: last?.repsL ?? null, repsR: last?.repsR ?? null, done: false }
+          : { kg: last?.kg ?? null, reps: last?.reps ?? null, done: false };
+        return { ...e, sets: [...e.sets, newSet] };
+      }),
     }));
   };
 
@@ -118,7 +151,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   };
 
   const cancelPushover = () => {
-    if (localStorage.getItem('logbook-push-enabled') !== 'true') return;
+    if (!store.settings?.pushEnabled) return;
     fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
       method: 'POST',
       headers: {
@@ -195,7 +228,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   useEffectT(() => {
     if (!restStart) return;
-    if (localStorage.getItem('logbook-push-enabled') !== 'true') return;
+    if (!store.settings?.pushEnabled) return;
     const delaySeconds = Math.round(Math.max(0, restStart + restDef * 1000 - Date.now()) / 1000);
     fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
       method: 'POST',
@@ -213,8 +246,15 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     const prev = prevRestRemaining.current;
     prevRestRemaining.current = restRemaining;
     if (prev !== null && prev > 0 && restRemaining === 0) {
-      // visual: open the rest modal so it's impossible to miss
       setRestModalOpen(true);
+      // gold screen flash 3×
+      let i = 0;
+      const flash = () => {
+        if (i >= 3) return;
+        setScreenFlash(true);
+        setTimeout(() => { setScreenFlash(false); i++; setTimeout(flash, 140); }, 220);
+      };
+      flash();
       // audio: two beeps + higher tone (blocked by iOS silent switch, but nice to have)
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -237,6 +277,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   const [flashSet, setFlashSet] = useStateT(null);
   const [improvedSet, setImprovedSet] = useStateT(false);
+  const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(false);
   const [confirmEl, confirm] = useConfirm();
   const [finishOpen, setFinishOpen] = useStateT(false);
@@ -328,7 +369,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const heroSet = currentSetIdx >= 0 ? entry.sets[currentSetIdx] : null;
   const prevHeroSet = last?.entry?.sets?.[currentSetIdx >= 0 ? currentSetIdx : 0];
 
-  const anyMissingData = entry.sets.some(st => !st.done && (st.kg == null || !st.reps));
+  const isUnilateral = !!exercise?.unilateral;
+  const anyMissingData = entry.sets.some(st => !st.done && (st.kg == null || (isUnilateral ? (!st.repsL || !st.repsR) : !st.reps)));
 
   const checkAllSets = async () => {
     if (allDone || anyMissingData) return;
@@ -345,6 +387,10 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   return (
     <Screen scroll={false}>
+      {/* Gold screen flash overlay */}
+      {screenFlash && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />
+      )}
       {/* Improvement toast */}
       <div style={{
         position: 'absolute', top: 'calc(env(safe-area-inset-top, 0px) + 62px)', left: 0, right: 0,
@@ -420,11 +466,13 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
       {/* Exercise chips */}
       <div ref={chipRowRef} style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
-        {session.entries.map((e, i) => {
+        {session.entries.flatMap((e, i) => {
           const done = e.sets.every(s => s.done);
           const active = i === exIdx;
-          return (
-            <button key={i}
+          const nextE = session.entries[i + 1];
+          const linkedToNext = e.supersetGroup && e.supersetGroup === nextE?.supersetGroup;
+          const chip = (
+            <button key={`chip-${i}`}
               onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
               style={{
                 flexShrink: 0, maxWidth: 110,
@@ -446,6 +494,10 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               </div>
             </button>
           );
+          if (linkedToNext) {
+            return [chip, <span key={`ss-${i}`} style={{ flexShrink: 0, alignSelf: 'center', fontSize: 10, color: UI.goldSoft, lineHeight: 1 }}>⟷</span>];
+          }
+          return [chip];
         })}
       </div>
 
@@ -484,7 +536,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                 <span className="micro-gold">SET {String(currentSetNum).padStart(2, '0')} / {String(entry.sets.length).padStart(2, '0')}</span>
                 {prevHeroSet && prevHeroSet.kg ? (
                   <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>
-                    LAST TIME <span style={{ color: UI.inkSoft }}>{prevHeroSet.kg}kg × {prevHeroSet.reps}</span>
+                    LAST TIME <span style={{ color: UI.inkSoft }}>{prevHeroSet.kg}kg × {(prevHeroSet.repsL != null || prevHeroSet.repsR != null) ? `L${prevHeroSet.repsL ?? '?'}/R${prevHeroSet.repsR ?? '?'}` : prevHeroSet.reps}</span>
                   </span>
                 ) : <span />}
               </div>
@@ -518,39 +570,58 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                   <div className="micro" style={{ marginTop: 2 }}>KILOGRAMS</div>
                 </div>
                 <div style={{ fontSize: 32, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 200, fontStyle: 'italic', alignSelf: 'flex-start', marginTop: 6 }}>×</div>
-                <div style={{ flex: 1, textAlign: 'center' }}>
-                  <input
-                    type="number" inputMode="numeric"
-                    value={heroSet.reps ?? ''} placeholder="—"
-                    onFocus={e => e.target.select()}
-                    onChange={e => updateSet(currentSetIdx, { reps: e.target.value === '' ? null : +e.target.value, done: false })}
-                    style={{
-                      background: 'transparent', border: 'none', outline: 'none',
-                      color: UI.gold,
-                      fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums',
-                      fontSize: 44, fontWeight: 300,
-                      letterSpacing: '-0.02em',
-                      textAlign: 'center', width: '100%', padding: 0,
-                    }}
-                  />
-                  <div className="micro" style={{ marginTop: 2 }}>REPETITIONS</div>
-                </div>
+                {isUnilateral ? (
+                  <div style={{ flex: 1, display: 'flex', gap: 4 }}>
+                    <div style={{ flex: 1, textAlign: 'center' }}>
+                      <input
+                        type="number" inputMode="numeric"
+                        value={heroSet.repsL ?? ''} placeholder="—"
+                        onFocus={e => e.target.select()}
+                        onChange={e => updateSet(currentSetIdx, { repsL: e.target.value === '' ? null : +e.target.value, done: false })}
+                        style={{ background: 'transparent', border: 'none', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0 }}
+                      />
+                      <div className="micro" style={{ marginTop: 2 }}>LEFT</div>
+                    </div>
+                    <div style={{ fontSize: 22, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 200, alignSelf: 'flex-start', marginTop: 10 }}>/</div>
+                    <div style={{ flex: 1, textAlign: 'center' }}>
+                      <input
+                        type="number" inputMode="numeric"
+                        value={heroSet.repsR ?? ''} placeholder="—"
+                        onFocus={e => e.target.select()}
+                        onChange={e => updateSet(currentSetIdx, { repsR: e.target.value === '' ? null : +e.target.value, done: false })}
+                        style={{ background: 'transparent', border: 'none', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0 }}
+                      />
+                      <div className="micro" style={{ marginTop: 2 }}>RIGHT</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ flex: 1, textAlign: 'center' }}>
+                    <input
+                      type="number" inputMode="numeric"
+                      value={heroSet.reps ?? ''} placeholder="—"
+                      onFocus={e => e.target.select()}
+                      onChange={e => updateSet(currentSetIdx, { reps: e.target.value === '' ? null : +e.target.value, done: false })}
+                      style={{ background: 'transparent', border: 'none', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0 }}
+                    />
+                    <div className="micro" style={{ marginTop: 2 }}>REPETITIONS</div>
+                  </div>
+                )}
               </div>
 
               {/* Big confirm button */}
               <div style={{ marginTop: 12, padding: '0 18px' }}>
                 <button
                   onClick={() => completeSet(currentSetIdx)}
-                  disabled={heroSet.kg == null || !heroSet.reps}
+                  disabled={heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)}
                   style={{
                     width: '100%', minHeight: 44,
-                    background: heroSet.kg == null || !heroSet.reps ? 'transparent' : `linear-gradient(180deg, var(--gold-light), var(--gold))`,
-                    border: heroSet.kg == null || !heroSet.reps ? `0.5px solid ${UI.hairStrong}` : `0.5px solid var(--gold-deep)`,
-                    color: heroSet.kg == null || !heroSet.reps ? UI.inkFaint : '#0a0805',
+                    background: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'transparent' : `linear-gradient(180deg, var(--gold-light), var(--gold))`,
+                    border: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? `0.5px solid ${UI.hairStrong}` : `0.5px solid var(--gold-deep)`,
+                    color: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? UI.inkFaint : '#0a0805',
                     borderRadius: 999,
                     fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em', textTransform: 'uppercase',
-                    cursor: heroSet.kg == null || !heroSet.reps ? 'default' : 'pointer',
-                    boxShadow: heroSet.kg == null || !heroSet.reps ? 'none' : '0 8px 30px rgba(201,169,97,0.30)',
+                    cursor: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'default' : 'pointer',
+                    boxShadow: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'none' : '0 8px 30px rgba(201,169,97,0.30)',
                     WebkitTapHighlightColor: 'transparent',
                   }}>
                   ✓ Check set
@@ -583,7 +654,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
               return (
                 <div key={i} style={{
                   display: 'grid',
-                  gridTemplateColumns: '28px 1fr 56px 56px 28px 18px',
+                  gridTemplateColumns: isUnilateral ? '28px 1fr 56px 44px 44px 28px 18px' : '28px 1fr 56px 56px 28px 18px',
                   gap: 8, alignItems: 'center',
                   padding: '10px 4px',
                   borderBottom: i < entry.sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
@@ -600,7 +671,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                   }}>{i + 1}</div>
 
                   <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
-                    {prevSet?.kg && prevSet?.reps ? `${prevSet.kg}kg × ${prevSet.reps}` : '—'}
+                    {prevSet?.kg && (prevSet?.reps || prevSet?.repsL != null) ? `${prevSet.kg}kg × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'}
                   </div>
 
                   <KgInput
@@ -620,24 +691,24 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                     }))}
                   />
 
-                  <input
-                    type="number" inputMode="numeric"
-                    value={s.reps ?? ''} placeholder="—"
-                    onFocus={e => e.target.select()}
-                    onChange={e => updateSet(i, { reps: e.target.value === '' ? null : +e.target.value, done: false })}
-                    disabled={s.done}
-                    style={setInputStyle(s.done, isCurrent)}
-                  />
+                  {isUnilateral ? (
+                    <>
+                      <input type="number" inputMode="numeric" value={s.repsL ?? ''} placeholder="L" onFocus={e => e.target.select()} onChange={e => updateSet(i, { repsL: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done} style={setInputStyle(s.done, isCurrent)} />
+                      <input type="number" inputMode="numeric" value={s.repsR ?? ''} placeholder="R" onFocus={e => e.target.select()} onChange={e => updateSet(i, { repsR: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done} style={setInputStyle(s.done, isCurrent)} />
+                    </>
+                  ) : (
+                    <input type="number" inputMode="numeric" value={s.reps ?? ''} placeholder="—" onFocus={e => e.target.select()} onChange={e => updateSet(i, { reps: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done} style={setInputStyle(s.done, isCurrent)} />
+                  )}
 
                   <button onClick={() => s.done ? updateSet(i, { done: false }) : completeSet(i)}
-                    disabled={!s.done && (s.kg == null || !s.reps)}
+                    disabled={!s.done && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps))}
                     style={{
                       width: 26, height: 26, borderRadius: 5, border: 'none', cursor: 'pointer',
                       background: s.done ? UI.gold : 'transparent',
-                      outline: `0.5px solid ${s.done ? UI.gold : (s.kg == null || !s.reps) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
+                      outline: `0.5px solid ${s.done ? UI.gold : (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 14, fontWeight: 700, color: s.done ? '#0a0805' : 'transparent',
-                      opacity: !s.done && (s.kg == null || !s.reps) ? 0.35 : 1,
+                      opacity: !s.done && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? 0.35 : 1,
                       flexShrink: 0,
                       WebkitTapHighlightColor: 'transparent',
                     }}>✓</button>
@@ -830,7 +901,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, paddingBottom: 8 }}>
           {/* big countdown */}
           <div style={{ textAlign: 'center' }}
-            onClick={restRemaining === 0 ? () => { persistRestStart(null); setRestModalOpen(false); } : undefined}
+            onClick={restRemaining === 0 ? () => { cancelPushover(); persistRestStart(null); setRestModalOpen(false); } : undefined}
           >
             <div className="num" style={{
               fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1,
@@ -854,7 +925,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           </div>
           {/* controls */}
           <div style={{ display: 'flex', gap: 10, width: '100%' }}>
-            <button onClick={() => { persistRestStart(null); setRestModalOpen(false); }} style={{
+            <button onClick={() => { cancelPushover(); persistRestStart(null); setRestModalOpen(false); }} style={{
               flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
               color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,

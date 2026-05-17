@@ -270,6 +270,7 @@ function HomeScreen({ store, setStore, go }) {
         exId: it.exId, name: ex?.name || '?',
         plannedSets: it.sets, plannedReps: it.reps,
         sets: seedSets, note: '',
+        supersetGroup: it.supersetGroup || null,
       };
     });
     const nowISO = new Date().toISOString();

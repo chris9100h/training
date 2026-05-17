@@ -2,16 +2,34 @@
 
 const { useState: useStateL, useMemo: useMemoL, useRef: useRefL, useEffect: useEffectL } = React;
 
+// Persists library filter state across navigation (survives remounts)
+const _lib = { tab: 'recent', q: '', filterTags: [], filterRestCats: [], filterUnilateral: null, filterPlan: null, filtersOpen: false };
+
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go }) {
   const [confirmEl, confirm] = useConfirm();
-  const [tab, setTab] = useStateL('recent');
-  const [q, setQ] = useStateL('');
+  const [tab, setTab] = useStateL(_lib.tab);
+  const [q, setQ] = useStateL(_lib.q);
   const [creating, setCreating] = useStateL(false);
   const [selecting, setSelecting] = useStateL(false);
   const [selected, setSelected] = useStateL(new Set());
-  const [filterTags, setFilterTags] = useStateL([]);
-  const toggleFilter = (m) => setFilterTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
+  const [filterTags, setFilterTags] = useStateL(_lib.filterTags);
+  const [filterRestCats, setFilterRestCats] = useStateL(_lib.filterRestCats);
+  const [filterUnilateral, setFilterUnilateral] = useStateL(_lib.filterUnilateral);
+  const toggleFilter = (m) => setFilterTags(t => { const n = t.includes(m) ? t.filter(x => x !== m) : [...t, m]; _lib.filterTags = n; return n; });
+  const toggleRestCat = (v) => setFilterRestCats(t => { const n = t.includes(v) ? t.filter(x => x !== v) : [...t, v]; _lib.filterRestCats = n; return n; });
+  const toggleUni = (v) => { const n = filterUnilateral === v ? null : v; _lib.filterUnilateral = n; setFilterUnilateral(n); };
+  const [filterPlan, setFilterPlan] = useStateL(_lib.filterPlan);
+  const togglePlan = (v) => { const n = filterPlan === v ? null : v; _lib.filterPlan = n; setFilterPlan(n); };
+  const [filtersOpen, setFiltersOpen] = useStateL(_lib.filtersOpen);
+  useEffectL(() => { _lib.filtersOpen = filtersOpen; }, [filtersOpen]);
+
+  const planExIds = useMemoL(() => new Set(
+    store.schedules.flatMap(s => s.days.flatMap(d => (d.items || []).map(it => it.exId)))
+  ), [store.schedules]);
+
+  useEffectL(() => { _lib.tab = tab; }, [tab]);
+  useEffectL(() => { _lib.q = q; }, [q]);
 
   const exitSelect = () => { setSelecting(false); setSelected(new Set()); };
 
@@ -65,10 +83,15 @@ function LibraryScreen({ store, setStore, go }) {
       .filter(e => {
         const matchSearch = !q || e.name.toUpperCase().includes(ql) || e.tags?.some(t => t.toUpperCase().includes(ql));
         const matchTags = filterTags.length === 0 || filterTags.some(ft => e.tags?.includes(ft));
-        return matchSearch && matchTags;
+        const matchRest = filterRestCats.length === 0 ||
+          (filterRestCats.includes('none') && !e.category) ||
+          (e.category && filterRestCats.includes(e.category));
+        const matchUnilateral = filterUnilateral === null || !!e.unilateral === filterUnilateral;
+        const matchPlan = filterPlan === null || (filterPlan === 'in' ? planExIds.has(e.id) : !planExIds.has(e.id));
+        return matchSearch && matchTags && matchRest && matchUnilateral && matchPlan;
       })
       .sort((a,b) => a.name.localeCompare(b.name));
-  }, [store.exercises, q, filterTags]);
+  }, [store.exercises, q, filterTags, filterRestCats, filterUnilateral, filterPlan, planExIds]);
 
   const topBarRight = selecting ? (
     <button onClick={exitSelect} style={{ background: 'none', border: 'none', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}>
@@ -113,21 +136,30 @@ function LibraryScreen({ store, setStore, go }) {
       </div>
 
       <div style={{ padding: '18px 22px', paddingBottom: selecting ? 80 : 22, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {tab === 'all' && (
-          <>
-            <div style={{ marginBottom: 4 }}>
-              <Field label="">
-                <TextInput value={q} onChange={setQ} placeholder="Suchen…" />
-              </Field>
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
-              {MUSCLES.map(m => (
-                <Pill key={m} gold={filterTags.includes(m)} onClick={() => toggleFilter(m)}
-                  style={{ cursor: 'pointer' }}>{m}</Pill>
-              ))}
-            </div>
-          </>
-        )}
+        {tab === 'all' && (() => {
+          const activeCount = filterTags.length + filterRestCats.length + (filterUnilateral !== null ? 1 : 0) + (filterPlan !== null ? 1 : 0);
+          return (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <div style={{ flex: 1 }}>
+                  <Field label="">
+                    <TextInput value={q} onChange={setQ} placeholder="Suchen…" />
+                  </Field>
+                </div>
+                <button onClick={() => setFiltersOpen(true)} style={{
+                  flexShrink: 0, background: activeCount > 0 ? UI.goldFaint : 'transparent',
+                  border: `0.5px solid ${activeCount > 0 ? UI.goldSoft : UI.hairStrong}`,
+                  borderRadius: 999, padding: '6px 12px', cursor: 'pointer',
+                  color: activeCount > 0 ? UI.gold : UI.inkSoft,
+                  fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+                  display: 'flex', alignItems: 'center', gap: 5,
+                }}>
+                  Filter{activeCount > 0 && <span style={{ background: UI.gold, color: '#0a0805', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{activeCount}</span>}
+                </button>
+              </div>
+            </>
+          );
+        })()}
 
         {tab === 'recent' && recent.length === 0 && (
           <Empty title="Nothing logged yet" sub="Once you log sessions, exercises will appear here." icon={ICON_BARBELL} />
@@ -150,9 +182,15 @@ function LibraryScreen({ store, setStore, go }) {
               }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="display" style={{ fontSize: 19, color: isToday ? UI.gold : UI.ink, lineHeight: 1.1, marginBottom: 3 }}>{ex.name}</div>
-                <div className="num" style={{ fontSize: 10, color: isToday ? UI.gold : UI.inkFaint, letterSpacing: '0.05em' }}>
+                <div className="num" style={{ fontSize: 10, color: isToday ? UI.gold : UI.inkFaint, letterSpacing: '0.05em', marginBottom: 4 }}>
                   {isToday ? 'today' : `${days}d ago`}
                   {top && ` · ${top.kg}kg × ${top.reps}`}
+                </div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {ex.tags?.map(t => <Pill key={t}>{t}</Pill>)}
+                  {ex.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
+                  {ex.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
+                  {planExIds.has(ex.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
@@ -179,8 +217,11 @@ function LibraryScreen({ store, setStore, go }) {
               }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="display" style={{ fontSize: 19, color: isSelected ? UI.danger : UI.ink, lineHeight: 1.1 }}>{e.name}</div>
-                <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                   {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
+                  {e.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{e.category.charAt(0).toUpperCase() + e.category.slice(1)}</Pill>}
+                  {e.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
+                  {planExIds.has(e.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
               {selecting ? (
@@ -226,6 +267,56 @@ function LibraryScreen({ store, setStore, go }) {
       )}
 
       {creating && <ExerciseCreator onClose={() => setCreating(false)} setStore={setStore} />}
+
+      {filtersOpen && (
+        <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div>
+              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                <span className="micro" style={{ color: UI.gold }}>MUSCLE GROUP</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {MUSCLES.map(m => (
+                  <Pill key={m} gold={filterTags.includes(m)} onClick={() => toggleFilter(m)} style={{ cursor: 'pointer' }}>{m}</Pill>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                <span className="micro" style={{ color: UI.gold }}>REST</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <Pill gold={filterRestCats.includes('none')} onClick={() => toggleRestCat('none')} style={{ cursor: 'pointer' }}>No rest assigned</Pill>
+                <Pill gold={filterRestCats.includes('big')} onClick={() => toggleRestCat('big')} style={{ cursor: 'pointer' }}>Big</Pill>
+                <Pill gold={filterRestCats.includes('medium')} onClick={() => toggleRestCat('medium')} style={{ cursor: 'pointer' }}>Medium</Pill>
+                <Pill gold={filterRestCats.includes('small')} onClick={() => toggleRestCat('small')} style={{ cursor: 'pointer' }}>Small</Pill>
+              </div>
+            </div>
+            <div>
+              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                <span className="micro" style={{ color: UI.gold }}>MOVEMENT</span>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <Pill gold={filterUnilateral === true} onClick={() => toggleUni(true)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
+                <Pill gold={filterUnilateral === false} onClick={() => toggleUni(false)} style={{ cursor: 'pointer' }}>Bilateral</Pill>
+              </div>
+            </div>
+            <div>
+              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                <span className="micro" style={{ color: UI.gold }}>PLAN</span>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <Pill gold={filterPlan === 'in'} onClick={() => togglePlan('in')} style={{ cursor: 'pointer' }}>In plan</Pill>
+                <Pill gold={filterPlan === 'out'} onClick={() => togglePlan('out')} style={{ cursor: 'pointer' }}>Not in plan</Pill>
+              </div>
+            </div>
+            <Btn onClick={() => setFiltersOpen(false)} disabled={filtered.length === 0} style={{ opacity: filtered.length === 0 ? 0.4 : 1 }}>
+              {filtered.length === 0 ? 'No results' : `Show ${filtered.length} exercise${filtered.length === 1 ? '' : 's'}`}
+            </Btn>
+          </div>
+        </Sheet>
+      )}
+
       {confirmEl}
     </Screen>
   );
@@ -237,10 +328,11 @@ function ExerciseCreator({ onClose, setStore, onCreated }) {
   const [name, setName] = useStateL('');
   const [selectedTags, setSelectedTags] = useStateL([]);
   const [category, setCategory] = useStateL(null);
+  const [unilateral, setUnilateral] = useStateL(false);
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, note: '' };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral, note: '' };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -268,6 +360,12 @@ function ExerciseCreator({ onClose, setStore, onCreated }) {
             ))}
           </div>
         </div>
+        <div>
+          <span className="label">Movement type</span>
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            <Pill gold={unilateral} onClick={() => setUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
+          </div>
+        </div>
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Create</Btn>
       </div>
     </Sheet>
@@ -284,14 +382,15 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
   const [editName, setEditName] = useStateL('');
   const [editTags, setEditTags] = useStateL([]);
   const [editCategory, setEditCategory] = useStateL(null);
+  const [editUnilateral, setEditUnilateral] = useStateL(false);
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditUnilateral(!!ex.unilateral); setEditMode(true); };
   const cancelEdit = () => setEditMode(false);
   const saveEdit = () => {
     if (!editName.trim()) return;
-    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null } : e) }));
+    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral } : e) }));
     setEditMode(false);
   };
   const toggleEditTag = (m) => setEditTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
@@ -314,9 +413,14 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
       .map(s => ({ session: s, entry: s.entries.find(e => e.exId === exId) }));
   }, [store.sessions, exId]);
 
+  const e1rmForSet = (s) => {
+    if (s.kg == null) return 0;
+    if (s.repsL != null || s.repsR != null) return s.kg * (1 + Math.max(s.repsL || 0, s.repsR || 0) / 30);
+    return s.reps ? s.kg * (1 + s.reps / 30) : 0;
+  };
+
   const points = history.map(h => {
-    const best = (h.entry.sets || []).filter(s => s.kg && s.reps)
-      .reduce((m, s) => Math.max(m, s.kg * (1 + s.reps / 30)), 0);
+    const best = (h.entry.sets || []).reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
     return { date: h.session.date, est: best };
   }).filter(p => p.est > 0).reverse();
 
@@ -374,13 +478,20 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
                 ))}
               </div>
             </div>
+            <div>
+              <span className="label">Movement type</span>
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                <Pill gold={editUnilateral} onClick={() => setEditUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
+              </div>
+            </div>
             <Btn kind="ghost" onClick={cancelEdit} style={{ fontSize: 11 }}>Cancel</Btn>
           </div>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {ex.category && <Pill gold>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
+            {ex.unilateral && <Pill gold>Unilateral</Pill>}
             {(ex.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
-            {!ex.category && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
+            {!ex.category && !ex.unilateral && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
           </div>
         )}
       </div>
@@ -434,9 +545,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
           <Bezel>HISTORY</Bezel>
           <div style={{ marginTop: 8 }}>
             {history.slice(0, 10).map((h, hi) => {
-              const e1rm = (s) => (s.kg && s.reps) ? s.kg * (1 + s.reps / 30) : 0;
-              const setsWithData = h.entry.sets.filter(s => s.kg && s.reps);
-              const sessionBest = setsWithData.length ? Math.max(...setsWithData.map(e1rm)) : 0;
+              const sessionBest = h.entry.sets.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
               const isPR = pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01;
               return (
                 <div key={h.session.id}
@@ -458,10 +567,13 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       {h.entry.sets.filter(s => s.kg).map((s, i) => {
-                        const isBest = sessionBest > 0 && Math.abs(e1rm(s) - sessionBest) < 0.01;
+                        const isBest = sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01;
+                        const repsStr = (s.repsL != null || s.repsR != null)
+                          ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
+                          : s.reps;
                         return (
                           <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink }}>
-                            {s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{s.reps}
+                            {s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{repsStr}
                           </span>
                         );
                       })}
@@ -924,7 +1036,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       canvas.toBlob(async (blob) => {
         const filename = `${s.dayName}-${s.date.slice(0,10)}.png`;
         const file = new File([blob], filename, { type: 'image/png' });
-        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
           try { await navigator.share({ files: [file] }); } catch(_) {}
         } else {
           const url = URL.createObjectURL(blob);
@@ -1020,34 +1133,69 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         <div>
           <Bezel>EXERCISES</Bezel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
-            {s.entries.map((e, i) => (
-              <div key={i}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-                  <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{e.name}</div>
-                  <Pill>{e.sets.filter(x => x.done).length} / {e.sets.length}</Pill>
+            {(() => {
+              // Group entries: consecutive entries with the same supersetGroup are bundled
+              const groups = [];
+              let idx = 0;
+              while (idx < s.entries.length) {
+                const e = s.entries[idx];
+                if (e.supersetGroup) {
+                  const members = [{ entry: e, idx }];
+                  let j = idx + 1;
+                  while (j < s.entries.length && s.entries[j].supersetGroup === e.supersetGroup) {
+                    members.push({ entry: s.entries[j], idx: j });
+                    j++;
+                  }
+                  groups.push({ type: 'superset', members });
+                  idx = j;
+                } else {
+                  groups.push({ type: 'standalone', entry: e, idx });
+                  idx++;
+                }
+              }
+
+              const renderEntry = (e, i) => (
+                <div key={i}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{e.name}</div>
+                    <Pill>{e.sets.filter(x => x.done).length} / {e.sets.length}</Pill>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {e.sets.map((st, j) => {
+                      const prev = prevEntryMap[e.exId];
+                      const gold = isImprovement(st, prev?.sets?.[j]);
+                      return (
+                        <span key={j} style={{
+                          opacity: st.done ? 1 : 0.3,
+                          background: gold ? UI.goldFaint : 'transparent',
+                          border: `0.5px solid ${gold ? UI.goldSoft : UI.hair}`,
+                          borderRadius: 6, padding: '3px 8px',
+                          fontFamily: UI.fontNum, fontSize: 12,
+                          color: gold ? UI.goldLight : UI.ink,
+                        }}>
+                          {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{e.note}</div>}
                 </div>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {e.sets.map((st, j) => {
-                    const prev = prevEntryMap[e.exId];
-                    const gold = isImprovement(st, prev?.sets?.[j]);
-                    return (
-                      <span key={j} style={{
-                        opacity: st.done ? 1 : 0.3,
-                        background: gold ? UI.goldFaint : 'transparent',
-                        border: `0.5px solid ${gold ? UI.goldSoft : UI.hair}`,
-                        borderRadius: 6, padding: '3px 8px',
-                        fontFamily: UI.fontNum, fontSize: 12,
-                        color: gold ? UI.goldLight : UI.ink,
-                      }}>
-                        {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
-                      </span>
-                    );
-                  })}
+              );
+
+              return groups.map((g, gi) => (
+                <div key={gi}>
+                  {g.type === 'superset' ? (
+                    <div style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 12 }}>
+                      <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>SUPERSET</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                        {g.members.map(({ entry: e, idx: i }) => renderEntry(e, i))}
+                      </div>
+                    </div>
+                  ) : renderEntry(g.entry, g.idx)}
+                  {gi < groups.length - 1 && <Hairline style={{ marginTop: 14 }} />}
                 </div>
-                {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{e.note}</div>}
-                {i < s.entries.length - 1 && <Hairline style={{ marginTop: 14 }} />}
-              </div>
-            ))}
+              ));
+            })()}
           </div>
         </div>
       </div>
@@ -1115,7 +1263,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       fontFamily: UI.fontNum, fontSize: 11,
                       color: gold ? UI.goldLight : UI.ink,
                     }}>
-                      {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                      {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
                     </span>
                   );
                 })}
@@ -1242,7 +1390,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [restOpen, setRestOpen] = useStateL(false);
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
-  const [pushEnabled, setPushEnabled] = useStateL(() => localStorage.getItem('logbook-push-enabled') === 'true');
+  const [pushEnabled, setPushEnabled] = useStateL(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
   const pushStatusTimer = React.useRef(null);
   useEffectL(() => {
     if (!('caches' in window)) return;
@@ -1256,6 +1404,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
     const next = !pushEnabled;
     setPushEnabled(next);
     localStorage.setItem('logbook-push-enabled', String(next));
+    setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: next } }));
   };
 
   const testPushover = async (delaySeconds = 0) => {
