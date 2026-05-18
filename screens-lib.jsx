@@ -1282,6 +1282,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         <SessionEditSheet
           session={s}
           duration={duration}
+          exercises={store.exercises}
           onClose={() => setEditing(false)}
           onSave={(patch) => {
             setStore(st => ({ ...st, sessions: st.sessions.map(x => x.id === s.id ? { ...x, ...patch } : x) }));
@@ -1294,7 +1295,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   );
 }
 
-function SessionEditSheet({ session, duration, onClose, onSave }) {
+function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   const [draftDate, setDraftDate] = useStateL(session.date ? session.date.slice(0, 10) : '');
   const [draftDuration, setDraftDuration] = useStateL(duration != null ? String(Math.round(duration / 5) * 5) : '0');
   const [draftEntries, setDraftEntries] = useStateL(() => JSON.parse(JSON.stringify(session.entries)));
@@ -1350,29 +1351,50 @@ function SessionEditSheet({ session, duration, onClose, onSave }) {
           </select>
         </div>
         <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {draftEntries.map((e, eIdx) => (
-            <div key={eIdx}>
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{e.name.toUpperCase()}</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {e.sets.map((st, sIdx) => (
-                  <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 10, background: UI.bgInset, borderRadius: 10, padding: '8px 12px' }}>
-                    <span className="num" style={{ width: 20, fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{sIdx + 1}</span>
-                    <input type="number" inputMode="decimal" step="0.5" value={st.kg ?? ''}
-                      placeholder="—" onFocus={e => e.target.select()}
-                      onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
-                      style={numInputStyle} />
-                    <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>kg</span>
-                    <span style={{ color: UI.hair, fontSize: 14, margin: '0 2px', fontFamily: UI.fontDisplay, fontStyle: 'italic' }}>×</span>
-                    <input type="number" inputMode="numeric" value={st.reps ?? ''}
-                      placeholder="—" onFocus={e => e.target.select()}
-                      onChange={ev => updateSet(eIdx, sIdx, { reps: ev.target.value === '' ? null : +ev.target.value })}
-                      style={numInputStyle} />
-                    <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>reps</span>
-                  </div>
-                ))}
+          {draftEntries.map((e, eIdx) => {
+            const isUnilateral = !!(exercises?.find(ex => ex.id === e.exId)?.unilateral)
+              || e.sets.some(st => st.repsL != null || st.repsR != null);
+            return (
+              <div key={eIdx}>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{e.name.toUpperCase()}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {e.sets.map((st, sIdx) => (
+                    <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: UI.bgInset, borderRadius: 10, padding: '8px 12px' }}>
+                      <span className="num" style={{ width: 20, fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{sIdx + 1}</span>
+                      <input type="number" inputMode="decimal" step="0.5" value={st.kg ?? ''}
+                        placeholder="—" onFocus={e => e.target.select()}
+                        onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
+                        style={numInputStyle} />
+                      <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>kg</span>
+                      <span style={{ color: UI.hair, fontSize: 14, margin: '0 2px', fontFamily: UI.fontDisplay, fontStyle: 'italic' }}>×</span>
+                      {isUnilateral ? (
+                        <>
+                          <input type="number" inputMode="numeric" value={st.repsL ?? ''}
+                            placeholder="—" onFocus={e => e.target.select()}
+                            onChange={ev => updateSet(eIdx, sIdx, { repsL: ev.target.value === '' ? null : +ev.target.value })}
+                            style={numInputStyle} />
+                          <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>L</span>
+                          <input type="number" inputMode="numeric" value={st.repsR ?? ''}
+                            placeholder="—" onFocus={e => e.target.select()}
+                            onChange={ev => updateSet(eIdx, sIdx, { repsR: ev.target.value === '' ? null : +ev.target.value })}
+                            style={numInputStyle} />
+                          <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>R</span>
+                        </>
+                      ) : (
+                        <>
+                          <input type="number" inputMode="numeric" value={st.reps ?? ''}
+                            placeholder="—" onFocus={e => e.target.select()}
+                            onChange={ev => updateSet(eIdx, sIdx, { reps: ev.target.value === '' ? null : +ev.target.value })}
+                            style={numInputStyle} />
+                          <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>reps</span>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={onClose} style={{ flex: 1 }}>Cancel</Btn>
