@@ -75,7 +75,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     const prevSet = last?.entry?.sets?.[setIdx];
     if (isImprovement(entry.sets[setIdx], prevSet)) {
       setImprovedSet(true);
-      setTimeout(() => setImprovedSet(false), 2200);
+      setTimeout(() => setImprovedSet(false), 2500);
     }
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
     const group = entry.supersetGroup;
@@ -396,24 +396,31 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       {screenFlash && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />
       )}
-      {/* Improvement toast */}
-      <div style={{
-        position: 'absolute', top: 'calc(env(safe-area-inset-top, 0px) + 62px)', left: 0, right: 0,
-        display: 'flex', justifyContent: 'center', zIndex: 20, pointerEvents: 'none',
-        transition: 'opacity 0.3s ease, transform 0.3s ease',
-        opacity: improvedSet ? 1 : 0,
-        transform: improvedSet ? 'translateY(0)' : 'translateY(-8px)',
-      }}>
+      {/* Improvement overlay */}
+      {improvedSet && (
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 7,
-          background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`,
-          borderRadius: 999, padding: '6px 14px',
-          backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+          position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
+          background: 'radial-gradient(ellipse at center, rgba(201,169,97,0.07) 0%, transparent 70%)',
+          animation: 'improvedFade 2.5s ease forwards',
+          animationFillMode: 'forwards',
         }}>
-          <span style={{ fontSize: 13, color: UI.gold }}>↑</span>
-          <span style={{ fontSize: 12, color: UI.gold, fontFamily: UI.fontUi, fontWeight: 500, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Improvement</span>
+          {/* pulsing border ring */}
+          <div style={{
+            position: 'absolute', inset: 0,
+            animation: 'improvedBorderPulse 0.65s ease-in-out infinite',
+            borderRadius: 0,
+          }} />
+          {/* centered label */}
+          <div style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            gap: 6,
+          }}>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 52, color: UI.gold, fontStyle: 'italic', fontWeight: 300, lineHeight: 1 }}>↑</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.gold, fontWeight: 600, letterSpacing: '0.22em' }}>IMPROVEMENT</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Top: close + session timer */}
       <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 8px', display: 'flex', alignItems: 'center', gap: 14 }}>
