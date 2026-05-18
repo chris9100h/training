@@ -232,7 +232,7 @@ function HomeScreen({ store, setStore, go }) {
       monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
       const start = new Date(store.cycleStartDate + 'T12:00:00');
       const dfs = Math.round((monday - start) / 86400000);
-      return `CYCLE ${Math.max(1, Math.floor(dfs / dayCount) + 1)}`;
+      return `CYCLE ${Math.floor(dfs / dayCount) + 1}`;
     }
     const cycleNum = currentCycleNum + weekOffset + 1;
     return `CYCLE ${cycleNum}`;
@@ -293,7 +293,7 @@ function HomeScreen({ store, setStore, go }) {
     const cycleNums = Array.from({ length: 7 }).map((_, i) => {
       const date = new Date(monday); date.setDate(monday.getDate() + i);
       const dfs = Math.round((date - start) / 86400000);
-      return Math.max(1, Math.floor(dfs / dayCount) + 1);
+      return Math.floor(dfs / dayCount) + 1;
     });
     const segments = [];
     let cur = { cycleNum: cycleNums[0], count: 1 };
@@ -535,7 +535,7 @@ function HomeScreen({ store, setStore, go }) {
           <div style={{ flexShrink: 0, display: 'flex', gap: 4, marginTop: -4 }}>
             {cycleBarSegments.map((seg, i) => {
               const selDay = week.find(d => d.weekday === selectedWd);
-              const selCycleNum = selDay ? Math.max(1, Math.floor(selDay.daysFromStart / dayCount) + 1) : null;
+              const selCycleNum = selDay ? Math.floor(selDay.daysFromStart / dayCount) + 1 : null;
               const isActive = seg.cycleNum === selCycleNum;
               return (
                 <div key={i} style={{
