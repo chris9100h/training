@@ -602,19 +602,29 @@ function HomeScreen({ store, setStore, go }) {
             </div>
 
             {/* CTAs */}
-            {isSlotDone ? (
-              <Frame style={{ padding: '14px 18px', width: '100%' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: UI.goldFaint, boxShadow: `inset 0 0 0 0.5px ${UI.goldSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5"><path d="M2 6l2.5 2.5L10 3"/></svg>
+            {isSlotDone ? (() => {
+              const dateKey = sessionDate.toISOString().slice(0, 10);
+              const doneSession = [...store.sessions]
+                .filter(s => s.ended && s.date.slice(0, 10) === dateKey)
+                .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
+              return (
+                <Frame
+                  onClick={doneSession ? () => go({ name: 'session', sessionId: doneSession.id, back: { name: 'home' } }) : undefined}
+                  style={{ padding: '14px 18px', width: '100%', cursor: doneSession ? 'pointer' : 'default' }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: '50%', background: UI.goldFaint, boxShadow: `inset 0 0 0 0.5px ${UI.goldSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5"><path d="M2 6l2.5 2.5L10 3"/></svg>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div className="micro-gold" style={{ marginBottom: 2 }}>WORKOUT COMPLETE</div>
+                      <div style={{ fontSize: 13, color: UI.inkSoft }}>Well done.</div>
+                    </div>
+                    {doneSession && <ChevronRight />}
                   </div>
-                  <div>
-                    <div className="micro-gold" style={{ marginBottom: 2 }}>WORKOUT COMPLETE</div>
-                    <div style={{ fontSize: 13, color: UI.inkSoft }}>Well done.</div>
-                  </div>
-                </div>
-              </Frame>
-            ) : (
+                </Frame>
+              );
+            })() : (
               <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', width: '100%' }}>
                 <button onClick={startSession} style={{
                   flex: 1, minHeight: 90, borderRadius: 18, border: 'none', cursor: 'pointer',
