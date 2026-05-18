@@ -1391,7 +1391,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
   const [pushEnabled, setPushEnabled] = useStateL(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
-  const [cycleWeekView, setCycleWeekView] = useStateL(() => localStorage.getItem('logbook-cycle-week-view') === 'true');
+  const [cycleWeekView, setCycleWeekView] = useStateL(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const pushStatusTimer = React.useRef(null);
   useEffectL(() => {
     if (!('caches' in window)) return;
@@ -1563,6 +1563,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 const next = !cycleWeekView;
                 setCycleWeekView(next);
                 localStorage.setItem('logbook-cycle-week-view', String(next));
+                setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: next } }));
               }}
               style={{
                 width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0,

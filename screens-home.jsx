@@ -106,7 +106,7 @@ function HomeScreen({ store, setStore, go }) {
   const dayIdx = today?.idx ?? 0;
   const dayCount = sch?.days?.length || 0;
   const weekdayMode = sch ? LB.isWeekdayPlan(sch) : false;
-  const cycleWeekView = !weekdayMode && localStorage.getItem('logbook-cycle-week-view') === 'true';
+  const cycleWeekView = !weekdayMode && (store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
 
   const jsDay = new Date().getDay();
   const todayWd = jsDay === 0 ? 6 : jsDay - 1;
