@@ -271,6 +271,40 @@ function HomeScreen({ store, setStore, go }) {
     return [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''))[0];
   }, [store.sessions]);
 
+  const doneSession = useMemo(() => {
+    const dateKey = sessionDate.toISOString().slice(0, 10);
+    return [...store.sessions]
+      .filter(s => s.ended && s.date.slice(0, 10) === dateKey)
+      .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] ?? null;
+  }, [store.sessions, sessionDate]);
+
+  const { improvementCount, regressionCount } = useMemo(() => {
+    if (!doneSession) return { improvementCount: 0, regressionCount: 0 };
+    const cmp = (st, prevSet, better) => {
+      if (!prevSet || !st.done) return false;
+      if (st.kg == null || prevSet.kg == null) return false;
+      const repsA = st.repsL ?? st.reps; const repsB = prevSet.repsL ?? prevSet.reps;
+      if (repsA == null || repsB == null) return false;
+      return better
+        ? (st.kg >= prevSet.kg && repsA >= repsB && (st.kg > prevSet.kg || repsA > repsB))
+        : (st.kg < prevSet.kg || repsA < repsB);
+    };
+    let improvements = 0, regressions = 0;
+    doneSession.entries.forEach(e => {
+      const prev = [...store.sessions]
+        .filter(x => x.ended && x.id !== doneSession.id && x.dayName === doneSession.dayName && x.ended < doneSession.ended)
+        .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
+        .find(x => x.entries.some(en => en.exId === e.exId));
+      const prevEntry = prev?.entries.find(en => en.exId === e.exId);
+      if (!prevEntry) return;
+      const improved = e.sets.some((st, j) => cmp(st, prevEntry.sets?.[j], true));
+      if (improved) { improvements++; return; }
+      const regressed = e.sets.some((st, j) => cmp(st, prevEntry.sets?.[j], false));
+      if (regressed) regressions++;
+    });
+    return { improvementCount: improvements, regressionCount: regressions };
+  }, [doneSession, store.sessions]);
+
   const completedCyclePos = useMemo(() => {
     if (weekdayMode || !sch) return null;
     const set = new Set();
@@ -603,15 +637,30 @@ function HomeScreen({ store, setStore, go }) {
 
             {/* CTAs */}
             {isSlotDone ? (
-              <Frame style={{ padding: '14px 18px', width: '100%' }}>
+              <Frame
+                onClick={doneSession ? () => go({ name: 'session', sessionId: doneSession.id, back: { name: 'home' } }) : undefined}
+                style={{ padding: '14px 18px', width: '100%', cursor: doneSession ? 'pointer' : 'default' }}
+              >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div style={{ width: 28, height: 28, borderRadius: '50%', background: UI.goldFaint, boxShadow: `inset 0 0 0 0.5px ${UI.goldSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5"><path d="M2 6l2.5 2.5L10 3"/></svg>
                   </div>
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <div className="micro-gold" style={{ marginBottom: 2 }}>WORKOUT COMPLETE</div>
-                    <div style={{ fontSize: 13, color: UI.inkSoft }}>Well done.</div>
+                    <div style={{ fontSize: 13, color: UI.inkSoft, display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {improvementCount === 0 && regressionCount === 0 ? 'Well done.' : (
+                        <>
+                          {improvementCount > 0 && (
+                            <span style={{ color: '#7bc47b', fontWeight: 600 }}>↑ {improvementCount}</span>
+                          )}
+                          {regressionCount > 0 && (
+                            <span style={{ color: UI.danger, fontWeight: 600 }}>↓ {regressionCount}</span>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
+                  {doneSession && <ChevronRight />}
                 </div>
               </Frame>
             ) : (
