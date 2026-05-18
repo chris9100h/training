@@ -271,6 +271,34 @@ function HomeScreen({ store, setStore, go }) {
     return [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''))[0];
   }, [store.sessions]);
 
+  const doneSession = useMemo(() => {
+    const dateKey = sessionDate.toISOString().slice(0, 10);
+    return [...store.sessions]
+      .filter(s => s.ended && s.date.slice(0, 10) === dateKey)
+      .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] ?? null;
+  }, [store.sessions, sessionDate]);
+
+  const improvementCount = useMemo(() => {
+    if (!doneSession) return 0;
+    const isImprovement = (st, prevSet) => {
+      if (!prevSet || !st.done) return false;
+      const hasKg = st.kg != null && prevSet.kg != null;
+      const hasReps = (st.reps != null && prevSet.reps != null) || (st.repsL != null && prevSet.repsL != null);
+      if (!hasKg || !hasReps) return false;
+      const repsA = st.repsL ?? st.reps; const repsB = prevSet.repsL ?? prevSet.reps;
+      return st.kg >= prevSet.kg && repsA >= repsB && (st.kg > prevSet.kg || repsA > repsB);
+    };
+    return doneSession.entries.reduce((count, e) => {
+      const prev = [...store.sessions]
+        .filter(x => x.ended && x.id !== doneSession.id && x.dayName === doneSession.dayName)
+        .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
+        .find(x => x.entries.some(en => en.exId === e.exId));
+      const prevEntry = prev?.entries.find(en => en.exId === e.exId);
+      const improved = prevEntry && e.sets.some((st, j) => isImprovement(st, prevEntry.sets?.[j]));
+      return count + (improved ? 1 : 0);
+    }, 0);
+  }, [doneSession, store.sessions]);
+
   const completedCyclePos = useMemo(() => {
     if (weekdayMode || !sch) return null;
     const set = new Set();
@@ -602,29 +630,25 @@ function HomeScreen({ store, setStore, go }) {
             </div>
 
             {/* CTAs */}
-            {isSlotDone ? (() => {
-              const dateKey = sessionDate.toISOString().slice(0, 10);
-              const doneSession = [...store.sessions]
-                .filter(s => s.ended && s.date.slice(0, 10) === dateKey)
-                .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
-              return (
-                <Frame
-                  onClick={doneSession ? () => go({ name: 'session', sessionId: doneSession.id, back: { name: 'home' } }) : undefined}
-                  style={{ padding: '14px 18px', width: '100%', cursor: doneSession ? 'pointer' : 'default' }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div style={{ width: 28, height: 28, borderRadius: '50%', background: UI.goldFaint, boxShadow: `inset 0 0 0 0.5px ${UI.goldSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5"><path d="M2 6l2.5 2.5L10 3"/></svg>
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div className="micro-gold" style={{ marginBottom: 2 }}>WORKOUT COMPLETE</div>
-                      <div style={{ fontSize: 13, color: UI.inkSoft }}>Well done.</div>
-                    </div>
-                    {doneSession && <ChevronRight />}
+            {isSlotDone ? (
+              <Frame
+                onClick={doneSession ? () => go({ name: 'session', sessionId: doneSession.id, back: { name: 'home' } }) : undefined}
+                style={{ padding: '14px 18px', width: '100%', cursor: doneSession ? 'pointer' : 'default' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: UI.goldFaint, boxShadow: `inset 0 0 0 0.5px ${UI.goldSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5"><path d="M2 6l2.5 2.5L10 3"/></svg>
                   </div>
-                </Frame>
-              );
-            })() : (
+                  <div style={{ flex: 1 }}>
+                    <div className="micro-gold" style={{ marginBottom: 2 }}>WORKOUT COMPLETE</div>
+                    <div style={{ fontSize: 13, color: UI.inkSoft }}>
+                      {improvementCount > 0 ? `${improvementCount} improvement${improvementCount > 1 ? 's' : ''}` : 'Well done.'}
+                    </div>
+                  </div>
+                  {doneSession && <ChevronRight />}
+                </div>
+              </Frame>
+            ) : (
               <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', width: '100%' }}>
                 <button onClick={startSession} style={{
                   flex: 1, minHeight: 90, borderRadius: 18, border: 'none', cursor: 'pointer',
