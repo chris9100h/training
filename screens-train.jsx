@@ -416,8 +416,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 6,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 52, color: UI.gold, fontStyle: 'italic', fontWeight: 300, lineHeight: 1 }}>↑</span>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.gold, fontWeight: 600, letterSpacing: '0.22em' }}>IMPROVEMENT</span>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 60px rgba(201,169,97,0.5)' }}>↑</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 22, color: '#fff8e7', fontWeight: 800, letterSpacing: '0.18em', textShadow: '0 0 20px rgba(201,169,97,1), 0 0 50px rgba(201,169,97,0.7), 0 0 90px rgba(201,169,97,0.4)' }}>IMPROVEMENT</span>
           </div>
         </div>
       )}
