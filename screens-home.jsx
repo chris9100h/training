@@ -133,7 +133,18 @@ function HomeScreen({ store, setStore, go }) {
   const [selectedWd, setSelectedWd] = useState(todayWd);
   const [selectedSlot, setSelectedSlot] = useState(dayIdx);
 
-  const minOffset = weekdayMode ? -8 : cycleWeekView ? -Math.ceil((currentCycleNum + 1) * dayCount / 7) - 1 : -(currentCycleNum + 1);
+  const minOffset = (() => {
+    if (weekdayMode) return -8;
+    if (cycleWeekView && store.cycleStartDate && dayCount > 0) {
+      const now = new Date(); now.setHours(12, 0, 0, 0);
+      const currentMondayMs = now.getTime() - todayWd * 86400000;
+      const cycle0StartMs = new Date(store.cycleStartDate + 'T12:00:00').getTime() - dayCount * 86400000;
+      const cycle0Wd = (new Date(cycle0StartMs).getDay() + 6) % 7;
+      const cycle0MondayMs = cycle0StartMs - cycle0Wd * 86400000;
+      return Math.round((cycle0MondayMs - currentMondayMs) / (7 * 86400000));
+    }
+    return -(currentCycleNum + 1);
+  })();
   const goBack = () => {
     if (weekOffset <= minOffset) return;
     setWeekOffset(weekOffset - 1);
