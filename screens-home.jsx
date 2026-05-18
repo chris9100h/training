@@ -647,14 +647,17 @@ function HomeScreen({ store, setStore, go }) {
                   </div>
                   <div style={{ flex: 1 }}>
                     <div className="micro-gold" style={{ marginBottom: 2 }}>WORKOUT COMPLETE</div>
-                    <div style={{ fontSize: 13, color: UI.inkSoft, display: 'flex', gap: 8 }}>
-                      {improvementCount > 0 && (
-                        <span style={{ color: UI.gold }}>↑ {improvementCount} improvement{improvementCount > 1 ? 's' : ''}</span>
+                    <div style={{ fontSize: 13, color: UI.inkSoft, display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {improvementCount === 0 && regressionCount === 0 ? 'Well done.' : (
+                        <>
+                          {improvementCount > 0 && (
+                            <span style={{ color: '#7bc47b', fontWeight: 600 }}>↑ {improvementCount}</span>
+                          )}
+                          {regressionCount > 0 && (
+                            <span style={{ color: UI.danger, fontWeight: 600 }}>↓ {regressionCount}</span>
+                          )}
+                        </>
                       )}
-                      {regressionCount > 0 && (
-                        <span style={{ color: UI.danger }}>↓ {regressionCount} regression{regressionCount > 1 ? 's' : ''}</span>
-                      )}
-                      {improvementCount === 0 && regressionCount === 0 && 'Well done.'}
                     </div>
                   </div>
                   {doneSession && <ChevronRight />}
