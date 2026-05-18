@@ -116,6 +116,7 @@ async function loadFromSupabase(userId) {
         restMedium:  sett.rest_medium  || 120,
         restSmall:   sett.rest_small   || 90,
         pushEnabled: sett.push_enabled ?? false,
+        cycleWeekView: sett.cycle_week_view ?? false,
       },
   };
 }
@@ -124,7 +125,7 @@ async function loadFromSupabase(userId) {
 
 function sessionToRow(s, userId) {
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, scheduleId, dayId, dayName, startedAt, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   return row;
@@ -179,7 +180,8 @@ async function syncStore(prev, next, userId) {
     prev.settings?.restBig         !== next.settings?.restBig         ||
     prev.settings?.restMedium      !== next.settings?.restMedium      ||
     prev.settings?.restSmall       !== next.settings?.restSmall       ||
-    prev.settings?.pushEnabled     !== next.settings?.pushEnabled;
+    prev.settings?.pushEnabled     !== next.settings?.pushEnabled     ||
+    prev.settings?.cycleWeekView   !== next.settings?.cycleWeekView;
 
   if (settingsChanged) {
     ops.push(_supabase.from('user_settings').upsert({
@@ -194,6 +196,7 @@ async function syncStore(prev, next, userId) {
       rest_medium:  next.settings?.restMedium  || 120,
       rest_small:   next.settings?.restSmall   || 90,
       push_enabled: next.settings?.pushEnabled ?? false,
+      cycle_week_view: next.settings?.cycleWeekView ?? false,
       in_progress_session_id: next.inProgress ?? null,
     }));
   }
