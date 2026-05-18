@@ -88,7 +88,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), 300);
       } else {
         // Round complete: start rest
-        persistRestStart(Date.now());
+        persistRestStart(Date.now(), restDef);
         const allGroupDone = updatedSets.every(s => s.done) && partners.every(({ e }) => e.sets.every(s => s.done));
         if (allGroupDone) {
           const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
@@ -105,7 +105,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         }
       }
     } else {
-      persistRestStart(Date.now());
+      persistRestStart(Date.now(), restDef);
       if (updatedSets.every(st => st.done)) {
         setTimeout(() => navigate(1), 600);
       }
@@ -198,10 +198,13 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
   // rest timer — persisted in session so navigation doesn't kill it
   const [restStart, setRestStart] = useStateT(() => session.restStart ?? null);
+  const [restDuration, setRestDuration] = useStateT(() => session.restDuration ?? null);
 
-  const persistRestStart = (val) => {
+  const persistRestStart = (val, dur) => {
     setRestStart(val);
-    updateSession(sess => ({ ...sess, restStart: val }));
+    const newDur = val !== null ? (dur ?? null) : null;
+    setRestDuration(newDur);
+    updateSession(sess => ({ ...sess, restStart: val, restDuration: newDur }));
   };
   const [now, setNow] = useStateT(Date.now());
   useEffectT(() => {
@@ -222,14 +225,16 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                 : cat === 'medium' ? (store.settings?.restMedium || 120)
                 : cat === 'small'  ? (store.settings?.restSmall  || 90)
                 :                    (store.settings?.restDefault || 120);
+  // Use the duration snapshotted when the timer started, not the current exercise's category
+  const activeRestDef = (restStart !== null && restDuration !== null) ? restDuration : restDef;
   const restElapsed = restStart ? Math.floor((now - restStart) / 1000) : null;
-  const restRemaining = restElapsed != null ? Math.max(0, restDef - restElapsed) : null;
-  const restPct = restElapsed != null ? Math.min(100, (restElapsed / restDef) * 100) : 0;
+  const restRemaining = restElapsed != null ? Math.max(0, activeRestDef - restElapsed) : null;
+  const restPct = restElapsed != null ? Math.min(100, (restElapsed / activeRestDef) * 100) : 0;
 
   useEffectT(() => {
     if (!restStart) return;
     if (!store.settings?.pushEnabled) return;
-    const delaySeconds = Math.round(Math.max(0, restStart + restDef * 1000 - Date.now()) / 1000);
+    const delaySeconds = Math.round(Math.max(0, restStart + activeRestDef * 1000 - Date.now()) / 1000);
     fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
       method: 'POST',
       headers: {
@@ -381,7 +386,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         ? { ...e, sets: e.sets.map(st => ({ ...st, done: true })) }
         : e),
     }));
-    persistRestStart(Date.now());
+    persistRestStart(Date.now(), restDef);
     setTimeout(() => navigate(1), 600);
   };
 
