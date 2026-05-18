@@ -278,25 +278,31 @@ function HomeScreen({ store, setStore, go }) {
       .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] ?? null;
   }, [store.sessions, sessionDate]);
 
-  const improvementCount = useMemo(() => {
-    if (!doneSession) return 0;
-    const isImprovement = (st, prevSet) => {
+  const { improvementCount, regressionCount } = useMemo(() => {
+    if (!doneSession) return { improvementCount: 0, regressionCount: 0 };
+    const cmp = (st, prevSet, better) => {
       if (!prevSet || !st.done) return false;
-      const hasKg = st.kg != null && prevSet.kg != null;
-      const hasReps = (st.reps != null && prevSet.reps != null) || (st.repsL != null && prevSet.repsL != null);
-      if (!hasKg || !hasReps) return false;
+      if (st.kg == null || prevSet.kg == null) return false;
       const repsA = st.repsL ?? st.reps; const repsB = prevSet.repsL ?? prevSet.reps;
-      return st.kg >= prevSet.kg && repsA >= repsB && (st.kg > prevSet.kg || repsA > repsB);
+      if (repsA == null || repsB == null) return false;
+      return better
+        ? (st.kg >= prevSet.kg && repsA >= repsB && (st.kg > prevSet.kg || repsA > repsB))
+        : (st.kg < prevSet.kg || repsA < repsB);
     };
-    return doneSession.entries.reduce((count, e) => {
+    let improvements = 0, regressions = 0;
+    doneSession.entries.forEach(e => {
       const prev = [...store.sessions]
         .filter(x => x.ended && x.id !== doneSession.id && x.dayName === doneSession.dayName)
         .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
         .find(x => x.entries.some(en => en.exId === e.exId));
       const prevEntry = prev?.entries.find(en => en.exId === e.exId);
-      const improved = prevEntry && e.sets.some((st, j) => isImprovement(st, prevEntry.sets?.[j]));
-      return count + (improved ? 1 : 0);
-    }, 0);
+      if (!prevEntry) return;
+      const improved = e.sets.some((st, j) => cmp(st, prevEntry.sets?.[j], true));
+      if (improved) { improvements++; return; }
+      const regressed = e.sets.some((st, j) => cmp(st, prevEntry.sets?.[j], false));
+      if (regressed) regressions++;
+    });
+    return { improvementCount: improvements, regressionCount: regressions };
   }, [doneSession, store.sessions]);
 
   const completedCyclePos = useMemo(() => {
@@ -641,8 +647,14 @@ function HomeScreen({ store, setStore, go }) {
                   </div>
                   <div style={{ flex: 1 }}>
                     <div className="micro-gold" style={{ marginBottom: 2 }}>WORKOUT COMPLETE</div>
-                    <div style={{ fontSize: 13, color: UI.inkSoft }}>
-                      {improvementCount > 0 ? `${improvementCount} improvement${improvementCount > 1 ? 's' : ''}` : 'Well done.'}
+                    <div style={{ fontSize: 13, color: UI.inkSoft, display: 'flex', gap: 8 }}>
+                      {improvementCount > 0 && (
+                        <span style={{ color: UI.gold }}>↑ {improvementCount} improvement{improvementCount > 1 ? 's' : ''}</span>
+                      )}
+                      {regressionCount > 0 && (
+                        <span style={{ color: UI.danger }}>↓ {regressionCount} regression{regressionCount > 1 ? 's' : ''}</span>
+                      )}
+                      {improvementCount === 0 && regressionCount === 0 && 'Well done.'}
                     </div>
                   </div>
                   {doneSession && <ChevronRight />}
