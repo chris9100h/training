@@ -1391,6 +1391,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
   const [pushEnabled, setPushEnabled] = useStateL(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
+  const [cycleWeekView, setCycleWeekView] = useStateL(() => localStorage.getItem('logbook-cycle-week-view') === 'true');
   const pushStatusTimer = React.useRef(null);
   useEffectL(() => {
     if (!('caches' in window)) return;
@@ -1548,6 +1549,36 @@ function SettingsScreen({ store, setStore, go, userId }) {
               )}
             </div>
           )}
+        </Frame>
+
+        {/* Display */}
+        <Frame style={{ padding: '14px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <span className="label" style={{ marginBottom: 0 }}>Week view in cycle mode</span>
+              <div className="micro" style={{ marginTop: 4, maxWidth: 220 }}>Show Mon–Sun instead of cycle days in the date strip</div>
+            </div>
+            <div
+              onClick={() => {
+                const next = !cycleWeekView;
+                setCycleWeekView(next);
+                localStorage.setItem('logbook-cycle-week-view', String(next));
+              }}
+              style={{
+                width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0,
+                background: cycleWeekView ? 'var(--gold)' : UI.bgInset,
+                border: `0.5px solid ${cycleWeekView ? UI.goldSoft : UI.hairStrong}`,
+                position: 'relative', transition: 'background 0.2s',
+              }}
+            >
+              <div style={{
+                position: 'absolute', top: 3, left: cycleWeekView ? 21 : 3,
+                width: 18, height: 18, borderRadius: 9,
+                background: cycleWeekView ? '#0a0805' : UI.inkFaint,
+                transition: 'left 0.2s',
+              }} />
+            </div>
+          </div>
         </Frame>
 
         <Bezel>DATA</Bezel>
