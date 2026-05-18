@@ -759,8 +759,14 @@ function StatsTab({ store, sessions, go }) {
     const oldest = relevant.reduce((min, s) =>
       s.date.slice(0, 10) < min ? s.date.slice(0, 10) : min, relevant[0].date.slice(0, 10));
     const anchor = planStart ?? new Date(oldest + 'T12:00:00');
-    const weeks = Math.max(1, (today.getTime() - anchor.getTime()) / (7 * 86400000));
-    return (relevant.length / weeks).toFixed(1);
+    // Monday of the anchor week
+    const anchorDay = anchor.getDay() === 0 ? 6 : anchor.getDay() - 1;
+    const anchorMonday = new Date(anchor); anchorMonday.setDate(anchor.getDate() - anchorDay); anchorMonday.setHours(0,0,0,0);
+    // Monday of the current week
+    const todayDay = today.getDay() === 0 ? 6 : today.getDay() - 1;
+    const currentMonday = new Date(today); currentMonday.setDate(today.getDate() - todayDay); currentMonday.setHours(0,0,0,0);
+    const weeks = Math.round((currentMonday - anchorMonday) / (7 * 86400000)) + 1;
+    return (relevant.length / Math.max(1, weeks)).toFixed(1);
   }, [sessions, planStart]);
   const exCounts = {};
   sessions.forEach(s => s.entries.forEach(e => { exCounts[e.exId] = (exCounts[e.exId] || 0) + 1; }));
