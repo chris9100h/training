@@ -44,18 +44,14 @@ function LoginScreen() {
         <span className="micro">EST. 2024</span>
       </div>
 
-      {/* Logo + title — fills upper screen as a unit */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative', zIndex: 1 }}>
+      {/* Centered block: logo + title + form */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
         <img src="icons/zane-logo.png" style={{ width: '82%', maxWidth: 340, objectFit: 'contain' }} />
-        <div style={{ textAlign: 'center', marginTop: 12 }}>
+        <div style={{ textAlign: 'center', marginTop: 6, marginBottom: 28 }}>
           <div className="display" style={{ fontSize: 38, fontWeight: 700, color: UI.ink, letterSpacing: '0.22em' }}>ZANE</div>
           <div className="display-it" style={{ marginTop: 2, fontSize: 14, fontWeight: 700, color: UI.gold, letterSpacing: '0.03em' }}>Train like Zane or remain the same.</div>
         </div>
-      </div>
-
-      {/* Form */}
-      <div style={{ flexShrink: 0, padding: '0 32px', position: 'relative', zIndex: 1 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
           <Field label="Email">
             <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus />
           </Field>
