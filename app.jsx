@@ -37,7 +37,7 @@ function LoadingScreen() {
         }}>
           <div style={{ fontSize: 38, fontWeight: 700, color: UI.gold, fontFamily: UI.fontNum, letterSpacing: '-0.02em' }}>L</div>
         </div>
-        <div style={{ fontSize: 18, fontWeight: 700, color: UI.ink, letterSpacing: '0.14em' }}>LOGBOOK</div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: UI.ink, letterSpacing: '0.14em' }}>ZANE</div>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontNum, letterSpacing: '0.1em', marginTop: 10, animation: 'timerPulse 1.6s ease-in-out infinite' }}>
           Loading…
         </div>
