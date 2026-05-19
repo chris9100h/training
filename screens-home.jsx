@@ -11,6 +11,15 @@ function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
+  const [swVersion, setSwVersion] = useState('');
+
+  useEffect(() => {
+    if (!('caches' in window)) return;
+    caches.keys().then(keys => {
+      const name = keys.find(k => k.startsWith('zane-'));
+      if (name) setSwVersion(name.replace('zane-', ''));
+    });
+  }, []);
 
   const canSubmit = email.trim() && password.length >= 6;
 
@@ -31,36 +40,16 @@ function LoginScreen() {
       <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
 
       <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
-        <span className="micro">LOGBOOK · CAL. M.01</span>
+        <span className="micro">ZANE · CAL. M.01</span>
         <span className="micro">EST. 2024</span>
       </div>
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
-          {/* Dial-style logo */}
-          <div style={{
-            width: 140, height: 140, borderRadius: '50%',
-            border: `0.5px solid ${UI.goldSoft}`,
-            background: `radial-gradient(circle at 50% 30%, rgba(201,169,97,0.10), transparent 60%), ${UI.bgRaised}`,
-            position: 'relative',
-            boxShadow: `0 0 0 6px ${UI.bg}, 0 0 0 6.5px ${UI.hair}, 0 0 80px rgba(201,169,97,0.12)`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            {Array.from({ length: 12 }).map((_, i) => (
-              <div key={i} style={{
-                position: 'absolute', top: 5, left: '50%',
-                width: i % 3 === 0 ? 1 : 0.5,
-                height: i % 3 === 0 ? 9 : 5,
-                background: i % 3 === 0 ? UI.gold : UI.hairStrong,
-                transform: `translateX(-50%) rotate(${i * 30}deg)`,
-                transformOrigin: '50% 65px',
-              }} />
-            ))}
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 56, color: UI.gold, fontStyle: 'italic', fontWeight: 400, letterSpacing: '-0.04em' }}>L</span>
-          </div>
-          <div style={{ marginTop: 26, textAlign: 'center' }}>
-            <div className="display" style={{ fontSize: 30, color: UI.ink, letterSpacing: '0.18em' }}>LOGBOOK</div>
-            <div className="micro" style={{ marginTop: 6 }}>FERRUM · SUDOR · NUMERI</div>
+          <img src="icons/zane-logo.png" style={{ width: 160, height: 160, objectFit: 'contain' }} />
+          <div style={{ marginTop: 0, textAlign: 'center' }}>
+            <div className="display" style={{ fontSize: 38, fontWeight: 700, color: UI.ink, letterSpacing: '0.22em' }}>ZANE</div>
+            <div className="display-it" style={{ marginTop: 2, fontSize: 14, fontWeight: 700, color: UI.gold, letterSpacing: '0.03em' }}>Train like Zane or remain the same.</div>
           </div>
         </div>
 
@@ -90,8 +79,8 @@ function LoginScreen() {
       </div>
 
       <div style={{ flexShrink: 0, padding: '0 22px calc(env(safe-area-inset-bottom, 8px) + 18px)', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
-        <span className="micro">REF. LB-V2-2026</span>
-        <span className="micro">SWISS MADE</span>
+        <span className="micro">REF. CZ-V2-2026</span>
+        <span className="micro">{swVersion || '…'}</span>
       </div>
     </Screen>
   );

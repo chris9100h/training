@@ -1,7 +1,7 @@
 {
-  "name": "Logbook",
-  "short_name": "Logbook",
-  "description": "iron · sweat · numbers",
+  "name": "Zane",
+  "short_name": "Zane",
+  "description": "train like zane or remain the same",
   "start_url": "/training/",
   "display": "standalone",
   "orientation": "portrait",

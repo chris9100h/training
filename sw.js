@@ -1,4 +1,4 @@
-const CACHE = 'logbook-1.21';
+const CACHE = 'zane-v1.3';
 const ASSETS = [
   '/training/',
   '/training/index.html',
