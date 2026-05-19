@@ -368,7 +368,7 @@ function Sheet({ open, onClose, title, children }) {
         boxShadow: '0 -20px 60px rgba(0,0,0,0.5)',
         padding: `16px 22px ${kbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
         animation: 'sheet-up 0.22s ease',
-        maxHeight: '85vh', overflow: 'auto',
+        maxHeight: '88dvh', overflow: 'auto',
       }}>
         <div style={{ width: 40, height: 3, background: UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
         {title && (

@@ -143,7 +143,7 @@ function LibraryScreen({ store, setStore, go }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                 <div style={{ flex: 1 }}>
                   <Field label="">
-                    <TextInput value={q} onChange={setQ} placeholder="Suchen…" />
+                    <TextInput value={q} onChange={v => setQ(v.toUpperCase())} placeholder="Suchen…" />
                   </Field>
                 </div>
                 <button onClick={() => setFiltersOpen(true)} style={{
@@ -324,8 +324,8 @@ function LibraryScreen({ store, setStore, go }) {
 
 const EXERCISE_SIZES = [['big','Big'],['medium','Medium'],['small','Small']];
 
-function ExerciseCreator({ onClose, setStore, onCreated }) {
-  const [name, setName] = useStateL('');
+function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
+  const [name, setName] = useStateL(initialName);
   const [selectedTags, setSelectedTags] = useStateL([]);
   const [category, setCategory] = useStateL(null);
   const [unilateral, setUnilateral] = useStateL(false);
@@ -341,7 +341,7 @@ function ExerciseCreator({ onClose, setStore, onCreated }) {
     <Sheet open={true} onClose={onClose} title="New exercise">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <Field label="Name">
-          <TextInput value={name} onChange={setName} placeholder="e.g. Bench press" autoFocus />
+          <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" autoFocus />
         </Field>
         <div>
           <span className="label">Muscle group</span>
@@ -459,7 +459,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
         {editMode ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <Field label="Name">
-              <TextInput value={editName} onChange={setEditName} />
+              <TextInput value={editName} onChange={v => setEditName(v.toUpperCase())} />
             </Field>
             <div>
               <span className="label">Muscle group</span>

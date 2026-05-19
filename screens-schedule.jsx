@@ -252,7 +252,6 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
       else days.splice(atIdx, 0, newDay);
       return { ...d, days };
     });
-    setPickingType(null);
   };
   const replaceDayType = (idx, type) => {
     setDraft(d => ({ ...d, days: d.days.map((day, i) => i === idx ? { ...day, name: type } : day) }));
@@ -294,7 +293,7 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
       />
       <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Field label="Name">
-          <TextInput value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v }))} />
+          <TextInput value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v.toUpperCase() }))} />
         </Field>
 
         {LB.isWeekdayPlan(draft) ? (
@@ -412,6 +411,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick }) {
     }
     setStore(s => ({ ...s, customDayTypes: [...(s.customDayTypes || []), name] }));
     onPick(name);
+    setNewName('');
   };
 
   const removeCustom = async (name) => {
@@ -709,7 +709,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
         />
       )}
       {addingEx && (
-        <ExercisePicker store={store} onClose={() => setAddingEx(false)} onPick={addExercise} />
+        <ExercisePicker store={store} setStore={setStore} onClose={() => setAddingEx(false)} onPick={addExercise} />
       )}
       {copyingFrom && schedule && (
         <DayCopyPicker
@@ -724,9 +724,10 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   );
 }
 
-function ExercisePicker({ store, onClose, onPick }) {
+function ExercisePicker({ store, setStore, onClose, onPick }) {
   const [q, setQ] = useStateS('');
   const [filterTags, setFilterTags] = useStateS([]);
+  const [creatingNew, setCreatingNew] = useStateS(null);
   const toggleFilter = (m) => setFilterTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
 
   const list = useMemoS(() => {
@@ -743,7 +744,7 @@ function ExercisePicker({ store, onClose, onPick }) {
   return (
     <Sheet open={true} onClose={onClose} title="Select exercise">
       <Field label="">
-        <TextInput value={q} onChange={setQ} placeholder="Search or type…" />
+        <TextInput value={q} onChange={v => setQ(v.toUpperCase())} placeholder="Search or type…" />
       </Field>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
         {MUSCLES.map(m => (
@@ -751,7 +752,7 @@ function ExercisePicker({ store, onClose, onPick }) {
             style={{ cursor: 'pointer' }}>{m}</Pill>
         ))}
       </div>
-      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', maxHeight: 300, overflow: 'auto' }}>
+      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', maxHeight: 240, overflow: 'auto' }}>
         {list.map((e, ei) => (
           <button key={e.id} onClick={() => onPick(e.id)} style={{
             background: 'transparent', border: 'none', textAlign: 'left',
@@ -766,19 +767,23 @@ function ExercisePicker({ store, onClose, onPick }) {
           </button>
         ))}
         {list.length === 0 && <div className="micro" style={{ padding: '20px 0', textAlign: 'center', color: UI.inkFaint }}>No exercises found</div>}
-        {q && !list.find(e => e.name.toUpperCase() === q.toUpperCase()) && (
-          <button onClick={() => {
-            if (window.__createExercise) {
-              const newId = window.__createExercise(q);
-              onPick(newId);
-            }
-          }} style={{
-            background: UI.goldFaint, border: `0.5px dashed ${UI.goldSoft}`,
-            padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
-            color: UI.gold, fontSize: 13, marginTop: 8, fontFamily: UI.fontUi, textAlign: 'left',
-          }}>+ Create "{q}"</button>
-        )}
       </div>
+      {q && !list.find(e => e.name.toUpperCase() === q.toUpperCase()) && (
+        <button onClick={() => setCreatingNew(q)} style={{
+          background: UI.goldFaint, border: `0.5px dashed ${UI.goldSoft}`,
+          padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
+          color: UI.gold, fontSize: 13, marginTop: 8, fontFamily: UI.fontUi, textAlign: 'left',
+          width: '100%', boxSizing: 'border-box',
+        }}>+ Create "{q}"</button>
+      )}
+      {creatingNew !== null && (
+        <window.Screens.ExerciseCreator
+          initialName={creatingNew}
+          setStore={setStore}
+          onCreated={(id) => { onPick(id); }}
+          onClose={() => setCreatingNew(null)}
+        />
+      )}
     </Sheet>
   );
 }
@@ -815,7 +820,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
     };
     setStore(s => {
       const withTypes = ensureCustomTypes(s, pattern);
-      return { ...withTypes, schedules: [...withTypes.schedules, newSch], activeScheduleId: newSch.id, cycleIndex: 0, cycleStartDate: LB.todayISO() };
+      return { ...withTypes, schedules: [...withTypes.schedules, newSch] };
     });
     go({ name: 'schedule', scheduleId: newSch.id });
   };
@@ -837,7 +842,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
     };
     setStore(s => {
       const withTypes = ensureCustomTypes(s, sorted.map(d => d.name));
-      return { ...withTypes, schedules: [...withTypes.schedules, newSch], activeScheduleId: newSch.id, cycleIndex: 0 };
+      return { ...withTypes, schedules: [...withTypes.schedules, newSch] };
     });
     go({ name: 'schedule', scheduleId: newSch.id });
   };
@@ -861,7 +866,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
               <div style={{ fontSize: 13, color: UI.inkSoft }}>You can change this later.</div>
             </div>
             <Field label="Plan name">
-              <TextInput value={name} onChange={setName} placeholder="e.g. 2 on 1 off PPL" autoFocus />
+              <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. 2 ON 1 OFF PPL" autoFocus />
             </Field>
             <Btn onClick={() => setStep(1)} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Next →</Btn>
           </div>
@@ -889,7 +894,16 @@ function ScheduleNewScreen({ store, setStore, go }) {
                   <div style={{ fontSize: 12, color: UI.inkSoft }}>Append day types — cycle repeats endlessly.</div>
                 </div>
                 <div>
-                  <span className="label">Your cycle · {pattern.length} days</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span className="label">Your cycle · {pattern.length} days</span>
+                    {pattern.length > 0 && (
+                      <button onClick={() => setPattern([])} style={{
+                        background: 'transparent', border: 'none', cursor: 'pointer',
+                        color: UI.danger, fontSize: 10, fontFamily: UI.fontUi, padding: '2px 0',
+                        letterSpacing: '0.1em', textTransform: 'uppercase',
+                      }}>Clear all</button>
+                    )}
+                  </div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: 12, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 10, minHeight: 54, marginTop: 8 }}>
                     {pattern.map((p, i) => (
                       <button key={i} onClick={() => setPattern(pat => pat.filter((_,j) => j !== i))} style={{
@@ -987,7 +1001,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
           store={store} setStore={setStore}
           title="Choose day type"
           onClose={() => setPickingType(false)}
-          onPick={(t) => { setPattern(pat => [...pat, t]); setPickingType(false); }}
+          onPick={(t) => { setPattern(pat => [...pat, t]); }}
         />
       )}
       {pickingWeekday != null && (

@@ -36,6 +36,21 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const session = store.sessions.find(s => s.id === sessionId);
   if (!session) { go({ name: 'home' }); return null; }
 
+  useEffectT(() => {
+    if (!('wakeLock' in navigator)) return;
+    let lock = null;
+    const acquire = async () => {
+      try { lock = await navigator.wakeLock.request('screen'); } catch {}
+    };
+    const onVisibility = () => { if (!document.hidden) acquire(); };
+    acquire();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      lock?.release();
+    };
+  }, []);
+
   const _sch = store.schedules?.find(s => s.id === session.scheduleId);
   const isWeekdayMode = _sch ? LB.isWeekdayPlan(_sch) : false;
 
