@@ -30,7 +30,7 @@ function LoadingScreen() {
     <Screen scroll={false} style={{ justifyContent: 'center', alignItems: 'center' }}>
       <div style={{ textAlign: 'center', animation: 'fadeUp 0.4s ease' }}>
         <div style={{
-          width: 90, height: 90, margin: '0 auto 24px',
+          width: 220, height: 220, margin: '0 auto 24px',
           animation: 'logoPulse 2.4s ease-in-out infinite',
         }}>
           <img src="icons/zane-logo.png" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
