@@ -37,27 +37,7 @@ function LoginScreen() {
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
-          {/* Dial-style logo */}
-          <div style={{
-            width: 140, height: 140, borderRadius: '50%',
-            border: `0.5px solid ${UI.goldSoft}`,
-            background: `radial-gradient(circle at 50% 30%, rgba(201,169,97,0.10), transparent 60%), ${UI.bgRaised}`,
-            position: 'relative',
-            boxShadow: `0 0 0 6px ${UI.bg}, 0 0 0 6.5px ${UI.hair}, 0 0 80px rgba(201,169,97,0.12)`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            {Array.from({ length: 12 }).map((_, i) => (
-              <div key={i} style={{
-                position: 'absolute', top: 5, left: '50%',
-                width: i % 3 === 0 ? 1 : 0.5,
-                height: i % 3 === 0 ? 9 : 5,
-                background: i % 3 === 0 ? UI.gold : UI.hairStrong,
-                transform: `translateX(-50%) rotate(${i * 30}deg)`,
-                transformOrigin: '50% 65px',
-              }} />
-            ))}
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 56, color: UI.gold, fontStyle: 'italic', fontWeight: 400, letterSpacing: '-0.04em' }}>L</span>
-          </div>
+          <img src="icons/zane-logo.png" style={{ width: 160, height: 160, objectFit: 'contain' }} />
           <div style={{ marginTop: 26, textAlign: 'center' }}>
             <div className="display" style={{ fontSize: 30, color: UI.ink, letterSpacing: '0.18em' }}>ZANE</div>
             <div className="display-it" style={{ marginTop: 8, fontSize: 14, color: UI.goldSoft, letterSpacing: '0.03em' }}>Train like Zane or remain the same.</div>
