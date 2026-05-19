@@ -324,8 +324,8 @@ function LibraryScreen({ store, setStore, go }) {
 
 const EXERCISE_SIZES = [['big','Big'],['medium','Medium'],['small','Small']];
 
-function ExerciseCreator({ onClose, setStore, onCreated }) {
-  const [name, setName] = useStateL('');
+function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
+  const [name, setName] = useStateL(initialName);
   const [selectedTags, setSelectedTags] = useStateL([]);
   const [category, setCategory] = useStateL(null);
   const [unilateral, setUnilateral] = useStateL(false);
