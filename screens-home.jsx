@@ -663,14 +663,11 @@ function HomeScreen({ store, setStore, go }) {
                   WebkitTapHighlightColor: 'transparent',
                 }}>
                   <span className="micro" style={{ color: 'rgba(10,8,5,0.6)', letterSpacing: '0.22em', fontWeight: 600 }}>
-                    {isFutureSlot && !isViewingToday ? 'PLAN' : isViewingToday ? 'START' : 'LOG'}
+                    {isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION'}
                   </span>
                   <svg width="26" height="26" viewBox="0 0 24 24" fill="#0a0805">
                     <path d="M8 5v14l11-7z"/>
                   </svg>
-                  <span className="micro" style={{ color: 'rgba(10,8,5,0.45)' }}>
-                    {isViewingToday ? 'WORKOUT' : 'LOG'}
-                  </span>
                 </button>
                 {!weekdayMode && isViewingToday && (
                   <button onClick={async () => { if (await confirm('The current day will be skipped.', { title: 'Skip day?', ok: 'Skip' })) skipRest(); }} style={{
