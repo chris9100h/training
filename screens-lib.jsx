@@ -250,7 +250,7 @@ function LibraryScreen({ store, setStore, go }) {
           left: '50%', transform: 'translateX(-50%)',
           width: '100%', maxWidth: 440,
           padding: '12px 22px',
-          background: 'rgba(7,6,10,0.92)', borderTop: `0.5px solid ${UI.hair}`,
+          background: 'rgba(var(--bg-rgb),0.92)', borderTop: `0.5px solid ${UI.hair}`,
           backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
           zIndex: 15,
@@ -1032,12 +1032,51 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     prevEntryMap[e.exId] = prev?.entries.find(en => en.exId === e.exId) ?? null;
   });
 
+  const prevSameDay = store.sessions
+    .filter(x => x.ended && x.id !== s.id && x.dayName === s.dayName)
+    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
+  const volDelta = prevSameDay != null ? vol - totalVolume(prevSameDay) : null;
+
+  const prMap = {};
+  store.sessions.filter(x => x.ended && x.id !== s.id).forEach(sess =>
+    sess.entries.forEach(e => e.sets.filter(st => st.done && st.kg != null && st.reps != null).forEach(st => {
+      const cur = prMap[e.exId];
+      if (!cur || st.kg > cur.kg || (st.kg === cur.kg && st.reps > cur.reps)) prMap[e.exId] = { kg: st.kg, reps: st.reps };
+    }))
+  );
+  const sessionBestMap = {};
+  s.entries.forEach(e => e.sets.filter(st => st.done && st.kg != null && st.reps != null).forEach(st => {
+    const cur = sessionBestMap[e.exId];
+    if (!cur || st.kg > cur.kg || (st.kg === cur.kg && st.reps > cur.reps)) sessionBestMap[e.exId] = { kg: st.kg, reps: st.reps };
+  }));
+  const isPR = (st, exId) => {
+    if (!st.done || st.kg == null || st.reps == null) return false;
+    const sessionBest = sessionBestMap[exId];
+    if (!sessionBest || st.kg !== sessionBest.kg || st.reps !== sessionBest.reps) return false;
+    const best = prMap[exId];
+    return !best || st.kg > best.kg || (st.kg === best.kg && st.reps > best.reps);
+  };
+
+  const muscleGroups = [...new Set(
+    s.entries.flatMap(e => store.exercises.find(x => x.id === e.exId)?.tags || []).filter(Boolean)
+  )];
+
   const takeScreenshot = async () => {
     if (!captureRef.current || !window.html2canvas) return;
     setCapturing(true);
+    // Temporarily expand scroll parent so html2canvas captures full content
+    const scrollParent = captureRef.current.parentElement;
+    const saved = { overflow: scrollParent.style.overflow, height: scrollParent.style.height, minHeight: scrollParent.style.minHeight };
+    scrollParent.style.overflow = 'visible';
+    scrollParent.style.height = 'auto';
+    scrollParent.style.minHeight = 'auto';
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
-      const canvas = await window.html2canvas(captureRef.current, {
-        backgroundColor: '#07060a', scale: 2, useCORS: true, logging: false,
+      const el = captureRef.current;
+      const canvas = await window.html2canvas(el, {
+        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
+        scale: 2, useCORS: true, logging: false,
+        height: el.scrollHeight, windowHeight: el.scrollHeight,
       });
       canvas.toBlob(async (blob) => {
         const filename = `${s.dayName}-${s.date.slice(0,10)}.png`;
@@ -1055,6 +1094,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         }
       }, 'image/png');
     } finally {
+      scrollParent.style.overflow = saved.overflow;
+      scrollParent.style.height = saved.height;
+      scrollParent.style.minHeight = saved.minHeight;
       setCapturing(false);
     }
   };
@@ -1065,6 +1107,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     const reps = st.reps != null && prevSet.reps != null;
     if (!kg || !reps) return false;
     return st.kg >= prevSet.kg && st.reps >= prevSet.reps && (st.kg > prevSet.kg || st.reps > prevSet.reps);
+  };
+
+  const isDecline = (st, prevSet) => {
+    if (!prevSet || !st.done || st.kg == null || prevSet.kg == null || st.reps == null || prevSet.reps == null) return false;
+    return st.kg < prevSet.kg || (st.kg === prevSet.kg && st.reps < prevSet.reps);
   };
 
   return (
@@ -1096,10 +1143,27 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       />
       <Hairline />
 
-      <div style={{ padding: '14px 22px 28px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div ref={captureRef} style={{ padding: capturing ? '20px 22px 24px' : '14px 22px 28px', display: 'flex', flexDirection: 'column', gap: 18, background: UI.bg }}>
 
-        {/* Celebration banner */}
-        {justFinished && (() => {
+        {/* Screenshot-only header */}
+        {capturing && (
+          <div style={{ marginBottom: -4 }}>
+            <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+              <div>
+                <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 4 }}>
+                  {new Date(s.date.slice(0,10) + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
+                </div>
+                <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
+              </div>
+              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
+            </div>
+            <div style={{ height: '0.5px', background: UI.hair, marginBottom: 0 }} />
+          </div>
+        )}
+
+        {/* Celebration banner — screen only */}
+        {justFinished && !capturing && (() => {
           return (
             <BracketFrame gold style={{ marginBottom: 4 }}>
               <div style={{ textAlign: 'center', padding: '6px 0 10px' }}>
@@ -1126,17 +1190,45 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           );
         })()}
 
-        {/* Stats row */}
-        {!justFinished && (
+        {/* Stats — circle dials on screen, flat grid in screenshot */}
+        {!justFinished && !capturing && (
           <div style={{ display: 'flex', justifyContent: 'space-around' }}>
             <SubDial label="Duration" value={duration ?? '—'} sub={duration ? 'min' : ''} size={90} />
             <SubDial label="Volume" value={Math.round(vol).toLocaleString('en-US')} sub="kg" size={90} gold />
             <SubDial label="Sets" value={s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)} size={90} />
           </div>
         )}
+        {capturing && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', marginTop: -8 }}>
+            {[['DURATION', duration != null ? `${duration} min` : '—', false], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} kg`, true], ['SETS', s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0), false]].map(([label, value, gold], idx) => (
+              <div key={label} style={{ padding: '6px 12px', borderRight: idx < 2 ? `0.5px solid ${UI.hair}` : 'none', textAlign: 'center' }}>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{label}</div>
+                <div className="num" style={{ fontSize: 16, color: gold ? UI.gold : UI.ink }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Volume delta vs previous same-day session */}
+        {volDelta != null && (
+          <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
+            {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} kg · vs last {s.dayName}
+          </div>
+        )}
 
         {/* Exercise entries */}
         <div>
+          {capturing && <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />}
+          {muscleGroups.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+              {muscleGroups.map(tag => (
+                <span key={tag} className="micro" style={{
+                  color: UI.inkFaint, border: `0.5px solid ${UI.hair}`,
+                  borderRadius: 4, padding: '2px 8px',
+                }}>{tag}</span>
+              ))}
+            </div>
+          )}
           <Bezel>EXERCISES</Bezel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
             {(() => {
@@ -1160,33 +1252,37 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 }
               }
 
-              const renderEntry = (e, i) => (
+              const renderEntry = (e, i) => {
+                const prev = prevEntryMap[e.exId];
+                const hasImprovement = e.sets.some((st, j) => isPR(st, e.exId) || isImprovement(st, prev?.sets?.[j]));
+                return (
                 <div key={i}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
                     <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{e.name}</div>
-                    <Pill>{e.sets.filter(x => x.done).length} / {e.sets.length}</Pill>
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {e.sets.map((st, j) => {
-                      const prev = prevEntryMap[e.exId];
-                      const gold = isImprovement(st, prev?.sets?.[j]);
+                      const pr = isPR(st, e.exId);
+                      const highlight = pr || isImprovement(st, prev?.sets?.[j]);
+                      const decline = !hasImprovement && isDecline(st, prev?.sets?.[j]);
                       return (
                         <span key={j} style={{
                           opacity: st.done ? 1 : 0.3,
-                          background: gold ? UI.goldFaint : 'transparent',
-                          border: `0.5px solid ${gold ? UI.goldSoft : UI.hair}`,
+                          background: highlight ? UI.goldFaint : decline ? 'rgba(200,116,105,0.08)' : 'transparent',
+                          border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(200,116,105,0.35)' : UI.hair}`,
                           borderRadius: 6, padding: '3px 8px',
                           fontFamily: UI.fontNum, fontSize: 12,
-                          color: gold ? UI.goldLight : UI.ink,
+                          color: highlight ? UI.goldLight : decline ? 'rgba(200,116,105,0.85)' : UI.ink,
                         }}>
-                          {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
+                          {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(200,116,105,0.6)' : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(200,116,105,0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
                         </span>
                       );
                     })}
                   </div>
                   {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{e.note}</div>}
                 </div>
-              );
+                );
+              };
 
               return groups.map((g, gi) => (
                 <div key={gi}>
@@ -1203,86 +1299,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               ));
             })()}
           </div>
+          {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 14 }} />}
         </div>
       </div>
 
-      {/* off-screen capture target */}
-      <div ref={captureRef} style={{
-        position: 'fixed', top: 0, left: '-9999px', width: 390,
-        background: '#07060a', padding: '22px 20px 26px',
-        fontFamily: UI.fontUi, color: UI.ink,
-      }}>
-        {/* top gold rule */}
-        <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
-
-        {/* header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-          <div>
-            <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 4 }}>
-              {new Date(s.date.slice(0,10) + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
-            </div>
-            <div className="display" style={{ fontSize: 24 }}>{s.dayName}</div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div className="micro-gold" style={{ letterSpacing: '0.18em' }}>ZANE</div>
-          </div>
-        </div>
-
-        {/* hairline divider */}
-        <div style={{ height: '0.5px', background: UI.hair, marginBottom: 14 }} />
-
-        {/* stats row — 3 columns with vertical hairlines */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', marginBottom: 14 }}>
-          {[['DURATION', duration != null ? `${duration} min` : '—'], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} kg`], ['SETS', s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)]].map(([label, value], idx) => (
-            <div key={label} style={{
-              padding: '6px 12px',
-              borderRight: idx < 2 ? `0.5px solid ${UI.hair}` : 'none',
-              textAlign: idx === 0 ? 'left' : idx === 2 ? 'right' : 'center',
-            }}>
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{label}</div>
-              <div className="num" style={{ fontSize: 16, color: UI.gold }}>{value}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* gold divider before entries */}
-        <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />
-
-        {/* exercise entries as hairline rows */}
-        {s.entries.map((e, i) => (
-          <div key={i}>
-            <div style={{ paddingBottom: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <div className="display" style={{ fontSize: 15 }}>{e.name}</div>
-                <div className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{e.sets.filter(x => x.done).length}/{e.sets.length}</div>
-              </div>
-              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                {e.sets.map((st, j) => {
-                  const prev = prevEntryMap[e.exId];
-                  const gold = isImprovement(st, prev?.sets?.[j]);
-                  return (
-                    <span key={j} style={{
-                      opacity: st.done ? 1 : 0.35,
-                      background: gold ? UI.goldFaint : UI.bgInset,
-                      border: `0.5px solid ${gold ? UI.goldSoft : UI.hair}`,
-                      borderRadius: 4, padding: '2px 7px',
-                      fontFamily: UI.fontNum, fontSize: 11,
-                      color: gold ? UI.goldLight : UI.ink,
-                    }}>
-                      {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
-                    </span>
-                  );
-                })}
-              </div>
-              {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{e.note}</div>}
-            </div>
-            {i < s.entries.length - 1 && <div style={{ height: '0.5px', background: UI.hair, marginBottom: 14 }} />}
-          </div>
-        ))}
-
-        {/* bottom gold rule */}
-        <div style={{ height: '0.5px', background: UI.gold, marginTop: 4 }} />
-      </div>
 
       {editing && (
         <SessionEditSheet
@@ -1420,6 +1440,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [pushStatus, setPushStatus] = useStateL(null);
   const [pushEnabled, setPushEnabled] = useStateL(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
   const [cycleWeekView, setCycleWeekView] = useStateL(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
+  const [darkMode, setDarkMode] = useStateL(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   const pushStatusTimer = React.useRef(null);
   useEffectL(() => {
     if (!('caches' in window)) return;
@@ -1628,6 +1649,33 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 position: 'absolute', top: 3, left: cycleWeekView ? 21 : 3,
                 width: 18, height: 18, borderRadius: 9,
                 background: cycleWeekView ? '#0a0805' : UI.inkFaint,
+                transition: 'left 0.2s',
+              }} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+            <div>
+              <span className="label" style={{ marginBottom: 0 }}>Pure black background</span>
+              <div className="micro" style={{ marginTop: 4, maxWidth: 220 }}>Use OLED black instead of dark gray</div>
+            </div>
+            <div
+              onClick={() => {
+                const next = darkMode === 'black' ? 'dark' : 'black';
+                setDarkMode(next);
+                localStorage.setItem('logbook-dark-mode', next);
+                setStore(s => ({ ...s, settings: { ...s.settings, darkMode: next } }));
+              }}
+              style={{
+                width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0,
+                background: darkMode === 'black' ? 'var(--accent)' : UI.bgInset,
+                border: `0.5px solid ${darkMode === 'black' ? UI.goldSoft : UI.hairStrong}`,
+                position: 'relative', transition: 'background 0.2s',
+              }}
+            >
+              <div style={{
+                position: 'absolute', top: 3, left: darkMode === 'black' ? 21 : 3,
+                width: 18, height: 18, borderRadius: 9,
+                background: darkMode === 'black' ? '#0a0805' : UI.inkFaint,
                 transition: 'left 0.2s',
               }} />
             </div>
