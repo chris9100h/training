@@ -31,7 +31,7 @@ function LoginScreen() {
       <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
 
       <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
-        <span className="micro">LOGBOOK · CAL. M.01</span>
+        <span className="micro">ZANE · CAL. M.01</span>
         <span className="micro">EST. 2024</span>
       </div>
 
@@ -56,10 +56,13 @@ function LoginScreen() {
                 transformOrigin: '50% 65px',
               }} />
             ))}
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 56, color: UI.gold, fontStyle: 'italic', fontWeight: 400, letterSpacing: '-0.04em' }}>L</span>
+            <svg viewBox="0 0 100 100" width="88" height="88" style={{ display: 'block' }}>
+              <path fill={UI.gold} d="M52,5 Q62,2 70,9 Q74,12 74,16 L69,17 Q64,21 62,24 L60,28 Q72,32 82,44 Q88,52 88,64 Q88,74 84,78 L80,78 Q80,66 78,54 Q74,46 68,44 L66,72 L52,74 L38,72 L36,44 Q30,44 24,56 Q18,68 18,80 L14,82 Q8,78 6,64 Q6,50 12,40 Q18,34 26,30 Q34,26 38,26 L40,22 Q44,21 46,20 L44,16 Q40,12 40,8 Q44,4 52,5Z"/>
+            </svg>
           </div>
           <div style={{ marginTop: 26, textAlign: 'center' }}>
-            <div className="display" style={{ fontSize: 30, color: UI.ink, letterSpacing: '0.18em' }}>LOGBOOK</div>
+            <div className="display" style={{ fontSize: 30, color: UI.ink, letterSpacing: '0.18em' }}>ZANE</div>
+            <div className="display-it" style={{ marginTop: 8, fontSize: 14, color: UI.goldSoft, letterSpacing: '0.03em' }}>Train like Zane or remain the same.</div>
             <div className="micro" style={{ marginTop: 6 }}>FERRUM · SUDOR · NUMERI</div>
           </div>
         </div>
@@ -90,7 +93,7 @@ function LoginScreen() {
       </div>
 
       <div style={{ flexShrink: 0, padding: '0 22px calc(env(safe-area-inset-bottom, 8px) + 18px)', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
-        <span className="micro">REF. LB-V2-2026</span>
+        <span className="micro">REF. CZ-V2-2026</span>
         <span className="micro">SWISS MADE</span>
       </div>
     </Screen>

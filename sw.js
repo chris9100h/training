@@ -1,4 +1,4 @@
-const CACHE = 'logbook-1.21';
+const CACHE = 'zane-1.22';
 const ASSETS = [
   '/training/',
   '/training/index.html',
@@ -12,6 +12,7 @@ const ASSETS = [
   '/training/app.jsx',
   '/training/icons/icon-192.png',
   '/training/icons/icon-512.png',
+  '/training/icons/zane-icon.svg',
 ];
 
 self.addEventListener('install', e => {

@@ -1424,8 +1424,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
   useEffectL(() => {
     if (!('caches' in window)) return;
     caches.keys().then(keys => {
-      const name = keys.find(k => k.startsWith('logbook-'));
-      if (name) setSwVersion(name.replace('logbook-', ''));
+      const name = keys.find(k => k.startsWith('zane-'));
+      if (name) setSwVersion(name.replace('zane-', ''));
     });
   }, []);
 
@@ -1446,7 +1446,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: 'Rest done — keep going! 💪', title: 'Logbook Test', delaySeconds, nonce: String(Date.now()) }),
+        body: JSON.stringify({ message: 'Rest done — keep going! 💪', title: 'Zane Test', delaySeconds, nonce: String(Date.now()) }),
       });
       if (res.status === 202) {
         setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`);
@@ -1472,7 +1472,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
     const blob = new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `logbook-${LB.todayISO()}.json`;
+    a.href = url; a.download = `zane-${LB.todayISO()}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
@@ -1651,7 +1651,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           Delete all data
         </Btn>
         <div className="micro" style={{ textAlign: 'center', marginTop: 8 }}>
-          Logbook · {swVersion || '…'} · Data in Supabase
+          Zane · {swVersion || '…'} · Data in Supabase
         </div>
       </div>
       {confirmEl}
