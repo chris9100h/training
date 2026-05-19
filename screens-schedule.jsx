@@ -819,7 +819,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
     };
     setStore(s => {
       const withTypes = ensureCustomTypes(s, pattern);
-      return { ...withTypes, schedules: [...withTypes.schedules, newSch], activeScheduleId: newSch.id, cycleIndex: 0, cycleStartDate: LB.todayISO() };
+      return { ...withTypes, schedules: [...withTypes.schedules, newSch] };
     });
     go({ name: 'schedule', scheduleId: newSch.id });
   };
@@ -841,7 +841,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
     };
     setStore(s => {
       const withTypes = ensureCustomTypes(s, sorted.map(d => d.name));
-      return { ...withTypes, schedules: [...withTypes.schedules, newSch], activeScheduleId: newSch.id, cycleIndex: 0 };
+      return { ...withTypes, schedules: [...withTypes.schedules, newSch] };
     });
     go({ name: 'schedule', scheduleId: newSch.id });
   };
