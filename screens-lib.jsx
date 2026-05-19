@@ -1109,6 +1109,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     return st.kg >= prevSet.kg && st.reps >= prevSet.reps && (st.kg > prevSet.kg || st.reps > prevSet.reps);
   };
 
+  const isDecline = (st, prevSet) => {
+    if (!prevSet || !st.done || st.kg == null || prevSet.kg == null || st.reps == null || prevSet.reps == null) return false;
+    return st.kg < prevSet.kg || (st.kg === prevSet.kg && st.reps < prevSet.reps);
+  };
+
   return (
     <Screen>
       <ScreenHead
@@ -1247,33 +1252,37 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 }
               }
 
-              const renderEntry = (e, i) => (
+              const renderEntry = (e, i) => {
+                const prev = prevEntryMap[e.exId];
+                const hasImprovement = e.sets.some((st, j) => isPR(st, e.exId) || isImprovement(st, prev?.sets?.[j]));
+                return (
                 <div key={i}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
                     <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{e.name}</div>
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {e.sets.map((st, j) => {
-                      const prev = prevEntryMap[e.exId];
                       const pr = isPR(st, e.exId);
                       const highlight = pr || isImprovement(st, prev?.sets?.[j]);
+                      const decline = !hasImprovement && isDecline(st, prev?.sets?.[j]);
                       return (
                         <span key={j} style={{
                           opacity: st.done ? 1 : 0.3,
-                          background: highlight ? UI.goldFaint : 'transparent',
-                          border: `0.5px solid ${highlight ? UI.goldSoft : UI.hair}`,
+                          background: highlight ? UI.goldFaint : decline ? 'rgba(200,116,105,0.08)' : 'transparent',
+                          border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(200,116,105,0.35)' : UI.hair}`,
                           borderRadius: 6, padding: '3px 8px',
                           fontFamily: UI.fontNum, fontSize: 12,
-                          color: highlight ? UI.goldLight : UI.ink,
+                          color: highlight ? UI.goldLight : decline ? 'rgba(200,116,105,0.85)' : UI.ink,
                         }}>
-                          {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: highlight ? UI.gold : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
+                          {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(200,116,105,0.6)' : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(200,116,105,0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
                         </span>
                       );
                     })}
                   </div>
                   {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{e.note}</div>}
                 </div>
-              );
+                );
+              };
 
               return groups.map((g, gi) => (
                 <div key={gi}>
