@@ -50,7 +50,7 @@ function TopBar({ title, sub, onBack, right }) {
       padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 14px',
       borderBottom: `0.5px solid ${UI.hair}`,
       position: 'sticky', top: 0,
-      background: 'rgba(7,6,10,0.85)',
+      background: 'rgba(var(--bg-rgb),0.85)',
       backdropFilter: 'blur(20px)',
       WebkitBackdropFilter: 'blur(20px)',
       zIndex: 5,
@@ -125,7 +125,7 @@ function TabBar({ active, onChange }) {
       zIndex: 20,
     }}>
       <div style={{
-        background: 'rgba(7,6,10,0.88)',
+        background: 'rgba(var(--bg-rgb),0.88)',
         backdropFilter: 'blur(24px) saturate(140%)',
         WebkitBackdropFilter: 'blur(24px) saturate(140%)',
         border: `0.5px solid ${UI.hair}`,

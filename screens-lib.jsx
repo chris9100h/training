@@ -250,7 +250,7 @@ function LibraryScreen({ store, setStore, go }) {
           left: '50%', transform: 'translateX(-50%)',
           width: '100%', maxWidth: 440,
           padding: '12px 22px',
-          background: 'rgba(7,6,10,0.92)', borderTop: `0.5px solid ${UI.hair}`,
+          background: 'rgba(var(--bg-rgb),0.92)', borderTop: `0.5px solid ${UI.hair}`,
           backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
           zIndex: 15,

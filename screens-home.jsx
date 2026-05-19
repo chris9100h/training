@@ -424,7 +424,7 @@ function HomeScreen({ store, setStore, go }) {
         borderBottom: `0.5px solid ${UI.hair}`,
         position: 'sticky', top: 0, zIndex: 5,
         backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-        background: 'rgba(7,6,10,0.85)',
+        background: 'rgba(var(--bg-rgb),0.85)',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
