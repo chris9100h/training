@@ -341,7 +341,7 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
     <Sheet open={true} onClose={onClose} title="New exercise">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <Field label="Name">
-          <TextInput value={name} onChange={setName} placeholder="e.g. Bench press" autoFocus />
+          <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" autoFocus />
         </Field>
         <div>
           <span className="label">Muscle group</span>
@@ -459,7 +459,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
         {editMode ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <Field label="Name">
-              <TextInput value={editName} onChange={setEditName} />
+              <TextInput value={editName} onChange={v => setEditName(v.toUpperCase())} />
             </Field>
             <div>
               <span className="label">Muscle group</span>
