@@ -1550,7 +1550,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
               onClick={togglePush}
               style={{
                 width: 44, height: 26, borderRadius: 13, cursor: 'pointer',
-                background: pushEnabled ? 'var(--gold)' : UI.bgInset,
+                background: pushEnabled ? 'var(--accent)' : UI.bgInset,
                 border: `0.5px solid ${pushEnabled ? UI.goldSoft : UI.hairStrong}`,
                 position: 'relative', transition: 'background 0.2s',
               }}
@@ -1579,6 +1579,30 @@ function SettingsScreen({ store, setStore, go, userId }) {
           )}
         </Frame>
 
+        {/* Accent color */}
+        <Frame style={{ padding: '14px 16px' }}>
+          <span className="label" style={{ display: 'block', marginBottom: 12 }}>Accent color</span>
+          <div style={{ display: 'flex', gap: 10 }}>
+            {Object.entries(window.ACCENT_PALETTE).map(([key, c]) => {
+              const active = (store.settings?.accentColor ?? 'gold') === key;
+              return (
+                <button key={key} onClick={() => {
+                  window.applyAccentColor(key);
+                  localStorage.setItem('logbook-accent-color', key);
+                  setStore(s => ({ ...s, settings: { ...s.settings, accentColor: key } }));
+                }} title={c.label} style={{
+                  width: 28, height: 28, borderRadius: '50%',
+                  background: c.hex,
+                  border: active ? `2.5px solid ${UI.ink}` : '2.5px solid transparent',
+                  boxShadow: active ? `0 0 0 1px ${c.hex}` : 'none',
+                  cursor: 'pointer', padding: 0, flexShrink: 0,
+                  WebkitTapHighlightColor: 'transparent',
+                }} />
+              );
+            })}
+          </div>
+        </Frame>
+
         {/* Display */}
         <Frame style={{ padding: '14px 16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1595,7 +1619,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
               }}
               style={{
                 width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0,
-                background: cycleWeekView ? 'var(--gold)' : UI.bgInset,
+                background: cycleWeekView ? 'var(--accent)' : UI.bgInset,
                 border: `0.5px solid ${cycleWeekView ? UI.goldSoft : UI.hairStrong}`,
                 position: 'relative', transition: 'background 0.2s',
               }}

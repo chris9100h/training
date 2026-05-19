@@ -57,6 +57,14 @@ function App() {
   const localDirty                = useRefA(false); // true if user changed store after cache load
 
   useEffectA(() => {
+    const color = store?.settings?.accentColor;
+    if (color) {
+      window.applyAccentColor(color);
+      localStorage.setItem('logbook-accent-color', color);
+    }
+  }, [store?.settings?.accentColor]);
+
+  useEffectA(() => {
     if (!('wakeLock' in navigator)) return;
     let lock = null;
     const acquire = async () => {

@@ -17,11 +17,11 @@ const UI = {
   inkLine:  'var(--hair)',
   hair:     'var(--hair)',
   hairStrong: 'var(--hair-strong)',
-  gold:      'var(--gold)',
-  goldLight: 'var(--gold-light)',
-  goldDeep:  'var(--gold-deep)',
-  goldSoft:  'var(--gold-soft)',
-  goldFaint: 'var(--gold-faint)',
+  gold:      'var(--accent)',
+  goldLight: 'var(--accent-light)',
+  goldDeep:  'var(--accent-deep)',
+  goldSoft:  'var(--accent-soft)',
+  goldFaint: 'var(--accent-faint)',
   danger:    'var(--danger)',
   ok:        'var(--ok)',
   fontUi:      '"Inter", system-ui, sans-serif',
@@ -142,7 +142,7 @@ function TabBar({ active, onChange }) {
             left: `calc(${(idx * 100) / tabs.length}% + 4px)`,
             top: 0, bottom: 0,
             width: `calc(${100 / tabs.length}% - 8px)`,
-            background: 'linear-gradient(180deg, rgba(201,169,97,0.18), rgba(201,169,97,0.06))',
+            background: 'linear-gradient(180deg, rgba(var(--accent-rgb),0.18), rgba(var(--accent-rgb),0.06))',
             border: `0.5px solid ${UI.goldSoft}`,
             borderRadius: 999,
             transition: 'left 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -192,15 +192,15 @@ function TabBar({ active, onChange }) {
 
 // ─── Buttons ────────────────────────────────────────────────────────
 const btnPrimary = {
-  background: `linear-gradient(180deg, var(--gold-light), var(--gold))`,
+  background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
   color: '#0a0805',
-  border: '0.5px solid var(--gold-deep)',
+  border: '0.5px solid var(--accent-deep)',
   borderRadius: 999,
   padding: '14px 22px', minHeight: 48,
   fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
   letterSpacing: '0.08em', textTransform: 'uppercase',
   cursor: 'pointer',
-  boxShadow: '0 8px 24px rgba(201,169,97,0.30)',
+  boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.30)',
   WebkitTapHighlightColor: 'transparent',
 };
 
@@ -232,7 +232,7 @@ function Card({ children, accent = false, style = {}, ...rest }) {
   return (
     <div style={{
       background: accent
-        ? `linear-gradient(180deg, rgba(201,169,97,0.06), rgba(201,169,97,0.01))`
+        ? `linear-gradient(180deg, rgba(var(--accent-rgb),0.06), rgba(var(--accent-rgb),0.01))`
         : 'rgba(236,228,208,0.02)',
       border: `0.5px solid ${accent ? UI.goldSoft : UI.hair}`,
       borderRadius: 14,
@@ -271,7 +271,7 @@ function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, 
         border: `0.5px solid ${focused ? UI.goldSoft : UI.hair}`,
         borderRadius: 10,
         padding: '12px 14px',
-        boxShadow: focused ? `0 0 0 3px rgba(201,169,97,0.08)` : 'none',
+        boxShadow: focused ? `0 0 0 3px rgba(var(--accent-rgb),0.08)` : 'none',
         transition: 'border-color 0.15s, box-shadow 0.15s',
       }}>
         <input
@@ -500,7 +500,7 @@ function Frame({ children, accent = false, style = {}, padding = 18, onClick }) 
   return (
     <div onClick={onClick} style={{
       background: accent
-        ? `linear-gradient(180deg, rgba(201,169,97,0.06), rgba(201,169,97,0.01))`
+        ? `linear-gradient(180deg, rgba(var(--accent-rgb),0.06), rgba(var(--accent-rgb),0.01))`
         : 'rgba(236,228,208,0.02)',
       border: `0.5px solid ${accent ? UI.goldSoft : UI.hair}`,
       borderRadius: 14,
@@ -537,9 +537,9 @@ function CrownButton({ children, onClick, size = 180, disabled, style = {} }) {
     <button onClick={onClick} disabled={disabled} style={{
       width: size, height: size, borderRadius: '50%',
       border: 'none', cursor: disabled ? 'default' : 'pointer',
-      background: `radial-gradient(circle at 50% 35%, var(--gold-light) 0%, var(--gold) 35%, var(--gold-deep) 100%)`,
+      background: `radial-gradient(circle at 50% 35%, var(--accent-light) 0%, var(--accent) 35%, var(--accent-deep) 100%)`,
       color: '#0a0805', position: 'relative',
-      boxShadow: '0 20px 60px rgba(201,169,97,0.30), 0 0 0 0.5px rgba(201,169,97,0.6), inset 0 1px 0 rgba(255,240,200,0.4), inset 0 -8px 24px rgba(0,0,0,0.25)',
+      boxShadow: '0 20px 60px rgba(var(--accent-rgb),0.30), 0 0 0 0.5px rgba(var(--accent-rgb),0.6), inset 0 1px 0 rgba(255,240,200,0.4), inset 0 -8px 24px rgba(0,0,0,0.25)',
       opacity: disabled ? 0.3 : 1,
       animation: disabled ? 'none' : 'pulseGold 3.5s ease-out infinite',
       WebkitTapHighlightColor: 'transparent',
