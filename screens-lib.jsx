@@ -1050,8 +1050,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     return !best || st.kg > best.kg || (st.kg === best.kg && st.reps > best.reps);
   };
 
-  const categories = [...new Set(
-    s.entries.map(e => store.exercises.find(x => x.id === e.exId)?.category).filter(Boolean)
+  const muscleGroups = [...new Set(
+    s.entries.flatMap(e => store.exercises.find(x => x.id === e.exId)?.tags || []).filter(Boolean)
   )];
 
   const takeScreenshot = async () => {
@@ -1166,13 +1166,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
         {/* Exercise entries */}
         <div>
-          {categories.length > 0 && (
+          {muscleGroups.length > 0 && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-              {categories.map(cat => (
-                <span key={cat} className="micro" style={{
+              {muscleGroups.map(tag => (
+                <span key={tag} className="micro" style={{
                   color: UI.inkFaint, border: `0.5px solid ${UI.hair}`,
                   borderRadius: 4, padding: '2px 8px',
-                }}>{cat}</span>
+                }}>{tag}</span>
               ))}
             </div>
           )}
@@ -1285,7 +1285,14 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         </div>
 
         {/* gold divider before entries */}
-        <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />
+        <div style={{ height: '0.5px', background: UI.gold, marginBottom: volDelta != null ? 8 : 14 }} />
+
+        {/* volume delta */}
+        {volDelta != null && (
+          <div className="micro" style={{ textAlign: 'center', marginBottom: 14, color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
+            {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} kg · vs last {s.dayName}
+          </div>
+        )}
 
         {/* exercise entries as hairline rows */}
         {s.entries.map((e, i) => (
@@ -1297,17 +1304,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {e.sets.map((st, j) => {
                   const prev = prevEntryMap[e.exId];
-                  const gold = isImprovement(st, prev?.sets?.[j]);
+                  const pr = isPR(st, e.exId);
+                  const highlight = pr || isImprovement(st, prev?.sets?.[j]);
                   return (
                     <span key={j} style={{
                       opacity: st.done ? 1 : 0.35,
-                      background: gold ? UI.goldFaint : UI.bgInset,
-                      border: `0.5px solid ${gold ? UI.goldSoft : UI.hair}`,
+                      background: highlight ? UI.goldFaint : UI.bgInset,
+                      border: `0.5px solid ${highlight ? UI.goldSoft : UI.hair}`,
                       borderRadius: 4, padding: '2px 7px',
                       fontFamily: UI.fontNum, fontSize: 11,
-                      color: gold ? UI.goldLight : UI.ink,
+                      color: highlight ? UI.goldLight : UI.ink,
                     }}>
-                      {st.kg ?? '—'}<span style={{ color: gold ? UI.gold : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.gold : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
+                      {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: highlight ? UI.gold : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <span style={{ fontSize: 8, color: UI.gold, marginLeft: 3, letterSpacing: '0.08em', fontFamily: UI.fontUi }}>PR</span>}
                     </span>
                   );
                 })}
