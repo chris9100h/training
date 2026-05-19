@@ -1,4 +1,4 @@
-const CACHE = 'zane-v1.3';
+const CACHE = 'zane-v1.5';
 const ASSETS = [
   '/training/',
   '/training/index.html',
