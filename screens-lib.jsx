@@ -1251,9 +1251,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {s.entries.map((e, i) => (
           <div key={i}>
             <div style={{ paddingBottom: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <div style={{ marginBottom: 6 }}>
                 <div className="display" style={{ fontSize: 15 }}>{e.name}</div>
-                <div className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{e.sets.filter(x => x.done).length}/{e.sets.length}</div>
               </div>
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {e.sets.map((st, j) => {
