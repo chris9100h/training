@@ -662,12 +662,10 @@ function HomeScreen({ store, setStore, go }) {
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
                   WebkitTapHighlightColor: 'transparent',
                 }}>
-                  <span className="micro" style={{ color: 'rgba(10,8,5,0.6)', letterSpacing: '0.22em', fontWeight: 600 }}>
+                  <span style={{ color: 'rgba(10,8,5,0.75)', letterSpacing: '0.18em', fontWeight: 700, fontSize: 15, fontFamily: UI.fontUi }}>
                     {isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION'}
                   </span>
-                  <svg width="26" height="26" viewBox="0 0 24 24" fill="#0a0805">
-                    <path d="M8 5v14l11-7z"/>
-                  </svg>
+                  <i className="fa-solid fa-dumbbell" style={{ fontSize: 22, color: 'rgba(10,8,5,0.55)' }} />
                 </button>
                 {!weekdayMode && isViewingToday && (
                   <button onClick={async () => { if (await confirm('The current day will be skipped.', { title: 'Skip day?', ok: 'Skip' })) skipRest(); }} style={{
