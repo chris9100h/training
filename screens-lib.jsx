@@ -1269,7 +1269,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       fontFamily: UI.fontNum, fontSize: 11,
                       color: gold ? UI.goldLight : UI.ink,
                     }}>
-                      {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
+                      {st.kg ?? '—'}<span style={{ color: gold ? UI.gold : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.gold : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
                     </span>
                   );
                 })}
