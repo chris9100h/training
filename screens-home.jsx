@@ -11,6 +11,15 @@ function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
+  const [swVersion, setSwVersion] = useState('');
+
+  useEffect(() => {
+    if (!('caches' in window)) return;
+    caches.keys().then(keys => {
+      const name = keys.find(k => k.startsWith('zane-'));
+      if (name) setSwVersion(name.replace('zane-', ''));
+    });
+  }, []);
 
   const canSubmit = email.trim() && password.length >= 6;
 
@@ -71,7 +80,7 @@ function LoginScreen() {
 
       <div style={{ flexShrink: 0, padding: '0 22px calc(env(safe-area-inset-bottom, 8px) + 18px)', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
         <span className="micro">REF. CZ-V2-2026</span>
-        <span className="micro">SWISS MADE</span>
+        <span className="micro">{swVersion || '…'}</span>
       </div>
     </Screen>
   );
