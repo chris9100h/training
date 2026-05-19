@@ -411,6 +411,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick }) {
     }
     setStore(s => ({ ...s, customDayTypes: [...(s.customDayTypes || []), name] }));
     onPick(name);
+    setNewName('');
   };
 
   const removeCustom = async (name) => {
