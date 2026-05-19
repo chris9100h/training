@@ -252,7 +252,6 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
       else days.splice(atIdx, 0, newDay);
       return { ...d, days };
     });
-    setPickingType(null);
   };
   const replaceDayType = (idx, type) => {
     setDraft(d => ({ ...d, days: d.days.map((day, i) => i === idx ? { ...day, name: type } : day) }));
@@ -1000,7 +999,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
           store={store} setStore={setStore}
           title="Choose day type"
           onClose={() => setPickingType(false)}
-          onPick={(t) => { setPattern(pat => [...pat, t]); setPickingType(false); }}
+          onPick={(t) => { setPattern(pat => [...pat, t]); }}
         />
       )}
       {pickingWeekday != null && (
