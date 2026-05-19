@@ -1266,7 +1266,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           fontFamily: UI.fontNum, fontSize: 12,
                           color: highlight ? UI.goldLight : UI.ink,
                         }}>
-                          {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: highlight ? UI.gold : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <span style={{ fontSize: 8, color: UI.gold, marginLeft: 3, letterSpacing: '0.08em', fontFamily: UI.fontUi }}>PR</span>}
+                          {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: highlight ? UI.gold : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
                         </span>
                       );
                     })}
