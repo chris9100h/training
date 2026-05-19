@@ -1177,7 +1177,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           border: `0.5px solid ${gold ? UI.goldSoft : UI.hair}`,
                           borderRadius: 6, padding: '3px 8px',
                           fontFamily: UI.fontNum, fontSize: 12,
-                          color: UI.ink,
+                          color: gold ? UI.goldLight : UI.ink,
                         }}>
                           {st.kg ?? '—'}<span style={{ color: gold ? UI.goldSoft : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.goldSoft : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
                         </span>
