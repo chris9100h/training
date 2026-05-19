@@ -627,13 +627,13 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                   disabled={heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)}
                   style={{
                     width: '100%', minHeight: 44,
-                    background: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'transparent' : `linear-gradient(180deg, var(--gold-light), var(--gold))`,
-                    border: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? `0.5px solid ${UI.hairStrong}` : `0.5px solid var(--gold-deep)`,
+                    background: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
+                    border: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? `0.5px solid ${UI.hairStrong}` : `0.5px solid var(--accent-deep)`,
                     color: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? UI.inkFaint : '#0a0805',
                     borderRadius: 999,
                     fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em', textTransform: 'uppercase',
                     cursor: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'default' : 'pointer',
-                    boxShadow: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'none' : '0 8px 30px rgba(201,169,97,0.30)',
+                    boxShadow: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'none' : '0 8px 30px rgba(var(--accent-rgb),0.30)',
                     WebkitTapHighlightColor: 'transparent',
                   }}>
                   ✓ Check set

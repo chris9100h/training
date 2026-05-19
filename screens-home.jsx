@@ -667,8 +667,8 @@ function HomeScreen({ store, setStore, go }) {
               <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', width: '100%' }}>
                 <button onClick={startSession} style={{
                   flex: 1, minHeight: 90, borderRadius: 18, border: 'none', cursor: 'pointer',
-                  background: 'linear-gradient(160deg, var(--gold-light) 0%, var(--gold) 55%, var(--gold-deep) 100%)',
-                  boxShadow: '0 16px 50px rgba(201,169,97,0.35), 0 0 0 0.5px rgba(201,169,97,0.6), inset 0 1px 0 rgba(255,240,200,0.4)',
+                  background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+                  boxShadow: '0 16px 50px rgba(var(--accent-rgb),0.35), 0 0 0 0.5px rgba(var(--accent-rgb),0.6), inset 0 1px 0 rgba(255,240,200,0.4)',
                   animation: 'pulseGold 3.5s ease-out infinite',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
                   WebkitTapHighlightColor: 'transparent',
