@@ -294,7 +294,7 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
       />
       <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Field label="Name">
-          <TextInput value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v }))} />
+          <TextInput value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v.toUpperCase() }))} />
         </Field>
 
         {LB.isWeekdayPlan(draft) ? (
@@ -865,7 +865,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
               <div style={{ fontSize: 13, color: UI.inkSoft }}>You can change this later.</div>
             </div>
             <Field label="Plan name">
-              <TextInput value={name} onChange={setName} placeholder="e.g. 2 on 1 off PPL" autoFocus />
+              <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. 2 ON 1 OFF PPL" autoFocus />
             </Field>
             <Btn onClick={() => setStep(1)} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Next →</Btn>
           </div>

@@ -143,7 +143,7 @@ function LibraryScreen({ store, setStore, go }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                 <div style={{ flex: 1 }}>
                   <Field label="">
-                    <TextInput value={q} onChange={setQ} placeholder="Suchen…" />
+                    <TextInput value={q} onChange={v => setQ(v.toUpperCase())} placeholder="Suchen…" />
                   </Field>
                 </div>
                 <button onClick={() => setFiltersOpen(true)} style={{
