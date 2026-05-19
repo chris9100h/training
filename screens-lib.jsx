@@ -1420,6 +1420,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [pushStatus, setPushStatus] = useStateL(null);
   const [pushEnabled, setPushEnabled] = useStateL(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
   const [cycleWeekView, setCycleWeekView] = useStateL(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
+  const [darkMode, setDarkMode] = useStateL(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   const pushStatusTimer = React.useRef(null);
   useEffectL(() => {
     if (!('caches' in window)) return;
@@ -1628,6 +1629,33 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 position: 'absolute', top: 3, left: cycleWeekView ? 21 : 3,
                 width: 18, height: 18, borderRadius: 9,
                 background: cycleWeekView ? '#0a0805' : UI.inkFaint,
+                transition: 'left 0.2s',
+              }} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+            <div>
+              <span className="label" style={{ marginBottom: 0 }}>Pure black background</span>
+              <div className="micro" style={{ marginTop: 4, maxWidth: 220 }}>Use OLED black instead of dark gray</div>
+            </div>
+            <div
+              onClick={() => {
+                const next = darkMode === 'black' ? 'dark' : 'black';
+                setDarkMode(next);
+                localStorage.setItem('logbook-dark-mode', next);
+                setStore(s => ({ ...s, settings: { ...s.settings, darkMode: next } }));
+              }}
+              style={{
+                width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0,
+                background: darkMode === 'black' ? 'var(--accent)' : UI.bgInset,
+                border: `0.5px solid ${darkMode === 'black' ? UI.goldSoft : UI.hairStrong}`,
+                position: 'relative', transition: 'background 0.2s',
+              }}
+            >
+              <div style={{
+                position: 'absolute', top: 3, left: darkMode === 'black' ? 21 : 3,
+                width: 18, height: 18, borderRadius: 9,
+                background: darkMode === 'black' ? '#0a0805' : UI.inkFaint,
                 transition: 'left 0.2s',
               }} />
             </div>

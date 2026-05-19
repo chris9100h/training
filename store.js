@@ -118,6 +118,7 @@ async function loadFromSupabase(userId) {
         pushEnabled: sett.push_enabled ?? false,
         cycleWeekView: sett.cycle_week_view ?? false,
         accentColor: sett.accent_color ?? 'gold',
+        darkMode: sett.dark_mode ?? 'dark',
       },
   };
 }
@@ -183,7 +184,8 @@ async function syncStore(prev, next, userId) {
     prev.settings?.restSmall       !== next.settings?.restSmall       ||
     prev.settings?.pushEnabled     !== next.settings?.pushEnabled     ||
     prev.settings?.cycleWeekView   !== next.settings?.cycleWeekView   ||
-    prev.settings?.accentColor     !== next.settings?.accentColor;
+    prev.settings?.accentColor     !== next.settings?.accentColor     ||
+    prev.settings?.darkMode        !== next.settings?.darkMode;
 
   if (settingsChanged) {
     ops.push(_supabase.from('user_settings').upsert({
@@ -200,6 +202,7 @@ async function syncStore(prev, next, userId) {
       push_enabled: next.settings?.pushEnabled ?? false,
       cycle_week_view: next.settings?.cycleWeekView ?? false,
       accent_color: next.settings?.accentColor ?? 'gold',
+      dark_mode: next.settings?.darkMode ?? 'dark',
       in_progress_session_id: next.inProgress ?? null,
     }));
   }

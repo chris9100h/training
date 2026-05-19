@@ -20,6 +20,7 @@
     --bg: #07060a;
     --bg-raised: #100d0b;
     --bg-inset: #1a1611;
+    --bg-body: #050409;
     --ink: #ece4d0;
     --ink-soft: rgba(236,228,208,0.66);
     --ink-faint: rgba(236,228,208,0.34);
@@ -37,7 +38,7 @@
   }
   html, body { min-height: 100vh; margin: 0; }
   html, body {
-    background: #050409;
+    background: var(--bg-body);
     color: var(--ink);
     font-family: "Inter", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -49,7 +50,7 @@
     background:
       radial-gradient(ellipse 60% 40% at 50% 0%, rgba(var(--accent-rgb),0.05), transparent 70%),
       radial-gradient(ellipse 40% 30% at 50% 100%, rgba(var(--accent-rgb),0.03), transparent 70%),
-      #050409;
+      var(--bg-body);
   }
   #root {
     position: fixed;
@@ -167,6 +168,24 @@ window.applyAccentColor = function(key) {
   s.setProperty('--accent-rgb', c.rgb);
 };
 window.applyAccentColor(localStorage.getItem('logbook-accent-color') || 'gold');
+</script>
+
+<script>
+window.DARK_MODES = {
+  dark:  { bg: '#1a1820', bgRaised: '#211e1c', bgInset: '#2a2723', bgBody: '#141218' },
+  black: { bg: '#07060a', bgRaised: '#100d0b', bgInset: '#1a1611', bgBody: '#050409' },
+};
+window.applyDarkMode = function(key) {
+  var m = window.DARK_MODES[key] || window.DARK_MODES.dark;
+  var s = document.documentElement.style;
+  s.setProperty('--bg', m.bg);
+  s.setProperty('--bg-raised', m.bgRaised);
+  s.setProperty('--bg-inset', m.bgInset);
+  s.setProperty('--bg-body', m.bgBody);
+  var tc = document.querySelector('meta[name="theme-color"]');
+  if (tc) tc.content = m.bg;
+};
+window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 </script>
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>

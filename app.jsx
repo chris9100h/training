@@ -63,6 +63,14 @@ function App() {
   }, [store?.settings?.accentColor]);
 
   useEffectA(() => {
+    const mode = store?.settings?.darkMode;
+    if (mode) {
+      window.applyDarkMode(mode);
+      localStorage.setItem('logbook-dark-mode', mode);
+    }
+  }, [store?.settings?.darkMode]);
+
+  useEffectA(() => {
     if (!('wakeLock' in navigator)) return;
     let lock = null;
     const acquire = async () => {
