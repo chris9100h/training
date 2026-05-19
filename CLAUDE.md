@@ -1,24 +1,63 @@
 # Logbook — Projektkontext für Claude
 
+## Sprache
+
+- **Konversation mit dem Nutzer:** Deutsch
+- **App-UI, Code, Commits, Kommentare:** Englisch
+
 ## Architektur
 
 - **Kein Build-Step.** Keine npm-Pakete verwenden. Abhängigkeiten laufen über CDN-Scripts in `index.html` (React 18, Babel Standalone, Supabase JS).
+- **Kein import/export.** Alles läuft über den globalen `window`-Namespace:
+  - `window.LB` — Store-Funktionen (aus `store.js`)
+  - `window.Screens` — Screen-Komponenten (aus den `screens-*.jsx` Dateien)
+  - `window.UI` — UI-Primitives und Farb-Tokens (aus `ui.jsx`)
+  - `window.ACCENT_PALETTE`, `window.applyAccentColor` — Akzentfarben-System (aus `index.html`)
+- **Babel Standalone** — JSX funktioniert, TypeScript nicht. Syntaxfehler crashen die gesamte App ohne hilfreiche Fehlermeldung.
 - **Dateistruktur:**
   - `index.html` — CSS-Variablen, globale Styles, Animationen, Skripte
   - `ui.jsx` — gemeinsame UI-Komponenten (UI-Objekt, Screen, TopBar, TabBar, Btn, Card, …)
   - `app.jsx` — Root-Komponente, Auth, Routing, Store-Sync
   - `screens-home.jsx`, `screens-schedule.jsx`, `screens-train.jsx`, `screens-lib.jsx` — einzelne Screens
   - `store.js` — Supabase-Lesen/Schreiben, Auth-Funktionen
-- **Theme:** CSS Custom Properties in `:root` (kein CSS-Framework). Akzentfarbe läuft über `--accent`, `--accent-light`, `--accent-deep`, `--accent-rgb`. Keine hardcodierten `rgba(r,g,b,x)`-Werte für die Akzentfarbe verwenden — immer `rgba(var(--accent-rgb), x)`.
+
+## Screens & Navigation
+
+- Jeder Screen bekommt `{ store, setStore, go, userId }` als Props.
+- Navigation via `go({ name: 'home' })`, `go({ name: 'settings' })` etc.
+- Screens werden am Ende der jeweiligen Datei registriert: `Object.assign(window.Screens, { ... })`.
+
+## Store
+
+- Der Store ist ein einzelnes React-State-Objekt in `app.jsx`.
+- `syncStore(prev, next, userId)` in `store.js` diff't prev/next und schreibt nur geänderte Felder nach Supabase.
+- Store-Updates immer via `setStore(s => ({ ...s, ... }))` — nie direkt mutieren.
+- **Neue Settings** müssen immer an drei Stellen in `store.js` ergänzt werden:
+  1. `loadFromSupabase` — Mapping DB → Store
+  2. `settingsChanged`-Check in `syncStore`
+  3. `upsert`-Objekt in `syncStore`
+
+## Theme & Styling
+
+- CSS Custom Properties in `:root` (kein CSS-Framework).
+- Akzentfarbe läuft über `--accent`, `--accent-light`, `--accent-deep`, `--accent-rgb`. Keine hardcodierten `rgba(r,g,b,x)`-Werte für die Akzentfarbe — immer `rgba(var(--accent-rgb), x)`.
+- Farb-Tokens im Code immer über `UI.xxx` referenzieren (z.B. `UI.gold`, `UI.ink`, `UI.hairStrong`).
+- **Typografie-Klassen** (definiert in `index.html`, nicht neu erfinden):
+  - `.micro` — 9px uppercase Label
+  - `.micro-gold` — wie micro, aber in Akzentfarbe
+  - `.label` — 10px uppercase Label
+  - `.num` — JetBrains Mono, für Zahlen
+  - `.display` — Cormorant Garamond, für Titel
+  - `.display-it` — Cormorant Garamond italic
 
 ## Konventionen
 
 - **DB-Spalten:** `snake_case` (z.B. `accent_color`, `rest_default`)
 - **Store-Felder:** `camelCase` (z.B. `accentColor`, `restDefault`)
-- **Neue Settings** müssen immer an drei Stellen in `store.js` ergänzt werden:
-  1. `loadFromSupabase` — Mapping DB → Store
-  2. `settingsChanged`-Check in `syncStore`
-  3. `upsert`-Objekt in `syncStore`
+- **localStorage-Keys:** Einige Settings liegen parallel im localStorage für schnellen Zugriff vor dem Store-Load. Bestehende Keys konsistent halten:
+  - `logbook-accent-color`
+  - `logbook-push-enabled`
+  - `logbook-cycle-week-view`
 
 ## Datenbank (Supabase)
 
