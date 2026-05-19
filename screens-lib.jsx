@@ -1131,10 +1131,27 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       />
       <Hairline />
 
-      <div ref={captureRef} style={{ padding: '14px 22px 28px', display: 'flex', flexDirection: 'column', gap: 18, background: UI.bg }}>
+      <div ref={captureRef} style={{ padding: capturing ? '20px 22px 24px' : '14px 22px 28px', display: 'flex', flexDirection: 'column', gap: 18, background: UI.bg }}>
 
-        {/* Celebration banner */}
-        {justFinished && (() => {
+        {/* Screenshot-only header */}
+        {capturing && (
+          <div style={{ marginBottom: -4 }}>
+            <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+              <div>
+                <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 4 }}>
+                  {new Date(s.date.slice(0,10) + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
+                </div>
+                <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
+              </div>
+              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
+            </div>
+            <div style={{ height: '0.5px', background: UI.hair, marginBottom: 0 }} />
+          </div>
+        )}
+
+        {/* Celebration banner — screen only */}
+        {justFinished && !capturing && (() => {
           return (
             <BracketFrame gold style={{ marginBottom: 4 }}>
               <div style={{ textAlign: 'center', padding: '6px 0 10px' }}>
@@ -1161,12 +1178,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           );
         })()}
 
-        {/* Stats row */}
-        {!justFinished && (
+        {/* Stats — circle dials on screen, flat grid in screenshot */}
+        {!justFinished && !capturing && (
           <div style={{ display: 'flex', justifyContent: 'space-around' }}>
             <SubDial label="Duration" value={duration ?? '—'} sub={duration ? 'min' : ''} size={90} />
             <SubDial label="Volume" value={Math.round(vol).toLocaleString('en-US')} sub="kg" size={90} gold />
             <SubDial label="Sets" value={s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)} size={90} />
+          </div>
+        )}
+        {capturing && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', marginTop: -8 }}>
+            {[['DURATION', duration != null ? `${duration} min` : '—', false], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} kg`, true], ['SETS', s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0), false]].map(([label, value, gold], idx) => (
+              <div key={label} style={{ padding: '6px 12px', borderRight: idx < 2 ? `0.5px solid ${UI.hair}` : 'none', textAlign: idx === 0 ? 'left' : idx === 2 ? 'right' : 'center' }}>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{label}</div>
+                <div className="num" style={{ fontSize: 16, color: gold ? UI.gold : UI.ink }}>{value}</div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -1179,6 +1206,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
         {/* Exercise entries */}
         <div>
+          {capturing && <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />}
           {muscleGroups.length > 0 && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
               {muscleGroups.map(tag => (
@@ -1255,6 +1283,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               ));
             })()}
           </div>
+          {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 14 }} />}
         </div>
       </div>
 
