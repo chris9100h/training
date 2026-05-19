@@ -49,7 +49,7 @@ function LoginScreen() {
           <img src="icons/zane-logo.png" style={{ width: 160, height: 160, objectFit: 'contain' }} />
           <div style={{ marginTop: 0, textAlign: 'center' }}>
             <div className="display" style={{ fontSize: 38, fontWeight: 700, color: UI.ink, letterSpacing: '0.22em' }}>ZANE</div>
-            <div className="display-it" style={{ marginTop: 2, fontSize: 14, color: UI.gold, letterSpacing: '0.03em' }}>Train like Zane or remain the same.</div>
+            <div className="display-it" style={{ marginTop: 2, fontSize: 14, fontWeight: 700, color: UI.gold, letterSpacing: '0.03em' }}>Train like Zane or remain the same.</div>
           </div>
         </div>
 
