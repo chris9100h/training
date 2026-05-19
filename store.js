@@ -117,7 +117,7 @@ async function loadFromSupabase(userId) {
         restSmall:   sett.rest_small   || 90,
         pushEnabled: sett.push_enabled ?? false,
         cycleWeekView: sett.cycle_week_view ?? false,
-        accentColor: sett.accent_color ?? 'gold',
+        accentColor: sett.accent_color ?? 'copper',
         darkMode: sett.dark_mode ?? 'dark',
       },
   };
@@ -201,7 +201,7 @@ async function syncStore(prev, next, userId) {
       rest_small:   next.settings?.restSmall   || 90,
       push_enabled: next.settings?.pushEnabled ?? false,
       cycle_week_view: next.settings?.cycleWeekView ?? false,
-      accent_color: next.settings?.accentColor ?? 'gold',
+      accent_color: next.settings?.accentColor ?? 'copper',
       dark_mode: next.settings?.darkMode ?? 'dark',
       in_progress_session_id: next.inProgress ?? null,
     }));
