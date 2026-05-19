@@ -1057,9 +1057,19 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const takeScreenshot = async () => {
     if (!captureRef.current || !window.html2canvas) return;
     setCapturing(true);
+    // Temporarily expand scroll parent so html2canvas captures full content
+    const scrollParent = captureRef.current.parentElement;
+    const saved = { overflow: scrollParent.style.overflow, height: scrollParent.style.height, minHeight: scrollParent.style.minHeight };
+    scrollParent.style.overflow = 'visible';
+    scrollParent.style.height = 'auto';
+    scrollParent.style.minHeight = 'auto';
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
-      const canvas = await window.html2canvas(captureRef.current, {
-        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820', scale: 2, useCORS: true, logging: false,
+      const el = captureRef.current;
+      const canvas = await window.html2canvas(el, {
+        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
+        scale: 2, useCORS: true, logging: false,
+        height: el.scrollHeight, windowHeight: el.scrollHeight,
       });
       canvas.toBlob(async (blob) => {
         const filename = `${s.dayName}-${s.date.slice(0,10)}.png`;
@@ -1077,6 +1087,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         }
       }, 'image/png');
     } finally {
+      scrollParent.style.overflow = saved.overflow;
+      scrollParent.style.height = saved.height;
+      scrollParent.style.minHeight = saved.minHeight;
       setCapturing(false);
     }
   };
@@ -1118,7 +1131,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       />
       <Hairline />
 
-      <div style={{ padding: '14px 22px 28px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div ref={captureRef} style={{ padding: '14px 22px 28px', display: 'flex', flexDirection: 'column', gap: 18, background: UI.bg }}>
 
         {/* Celebration banner */}
         {justFinished && (() => {
@@ -1245,90 +1258,6 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         </div>
       </div>
 
-      {/* off-screen capture target */}
-      <div ref={captureRef} style={{
-        position: 'fixed', top: 0, left: '-9999px', width: 390,
-        background: 'var(--bg)', padding: '22px 20px 26px',
-        fontFamily: UI.fontUi, color: UI.ink,
-      }}>
-        {/* top gold rule */}
-        <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
-
-        {/* header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-          <div>
-            <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 4 }}>
-              {new Date(s.date.slice(0,10) + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
-            </div>
-            <div className="display" style={{ fontSize: 24 }}>{s.dayName}</div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div className="micro-gold" style={{ letterSpacing: '0.18em' }}>ZANE</div>
-          </div>
-        </div>
-
-        {/* hairline divider */}
-        <div style={{ height: '0.5px', background: UI.hair, marginBottom: 14 }} />
-
-        {/* stats row — 3 columns with vertical hairlines */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', marginBottom: 14 }}>
-          {[['DURATION', duration != null ? `${duration} min` : '—'], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} kg`], ['SETS', s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)]].map(([label, value], idx) => (
-            <div key={label} style={{
-              padding: '6px 12px',
-              borderRight: idx < 2 ? `0.5px solid ${UI.hair}` : 'none',
-              textAlign: idx === 0 ? 'left' : idx === 2 ? 'right' : 'center',
-            }}>
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{label}</div>
-              <div className="num" style={{ fontSize: 16, color: UI.gold }}>{value}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* gold divider before entries */}
-        <div style={{ height: '0.5px', background: UI.gold, marginBottom: volDelta != null ? 8 : 14 }} />
-
-        {/* volume delta */}
-        {volDelta != null && (
-          <div className="micro" style={{ textAlign: 'center', marginBottom: 14, color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
-            {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} kg · vs last {s.dayName}
-          </div>
-        )}
-
-        {/* exercise entries as hairline rows */}
-        {s.entries.map((e, i) => (
-          <div key={i}>
-            <div style={{ paddingBottom: 12 }}>
-              <div style={{ marginBottom: 6 }}>
-                <div className="display" style={{ fontSize: 15 }}>{e.name}</div>
-              </div>
-              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                {e.sets.map((st, j) => {
-                  const prev = prevEntryMap[e.exId];
-                  const pr = isPR(st, e.exId);
-                  const highlight = pr || isImprovement(st, prev?.sets?.[j]);
-                  return (
-                    <span key={j} style={{
-                      opacity: st.done ? 1 : 0.35,
-                      background: highlight ? UI.goldFaint : UI.bgInset,
-                      border: `0.5px solid ${highlight ? UI.goldSoft : UI.hair}`,
-                      borderRadius: 4, padding: '2px 7px',
-                      fontFamily: UI.fontNum, fontSize: 11,
-                      color: highlight ? UI.goldLight : UI.ink,
-                    }}>
-                      {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: highlight ? UI.gold : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <span style={{ fontSize: 8, color: UI.gold, marginLeft: 3, letterSpacing: '0.08em', fontFamily: UI.fontUi }}>PR</span>}
-                    </span>
-                  );
-                })}
-              </div>
-              {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{e.note}</div>}
-            </div>
-            {i < s.entries.length - 1 && <div style={{ height: '0.5px', background: UI.hair, marginBottom: 14 }} />}
-          </div>
-        ))}
-
-        {/* bottom gold rule */}
-        <div style={{ height: '0.5px', background: UI.gold, marginTop: 4 }} />
-      </div>
 
       {editing && (
         <SessionEditSheet
