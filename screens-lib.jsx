@@ -1032,6 +1032,28 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     prevEntryMap[e.exId] = prev?.entries.find(en => en.exId === e.exId) ?? null;
   });
 
+  const prevSameDay = store.sessions
+    .filter(x => x.ended && x.id !== s.id && x.dayName === s.dayName)
+    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
+  const volDelta = prevSameDay != null ? vol - totalVolume(prevSameDay) : null;
+
+  const prMap = {};
+  store.sessions.filter(x => x.ended && x.id !== s.id).forEach(sess =>
+    sess.entries.forEach(e => e.sets.filter(st => st.done && st.kg != null && st.reps != null).forEach(st => {
+      const cur = prMap[e.exId];
+      if (!cur || st.kg > cur.kg || (st.kg === cur.kg && st.reps > cur.reps)) prMap[e.exId] = { kg: st.kg, reps: st.reps };
+    }))
+  );
+  const isPR = (st, exId) => {
+    if (!st.done || st.kg == null || st.reps == null) return false;
+    const best = prMap[exId];
+    return !best || st.kg > best.kg || (st.kg === best.kg && st.reps > best.reps);
+  };
+
+  const categories = [...new Set(
+    s.entries.map(e => store.exercises.find(x => x.id === e.exId)?.category).filter(Boolean)
+  )];
+
   const takeScreenshot = async () => {
     if (!captureRef.current || !window.html2canvas) return;
     setCapturing(true);
@@ -1135,8 +1157,25 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           </div>
         )}
 
+        {/* Volume delta vs previous same-day session */}
+        {volDelta != null && (
+          <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
+            {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} kg · vs last {s.dayName}
+          </div>
+        )}
+
         {/* Exercise entries */}
         <div>
+          {categories.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+              {categories.map(cat => (
+                <span key={cat} className="micro" style={{
+                  color: UI.inkFaint, border: `0.5px solid ${UI.hair}`,
+                  borderRadius: 4, padding: '2px 8px',
+                }}>{cat}</span>
+              ))}
+            </div>
+          )}
           <Bezel>EXERCISES</Bezel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
             {(() => {
@@ -1168,17 +1207,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {e.sets.map((st, j) => {
                       const prev = prevEntryMap[e.exId];
-                      const gold = isImprovement(st, prev?.sets?.[j]);
+                      const pr = isPR(st, e.exId);
+                      const highlight = pr || isImprovement(st, prev?.sets?.[j]);
                       return (
                         <span key={j} style={{
                           opacity: st.done ? 1 : 0.3,
-                          background: gold ? UI.goldFaint : 'transparent',
-                          border: `0.5px solid ${gold ? UI.goldSoft : UI.hair}`,
+                          background: highlight ? UI.goldFaint : 'transparent',
+                          border: `0.5px solid ${highlight ? UI.goldSoft : UI.hair}`,
                           borderRadius: 6, padding: '3px 8px',
                           fontFamily: UI.fontNum, fontSize: 12,
-                          color: gold ? UI.goldLight : UI.ink,
+                          color: highlight ? UI.goldLight : UI.ink,
                         }}>
-                          {st.kg ?? '—'}<span style={{ color: gold ? UI.gold : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: gold ? UI.gold : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
+                          {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: highlight ? UI.gold : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <span style={{ fontSize: 8, color: UI.gold, marginLeft: 3, letterSpacing: '0.08em', fontFamily: UI.fontUi }}>PR</span>}
                         </span>
                       );
                     })}
