@@ -1044,8 +1044,15 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       if (!cur || st.kg > cur.kg || (st.kg === cur.kg && st.reps > cur.reps)) prMap[e.exId] = { kg: st.kg, reps: st.reps };
     }))
   );
+  const sessionBestMap = {};
+  s.entries.forEach(e => e.sets.filter(st => st.done && st.kg != null && st.reps != null).forEach(st => {
+    const cur = sessionBestMap[e.exId];
+    if (!cur || st.kg > cur.kg || (st.kg === cur.kg && st.reps > cur.reps)) sessionBestMap[e.exId] = { kg: st.kg, reps: st.reps };
+  }));
   const isPR = (st, exId) => {
     if (!st.done || st.kg == null || st.reps == null) return false;
+    const sessionBest = sessionBestMap[exId];
+    if (!sessionBest || st.kg !== sessionBest.kg || st.reps !== sessionBest.reps) return false;
     const best = prMap[exId];
     return !best || st.kg > best.kg || (st.kg === best.kg && st.reps > best.reps);
   };
