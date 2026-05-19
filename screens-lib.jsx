@@ -1224,7 +1224,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             <div className="display" style={{ fontSize: 24 }}>{s.dayName}</div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div className="micro-gold" style={{ letterSpacing: '0.18em' }}>LOGBOOK</div>
+            <div className="micro-gold" style={{ letterSpacing: '0.18em' }}>ZANE</div>
           </div>
         </div>
 
