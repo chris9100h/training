@@ -71,21 +71,6 @@ function App() {
   }, [store?.settings?.darkMode]);
 
   useEffectA(() => {
-    if (!('wakeLock' in navigator)) return;
-    let lock = null;
-    const acquire = async () => {
-      try { lock = await navigator.wakeLock.request('screen'); } catch {}
-    };
-    const onVisibility = () => { if (!document.hidden) acquire(); };
-    acquire();
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      lock?.release();
-    };
-  }, []);
-
-  useEffectA(() => {
     const THRESHOLD = 30 * 60 * 1000;
     const KEY = 'logbook-bg-ts';
 
