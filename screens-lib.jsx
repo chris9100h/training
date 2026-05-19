@@ -1189,7 +1189,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {capturing && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', marginTop: -8 }}>
             {[['DURATION', duration != null ? `${duration} min` : '—', false], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} kg`, true], ['SETS', s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0), false]].map(([label, value, gold], idx) => (
-              <div key={label} style={{ padding: '6px 12px', borderRight: idx < 2 ? `0.5px solid ${UI.hair}` : 'none', textAlign: idx === 0 ? 'left' : idx === 2 ? 'right' : 'center' }}>
+              <div key={label} style={{ padding: '6px 12px', borderRight: idx < 2 ? `0.5px solid ${UI.hair}` : 'none', textAlign: 'center' }}>
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{label}</div>
                 <div className="num" style={{ fontSize: 16, color: gold ? UI.gold : UI.ink }}>{value}</div>
               </div>
