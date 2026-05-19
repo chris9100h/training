@@ -44,13 +44,16 @@ function LoginScreen() {
         <span className="micro">EST. 2024</span>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
-          <img src="icons/zane-logo.png" style={{ width: 160, height: 160, objectFit: 'contain' }} />
-          <div style={{ marginTop: 0, textAlign: 'center' }}>
-            <div className="display" style={{ fontSize: 38, fontWeight: 700, color: UI.ink, letterSpacing: '0.22em' }}>ZANE</div>
-            <div className="display-it" style={{ marginTop: 2, fontSize: 14, fontWeight: 700, color: UI.gold, letterSpacing: '0.03em' }}>Train like Zane or remain the same.</div>
-          </div>
+      {/* Logo — fills upper screen */}
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', zIndex: 1 }}>
+        <img src="icons/zane-logo.png" style={{ width: '82%', maxWidth: 340, objectFit: 'contain' }} />
+      </div>
+
+      {/* Title + form */}
+      <div style={{ flexShrink: 0, padding: '0 32px', position: 'relative', zIndex: 1 }}>
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+          <div className="display" style={{ fontSize: 38, fontWeight: 700, color: UI.ink, letterSpacing: '0.22em' }}>ZANE</div>
+          <div className="display-it" style={{ marginTop: 2, fontSize: 14, fontWeight: 700, color: UI.gold, letterSpacing: '0.03em' }}>Train like Zane or remain the same.</div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
