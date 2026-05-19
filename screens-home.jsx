@@ -44,17 +44,18 @@ function LoginScreen() {
         <span className="micro">EST. 2024</span>
       </div>
 
-      {/* Logo — fills upper screen */}
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', zIndex: 1 }}>
+      {/* Logo + title — fills upper screen as a unit */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative', zIndex: 1 }}>
         <img src="icons/zane-logo.png" style={{ width: '82%', maxWidth: 340, objectFit: 'contain' }} />
-      </div>
-
-      {/* Title + form */}
-      <div style={{ flexShrink: 0, padding: '0 32px', position: 'relative', zIndex: 1 }}>
-        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+        <div style={{ textAlign: 'center', marginTop: 12 }}>
           <div className="display" style={{ fontSize: 38, fontWeight: 700, color: UI.ink, letterSpacing: '0.22em' }}>ZANE</div>
           <div className="display-it" style={{ marginTop: 2, fontSize: 14, fontWeight: 700, color: UI.gold, letterSpacing: '0.03em' }}>Train like Zane or remain the same.</div>
         </div>
+      </div>
+
+      {/* Form */}
+      <div style={{ flexShrink: 0, padding: '0 32px', position: 'relative', zIndex: 1 }}>
+        <div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
           <Field label="Email">
@@ -78,7 +79,6 @@ function LoginScreen() {
           <Btn onClick={submit} disabled={!canSubmit || loading} style={{ marginTop: 4, opacity: canSubmit && !loading ? 1 : 0.4 }}>
             {loading ? 'Signing in…' : 'Log in'}
           </Btn>
-        </div>
       </div>
 
       <div style={{ flexShrink: 0, padding: '0 22px calc(env(safe-area-inset-bottom, 8px) + 18px)', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
