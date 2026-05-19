@@ -1037,7 +1037,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     setCapturing(true);
     try {
       const canvas = await window.html2canvas(captureRef.current, {
-        backgroundColor: '#07060a', scale: 2, useCORS: true, logging: false,
+        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820', scale: 2, useCORS: true, logging: false,
       });
       canvas.toBlob(async (blob) => {
         const filename = `${s.dayName}-${s.date.slice(0,10)}.png`;
@@ -1209,7 +1209,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       {/* off-screen capture target */}
       <div ref={captureRef} style={{
         position: 'fixed', top: 0, left: '-9999px', width: 390,
-        background: '#07060a', padding: '22px 20px 26px',
+        background: 'var(--bg)', padding: '22px 20px 26px',
         fontFamily: UI.fontUi, color: UI.ink,
       }}>
         {/* top gold rule */}
