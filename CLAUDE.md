@@ -27,6 +27,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 **WICHTIG:** Wenn eine DB-Änderung (neue Spalte, neue Tabelle) notwendig ist:
 1. Eine Migration in `supabase/migrations/` anlegen
 2. Den Nutzer explizit darauf hinweisen, dass sie ausgeführt werden muss
+3. Die Spalten-Liste unter "Aktuelle Tabellen & Spalten" in dieser Datei aktualisieren
 
 ### Aktuelle Tabellen & Spalten
 
