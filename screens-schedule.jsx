@@ -752,7 +752,7 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
             style={{ cursor: 'pointer' }}>{m}</Pill>
         ))}
       </div>
-      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', maxHeight: 300, overflow: 'auto' }}>
+      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', maxHeight: 240, overflow: 'auto' }}>
         {list.map((e, ei) => (
           <button key={e.id} onClick={() => onPick(e.id)} style={{
             background: 'transparent', border: 'none', textAlign: 'left',
@@ -767,14 +767,15 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
           </button>
         ))}
         {list.length === 0 && <div className="micro" style={{ padding: '20px 0', textAlign: 'center', color: UI.inkFaint }}>No exercises found</div>}
-        {q && !list.find(e => e.name.toUpperCase() === q.toUpperCase()) && (
-          <button onClick={() => setCreatingNew(q)} style={{
-            background: UI.goldFaint, border: `0.5px dashed ${UI.goldSoft}`,
-            padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
-            color: UI.gold, fontSize: 13, marginTop: 8, fontFamily: UI.fontUi, textAlign: 'left',
-          }}>+ Create "{q}"</button>
-        )}
       </div>
+      {q && !list.find(e => e.name.toUpperCase() === q.toUpperCase()) && (
+        <button onClick={() => setCreatingNew(q)} style={{
+          background: UI.goldFaint, border: `0.5px dashed ${UI.goldSoft}`,
+          padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
+          color: UI.gold, fontSize: 13, marginTop: 8, fontFamily: UI.fontUi, textAlign: 'left',
+          width: '100%', boxSizing: 'border-box',
+        }}>+ Create "{q}"</button>
+      )}
       {creatingNew !== null && (
         <window.Screens.ExerciseCreator
           initialName={creatingNew}
