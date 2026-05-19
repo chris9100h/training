@@ -55,8 +55,6 @@ function LoginScreen() {
 
       {/* Form */}
       <div style={{ flexShrink: 0, padding: '0 32px', position: 'relative', zIndex: 1 }}>
-        <div>
-
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
           <Field label="Email">
             <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus />
@@ -79,6 +77,7 @@ function LoginScreen() {
           <Btn onClick={submit} disabled={!canSubmit || loading} style={{ marginTop: 4, opacity: canSubmit && !loading ? 1 : 0.4 }}>
             {loading ? 'Signing in…' : 'Log in'}
           </Btn>
+        </div>
       </div>
 
       <div style={{ flexShrink: 0, padding: '0 22px calc(env(safe-area-inset-bottom, 8px) + 18px)', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
