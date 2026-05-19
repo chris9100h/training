@@ -173,8 +173,8 @@ window.applyAccentColor(localStorage.getItem('logbook-accent-color') || 'gold');
 
 <script>
 window.DARK_MODES = {
-  dark:  { bg: '#1a1820', bgRaised: '#252334', bgInset: '#2f2c3c', bgBody: '#141218', bgRgb: '26,24,32' },
-  black: { bg: '#07060a', bgRaised: '#100d0b', bgInset: '#1a1611', bgBody: '#050409', bgRgb: '7,6,10' },
+  dark:  { bg: '#1a1820', bgRaised: '#252334', bgInset: '#2f2c3c', bgBody: '#141218', bgRgb: '26,24,32', inkFaint: 'rgba(236,228,208,0.44)', inkGhost: 'rgba(236,228,208,0.20)' },
+  black: { bg: '#07060a', bgRaised: '#100d0b', bgInset: '#1a1611', bgBody: '#050409', bgRgb: '7,6,10', inkFaint: 'rgba(236,228,208,0.34)', inkGhost: 'rgba(236,228,208,0.14)' },
 };
 window.applyDarkMode = function(key) {
   var m = window.DARK_MODES[key] || window.DARK_MODES.dark;
@@ -184,6 +184,8 @@ window.applyDarkMode = function(key) {
   s.setProperty('--bg-inset', m.bgInset);
   s.setProperty('--bg-body', m.bgBody);
   s.setProperty('--bg-rgb', m.bgRgb);
+  s.setProperty('--ink-faint', m.inkFaint);
+  s.setProperty('--ink-ghost', m.inkGhost);
   var tc = document.querySelector('meta[name="theme-color"]');
   if (tc) tc.content = m.bg;
 };
