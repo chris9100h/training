@@ -399,10 +399,28 @@ function loadFromLocal(userId) {
   } catch (_) { return null; }
 }
 
+// Snapshot of the last state confirmed written to Supabase. Persisted so a
+// restart can still tell apart local unsynced edits from pristine server state.
+function saveBase(store, userId) {
+  try {
+    localStorage.setItem(`logbook-base-${userId}`, JSON.stringify(store));
+  } catch (_) {}
+}
+
+function loadBase(userId) {
+  try {
+    const raw = localStorage.getItem(`logbook-base-${userId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+
 function clearLocal(userId) {
   try {
-    const key = userId ? `logbook-${userId}` : null;
-    if (key) { localStorage.removeItem(key); return; }
+    if (userId) {
+      localStorage.removeItem(`logbook-${userId}`);
+      localStorage.removeItem(`logbook-base-${userId}`);
+      return;
+    }
     Object.keys(localStorage).filter(k => k.startsWith('logbook-')).forEach(k => localStorage.removeItem(k));
   } catch (_) {}
 }
@@ -412,6 +430,6 @@ window.LB = {
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
   signIn, signUp, signOut, deleteAllData, importFromBackup,
   loadFromSupabase, syncStore, seedStarter,
-  saveToLocal, loadFromLocal, clearLocal,
+  saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay, isWeekdayPlan,
 };

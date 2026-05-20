@@ -165,7 +165,7 @@ function App() {
     syncing.current = true;
     let ok = false;
     LB.syncStore(syncBase.current, target, uid)
-      .then(() => { syncBase.current = target; ok = true; })
+      .then(() => { syncBase.current = target; LB.saveBase(target, uid); ok = true; })
       .catch(err => console.error('Supabase sync failed, will retry', err))
       .finally(() => {
         syncing.current = false;
@@ -179,7 +179,10 @@ function App() {
     if (cached) {
       // Show instantly from cache, then refresh from Supabase in background
       prevStore.current = cached;
-      syncBase.current = cached;
+      // base = last state confirmed written to Supabase. Lets the merge below
+      // tell apart locally-changed-but-unsynced settings from server state.
+      const base = LB.loadBase(uid);
+      syncBase.current = base || cached;
       setStore(cached);
       setPhase('ready');
       LB.loadFromSupabase(uid)
@@ -189,6 +192,7 @@ function App() {
           const cur = prevStore.current;
           // fresh is the pristine server state — use it as the sync diff base
           syncBase.current = fresh;
+          LB.saveBase(fresh, uid);
           let merged = fresh;
           if (cur) {
             const inProgressId = cur.inProgress ?? fresh.inProgress;
@@ -217,8 +221,27 @@ function App() {
             const localOnlyExercises = (cur.exercises || []).filter(x => !serverExIds.has(x.id));
             const serverSchIds = new Set(fresh.schedules.map(s => s.id));
             const localOnlySchedules = (cur.schedules || []).filter(x => !serverSchIds.has(x.id));
+            // settings & cycle state: keep values the user changed locally that
+            // the server hasn't confirmed yet (i.e. they differ from the base).
+            let settings = fresh.settings, userBlk = fresh.user;
+            const scalars = {};
+            if (base) {
+              settings = { ...fresh.settings };
+              for (const k of Object.keys(fresh.settings)) {
+                if (cur.settings?.[k] !== base.settings?.[k]) settings[k] = cur.settings[k];
+              }
+              for (const k of ['activeScheduleId', 'cycleIndex', 'cycleStartDate', 'lastAdvancedDate']) {
+                if (cur[k] !== base[k]) scalars[k] = cur[k];
+              }
+              if (cur.user?.name && cur.user.name !== base.user?.name) {
+                userBlk = { ...fresh.user, name: cur.user.name };
+              }
+            }
             merged = {
               ...fresh,
+              ...scalars,
+              user: userBlk,
+              settings,
               inProgress: inProgressId,
               sessions: [...localOnly, ...sessions],
               exercises: [...localOnlyExercises, ...fresh.exercises],
@@ -235,6 +258,7 @@ function App() {
         const loaded = await LB.loadFromSupabase(uid);
         prevStore.current = loaded;
         syncBase.current = loaded;
+        LB.saveBase(loaded, uid);
         setStore(loaded);
         setPhase('ready');
       } catch (e) {
@@ -248,11 +272,16 @@ function App() {
     const { data: { subscription } } = LB.supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'INITIAL_SESSION') {
         if (session) { setUserId(session.user.id); loadData(session.user.id); }
-        else          { setPhase('unauthed'); }
+        // Offline with no restorable session: show the error screen, not the
+        // login screen — you can't sign in offline, and a retry recovers.
+        else          { setPhase(navigator.onLine ? 'unauthed' : 'error'); }
       } else if (event === 'SIGNED_IN') {
         setUserId(session.user.id);
         loadData(session.user.id);
       } else if (event === 'SIGNED_OUT') {
+        // An offline SIGNED_OUT is almost always a failed token refresh, not a
+        // real sign-out — never wipe the cache or drop to the login screen.
+        if (!navigator.onLine) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
         LB.clearLocal(userId);
         setStore(null);
         setUserId(null);
@@ -295,7 +324,7 @@ function App() {
 
   if (phase === 'init' || phase === 'loading') return <LoadingScreen />;
   if (phase === 'unauthed') return <window.Screens.LoginScreen />;
-  if (phase === 'error') return <ErrorScreen onRetry={() => { if (userId) loadData(userId); }} />;
+  if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 
   const go    = (r) => setRoute(r);
   const props = { store, setStore, go, userId };
