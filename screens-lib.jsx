@@ -1473,6 +1473,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [restOpen, setRestOpen] = useStateL(false);
   const [appearanceOpen, setAppearanceOpen] = useStateL(false);
   const [pushOpen, setPushOpen] = useStateL(false);
+  const [dataOpen, setDataOpen] = useStateL(false);
+  const [importing, setImporting] = useStateL(false);
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
   const [pushEnabled, setPushEnabled] = useStateL(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
@@ -1550,13 +1552,50 @@ function SettingsScreen({ store, setStore, go, userId }) {
     setStore(s => ({ ...s, user: { ...s.user, name: trimmed } }));
   };
 
-  const exportData = () => {
+  const exportData = (filename) => {
     const blob = new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `zane-${LB.todayISO()}.json`;
+    a.href = url; a.download = filename || `zane-${LB.todayISO()}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const importData = () => {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = '.json';
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      let backup;
+      try {
+        backup = JSON.parse(await file.text());
+      } catch (_) {
+        await confirm('The selected file is not valid JSON.', { title: 'Invalid file', ok: 'OK' });
+        return;
+      }
+      if (!backup.sessions || !backup.exercises || !backup.schedules) {
+        await confirm('This file does not look like a Zane backup.', { title: 'Invalid backup', ok: 'OK' });
+        return;
+      }
+      const latestSession = [...(backup.sessions || [])].filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
+      const backupDate = latestSession ? new Date(latestSession.ended).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }) : 'unknown date';
+      const ok = await confirm(
+        `This backup contains data up to ${backupDate}. Your current data will be downloaded first, then replaced.`,
+        { title: 'Restore backup?', ok: 'Restore', danger: true }
+      );
+      if (!ok) return;
+      exportData(`zane-before-import-${LB.todayISO()}.json`);
+      setImporting(true);
+      try {
+        await LB.importFromBackup(backup, userId);
+        window.location.reload();
+      } catch (err) {
+        setImporting(false);
+        await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' });
+      }
+    };
+    input.click();
   };
 
   const handleSignOut = async () => {
@@ -1753,9 +1792,20 @@ function SettingsScreen({ store, setStore, go, userId }) {
           )}
         </Frame>
 
-        <Bezel>DATA</Bezel>
-
-        <Btn kind="ghost" onClick={exportData} style={{ fontSize: 12 }}>Export data (JSON)</Btn>
+        <Frame style={{ padding: '14px 16px' }}>
+          <button onClick={() => setDataOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
+            <span className="label" style={{ marginBottom: 0 }}>Backup &amp; Restore</span>
+            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: dataOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+              <path d="M2 1l5 5-5 5"/>
+            </svg>
+          </button>
+          {dataOpen && (
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => exportData()} style={{ fontSize: 12 }}>Export data (JSON)</Btn>
+              <Btn kind="ghost" onClick={importData} disabled={importing} style={{ fontSize: 12 }}>{importing ? 'Importing…' : 'Import data (JSON)'}</Btn>
+            </div>
+          )}
+        </Frame>
         <Btn kind="ghost" onClick={async () => {
           if ('caches' in window) {
             const keys = await caches.keys();
