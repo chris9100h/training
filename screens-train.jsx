@@ -291,19 +291,22 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       // audio: two beeps + higher tone (blocked by iOS silent switch, but nice to have)
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const beep = (t, freq, dur) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.connect(gain); gain.connect(ctx.destination);
-          osc.type = 'sine'; osc.frequency.value = freq;
-          gain.gain.setValueAtTime(0.35, t);
-          gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
-          osc.start(t); osc.stop(t + dur);
+        const play = () => {
+          const beep = (t, freq, dur) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.type = 'sine'; osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.35, t);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+            osc.start(t); osc.stop(t + dur);
+          };
+          beep(ctx.currentTime,        880, 0.14);
+          beep(ctx.currentTime + 0.18, 880, 0.14);
+          beep(ctx.currentTime + 0.36, 1320, 0.28);
+          setTimeout(() => ctx.close(), 1200);
         };
-        beep(ctx.currentTime,        880, 0.14);
-        beep(ctx.currentTime + 0.18, 880, 0.14);
-        beep(ctx.currentTime + 0.36, 1320, 0.28);
-        setTimeout(() => ctx.close(), 1200);
+        ctx.state === 'suspended' ? ctx.resume().then(play) : play();
       } catch (_) {}
     }
   }, [restRemaining]);
