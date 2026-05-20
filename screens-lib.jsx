@@ -143,7 +143,7 @@ function LibraryScreen({ store, setStore, go }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                 <div style={{ flex: 1 }}>
                   <Field label="">
-                    <TextInput value={q} onChange={v => setQ(v.toUpperCase())} placeholder="Suchen…" />
+                    <TextInput value={q} onChange={v => setQ(v.toUpperCase())} placeholder="Search…" />
                   </Field>
                 </div>
                 <button onClick={() => setFiltersOpen(true)} style={{
@@ -1524,10 +1524,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
     clearTimeout(pushStatusTimer.current);
     setPushStatus(delaySeconds > 0 ? `Sending… Lock screen now!` : 'Sending…');
     try {
-      const res = await fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
+      const res = await fetch(LB.PUSHOVER_URL, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
+          'Authorization': `Bearer ${LB.SUPABASE_ANON_KEY}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ message: 'Rest done — keep going! 💪', title: 'Zane Test', delaySeconds, nonce: String(Date.now()), userKey: store.settings?.pushoverUserKey ?? '' }),

@@ -1,4 +1,5 @@
-const CACHE = 'zane-v1.5';
+const CACHE = 'zane-v1.501';
+const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 const ASSETS = [
   '/training/',
   '/training/index.html',
@@ -28,40 +29,55 @@ self.addEventListener('activate', e => {
   );
 });
 
-let _pushTimer = null;
-let _pushCancel = null;
-
 self.addEventListener('message', e => {
-  if (e.data?.type === 'SCHEDULE_PUSHOVER') {
-    if (_pushTimer) { clearTimeout(_pushTimer); _pushCancel?.(); }
-    const { endsAt, url, headers, body } = e.data;
-    const delay = Math.max(0, endsAt - Date.now());
-    let resolve;
-    const p = new Promise(res => { resolve = res; }).catch(() => {});
-    _pushCancel = () => { _pushTimer = null; resolve(); };
-    _pushTimer = setTimeout(() => {
-      _pushTimer = null;
-      fetch(url, { method: 'POST', headers, body }).catch(() => {}).finally(resolve);
-    }, delay);
-    e.waitUntil(p);
-  } else if (e.data?.type === 'CANCEL_PUSHOVER') {
-    if (_pushTimer) { clearTimeout(_pushTimer); _pushCancel?.(); _pushTimer = null; }
-  }
+  if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
-  if (url.origin !== location.origin) return;
 
-  // Network-first: always try to fetch fresh, fall back to cache when offline
+  // Supabase REST / Realtime / Edge functions — never cache, always hit network
+  if (url.hostname.endsWith('supabase.co')) return;
+
+  const sameOrigin = url.origin === location.origin;
+  const isCdn = CDN_HOSTS.includes(url.hostname);
+  if (!sameOrigin && !isCdn) return;
+
+  const offlineResponse = () => new Response('', { status: 504, statusText: 'Offline' });
+
+  if (sameOrigin) {
+    // App shell: stale-while-revalidate — serve cache instantly, refresh in background
+    e.respondWith(
+      caches.match(e.request).then(cached => {
+        const network = fetch(e.request).then(res => {
+          if (res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE).then(c => c.put(e.request, clone));
+          }
+          return res;
+        }).catch(() => cached || offlineResponse());
+        return cached || network;
+      })
+    );
+    return;
+  }
+
+  // CDN libraries + web fonts: cache-first so the app can boot fully offline.
+  // Fetch in CORS mode so the response is never opaque — an opaque response
+  // can't satisfy a CORS request (e.g. font-awesome, @font-face files) and
+  // can't be reliably reused. unpkg, cdnjs and Google Fonts all send
+  // permissive CORS headers, so a CORS fetch always succeeds for these hosts.
   e.respondWith(
-    fetch(e.request).then(res => {
-      if (res.ok) {
-        const clone = res.clone();
-        caches.open(CACHE).then(c => c.put(e.request, clone));
-      }
-      return res;
-    }).catch(() => caches.match(e.request))
+    caches.match(e.request).then(cached => {
+      if (cached) return cached;
+      return fetch(e.request.url, { mode: 'cors' }).then(res => {
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+        }
+        return res;
+      }).catch(() => offlineResponse());
+    })
   );
 });

@@ -180,10 +180,10 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
   const cancelPushover = () => {
     if (!store.settings?.pushEnabled) return;
-    fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
+    fetch(LB.PUSHOVER_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
+        'Authorization': `Bearer ${LB.SUPABASE_ANON_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ nonce: `cancel-${Date.now()}`, cancel: true, userKey: store.settings?.pushoverUserKey ?? '', userId }),
@@ -263,10 +263,10 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     if (!restStart) return;
     if (!store.settings?.pushEnabled) return;
     const delaySeconds = Math.round(Math.max(0, restStart + activeRestDef * 1000 - Date.now()) / 1000);
-    fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
+    fetch(LB.PUSHOVER_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
+        'Authorization': `Bearer ${LB.SUPABASE_ANON_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ delaySeconds, nonce: String(restStart), userKey: store.settings?.pushoverUserKey ?? '', userId }),
@@ -336,11 +336,18 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   const doSwap = (newExId) => {
-    const newEx = LB.findExercise(store, newExId);
-    updateSession(sess => ({
-      ...sess,
-      entries: sess.entries.map((e, i) => i !== exIdx ? e : { ...e, exId: newExId, name: newEx?.name || '?' }),
-    }));
+    // resolve the name from fresh state — a just-created exercise isn't in the
+    // closed-over `store` yet (its setStore hasn't re-rendered the screen)
+    setStore(s => {
+      const newEx = LB.findExercise(s, newExId);
+      return {
+        ...s,
+        sessions: s.sessions.map(x => x.id !== session.id ? x : {
+          ...x,
+          entries: x.entries.map((e, i) => i !== exIdx ? e : { ...e, exId: newExId, name: newEx?.name || e.name }),
+        }),
+      };
+    });
     setSwapOpen(false);
   };
 
@@ -395,7 +402,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   if (!entry) {
-    return <Screen><Empty title="Diese Session ist leer" action={<Btn onClick={() => go({ name: 'home' })}>Zurück</Btn>} /></Screen>;
+    return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
   }
 
   const completed = entry.sets.filter(s => s.done).length;
@@ -938,7 +945,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       </Sheet>
 
       {/* exercise swap picker */}
-      {swapOpen && <window.Screens.ExercisePicker store={store} onClose={() => setSwapOpen(false)} onPick={doSwap} />}
+      {swapOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSwapOpen(false)} onPick={doSwap} />}
 
       {/* rest timer modal */}
       <Sheet open={restModalOpen} onClose={() => setRestModalOpen(false)} title="Rest">

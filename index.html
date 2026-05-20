@@ -10,6 +10,7 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Zane" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -155,11 +156,11 @@ setTimeout(function() {
 <script>
 window.ACCENT_PALETTE = {
   gold:   { hex: '#c9a961', light: '#e5c97e', deep: '#8b6f3d', rgb: '201,169,97',  label: 'Gold'   },
-  copper: { hex: '#c47828', light: '#d9964a', deep: '#8a5010', rgb: '196,120,40',  label: 'Kupfer' },
+  copper: { hex: '#c47828', light: '#d9964a', deep: '#8a5010', rgb: '196,120,40',  label: 'Copper' },
   pink:   { hex: '#c9699a', light: '#de8fb8', deep: '#8b3f65', rgb: '201,105,154', label: 'Pink'   },
-  green:  { hex: '#7ab05a', light: '#9bcc7a', deep: '#4e7a38', rgb: '122,176,90',  label: 'Grün'   },
-  blue:   { hex: '#5b9bd5', light: '#7db5e8', deep: '#2e6499', rgb: '91,155,213',  label: 'Blau'   },
-  red:    { hex: '#c96060', light: '#e08080', deep: '#8b3535', rgb: '201,96,96',   label: 'Rot'    },
+  green:  { hex: '#7ab05a', light: '#9bcc7a', deep: '#4e7a38', rgb: '122,176,90',  label: 'Green'  },
+  blue:   { hex: '#5b9bd5', light: '#7db5e8', deep: '#2e6499', rgb: '91,155,213',  label: 'Blue'   },
+  red:    { hex: '#c96060', light: '#e08080', deep: '#8b3535', rgb: '201,96,96',   label: 'Red'    },
 };
 window.applyAccentColor = function(key) {
   var c = window.ACCENT_PALETTE[key] || window.ACCENT_PALETTE.gold;

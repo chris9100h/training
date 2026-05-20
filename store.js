@@ -3,6 +3,8 @@
 const SUPABASE_URL = 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
 
+const PUSHOVER_URL = `${SUPABASE_URL}/functions/v1/pushover`;
+
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
@@ -106,7 +108,7 @@ async function setupNewUser(userId, name) {
 
 // ─── LOAD ────────────────────────────────────────────────────────────────
 
-async function loadFromSupabase(userId) {
+async function loadFromSupabase(userId, _depth = 0) {
   const [profileRes, exRes, schRes, sessRes, settRes] = await Promise.all([
     _supabase.from('profiles').select('id, name').eq('id', userId).maybeSingle(),
     _supabase.from('exercises').select('id, name, tags, note, category, unilateral').eq('user_id', userId),
@@ -116,12 +118,19 @@ async function loadFromSupabase(userId) {
     _supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
   ]);
 
+  // A failed request (offline, RLS, server error) also yields no data — bail
+  // out so the caller can surface an error instead of mistaking this for a
+  // new user and re-seeding starter data over an existing account.
+  if (profileRes.error) throw profileRes.error;
+
   // First login after email confirmation — profile not yet created
   if (!profileRes.data) {
+    // guard against infinite recursion if setupNewUser silently fails (e.g. RLS)
+    if (_depth > 0) throw new Error('User profile setup failed');
     const { data: { user } } = await _supabase.auth.getUser();
     const name = user?.user_metadata?.name || user?.email?.split('@')[0] || 'Athlete';
     await setupNewUser(userId, name);
-    return loadFromSupabase(userId);
+    return loadFromSupabase(userId, _depth + 1);
   }
 
   const sett = settRes.data || {};
@@ -390,18 +399,37 @@ function loadFromLocal(userId) {
   } catch (_) { return null; }
 }
 
+// Snapshot of the last state confirmed written to Supabase. Persisted so a
+// restart can still tell apart local unsynced edits from pristine server state.
+function saveBase(store, userId) {
+  try {
+    localStorage.setItem(`logbook-base-${userId}`, JSON.stringify(store));
+  } catch (_) {}
+}
+
+function loadBase(userId) {
+  try {
+    const raw = localStorage.getItem(`logbook-base-${userId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+
 function clearLocal(userId) {
   try {
-    const key = userId ? `logbook-${userId}` : null;
-    if (key) { localStorage.removeItem(key); return; }
+    if (userId) {
+      localStorage.removeItem(`logbook-${userId}`);
+      localStorage.removeItem(`logbook-base-${userId}`);
+      return;
+    }
     Object.keys(localStorage).filter(k => k.startsWith('logbook-')).forEach(k => localStorage.removeItem(k));
   } catch (_) {}
 }
 
 window.LB = {
   supabase: _supabase,
+  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
   signIn, signUp, signOut, deleteAllData, importFromBackup,
   loadFromSupabase, syncStore, seedStarter,
-  saveToLocal, loadFromLocal, clearLocal,
+  saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay, isWeekdayPlan,
 };

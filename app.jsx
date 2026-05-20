@@ -2,6 +2,37 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useCallback: useCallbackA } = React;
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <Screen scroll={false} style={{ justifyContent: 'center', alignItems: 'center' }}>
+          <div style={{ textAlign: 'center', padding: 32, animation: 'fadeUp 0.4s ease' }}>
+            <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>
+              Something went wrong
+            </div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 20 }}>
+              {this.state.error?.message || 'Unexpected error'}
+            </div>
+            <button
+              onClick={() => { this.setState({ error: null }); this.props.onGoHome?.(); }}
+              style={{ background: UI.gold, color: '#0a0a0a', border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, fontFamily: UI.fontUi, cursor: 'pointer' }}
+            >
+              Back to home
+            </button>
+          </div>
+        </Screen>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function UpdateBanner({ onUpdate }) {
   return (
     <div style={{
@@ -44,14 +75,40 @@ function LoadingScreen() {
   );
 }
 
+function ErrorScreen({ onRetry }) {
+  return (
+    <Screen scroll={false} style={{ justifyContent: 'center', alignItems: 'center' }}>
+      <div style={{ textAlign: 'center', padding: 32, animation: 'fadeUp 0.4s ease' }}>
+        <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>
+          Couldn't load your data
+        </div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 20 }}>
+          Check your connection and try again.
+        </div>
+        <button onClick={onRetry} style={{
+          background: UI.gold, color: '#0a0a0a',
+          border: 'none', borderRadius: 8,
+          padding: '8px 18px', fontSize: 13, fontWeight: 600,
+          fontFamily: UI.fontUi, cursor: 'pointer',
+        }}>
+          Retry
+        </button>
+      </div>
+    </Screen>
+  );
+}
+
 function App() {
-  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed'
+  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error'
   const [store, setStore]         = useStateA(null);
   const [userId, setUserId]       = useStateA(null);
   const [route, setRoute]         = useStateA({ name: 'home' });
   const [updateAvailable, setUpdateAvailable] = useStateA(false);
   const waitingWorker             = useRefA(null);
   const prevStore                 = useRefA(null);
+  const syncBase                  = useRefA(null);  // last state confirmed written to Supabase
+  const pendingStore              = useRefA(null);  // latest state awaiting sync
+  const syncing                   = useRefA(false); // true while a sync is in flight
   const localDirty                = useRefA(false); // true if user changed store after cache load
 
   useEffectA(() => {
@@ -130,45 +187,90 @@ function App() {
     waitingWorker.current?.postMessage({ type: 'SKIP_WAITING' });
   }, []);
 
+  // Push pending local changes to Supabase. Serialized; on failure syncBase is
+  // left untouched so the next change (or an 'online' event) retries the diff.
+  const flushSync = useCallbackA((uid) => {
+    if (syncing.current) return;
+    const target = pendingStore.current;
+    if (!target || target === syncBase.current || !uid) return;
+    syncing.current = true;
+    let ok = false;
+    LB.syncStore(syncBase.current, target, uid)
+      .then(() => { syncBase.current = target; LB.saveBase(target, uid); ok = true; })
+      .catch(err => console.error('Supabase sync failed, will retry', err))
+      .finally(() => {
+        syncing.current = false;
+        if (ok && pendingStore.current !== syncBase.current) flushSync(uid);
+      });
+  }, []);
+
   const loadData = async (uid) => {
     localDirty.current = false;
     const cached = LB.loadFromLocal(uid);
     if (cached) {
       // Show instantly from cache, then refresh from Supabase in background
       prevStore.current = cached;
+      // base = last state confirmed written to Supabase. Lets the merge below
+      // tell apart locally-changed-but-unsynced settings from server state.
+      const base = LB.loadBase(uid);
+      syncBase.current = base || cached;
       setStore(cached);
       setPhase('ready');
       LB.loadFromSupabase(uid)
         .then(fresh => {
-          // Only apply if user hasn't made local changes during the fetch
-          if (!localDirty.current) {
-            const cur = prevStore.current;
-            if (cur) {
-              // preserve in-progress session (may not be committed to Supabase yet)
-              fresh.inProgress = cur.inProgress ?? fresh.inProgress;
-              const inProgressId = fresh.inProgress;
-              fresh.sessions = fresh.sessions.map(s => {
-                const mem = cur.sessions?.find(x => x.id === s.id);
-                if (!mem) return s;
-                const isActive = s.id === inProgressId;
-                return {
-                  ...s,
-                  currentExIdx: mem.currentExIdx ?? 0,
-                  cyclePos: mem.cyclePos ?? null,
-                  // for the active session, local entries/restStart are authoritative —
-                  // Supabase sync may still be in flight
-                  ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null } : {}),
-                };
-              });
-              // if the in-progress session hasn't reached Supabase yet, keep the local copy
-              if (inProgressId && !fresh.sessions.find(x => x.id === inProgressId)) {
-                const localSession = cur.sessions?.find(x => x.id === inProgressId);
-                if (localSession) fresh.sessions = [localSession, ...fresh.sessions];
-              }
-            }
-            prevStore.current = fresh;
-            setStore(fresh);
+          // Skip if the user made local changes while the fetch was in flight
+          if (localDirty.current) return;
+          const cur = prevStore.current;
+          // fresh is the pristine server state — use it as the sync diff base
+          syncBase.current = fresh;
+          LB.saveBase(fresh, uid);
+          let merged = fresh;
+          if (cur) {
+            const inProgressId = cur.inProgress ?? fresh.inProgress;
+            const serverIds = new Set(fresh.sessions.map(s => s.id));
+            const sessions = fresh.sessions.map(s => {
+              const mem = cur.sessions?.find(x => x.id === s.id);
+              if (!mem) return s;
+              const isActive = s.id === inProgressId;
+              return {
+                ...s,
+                currentExIdx: mem.currentExIdx ?? 0,
+                cyclePos: mem.cyclePos ?? null,
+                // for the active session, local entries/restStart are authoritative
+                ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null } : {}),
+              };
+            });
+            // keep sessions the server hasn't stored yet, but only recent ones —
+            // so a session deleted on another device isn't resurrected from a stale
+            // cache. The in-progress session is always kept regardless of its date.
+            const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 2);
+            const cutoffISO = cutoff.toISOString().slice(0, 10);
+            const localOnly = (cur.sessions || []).filter(x =>
+              !serverIds.has(x.id) && (x.id === inProgressId || (x.date || '') >= cutoffISO)
+            );
+            const serverExIds = new Set(fresh.exercises.map(e => e.id));
+            const localOnlyExercises = (cur.exercises || []).filter(x => !serverExIds.has(x.id));
+            const serverSchIds = new Set(fresh.schedules.map(s => s.id));
+            const localOnlySchedules = (cur.schedules || []).filter(x => !serverSchIds.has(x.id));
+            // Scalar state: the local cache is authoritative — it always holds
+            // the most recent state on this device, including unsynced offline
+            // edits. For items with IDs we use an ID-based merge instead.
+            merged = {
+              ...fresh,
+              settings: { ...fresh.settings, ...cur.settings },
+              activeScheduleId: cur.activeScheduleId,
+              cycleIndex: cur.cycleIndex,
+              cycleStartDate: cur.cycleStartDate,
+              lastAdvancedDate: cur.lastAdvancedDate,
+              user: cur.user?.name ? { ...fresh.user, name: cur.user.name } : fresh.user,
+              inProgress: inProgressId,
+              sessions: [...localOnly, ...sessions],
+              exercises: [...localOnlyExercises, ...fresh.exercises],
+              schedules: [...localOnlySchedules, ...fresh.schedules],
+            };
           }
+          prevStore.current = merged;
+          setStore(merged);
         })
         .catch(console.error);
     } else {
@@ -176,11 +278,13 @@ function App() {
       try {
         const loaded = await LB.loadFromSupabase(uid);
         prevStore.current = loaded;
+        syncBase.current = loaded;
+        LB.saveBase(loaded, uid);
         setStore(loaded);
         setPhase('ready');
       } catch (e) {
         console.error('loadFromSupabase failed', e);
-        setPhase('unauthed');
+        setPhase('error');
       }
     }
   };
@@ -189,15 +293,23 @@ function App() {
     const { data: { subscription } } = LB.supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'INITIAL_SESSION') {
         if (session) { setUserId(session.user.id); loadData(session.user.id); }
-        else          { setPhase('unauthed'); }
+        // Offline with no restorable session: show the error screen, not the
+        // login screen — you can't sign in offline, and a retry recovers.
+        else          { setPhase(navigator.onLine ? 'unauthed' : 'error'); }
       } else if (event === 'SIGNED_IN') {
         setUserId(session.user.id);
         loadData(session.user.id);
       } else if (event === 'SIGNED_OUT') {
+        // An offline SIGNED_OUT is almost always a failed token refresh, not a
+        // real sign-out — never wipe the cache or drop to the login screen.
+        if (!navigator.onLine) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
         LB.clearLocal(userId);
         setStore(null);
         setUserId(null);
         prevStore.current = null;
+        syncBase.current = null;
+        pendingStore.current = null;
+        syncing.current = false;
         localDirty.current = false;
         setRoute({ name: 'home' });
         setPhase('unauthed');
@@ -206,14 +318,23 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Sync to Supabase + save to localStorage on every store change
+  // Sync to Supabase + save to localStorage on every store change.
+  // A failed sync leaves syncBase unchanged so the pending diff is retried later.
   useEffectA(() => {
     if (!store || !userId || phase !== 'ready') return;
     if (prevStore.current !== store) localDirty.current = true;
-    LB.syncStore(prevStore.current, store, userId).catch(console.error);
-    LB.saveToLocal(store, userId);
     prevStore.current = store;
+    pendingStore.current = store;
+    LB.saveToLocal(store, userId);
+    flushSync(userId);
   }, [store]);
+
+  // Retry a failed sync as soon as connectivity returns
+  useEffectA(() => {
+    const onOnline = () => { if (userId) flushSync(userId); };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [userId, flushSync]);
 
   // helper for in-sheet "+ new exercise"
   window.__createExercise = (name) => {
@@ -224,6 +345,7 @@ function App() {
 
   if (phase === 'init' || phase === 'loading') return <LoadingScreen />;
   if (phase === 'unauthed') return <window.Screens.LoginScreen />;
+  if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 
   const go    = (r) => setRoute(r);
   const props = { store, setStore, go, userId };
@@ -248,7 +370,9 @@ function App() {
 
   return (
     <>
-      {screen}
+      <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
+        {screen}
+      </ErrorBoundary>
       {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
       {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} />}
     </>
