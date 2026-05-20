@@ -213,7 +213,17 @@ function App() {
             const localOnly = (cur.sessions || []).filter(x =>
               !serverIds.has(x.id) && (x.id === inProgressId || (x.date || '') >= cutoffISO)
             );
-            merged = { ...fresh, inProgress: inProgressId, sessions: [...localOnly, ...sessions] };
+            const serverExIds = new Set(fresh.exercises.map(e => e.id));
+            const localOnlyExercises = (cur.exercises || []).filter(x => !serverExIds.has(x.id));
+            const serverSchIds = new Set(fresh.schedules.map(s => s.id));
+            const localOnlySchedules = (cur.schedules || []).filter(x => !serverSchIds.has(x.id));
+            merged = {
+              ...fresh,
+              inProgress: inProgressId,
+              sessions: [...localOnly, ...sessions],
+              exercises: [...localOnlyExercises, ...fresh.exercises],
+              schedules: [...localOnlySchedules, ...fresh.schedules],
+            };
           }
           prevStore.current = merged;
           setStore(merged);
