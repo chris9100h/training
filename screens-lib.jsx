@@ -1222,7 +1222,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         )}
 
         {/* Exercise entries */}
-        <div>
+        <div style={{ position: 'relative' }}>
           {capturing && <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />}
           {muscleGroups.length > 0 && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -1305,9 +1305,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             })()}
           </div>
           {capturing && (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-              <img src="icons/zane-logo.png" style={{ width: 72, opacity: 0.5, transform: 'scaleX(-1)' }} />
-            </div>
+            <img src="icons/zane-logo.png" style={{ position: 'absolute', bottom: 24, right: 0, width: 72, opacity: 0.5, transform: 'scaleX(-1)' }} />
           )}
           {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 10 }} />}
         </div>
