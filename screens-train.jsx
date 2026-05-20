@@ -273,12 +273,6 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     }).catch(() => {});
   }, [restStart]);
 
-  // Cancel any scheduled rest notification if the screen unmounts mid-session
-  // (e.g. navigating Home without finishing or abandoning)
-  useEffectT(() => {
-    return () => { cancelPushover(); };
-  }, []);
-
   // beep + auto-open modal when rest timer hits zero
   const prevRestRemaining = useRefT(null);
   useEffectT(() => {

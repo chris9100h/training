@@ -205,8 +205,14 @@ function App() {
                 ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null } : {}),
               };
             });
-            // keep sessions created or finished locally that the server hasn't stored yet
-            const localOnly = (cur.sessions || []).filter(x => !serverIds.has(x.id));
+            // keep sessions the server hasn't stored yet, but only recent ones —
+            // so a session deleted on another device isn't resurrected from a stale
+            // cache. The in-progress session is always kept regardless of its date.
+            const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 2);
+            const cutoffISO = cutoff.toISOString().slice(0, 10);
+            const localOnly = (cur.sessions || []).filter(x =>
+              !serverIds.has(x.id) && (x.id === inProgressId || (x.date || '') >= cutoffISO)
+            );
             merged = { ...fresh, inProgress: inProgressId, sessions: [...localOnly, ...sessions] };
           }
           prevStore.current = merged;
