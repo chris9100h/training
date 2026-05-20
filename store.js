@@ -44,6 +44,46 @@ async function deleteAllData(userId) {
   ]);
 }
 
+async function importFromBackup(backup, userId) {
+  await deleteAllData(userId);
+  const sett = backup.settings ?? {};
+  await Promise.all([
+    backup.user?.name && _supabase.from('profiles').upsert({ id: userId, name: backup.user.name }),
+    backup.exercises?.length && _supabase.from('exercises').upsert(
+      backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, user_id: userId }))
+    ),
+    backup.schedules?.length && _supabase.from('schedules').upsert(
+      backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
+    ),
+    backup.sessions?.length && _supabase.from('sessions').upsert(
+      backup.sessions.filter(s => s.id).map(s => {
+        const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, ...rest } = s;
+        const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
+        if (startedAt != null) row.started_at = startedAt;
+        return row;
+      })
+    ),
+    _supabase.from('user_settings').upsert({
+      user_id: userId,
+      active_schedule_id: backup.activeScheduleId ?? null,
+      cycle_index: backup.cycleIndex ?? 0,
+      cycle_start_date: backup.cycleStartDate ?? null,
+      last_advanced_date: backup.lastAdvancedDate ?? null,
+      in_progress_session_id: backup.inProgress ?? null,
+      unit: sett.unit || 'kg',
+      rest_default: sett.restDefault || 120,
+      rest_big: sett.restBig || 180,
+      rest_medium: sett.restMedium || 120,
+      rest_small: sett.restSmall || 90,
+      push_enabled: sett.pushEnabled ?? false,
+      pushover_user_key: sett.pushoverUserKey ?? null,
+      cycle_week_view: sett.cycleWeekView ?? false,
+      accent_color: sett.accentColor ?? 'copper',
+      dark_mode: sett.darkMode ?? 'dark',
+    }),
+  ].filter(Boolean));
+}
+
 // ─── SETUP NEW USER ──────────────────────────────────────────────────────
 
 async function setupNewUser(userId, name) {
@@ -360,7 +400,7 @@ function clearLocal(userId) {
 
 window.LB = {
   supabase: _supabase,
-  signIn, signUp, signOut, deleteAllData,
+  signIn, signUp, signOut, deleteAllData, importFromBackup,
   loadFromSupabase, syncStore, seedStarter,
   saveToLocal, loadFromLocal, clearLocal,
   uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay, isWeekdayPlan,
