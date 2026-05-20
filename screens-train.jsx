@@ -186,7 +186,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ nonce: `cancel-${Date.now()}`, cancel: true }),
+      body: JSON.stringify({ nonce: `cancel-${Date.now()}`, cancel: true, userKey: store.settings?.pushoverUserKey ?? '' }),
     }).catch(() => {});
   };
 
@@ -269,7 +269,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ delaySeconds, nonce: String(restStart) }),
+      body: JSON.stringify({ delaySeconds, nonce: String(restStart), userKey: store.settings?.pushoverUserKey ?? '' }),
     }).catch(() => {});
   }, [restStart]);
 

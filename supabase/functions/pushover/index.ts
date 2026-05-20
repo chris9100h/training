@@ -34,7 +34,6 @@ Deno.serve(async (req) => {
   }
 
   const token = Deno.env.get('PUSHOVER_TOKEN') ?? 'a2vfbj4vu92hwzp5t9b6cbzkc18vw9';
-  const user  = Deno.env.get('PUSHOVER_USER')  ?? 'uxrg8gh43b1tpw31pq4r4i4ebqrhjt';
 
   const {
     message = 'Pause vorbei — weiter gehts! 💪',
@@ -43,7 +42,10 @@ Deno.serve(async (req) => {
     nonce = '',   // unique token per rest period; empty = no cancellation check
     _relay = false,
     cancel = false, // just invalidate the nonce, don't schedule delivery
+    userKey = '',
   } = await req.json().catch(() => ({}));
+
+  const user = userKey || Deno.env.get('PUSHOVER_USER') ?? 'uxrg8gh43b1tpw31pq4r4i4ebqrhjt';
 
   // First call only: register this nonce as the currently active one.
   // Relay hops skip this — the nonce is already stored from the initial call.
@@ -78,7 +80,7 @@ Deno.serve(async (req) => {
         fetch(SELF_URL, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message, title, delaySeconds: delaySeconds - MAX_CHUNK, nonce, _relay: true }),
+          body: JSON.stringify({ message, title, delaySeconds: delaySeconds - MAX_CHUNK, nonce, _relay: true, userKey }),
         }).catch(e => console.error('[pushover] relay error:', e))
       );
     } else {

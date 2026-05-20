@@ -116,6 +116,7 @@ async function loadFromSupabase(userId) {
         restMedium:  sett.rest_medium  || 120,
         restSmall:   sett.rest_small   || 90,
         pushEnabled: sett.push_enabled ?? false,
+        pushoverUserKey: sett.pushover_user_key ?? null,
         cycleWeekView: sett.cycle_week_view ?? false,
         accentColor: sett.accent_color ?? 'copper',
         darkMode: sett.dark_mode ?? 'dark',
@@ -183,6 +184,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.restMedium      !== next.settings?.restMedium      ||
     prev.settings?.restSmall       !== next.settings?.restSmall       ||
     prev.settings?.pushEnabled     !== next.settings?.pushEnabled     ||
+    prev.settings?.pushoverUserKey  !== next.settings?.pushoverUserKey  ||
     prev.settings?.cycleWeekView   !== next.settings?.cycleWeekView   ||
     prev.settings?.accentColor     !== next.settings?.accentColor     ||
     prev.settings?.darkMode        !== next.settings?.darkMode;
@@ -200,6 +202,7 @@ async function syncStore(prev, next, userId) {
       rest_medium:  next.settings?.restMedium  || 120,
       rest_small:   next.settings?.restSmall   || 90,
       push_enabled: next.settings?.pushEnabled ?? false,
+      pushover_user_key: next.settings?.pushoverUserKey ?? null,
       cycle_week_view: next.settings?.cycleWeekView ?? false,
       accent_color: next.settings?.accentColor ?? 'copper',
       dark_mode: next.settings?.darkMode ?? 'dark',

@@ -1475,6 +1475,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
   const [pushEnabled, setPushEnabled] = useStateL(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
+  const [pushKeyDraft, setPushKeyDraft] = useStateL('');
+  const [pushKeyModalOpen, setPushKeyModalOpen] = useStateL(false);
   const [cycleWeekView, setCycleWeekView] = useStateL(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateL(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   const pushStatusTimer = React.useRef(null);
@@ -1487,10 +1489,30 @@ function SettingsScreen({ store, setStore, go, userId }) {
   }, []);
 
   const togglePush = () => {
-    const next = !pushEnabled;
-    setPushEnabled(next);
-    localStorage.setItem('logbook-push-enabled', String(next));
-    setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: next } }));
+    if (!pushEnabled) {
+      const existingKey = store.settings?.pushoverUserKey;
+      if (existingKey) {
+        setPushEnabled(true);
+        localStorage.setItem('logbook-push-enabled', 'true');
+        setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } }));
+      } else {
+        setPushKeyDraft('');
+        setPushKeyModalOpen(true);
+      }
+    } else {
+      setPushEnabled(false);
+      localStorage.setItem('logbook-push-enabled', 'false');
+      setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: false } }));
+    }
+  };
+
+  const confirmPushKey = () => {
+    const key = pushKeyDraft.trim();
+    if (!key) return;
+    setPushEnabled(true);
+    localStorage.setItem('logbook-push-enabled', 'true');
+    setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true, pushoverUserKey: key } }));
+    setPushKeyModalOpen(false);
   };
 
   const testPushover = async (delaySeconds = 0) => {
@@ -1503,7 +1525,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: 'Rest done — keep going! 💪', title: 'Zane Test', delaySeconds, nonce: String(Date.now()) }),
+        body: JSON.stringify({ message: 'Rest done — keep going! 💪', title: 'Zane Test', delaySeconds, nonce: String(Date.now()), userKey: store.settings?.pushoverUserKey ?? '' }),
       });
       if (res.status === 202) {
         setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`);
@@ -1683,15 +1705,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
         <Frame style={{ padding: '14px 16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span className="label" style={{ marginBottom: 0 }}>Push notifications</span>
-              <div
-              onClick={store.user?.email === 'office@btc-prime.biz' ? togglePush : async () => { await confirm('Push notifications are not supported on this device.', { title: 'Not supported', ok: 'OK' }); }}
-              style={{
-                width: 44, height: 26, borderRadius: 13, cursor: 'pointer',
-                background: pushEnabled ? 'var(--accent)' : UI.bgInset,
-                border: `0.5px solid ${pushEnabled ? UI.goldSoft : UI.hairStrong}`,
-                position: 'relative', transition: 'background 0.2s',
-              }}
-            >
+            <div onClick={togglePush} style={{
+              width: 44, height: 26, borderRadius: 13, cursor: 'pointer',
+              background: pushEnabled ? 'var(--accent)' : UI.bgInset,
+              border: `0.5px solid ${pushEnabled ? UI.goldSoft : UI.hairStrong}`,
+              position: 'relative', transition: 'background 0.2s',
+            }}>
               <div style={{
                 position: 'absolute', top: 3, left: pushEnabled ? 21 : 3,
                 width: 18, height: 18, borderRadius: 9,
@@ -1700,7 +1719,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
               }} />
             </div>
           </div>
-          {store.user?.email === 'office@btc-prime.biz' && pushEnabled && (
+          {pushEnabled && store.settings?.pushoverUserKey && (
+            <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={{ marginTop: 6, background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              Change user key
+            </button>
+          )}
+          {pushEnabled && (
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn kind="ghost" onClick={() => testPushover(0)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>Now</Btn>
@@ -1737,6 +1761,26 @@ function SettingsScreen({ store, setStore, go, userId }) {
         </div>
       </div>
       {confirmEl}
+      <Sheet open={pushKeyModalOpen} onClose={() => setPushKeyModalOpen(false)} title="Pushover User Key">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.5 }}>
+            Enter your Pushover user key. Find it at pushover.net after logging in.
+          </div>
+          <input
+            value={pushKeyDraft}
+            onChange={e => setPushKeyDraft(e.target.value)}
+            placeholder="uXXXXXXXXXXXXXXXXXXXX"
+            style={{
+              background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+              borderRadius: 10, padding: '10px 14px',
+              fontFamily: UI.fontUi, fontSize: 13, color: UI.ink,
+              outline: 'none', width: '100%', boxSizing: 'border-box',
+            }}
+            autoCorrect="off" autoCapitalize="none" spellCheck={false}
+          />
+          <Btn onClick={confirmPushKey} disabled={!pushKeyDraft.trim()}>Enable notifications</Btn>
+        </div>
+      </Sheet>
     </Screen>
   );
 }
