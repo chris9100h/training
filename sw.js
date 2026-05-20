@@ -1,5 +1,5 @@
-const CACHE = 'zane-v1.6';
-const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
+const CACHE = 'zane-v1.7';
+const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com'];
 const ASSETS = [
   '/training/',
   '/training/index.html',
@@ -78,12 +78,14 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // CDN libraries / fonts: cache-first so the app can boot fully offline
+  // CDN libraries: cache-first so the app can boot fully offline.
+  // Only cache complete CORS/same-origin responses — caching or serving an
+  // opaque response for a CORS request makes the browser fail it.
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
       return fetch(e.request).then(res => {
-        if (res.ok || res.type === 'opaque') {
+        if (res.ok && res.type !== 'opaque') {
           const clone = res.clone();
           caches.open(CACHE).then(c => c.put(e.request, clone));
         }
