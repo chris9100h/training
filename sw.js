@@ -1,5 +1,5 @@
-const CACHE = 'zane-v1.7';
-const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com'];
+const CACHE = 'zane-v1.8';
+const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 const ASSETS = [
   '/training/',
   '/training/index.html',
@@ -80,14 +80,16 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // CDN libraries: cache-first so the app can boot fully offline.
-  // Only cache complete CORS/same-origin responses — caching or serving an
-  // opaque response for a CORS request makes the browser fail it.
+  // CDN libraries + web fonts: cache-first so the app can boot fully offline.
+  // Fetch in CORS mode so the response is never opaque — an opaque response
+  // can't satisfy a CORS request (e.g. font-awesome, @font-face files) and
+  // can't be reliably reused. unpkg, cdnjs and Google Fonts all send
+  // permissive CORS headers, so a CORS fetch always succeeds for these hosts.
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
-      return fetch(e.request).then(res => {
-        if (res.ok && res.type !== 'opaque') {
+      return fetch(e.request.url, { mode: 'cors' }).then(res => {
+        if (res.ok) {
           const clone = res.clone();
           caches.open(CACHE).then(c => c.put(e.request, clone));
         }
