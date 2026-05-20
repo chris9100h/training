@@ -41,7 +41,7 @@ function LoginScreen() {
 
       <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
         <span className="micro">ZANE · CAL. M.01</span>
-        <span className="micro">EST. 2024</span>
+        <span className="micro">EST. 2026</span>
       </div>
 
       {/* Centered block: logo + title + form */}
