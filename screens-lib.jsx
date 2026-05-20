@@ -1305,7 +1305,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             })()}
           </div>
           {capturing && (
-            <img src="icons/zane-logo.png" style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, transform: 'scaleX(-1)' }} />
+            <img src="icons/zane-logo-2.png" style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, transform: 'scaleX(-1)' }} />
           )}
           {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 10 }} />}
         </div>
