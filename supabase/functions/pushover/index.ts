@@ -22,8 +22,8 @@ function dbFetch(path: string, options: RequestInit = {}) {
   });
 }
 
-async function isNonceCurrent(nonce: string): Promise<boolean> {
-  const r = await dbFetch('pushover_active?id=eq.singleton&select=nonce');
+async function isNonceCurrent(nonce: string, userId: string): Promise<boolean> {
+  const r = await dbFetch(`pushover_active?id=eq.${encodeURIComponent(userId)}&select=nonce`);
   const rows: { nonce: string }[] = await r.json().catch(() => []);
   return rows[0]?.nonce === nonce;
 }
@@ -43,6 +43,7 @@ Deno.serve(async (req) => {
     _relay = false,
     cancel = false, // just invalidate the nonce, don't schedule delivery
     userKey = '',
+    userId = 'singleton',
   } = await req.json().catch(() => ({}));
 
   const user = userKey || (Deno.env.get('PUSHOVER_USER') ?? 'uxrg8gh43b1tpw31pq4r4i4ebqrhjt');
@@ -53,7 +54,7 @@ Deno.serve(async (req) => {
     await dbFetch('pushover_active', {
       method: 'POST',
       headers: { 'Prefer': 'resolution=merge-duplicates' },
-      body: JSON.stringify({ id: 'singleton', nonce }),
+      body: JSON.stringify({ id: userId, nonce }),
     }).catch(e => console.error('[pushover] nonce upsert error:', e));
   }
 
@@ -72,7 +73,7 @@ Deno.serve(async (req) => {
     if (delaySeconds > MAX_CHUNK) {
       await new Promise(r => setTimeout(r, MAX_CHUNK * 1000));
       // Cancel chain if a newer set started
-      if (nonce && !await isNonceCurrent(nonce)) {
+      if (nonce && !await isNonceCurrent(nonce, userId)) {
         console.log('[pushover] cancelled — newer rest timer active');
         return;
       }
@@ -80,13 +81,13 @@ Deno.serve(async (req) => {
         fetch(SELF_URL, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message, title, delaySeconds: delaySeconds - MAX_CHUNK, nonce, _relay: true, userKey }),
+          body: JSON.stringify({ message, title, delaySeconds: delaySeconds - MAX_CHUNK, nonce, _relay: true, userKey, userId }),
         }).catch(e => console.error('[pushover] relay error:', e))
       );
     } else {
       if (delaySeconds > 0) await new Promise(r => setTimeout(r, delaySeconds * 1000));
       // Cancel send if a newer set started
-      if (nonce && !await isNonceCurrent(nonce)) {
+      if (nonce && !await isNonceCurrent(nonce, userId)) {
         console.log('[pushover] cancelled — newer rest timer active');
         return;
       }
