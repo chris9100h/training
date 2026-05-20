@@ -336,11 +336,18 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   const doSwap = (newExId) => {
-    const newEx = LB.findExercise(store, newExId);
-    updateSession(sess => ({
-      ...sess,
-      entries: sess.entries.map((e, i) => i !== exIdx ? e : { ...e, exId: newExId, name: newEx?.name || '?' }),
-    }));
+    // resolve the name from fresh state — a just-created exercise isn't in the
+    // closed-over `store` yet (its setStore hasn't re-rendered the screen)
+    setStore(s => {
+      const newEx = LB.findExercise(s, newExId);
+      return {
+        ...s,
+        sessions: s.sessions.map(x => x.id !== session.id ? x : {
+          ...x,
+          entries: x.entries.map((e, i) => i !== exIdx ? e : { ...e, exId: newExId, name: newEx?.name || e.name }),
+        }),
+      };
+    });
     setSwapOpen(false);
   };
 
