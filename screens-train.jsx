@@ -32,7 +32,7 @@ function KgInput({ value, onChange, done, style }) {
   );
 }
 
-function TrainingScreen({ store, setStore, go, sessionId }) {
+function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const session = store.sessions.find(s => s.id === sessionId);
   if (!session) { go({ name: 'home' }); return null; }
 
@@ -57,7 +57,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
   const exIdx = session.currentExIdx || 0;
   const entry = session.entries[exIdx];
   const exercise = entry ? LB.findExercise(store, entry.exId) : null;
-  const last = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayName) : null;
+  const last = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayId) : null;
 
   const updateSession = (fn) => {
     setStore(s => ({
@@ -75,12 +75,15 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     }));
   };
 
+  const effReps = (st) => {
+    if (st.repsL != null || st.repsR != null) return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
+    return st.reps;
+  };
   const isImprovement = (st, prevSet) => {
-    if (!prevSet) return false;
-    const kg = st.kg != null && prevSet.kg != null;
-    const reps = st.reps != null && prevSet.reps != null;
-    if (!kg || !reps) return false;
-    return st.kg >= prevSet.kg && st.reps >= prevSet.reps && (st.kg > prevSet.kg || st.reps > prevSet.reps);
+    if (!prevSet || st.kg == null || prevSet.kg == null) return false;
+    const repsA = effReps(st); const repsB = effReps(prevSet);
+    if (repsA == null || repsB == null) return false;
+    return (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB);
   };
 
   const completeSet = (setIdx) => {
@@ -165,6 +168,16 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     updateSession(sess => ({ ...sess, currentExIdx: newIdx }));
   };
 
+  const skipExercise = () => {
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((e, i) => i === exIdx
+        ? { ...e, sets: e.sets.map(st => st.done ? st : { ...st, skipped: true }) }
+        : e),
+    }));
+    navigate(1);
+  };
+
   const cancelPushover = () => {
     if (!store.settings?.pushEnabled) return;
     fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
@@ -173,7 +186,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ nonce: `cancel-${Date.now()}`, cancel: true }),
+      body: JSON.stringify({ nonce: `cancel-${Date.now()}`, cancel: true, userKey: store.settings?.pushoverUserKey ?? '', userId }),
     }).catch(() => {});
   };
 
@@ -256,7 +269,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ delaySeconds, nonce: String(restStart) }),
+      body: JSON.stringify({ delaySeconds, nonce: String(restStart), userKey: store.settings?.pushoverUserKey ?? '', userId }),
     }).catch(() => {});
   }, [restStart]);
 
@@ -278,19 +291,22 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       // audio: two beeps + higher tone (blocked by iOS silent switch, but nice to have)
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const beep = (t, freq, dur) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.connect(gain); gain.connect(ctx.destination);
-          osc.type = 'sine'; osc.frequency.value = freq;
-          gain.gain.setValueAtTime(0.35, t);
-          gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
-          osc.start(t); osc.stop(t + dur);
+        const play = () => {
+          const beep = (t, freq, dur) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.type = 'sine'; osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.35, t);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+            osc.start(t); osc.stop(t + dur);
+          };
+          beep(ctx.currentTime,        880, 0.14);
+          beep(ctx.currentTime + 0.18, 880, 0.14);
+          beep(ctx.currentTime + 0.36, 1320, 0.28);
+          setTimeout(() => ctx.close(), 1200);
         };
-        beep(ctx.currentTime,        880, 0.14);
-        beep(ctx.currentTime + 0.18, 880, 0.14);
-        beep(ctx.currentTime + 0.36, 1320, 0.28);
-        setTimeout(() => ctx.close(), 1200);
+        ctx.state === 'suspended' ? ctx.resume().then(play) : play();
       } catch (_) {}
     }
   }, [restRemaining]);
@@ -494,7 +510,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       {/* Exercise chips */}
       <div ref={chipRowRef} style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
         {session.entries.flatMap((e, i) => {
-          const done = e.sets.every(s => s.done);
+          const done = e.sets.every(s => s.done || s.skipped);
           const active = i === exIdx;
           const nextE = session.entries[i + 1];
           const linkedToNext = e.supersetGroup && e.supersetGroup === nextE?.supersetGroup;
@@ -685,7 +701,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                   gap: 8, alignItems: 'center',
                   padding: '10px 4px',
                   borderBottom: i < entry.sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
-                  opacity: s.done ? 0.4 : 1,
+                  opacity: s.done || s.skipped ? 0.4 : 1,
                   animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
                 }}>
                   <div style={{
@@ -703,8 +719,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
                   <KgInput
                     value={s.kg}
-                    done={s.done}
-                    style={setInputStyle(s.done, isCurrent)}
+                    done={s.done || s.skipped}
+                    style={setInputStyle(s.done || s.skipped, isCurrent)}
                     onChange={kg => updateSession(sess => ({
                       ...sess,
                       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
@@ -720,25 +736,26 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
                   {isUnilateral ? (
                     <>
-                      <input type="number" inputMode="numeric" value={s.repsL ?? ''} placeholder="L" onFocus={e => e.target.select()} onChange={e => updateSet(i, { repsL: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done} style={setInputStyle(s.done, isCurrent)} />
-                      <input type="number" inputMode="numeric" value={s.repsR ?? ''} placeholder="R" onFocus={e => e.target.select()} onChange={e => updateSet(i, { repsR: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done} style={setInputStyle(s.done, isCurrent)} />
+                      <input type="number" inputMode="numeric" value={s.repsL ?? ''} placeholder="L" onFocus={e => e.target.select()} onChange={e => updateSet(i, { repsL: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done || s.skipped} style={setInputStyle(s.done || s.skipped, isCurrent)} />
+                      <input type="number" inputMode="numeric" value={s.repsR ?? ''} placeholder="R" onFocus={e => e.target.select()} onChange={e => updateSet(i, { repsR: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done || s.skipped} style={setInputStyle(s.done || s.skipped, isCurrent)} />
                     </>
                   ) : (
-                    <input type="number" inputMode="numeric" value={s.reps ?? ''} placeholder="—" onFocus={e => e.target.select()} onChange={e => updateSet(i, { reps: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done} style={setInputStyle(s.done, isCurrent)} />
+                    <input type="number" inputMode="numeric" value={s.reps ?? ''} placeholder="—" onFocus={e => e.target.select()} onChange={e => updateSet(i, { reps: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done || s.skipped} style={setInputStyle(s.done || s.skipped, isCurrent)} />
                   )}
 
-                  <button onClick={() => s.done ? updateSet(i, { done: false }) : completeSet(i)}
-                    disabled={!s.done && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps))}
+                  <button onClick={() => s.skipped ? updateSet(i, { skipped: false }) : s.done ? updateSet(i, { done: false }) : completeSet(i)}
+                    disabled={!s.done && !s.skipped && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps))}
                     style={{
                       width: 26, height: 26, borderRadius: 5, border: 'none', cursor: 'pointer',
                       background: s.done ? UI.gold : 'transparent',
-                      outline: `0.5px solid ${s.done ? UI.gold : (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
+                      outline: `0.5px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 14, fontWeight: 700, color: s.done ? '#0a0805' : 'transparent',
-                      opacity: !s.done && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? 0.35 : 1,
+                      fontSize: s.skipped ? 12 : 14, fontWeight: 700,
+                      color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
+                      opacity: !s.done && !s.skipped && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? 0.35 : 1,
                       flexShrink: 0,
                       WebkitTapHighlightColor: 'transparent',
-                    }}>✓</button>
+                    }}>{s.skipped ? '×' : '✓'}</button>
 
                   {!s.done && entry.sets.length > 1 ? (
                     <button onClick={() => removeSet(i)} style={{
@@ -806,8 +823,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
-        <Btn onClick={() => navigate(1)} style={{ flex: 1 }}>
-          {exIdx === session.entries.length - 1 ? 'Finish →' : 'Next exercise →'}
+        <Btn onClick={allDone ? () => navigate(1) : skipExercise} style={{ flex: 1 }}>
+          {exIdx === session.entries.length - 1 ? 'Finish →' : allDone ? 'Next exercise →' : completed === 0 ? 'Skip exercise' : 'Skip remaining'}
         </Btn>
       </div>
 

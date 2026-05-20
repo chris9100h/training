@@ -629,21 +629,32 @@ function StatsTab({ store, sessions, go }) {
   // Determine whether we're in cycle mode and compute current cycle window
   const sch = store.schedules.find(s => s.id === store.activeScheduleId);
   const isCycleMode = sch && !LB.isWeekdayPlan(sch) && !!store.cycleStartDate;
+  const cycleLen = sch?.days?.length || 1;
   const cycleWindowStart = (() => {
     if (!isCycleMode) return null;
     const start = new Date(store.cycleStartDate + 'T12:00:00');
     const n = Math.round((today.getTime() - start.getTime()) / 86400000);
-    const idxInCycle = ((n % sch.days.length) + sch.days.length) % sch.days.length;
+    const idxInCycle = ((n % cycleLen) + cycleLen) % cycleLen;
     const d = new Date(today); d.setDate(today.getDate() - idxInCycle);
     return d;
   })();
+  const currentCycleNum = isCycleMode ? Math.floor(Math.round((today.getTime() - new Date(store.cycleStartDate + 'T12:00:00').getTime()) / 86400000) / cycleLen) : 0;
 
-  // Sessions in the current training period (cycle or calendar week)
+  const [cycleViewOffset, setCycleViewOffset] = useStateL(0);
+  const selectedCycleStart = isCycleMode && cycleWindowStart ? (() => {
+    const d = new Date(cycleWindowStart); d.setDate(cycleWindowStart.getDate() + cycleViewOffset * cycleLen); return d;
+  })() : null;
+  const selectedCycleEnd = isCycleMode && selectedCycleStart ? (cycleViewOffset === 0 ? today : (() => {
+    const d = new Date(selectedCycleStart); d.setDate(selectedCycleStart.getDate() + cycleLen - 1); return d;
+  })()) : null;
+  const selectedCycleNum = currentCycleNum + cycleViewOffset;
+
+  // Sessions in the selected training period (cycle or calendar week)
   const thisPeriodSessions = useMemoL(() => sessions.filter(s => {
     const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
-    if (isCycleMode) return cycleWindowStart && d >= cycleWindowStart && d <= today;
+    if (isCycleMode) return selectedCycleStart && selectedCycleEnd && d >= selectedCycleStart && d <= selectedCycleEnd;
     return d >= monday && d <= sunday;
-  }), [sessions, isCycleMode, cycleWindowStart]);
+  }), [sessions, isCycleMode, selectedCycleStart, selectedCycleEnd]);
 
   // Calendar-week sessions — used for consistency card ("This Week")
   const thisWeekSessions = useMemoL(() => sessions.filter(s => {
@@ -789,9 +800,19 @@ function StatsTab({ store, sessions, go }) {
 
       {/* Weekly sets per muscle */}
       <div>
-        <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>{isCycleMode ? 'THIS CYCLE · SETS PER MUSCLE' : 'THIS WEEK · SETS PER MUSCLE'}</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div className="micro" style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>
+            {isCycleMode ? `CYCLE ${selectedCycleNum + 1} · SETS PER MUSCLE` : 'THIS WEEK · SETS PER MUSCLE'}
+          </div>
+          {isCycleMode && (
+            <div style={{ display: 'flex', gap: 2 }}>
+              <button onClick={() => setCycleViewOffset(o => Math.max(-currentCycleNum, o - 1))} style={{ background: 'none', border: 'none', color: cycleViewOffset <= -currentCycleNum ? UI.inkFaint : UI.inkSoft, cursor: cycleViewOffset <= -currentCycleNum ? 'default' : 'pointer', fontSize: 16, padding: '0 6px', lineHeight: 1 }}>‹</button>
+              <button onClick={() => setCycleViewOffset(o => Math.min(0, o + 1))} style={{ background: 'none', border: 'none', color: cycleViewOffset >= 0 ? UI.inkFaint : UI.inkSoft, cursor: cycleViewOffset >= 0 ? 'default' : 'pointer', fontSize: 16, padding: '0 6px', lineHeight: 1 }}>›</button>
+            </div>
+          )}
+        </div>
         {setsPerMuscle.length === 0 ? (
-          <div style={{ color: UI.inkFaint, fontSize: 13, fontFamily: UI.fontUi }}>{isCycleMode ? 'No sessions this cycle yet.' : 'No sessions this week yet.'}</div>
+          <div style={{ color: UI.inkFaint, fontSize: 13, fontFamily: UI.fontUi }}>{isCycleMode ? `No sessions in cycle ${selectedCycleNum + 1}.` : 'No sessions this week yet.'}</div>
         ) : setsPerMuscle.map(({ muscle, sets }) => (
           <div key={muscle} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <div style={{ width: 100, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.05em' }}>{muscle}</div>
@@ -1026,14 +1047,14 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const prevEntryMap = {};
   s.entries.forEach(e => {
     const prev = store.sessions
-      .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayName === s.dayName)
+      .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId)
       .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
       .find(x => x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null)));
     prevEntryMap[e.exId] = prev?.entries.find(en => en.exId === e.exId) ?? null;
   });
 
   const prevSameDay = store.sessions
-    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayName === s.dayName)
+    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
   const volDelta = prevSameDay != null ? vol - totalVolume(prevSameDay) : null;
 
@@ -1101,17 +1122,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     }
   };
 
+  const effReps = (st) => {
+    if (st.repsL != null || st.repsR != null) return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
+    return st.reps;
+  };
   const isImprovement = (st, prevSet) => {
-    if (!prevSet || !st.done) return false;
-    const kg = st.kg != null && prevSet.kg != null;
-    const reps = st.reps != null && prevSet.reps != null;
-    if (!kg || !reps) return false;
-    return st.kg >= prevSet.kg && st.reps >= prevSet.reps && (st.kg > prevSet.kg || st.reps > prevSet.reps);
+    if (!prevSet || !st.done || st.kg == null || prevSet.kg == null) return false;
+    const repsA = effReps(st); const repsB = effReps(prevSet);
+    if (repsA == null || repsB == null) return false;
+    return (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB);
   };
 
   const isDecline = (st, prevSet) => {
-    if (!prevSet || !st.done || st.kg == null || prevSet.kg == null || st.reps == null || prevSet.reps == null) return false;
-    return st.kg < prevSet.kg || (st.kg === prevSet.kg && st.reps < prevSet.reps);
+    if (!prevSet || !st.done || st.kg == null || prevSet.kg == null) return false;
+    const repsA = effReps(st); const repsB = effReps(prevSet);
+    if (repsA == null || repsB == null) return false;
+    return st.kg < prevSet.kg || (st.kg === prevSet.kg && repsA < repsB);
   };
 
   return (
@@ -1217,7 +1243,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         )}
 
         {/* Exercise entries */}
-        <div>
+        <div style={{ position: 'relative' }}>
           {capturing && <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />}
           {muscleGroups.length > 0 && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -1254,14 +1280,15 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
               const renderEntry = (e, i) => {
                 const prev = prevEntryMap[e.exId];
+                const exName = store.exercises.find(ex => ex.id === e.exId)?.name ?? e.name;
                 const hasImprovement = e.sets.some((st, j) => isPR(st, e.exId) || isImprovement(st, prev?.sets?.[j]));
                 return (
                 <div key={i}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{e.name}</div>
+                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{exName}</div>
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {e.sets.map((st, j) => {
+                    {e.sets.filter(st => !st.skipped).map((st, j) => {
                       const pr = isPR(st, e.exId);
                       const highlight = pr || isImprovement(st, prev?.sets?.[j]);
                       const decline = !hasImprovement && isDecline(st, prev?.sets?.[j]);
@@ -1278,6 +1305,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         </span>
                       );
                     })}
+                    {(() => { const n = e.sets.filter(st => st.skipped).length; return n > 0 && (
+                      <span style={{ border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.05em' }}>
+                        {n} SET{n > 1 ? 'S' : ''} SKIPPED
+                      </span>
+                    ); })()}
                   </div>
                   {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{e.note}</div>}
                 </div>
@@ -1299,7 +1331,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               ));
             })()}
           </div>
-          {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 14 }} />}
+          {capturing && (
+            <img src="icons/zane-logo-2.png" style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, transform: 'scaleX(-1)' }} />
+          )}
+          {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 10 }} />}
         </div>
       </div>
 
@@ -1382,7 +1417,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
               || e.sets.some(st => st.repsL != null || st.repsR != null);
             return (
               <div key={eIdx}>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{e.name.toUpperCase()}</div>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{(exercises?.find(ex => ex.id === e.exId)?.name ?? e.name).toUpperCase()}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {e.sets.map((st, sIdx) => (
                     <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: UI.bgInset, borderRadius: 10, padding: '8px 12px' }}>
@@ -1437,9 +1472,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [nickname, setNickname] = useStateL(store.user?.name || '');
   const [restOpen, setRestOpen] = useStateL(false);
   const [appearanceOpen, setAppearanceOpen] = useStateL(false);
+  const [pushOpen, setPushOpen] = useStateL(false);
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
   const [pushEnabled, setPushEnabled] = useStateL(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
+  const [pushKeyDraft, setPushKeyDraft] = useStateL('');
+  const [pushKeyModalOpen, setPushKeyModalOpen] = useStateL(false);
   const [cycleWeekView, setCycleWeekView] = useStateL(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateL(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   const pushStatusTimer = React.useRef(null);
@@ -1452,10 +1490,30 @@ function SettingsScreen({ store, setStore, go, userId }) {
   }, []);
 
   const togglePush = () => {
-    const next = !pushEnabled;
-    setPushEnabled(next);
-    localStorage.setItem('logbook-push-enabled', String(next));
-    setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: next } }));
+    if (!pushEnabled) {
+      const existingKey = store.settings?.pushoverUserKey;
+      if (existingKey) {
+        setPushEnabled(true);
+        localStorage.setItem('logbook-push-enabled', 'true');
+        setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } }));
+      } else {
+        setPushKeyDraft('');
+        setPushKeyModalOpen(true);
+      }
+    } else {
+      setPushEnabled(false);
+      localStorage.setItem('logbook-push-enabled', 'false');
+      setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: false } }));
+    }
+  };
+
+  const confirmPushKey = () => {
+    const key = pushKeyDraft.trim();
+    if (!key) return;
+    setPushEnabled(true);
+    localStorage.setItem('logbook-push-enabled', 'true');
+    setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true, pushoverUserKey: key } }));
+    setPushKeyModalOpen(false);
   };
 
   const testPushover = async (delaySeconds = 0) => {
@@ -1468,7 +1526,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: 'Rest done — keep going! 💪', title: 'Zane Test', delaySeconds, nonce: String(Date.now()) }),
+        body: JSON.stringify({ message: 'Rest done — keep going! 💪', title: 'Zane Test', delaySeconds, nonce: String(Date.now()), userKey: store.settings?.pushoverUserKey ?? '' }),
       });
       if (res.status === 202) {
         setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`);
@@ -1646,35 +1704,47 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
         {/* Push notifications */}
         <Frame style={{ padding: '14px 16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <button onClick={() => setPushOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
             <span className="label" style={{ marginBottom: 0 }}>Push notifications</span>
-            <div
-              onClick={togglePush}
-              style={{
-                width: 44, height: 26, borderRadius: 13, cursor: 'pointer',
-                background: pushEnabled ? 'var(--accent)' : UI.bgInset,
-                border: `0.5px solid ${pushEnabled ? UI.goldSoft : UI.hairStrong}`,
-                position: 'relative', transition: 'background 0.2s',
-              }}
-            >
-              <div style={{
-                position: 'absolute', top: 3, left: pushEnabled ? 21 : 3,
-                width: 18, height: 18, borderRadius: 9,
-                background: pushEnabled ? '#0a0805' : UI.inkFaint,
-                transition: 'left 0.2s',
-              }} />
-            </div>
-          </div>
-          {pushEnabled && (
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Btn kind="ghost" onClick={() => testPushover(0)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>Now</Btn>
-                <Btn kind="ghost" onClick={() => testPushover(10)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>10s</Btn>
-                <Btn kind="ghost" onClick={() => testPushover(30)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>30s</Btn>
+            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: pushOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+              <path d="M2 1l5 5-5 5"/>
+            </svg>
+          </button>
+          {pushOpen && (
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span className="micro" style={{ color: UI.inkSoft }}>Enabled</span>
+                <div onClick={togglePush} style={{
+                  width: 44, height: 26, borderRadius: 13, cursor: 'pointer',
+                  background: pushEnabled ? 'var(--accent)' : UI.bgInset,
+                  border: `0.5px solid ${pushEnabled ? UI.goldSoft : UI.hairStrong}`,
+                  position: 'relative', transition: 'background 0.2s',
+                }}>
+                  <div style={{
+                    position: 'absolute', top: 3, left: pushEnabled ? 21 : 3,
+                    width: 18, height: 18, borderRadius: 9,
+                    background: pushEnabled ? '#0a0805' : UI.inkFaint,
+                    transition: 'left 0.2s',
+                  }} />
+                </div>
               </div>
-              {pushStatus && (
-                <div className="micro" style={{ color: pushStatus.startsWith('✓') ? UI.gold : UI.inkSoft, textAlign: 'center' }}>
-                  {pushStatus}
+              {store.settings?.pushoverUserKey && (
+                <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'left' }}>
+                  Change user key
+                </button>
+              )}
+              {pushEnabled && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Btn kind="ghost" onClick={() => testPushover(0)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>Now</Btn>
+                    <Btn kind="ghost" onClick={() => testPushover(10)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>10s</Btn>
+                    <Btn kind="ghost" onClick={() => testPushover(30)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>30s</Btn>
+                  </div>
+                  {pushStatus && (
+                    <div className="micro" style={{ color: pushStatus.startsWith('✓') ? UI.gold : UI.inkSoft, textAlign: 'center' }}>
+                      {pushStatus}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1702,6 +1772,26 @@ function SettingsScreen({ store, setStore, go, userId }) {
         </div>
       </div>
       {confirmEl}
+      <Sheet open={pushKeyModalOpen} onClose={() => setPushKeyModalOpen(false)} title="Pushover User Key">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.5 }}>
+            Enter your Pushover user key. Find it at pushover.net after logging in.
+          </div>
+          <input
+            value={pushKeyDraft}
+            onChange={e => setPushKeyDraft(e.target.value)}
+            placeholder="uXXXXXXXXXXXXXXXXXXXX"
+            style={{
+              background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+              borderRadius: 10, padding: '10px 14px',
+              fontFamily: UI.fontUi, fontSize: 13, color: UI.ink,
+              outline: 'none', width: '100%', boxSizing: 'border-box',
+            }}
+            autoCorrect="off" autoCapitalize="none" spellCheck={false}
+          />
+          <Btn onClick={confirmPushKey} disabled={!pushKeyDraft.trim()}>Enable notifications</Btn>
+        </div>
+      </Sheet>
     </Screen>
   );
 }

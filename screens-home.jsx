@@ -46,10 +46,8 @@ function LoginScreen() {
 
       {/* Centered block: logo + title + form */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
-        <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 400, objectFit: 'contain' }} />
-        <div style={{ textAlign: 'center', marginTop: 6, marginBottom: 28 }}>
-          <div className="display" style={{ fontSize: 38, fontWeight: 700, color: UI.ink, letterSpacing: '0.22em' }}>ZANE</div>
-          <div className="display-it" style={{ marginTop: 2, fontSize: 14, fontWeight: 700, color: UI.gold, letterSpacing: '0.03em' }}>Train like Zane or remain the same.</div>
+        <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain' }} />
+        <div style={{ textAlign: 'center', marginTop: 0, marginBottom: 28 }}>
         </div>
         <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
           <Field label="Email">
@@ -267,21 +265,24 @@ function HomeScreen({ store, setStore, go }) {
 
   const { improvementCount, regressionCount } = useMemo(() => {
     if (!doneSession) return { improvementCount: 0, regressionCount: 0 };
+    const effReps = (st) => {
+      if (st.repsL != null || st.repsR != null) return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
+      return st.reps;
+    };
     const cmp = (st, prevSet, better) => {
-      if (!prevSet || !st.done) return false;
-      if (st.kg == null || prevSet.kg == null) return false;
-      const repsA = st.repsL ?? st.reps; const repsB = prevSet.repsL ?? prevSet.reps;
+      if (!prevSet || !st.done || st.kg == null || prevSet.kg == null) return false;
+      const repsA = effReps(st); const repsB = effReps(prevSet);
       if (repsA == null || repsB == null) return false;
       return better
-        ? (st.kg >= prevSet.kg && repsA >= repsB && (st.kg > prevSet.kg || repsA > repsB))
-        : (st.kg < prevSet.kg || repsA < repsB);
+        ? (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB)
+        : st.kg < prevSet.kg || (st.kg === prevSet.kg && repsA < repsB);
     };
     let improvements = 0, regressions = 0;
     doneSession.entries.forEach(e => {
       const prev = [...store.sessions]
-        .filter(x => x.ended && x.id !== doneSession.id && x.dayName === doneSession.dayName && x.ended < doneSession.ended)
+        .filter(x => x.ended && x.id !== doneSession.id && x.dayId === doneSession.dayId && x.ended < doneSession.ended)
         .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
-        .find(x => x.entries.some(en => en.exId === e.exId));
+        .find(x => x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null)));
       const prevEntry = prev?.entries.find(en => en.exId === e.exId);
       if (!prevEntry) return;
       const improved = e.sets.some((st, j) => cmp(st, prevEntry.sets?.[j], true));
@@ -355,10 +356,13 @@ function HomeScreen({ store, setStore, go }) {
     if (!activeDay || isActiveRest) return;
     const entries = activeDay.items.map(it => {
       const ex = LB.findExercise(store, it.exId);
-      const last = LB.lastSessionForExercise(store, it.exId, activeDay.name);
+      const last = LB.lastSessionForExercise(store, it.exId, activeDay.id);
+      const isUnilateral = ex?.unilateral || false;
       const seedSets = Array.from({ length: it.sets }).map((_, i) => {
         const prev = last?.entry?.sets?.[i];
-        return { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
+        return isUnilateral
+          ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
+          : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
       });
       return {
         exId: it.exId, name: ex?.name || '?',
