@@ -1507,9 +1507,11 @@ function SettingsScreen({ store, setStore, go, userId }) {
     }
   };
 
+  const pushKeyValid = /^[a-zA-Z0-9]{30}$/.test(pushKeyDraft.trim());
+
   const confirmPushKey = () => {
     const key = pushKeyDraft.trim();
-    if (!key) return;
+    if (!pushKeyValid) return;
     setPushEnabled(true);
     localStorage.setItem('logbook-push-enabled', 'true');
     setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true, pushoverUserKey: key } }));
@@ -1782,14 +1784,17 @@ function SettingsScreen({ store, setStore, go, userId }) {
             onChange={e => setPushKeyDraft(e.target.value)}
             placeholder="uXXXXXXXXXXXXXXXXXXXX"
             style={{
-              background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+              background: UI.bgInset, border: `0.5px solid ${pushKeyDraft && !pushKeyValid ? 'rgba(200,116,105,0.5)' : UI.hairStrong}`,
               borderRadius: 10, padding: '10px 14px',
               fontFamily: UI.fontUi, fontSize: 13, color: UI.ink,
               outline: 'none', width: '100%', boxSizing: 'border-box',
             }}
             autoCorrect="off" autoCapitalize="none" spellCheck={false}
           />
-          <Btn onClick={confirmPushKey} disabled={!pushKeyDraft.trim()}>Enable notifications</Btn>
+          {pushKeyDraft && !pushKeyValid && (
+            <div className="micro" style={{ color: 'rgba(200,116,105,0.85)' }}>Invalid key — must be 30 alphanumeric characters</div>
+          )}
+          <Btn onClick={confirmPushKey} disabled={!pushKeyValid}>Enable notifications</Btn>
         </div>
       </Sheet>
     </Screen>
