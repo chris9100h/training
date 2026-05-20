@@ -2,6 +2,37 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useCallback: useCallbackA } = React;
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <Screen scroll={false} style={{ justifyContent: 'center', alignItems: 'center' }}>
+          <div style={{ textAlign: 'center', padding: 32, animation: 'fadeUp 0.4s ease' }}>
+            <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>
+              Something went wrong
+            </div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 20 }}>
+              {this.state.error?.message || 'Unexpected error'}
+            </div>
+            <button
+              onClick={() => { this.setState({ error: null }); this.props.onGoHome?.(); }}
+              style={{ background: UI.gold, color: '#0a0a0a', border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, fontFamily: UI.fontUi, cursor: 'pointer' }}
+            >
+              Back to home
+            </button>
+          </div>
+        </Screen>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function UpdateBanner({ onUpdate }) {
   return (
     <div style={{
@@ -339,7 +370,9 @@ function App() {
 
   return (
     <>
-      {screen}
+      <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
+        {screen}
+      </ErrorBoundary>
       {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
       {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} />}
     </>

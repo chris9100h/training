@@ -1,4 +1,4 @@
-const CACHE = 'zane-v1.8';
+const CACHE = 'zane-v1.9';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 const ASSETS = [
   '/training/',
@@ -29,25 +29,8 @@ self.addEventListener('activate', e => {
   );
 });
 
-let _pushTimer = null;
-let _pushCancel = null;
-
 self.addEventListener('message', e => {
-  if (e.data?.type === 'SCHEDULE_PUSHOVER') {
-    if (_pushTimer) { clearTimeout(_pushTimer); _pushCancel?.(); }
-    const { endsAt, url, headers, body } = e.data;
-    const delay = Math.max(0, endsAt - Date.now());
-    let resolve;
-    const p = new Promise(res => { resolve = res; }).catch(() => {});
-    _pushCancel = () => { _pushTimer = null; resolve(); };
-    _pushTimer = setTimeout(() => {
-      _pushTimer = null;
-      fetch(url, { method: 'POST', headers, body }).catch(() => {}).finally(resolve);
-    }, delay);
-    e.waitUntil(p);
-  } else if (e.data?.type === 'CANCEL_PUSHOVER') {
-    if (_pushTimer) { clearTimeout(_pushTimer); _pushCancel?.(); _pushTimer = null; }
-  }
+  if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', e => {
