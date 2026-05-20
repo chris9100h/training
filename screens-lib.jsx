@@ -1436,6 +1436,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateL(store.user?.name || '');
   const [restOpen, setRestOpen] = useStateL(false);
+  const [appearanceOpen, setAppearanceOpen] = useStateL(false);
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
   const [pushEnabled, setPushEnabled] = useStateL(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
@@ -1563,6 +1564,86 @@ function SettingsScreen({ store, setStore, go, userId }) {
           )}
         </Frame>
 
+        {/* Appearance */}
+        <Frame style={{ padding: '14px 16px' }}>
+          <button onClick={() => setAppearanceOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
+            <span className="label" style={{ marginBottom: 0 }}>Appearance</span>
+            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: appearanceOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+              <path d="M2 1l5 5-5 5"/>
+            </svg>
+          </button>
+          {appearanceOpen && (
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <div className="micro" style={{ marginBottom: 8 }}>ACCENT COLOR</div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  {Object.entries(window.ACCENT_PALETTE).map(([key, c]) => {
+                    const active = (store.settings?.accentColor ?? 'copper') === key;
+                    return (
+                      <button key={key} onClick={() => {
+                        window.applyAccentColor(key);
+                        localStorage.setItem('logbook-accent-color', key);
+                        setStore(s => ({ ...s, settings: { ...s.settings, accentColor: key } }));
+                      }} title={c.label} style={{
+                        width: 28, height: 28, borderRadius: '50%',
+                        background: c.hex,
+                        border: active ? `2.5px solid ${UI.ink}` : '2.5px solid transparent',
+                        boxShadow: active ? `0 0 0 1px ${c.hex}` : 'none',
+                        cursor: 'pointer', padding: 0, flexShrink: 0,
+                        WebkitTapHighlightColor: 'transparent',
+                      }} />
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+                <div>
+                  <span className="label" style={{ marginBottom: 0 }}>Week view in cycle mode</span>
+                  <div className="micro" style={{ marginTop: 4, maxWidth: 220 }}>Show Mon–Sun instead of cycle days in the date strip</div>
+                </div>
+                <div
+                  onClick={() => {
+                    const next = !cycleWeekView;
+                    setCycleWeekView(next);
+                    localStorage.setItem('logbook-cycle-week-view', String(next));
+                    setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: next } }));
+                  }}
+                  style={{
+                    width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0,
+                    background: cycleWeekView ? 'var(--accent)' : UI.bgInset,
+                    border: `0.5px solid ${cycleWeekView ? UI.goldSoft : UI.hairStrong}`,
+                    position: 'relative', transition: 'background 0.2s',
+                  }}
+                >
+                  <div style={{ position: 'absolute', top: 3, left: cycleWeekView ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: cycleWeekView ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+                <div>
+                  <span className="label" style={{ marginBottom: 0 }}>Pure black background</span>
+                  <div className="micro" style={{ marginTop: 4, maxWidth: 220 }}>Use OLED black instead of dark gray</div>
+                </div>
+                <div
+                  onClick={() => {
+                    const next = darkMode === 'black' ? 'dark' : 'black';
+                    setDarkMode(next);
+                    localStorage.setItem('logbook-dark-mode', next);
+                    setStore(s => ({ ...s, settings: { ...s.settings, darkMode: next } }));
+                  }}
+                  style={{
+                    width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0,
+                    background: darkMode === 'black' ? 'var(--accent)' : UI.bgInset,
+                    border: `0.5px solid ${darkMode === 'black' ? UI.goldSoft : UI.hairStrong}`,
+                    position: 'relative', transition: 'background 0.2s',
+                  }}
+                >
+                  <div style={{ position: 'absolute', top: 3, left: darkMode === 'black' ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: darkMode === 'black' ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
+                </div>
+              </div>
+            </div>
+          )}
+        </Frame>
+
         {/* Push notifications */}
         <Frame style={{ padding: '14px 16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1598,88 +1679,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
               )}
             </div>
           )}
-        </Frame>
-
-        {/* Accent color */}
-        <Frame style={{ padding: '14px 16px' }}>
-          <span className="label" style={{ display: 'block', marginBottom: 12 }}>Accent color</span>
-          <div style={{ display: 'flex', gap: 10 }}>
-            {Object.entries(window.ACCENT_PALETTE).map(([key, c]) => {
-              const active = (store.settings?.accentColor ?? 'gold') === key;
-              return (
-                <button key={key} onClick={() => {
-                  window.applyAccentColor(key);
-                  localStorage.setItem('logbook-accent-color', key);
-                  setStore(s => ({ ...s, settings: { ...s.settings, accentColor: key } }));
-                }} title={c.label} style={{
-                  width: 28, height: 28, borderRadius: '50%',
-                  background: c.hex,
-                  border: active ? `2.5px solid ${UI.ink}` : '2.5px solid transparent',
-                  boxShadow: active ? `0 0 0 1px ${c.hex}` : 'none',
-                  cursor: 'pointer', padding: 0, flexShrink: 0,
-                  WebkitTapHighlightColor: 'transparent',
-                }} />
-              );
-            })}
-          </div>
-        </Frame>
-
-        {/* Display */}
-        <Frame style={{ padding: '14px 16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <span className="label" style={{ marginBottom: 0 }}>Week view in cycle mode</span>
-              <div className="micro" style={{ marginTop: 4, maxWidth: 220 }}>Show Mon–Sun instead of cycle days in the date strip</div>
-            </div>
-            <div
-              onClick={() => {
-                const next = !cycleWeekView;
-                setCycleWeekView(next);
-                localStorage.setItem('logbook-cycle-week-view', String(next));
-                setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: next } }));
-              }}
-              style={{
-                width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0,
-                background: cycleWeekView ? 'var(--accent)' : UI.bgInset,
-                border: `0.5px solid ${cycleWeekView ? UI.goldSoft : UI.hairStrong}`,
-                position: 'relative', transition: 'background 0.2s',
-              }}
-            >
-              <div style={{
-                position: 'absolute', top: 3, left: cycleWeekView ? 21 : 3,
-                width: 18, height: 18, borderRadius: 9,
-                background: cycleWeekView ? '#0a0805' : UI.inkFaint,
-                transition: 'left 0.2s',
-              }} />
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
-            <div>
-              <span className="label" style={{ marginBottom: 0 }}>Pure black background</span>
-              <div className="micro" style={{ marginTop: 4, maxWidth: 220 }}>Use OLED black instead of dark gray</div>
-            </div>
-            <div
-              onClick={() => {
-                const next = darkMode === 'black' ? 'dark' : 'black';
-                setDarkMode(next);
-                localStorage.setItem('logbook-dark-mode', next);
-                setStore(s => ({ ...s, settings: { ...s.settings, darkMode: next } }));
-              }}
-              style={{
-                width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0,
-                background: darkMode === 'black' ? 'var(--accent)' : UI.bgInset,
-                border: `0.5px solid ${darkMode === 'black' ? UI.goldSoft : UI.hairStrong}`,
-                position: 'relative', transition: 'background 0.2s',
-              }}
-            >
-              <div style={{
-                position: 'absolute', top: 3, left: darkMode === 'black' ? 21 : 3,
-                width: 18, height: 18, borderRadius: 9,
-                background: darkMode === 'black' ? '#0a0805' : UI.inkFaint,
-                transition: 'left 0.2s',
-              }} />
-            </div>
-          </div>
         </Frame>
 
         <Bezel>DATA</Bezel>
