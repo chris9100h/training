@@ -1288,7 +1288,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                     <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{exName}</div>
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {e.sets.map((st, j) => {
+                    {e.sets.filter(st => !st.skipped).map((st, j) => {
                       const pr = isPR(st, e.exId);
                       const highlight = pr || isImprovement(st, prev?.sets?.[j]);
                       const decline = !hasImprovement && isDecline(st, prev?.sets?.[j]);
@@ -1305,6 +1305,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         </span>
                       );
                     })}
+                    {(() => { const n = e.sets.filter(st => st.skipped).length; return n > 0 && (
+                      <span style={{ border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.05em' }}>
+                        {n} SET{n > 1 ? 'S' : ''} SKIPPED
+                      </span>
+                    ); })()}
                   </div>
                   {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{e.note}</div>}
                 </div>

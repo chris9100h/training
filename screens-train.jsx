@@ -168,6 +168,16 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
     updateSession(sess => ({ ...sess, currentExIdx: newIdx }));
   };
 
+  const skipExercise = () => {
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((e, i) => i === exIdx
+        ? { ...e, sets: e.sets.map(st => st.done ? st : { ...st, skipped: true }) }
+        : e),
+    }));
+    navigate(1);
+  };
+
   const cancelPushover = () => {
     if (!store.settings?.pushEnabled) return;
     fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
@@ -497,7 +507,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
       {/* Exercise chips */}
       <div ref={chipRowRef} style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
         {session.entries.flatMap((e, i) => {
-          const done = e.sets.every(s => s.done);
+          const done = e.sets.every(s => s.done || s.skipped);
           const active = i === exIdx;
           const nextE = session.entries[i + 1];
           const linkedToNext = e.supersetGroup && e.supersetGroup === nextE?.supersetGroup;
@@ -809,8 +819,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
         }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
-        <Btn onClick={() => navigate(1)} style={{ flex: 1 }}>
-          {exIdx === session.entries.length - 1 ? 'Finish →' : 'Next exercise →'}
+        <Btn onClick={allDone ? () => navigate(1) : skipExercise} style={{ flex: 1 }}>
+          {exIdx === session.entries.length - 1 ? 'Finish →' : allDone ? 'Next exercise →' : 'Skip exercise'}
         </Btn>
       </div>
 
