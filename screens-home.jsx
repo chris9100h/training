@@ -267,14 +267,17 @@ function HomeScreen({ store, setStore, go }) {
 
   const { improvementCount, regressionCount } = useMemo(() => {
     if (!doneSession) return { improvementCount: 0, regressionCount: 0 };
+    const effReps = (st) => {
+      if (st.repsL != null || st.repsR != null) return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
+      return st.reps;
+    };
     const cmp = (st, prevSet, better) => {
-      if (!prevSet || !st.done) return false;
-      if (st.kg == null || prevSet.kg == null) return false;
-      const repsA = st.repsL ?? st.reps; const repsB = prevSet.repsL ?? prevSet.reps;
+      if (!prevSet || !st.done || st.kg == null || prevSet.kg == null) return false;
+      const repsA = effReps(st); const repsB = effReps(prevSet);
       if (repsA == null || repsB == null) return false;
       return better
-        ? (st.kg >= prevSet.kg && repsA >= repsB && (st.kg > prevSet.kg || repsA > repsB))
-        : (st.kg < prevSet.kg || repsA < repsB);
+        ? (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB)
+        : st.kg < prevSet.kg || (st.kg === prevSet.kg && repsA < repsB);
     };
     let improvements = 0, regressions = 0;
     doneSession.entries.forEach(e => {

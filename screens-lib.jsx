@@ -1101,17 +1101,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     }
   };
 
+  const effReps = (st) => {
+    if (st.repsL != null || st.repsR != null) return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
+    return st.reps;
+  };
   const isImprovement = (st, prevSet) => {
-    if (!prevSet || !st.done) return false;
-    const kg = st.kg != null && prevSet.kg != null;
-    const reps = st.reps != null && prevSet.reps != null;
-    if (!kg || !reps) return false;
-    return st.kg >= prevSet.kg && st.reps >= prevSet.reps && (st.kg > prevSet.kg || st.reps > prevSet.reps);
+    if (!prevSet || !st.done || st.kg == null || prevSet.kg == null) return false;
+    const repsA = effReps(st); const repsB = effReps(prevSet);
+    if (repsA == null || repsB == null) return false;
+    return (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB);
   };
 
   const isDecline = (st, prevSet) => {
-    if (!prevSet || !st.done || st.kg == null || prevSet.kg == null || st.reps == null || prevSet.reps == null) return false;
-    return st.kg < prevSet.kg || (st.kg === prevSet.kg && st.reps < prevSet.reps);
+    if (!prevSet || !st.done || st.kg == null || prevSet.kg == null) return false;
+    const repsA = effReps(st); const repsB = effReps(prevSet);
+    if (repsA == null || repsB == null) return false;
+    return st.kg < prevSet.kg || (st.kg === prevSet.kg && repsA < repsB);
   };
 
   return (
