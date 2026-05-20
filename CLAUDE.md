@@ -85,3 +85,5 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 ## Deployment
 
 PWA, erreichbar unter `/training/`. Service Worker in `sw.js`.
+
+**Bei jedem Commit die SW-Cache-Version in `sw.js` um 1 erhöhen** (erste Zeile: `const CACHE = 'zane-vX.XXX'`). Das stellt sicher, dass Nutzer nach einem Deploy automatisch frische Assets bekommen. Aktuelles Format: `zane-v1.501`, nächster Commit `zane-v1.502`, dann `zane-v1.503`, usw.
