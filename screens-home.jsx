@@ -357,9 +357,12 @@ function HomeScreen({ store, setStore, go }) {
     const entries = activeDay.items.map(it => {
       const ex = LB.findExercise(store, it.exId);
       const last = LB.lastSessionForExercise(store, it.exId, activeDay.id);
+      const isUnilateral = ex?.unilateral || false;
       const seedSets = Array.from({ length: it.sets }).map((_, i) => {
         const prev = last?.entry?.sets?.[i];
-        return { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
+        return isUnilateral
+          ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
+          : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
       });
       return {
         exId: it.exId, name: ex?.name || '?',
