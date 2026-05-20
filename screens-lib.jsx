@@ -1026,14 +1026,14 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const prevEntryMap = {};
   s.entries.forEach(e => {
     const prev = store.sessions
-      .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayName === s.dayName)
+      .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId)
       .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
       .find(x => x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null)));
     prevEntryMap[e.exId] = prev?.entries.find(en => en.exId === e.exId) ?? null;
   });
 
   const prevSameDay = store.sessions
-    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayName === s.dayName)
+    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
   const volDelta = prevSameDay != null ? vol - totalVolume(prevSameDay) : null;
 

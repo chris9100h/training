@@ -282,9 +282,9 @@ function HomeScreen({ store, setStore, go }) {
     let improvements = 0, regressions = 0;
     doneSession.entries.forEach(e => {
       const prev = [...store.sessions]
-        .filter(x => x.ended && x.id !== doneSession.id && x.dayName === doneSession.dayName && x.ended < doneSession.ended)
+        .filter(x => x.ended && x.id !== doneSession.id && x.dayId === doneSession.dayId && x.ended < doneSession.ended)
         .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
-        .find(x => x.entries.some(en => en.exId === e.exId));
+        .find(x => x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null)));
       const prevEntry = prev?.entries.find(en => en.exId === e.exId);
       if (!prevEntry) return;
       const improved = e.sets.some((st, j) => cmp(st, prevEntry.sets?.[j], true));
