@@ -442,7 +442,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick }) {
               border: 'none', borderRadius: 0,
               background: UI.goldFaint, color: UI.gold, fontWeight: 600,
             }}>{t}</button>
-            <button onClick={() => removeCustom(t)} title="entfernen" style={{
+            <button onClick={() => removeCustom(t)} title="Remove" style={{
               background: UI.goldFaint, border: 'none', borderLeft: `0.5px solid ${UI.goldSoft}`,
               color: UI.gold, opacity: 0.55, padding: '0 8px', cursor: 'pointer', fontSize: 12,
             }}>×</button>
@@ -912,7 +912,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
                         border: `0.5px ${p === 'REST' ? 'dashed' : 'solid'} ${p === 'REST' ? UI.hairStrong : UI.goldSoft}`,
                         color: p === 'REST' ? UI.inkFaint : UI.gold,
                         fontSize: 11, fontFamily: UI.fontNum, letterSpacing: '0.06em', cursor: 'pointer',
-                      }} title="Tippen zum Entfernen">{p} ×</button>
+                      }} title="Tap to remove">{p} ×</button>
                     ))}
                     {pattern.length === 0 && <div className="micro" style={{ color: UI.inkFaint, alignSelf: 'center' }}>empty — add a day</div>}
                   </div>

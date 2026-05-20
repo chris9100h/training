@@ -44,14 +44,40 @@ function LoadingScreen() {
   );
 }
 
+function ErrorScreen({ onRetry }) {
+  return (
+    <Screen scroll={false} style={{ justifyContent: 'center', alignItems: 'center' }}>
+      <div style={{ textAlign: 'center', padding: 32, animation: 'fadeUp 0.4s ease' }}>
+        <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>
+          Couldn't load your data
+        </div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 20 }}>
+          Check your connection and try again.
+        </div>
+        <button onClick={onRetry} style={{
+          background: UI.gold, color: '#0a0a0a',
+          border: 'none', borderRadius: 8,
+          padding: '8px 18px', fontSize: 13, fontWeight: 600,
+          fontFamily: UI.fontUi, cursor: 'pointer',
+        }}>
+          Retry
+        </button>
+      </div>
+    </Screen>
+  );
+}
+
 function App() {
-  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed'
+  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error'
   const [store, setStore]         = useStateA(null);
   const [userId, setUserId]       = useStateA(null);
   const [route, setRoute]         = useStateA({ name: 'home' });
   const [updateAvailable, setUpdateAvailable] = useStateA(false);
   const waitingWorker             = useRefA(null);
   const prevStore                 = useRefA(null);
+  const syncBase                  = useRefA(null);  // last state confirmed written to Supabase
+  const pendingStore              = useRefA(null);  // latest state awaiting sync
+  const syncing                   = useRefA(false); // true while a sync is in flight
   const localDirty                = useRefA(false); // true if user changed store after cache load
 
   useEffectA(() => {
@@ -130,45 +156,61 @@ function App() {
     waitingWorker.current?.postMessage({ type: 'SKIP_WAITING' });
   }, []);
 
+  // Push pending local changes to Supabase. Serialized; on failure syncBase is
+  // left untouched so the next change (or an 'online' event) retries the diff.
+  const flushSync = useCallbackA((uid) => {
+    if (syncing.current) return;
+    const target = pendingStore.current;
+    if (!target || target === syncBase.current || !uid) return;
+    syncing.current = true;
+    let ok = false;
+    LB.syncStore(syncBase.current, target, uid)
+      .then(() => { syncBase.current = target; ok = true; })
+      .catch(err => console.error('Supabase sync failed, will retry', err))
+      .finally(() => {
+        syncing.current = false;
+        if (ok && pendingStore.current !== syncBase.current) flushSync(uid);
+      });
+  }, []);
+
   const loadData = async (uid) => {
     localDirty.current = false;
     const cached = LB.loadFromLocal(uid);
     if (cached) {
       // Show instantly from cache, then refresh from Supabase in background
       prevStore.current = cached;
+      syncBase.current = cached;
       setStore(cached);
       setPhase('ready');
       LB.loadFromSupabase(uid)
         .then(fresh => {
-          // Only apply if user hasn't made local changes during the fetch
-          if (!localDirty.current) {
-            const cur = prevStore.current;
-            if (cur) {
-              // preserve in-progress session (may not be committed to Supabase yet)
-              fresh.inProgress = cur.inProgress ?? fresh.inProgress;
-              const inProgressId = fresh.inProgress;
-              fresh.sessions = fresh.sessions.map(s => {
-                const mem = cur.sessions?.find(x => x.id === s.id);
-                if (!mem) return s;
-                const isActive = s.id === inProgressId;
-                return {
-                  ...s,
-                  currentExIdx: mem.currentExIdx ?? 0,
-                  cyclePos: mem.cyclePos ?? null,
-                  // for the active session, local entries/restStart are authoritative —
-                  // Supabase sync may still be in flight
-                  ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null } : {}),
-                };
-              });
-              // if the in-progress session hasn't reached Supabase yet, keep the local copy
-              if (inProgressId && !fresh.sessions.find(x => x.id === inProgressId)) {
-                const localSession = cur.sessions?.find(x => x.id === inProgressId);
-                if (localSession) fresh.sessions = [localSession, ...fresh.sessions];
-              }
-            }
-            prevStore.current = fresh;
-            setStore(fresh);
+          // Skip if the user made local changes while the fetch was in flight
+          if (localDirty.current) return;
+          const cur = prevStore.current;
+          // fresh is the pristine server state — use it as the sync diff base
+          syncBase.current = fresh;
+          let merged = fresh;
+          if (cur) {
+            const inProgressId = cur.inProgress ?? fresh.inProgress;
+            const serverIds = new Set(fresh.sessions.map(s => s.id));
+            const sessions = fresh.sessions.map(s => {
+              const mem = cur.sessions?.find(x => x.id === s.id);
+              if (!mem) return s;
+              const isActive = s.id === inProgressId;
+              return {
+                ...s,
+                currentExIdx: mem.currentExIdx ?? 0,
+                cyclePos: mem.cyclePos ?? null,
+                // for the active session, local entries/restStart are authoritative
+                ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null } : {}),
+              };
+            });
+            // keep sessions created or finished locally that the server hasn't stored yet
+            const localOnly = (cur.sessions || []).filter(x => !serverIds.has(x.id));
+            merged = { ...fresh, inProgress: inProgressId, sessions: [...localOnly, ...sessions] };
           }
+          prevStore.current = merged;
+          setStore(merged);
         })
         .catch(console.error);
     } else {
@@ -176,11 +218,12 @@ function App() {
       try {
         const loaded = await LB.loadFromSupabase(uid);
         prevStore.current = loaded;
+        syncBase.current = loaded;
         setStore(loaded);
         setPhase('ready');
       } catch (e) {
         console.error('loadFromSupabase failed', e);
-        setPhase('unauthed');
+        setPhase('error');
       }
     }
   };
@@ -198,6 +241,9 @@ function App() {
         setStore(null);
         setUserId(null);
         prevStore.current = null;
+        syncBase.current = null;
+        pendingStore.current = null;
+        syncing.current = false;
         localDirty.current = false;
         setRoute({ name: 'home' });
         setPhase('unauthed');
@@ -206,14 +252,23 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Sync to Supabase + save to localStorage on every store change
+  // Sync to Supabase + save to localStorage on every store change.
+  // A failed sync leaves syncBase unchanged so the pending diff is retried later.
   useEffectA(() => {
     if (!store || !userId || phase !== 'ready') return;
     if (prevStore.current !== store) localDirty.current = true;
-    LB.syncStore(prevStore.current, store, userId).catch(console.error);
-    LB.saveToLocal(store, userId);
     prevStore.current = store;
+    pendingStore.current = store;
+    LB.saveToLocal(store, userId);
+    flushSync(userId);
   }, [store]);
+
+  // Retry a failed sync as soon as connectivity returns
+  useEffectA(() => {
+    const onOnline = () => { if (userId) flushSync(userId); };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [userId, flushSync]);
 
   // helper for in-sheet "+ new exercise"
   window.__createExercise = (name) => {
@@ -224,6 +279,7 @@ function App() {
 
   if (phase === 'init' || phase === 'loading') return <LoadingScreen />;
   if (phase === 'unauthed') return <window.Screens.LoginScreen />;
+  if (phase === 'error') return <ErrorScreen onRetry={() => { if (userId) loadData(userId); }} />;
 
   const go    = (r) => setRoute(r);
   const props = { store, setStore, go, userId };

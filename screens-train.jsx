@@ -180,10 +180,10 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
   const cancelPushover = () => {
     if (!store.settings?.pushEnabled) return;
-    fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
+    fetch(LB.PUSHOVER_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
+        'Authorization': `Bearer ${LB.SUPABASE_ANON_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ nonce: `cancel-${Date.now()}`, cancel: true, userKey: store.settings?.pushoverUserKey ?? '', userId }),
@@ -263,15 +263,21 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     if (!restStart) return;
     if (!store.settings?.pushEnabled) return;
     const delaySeconds = Math.round(Math.max(0, restStart + activeRestDef * 1000 - Date.now()) / 1000);
-    fetch('https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover', {
+    fetch(LB.PUSHOVER_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE`,
+        'Authorization': `Bearer ${LB.SUPABASE_ANON_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ delaySeconds, nonce: String(restStart), userKey: store.settings?.pushoverUserKey ?? '', userId }),
     }).catch(() => {});
   }, [restStart]);
+
+  // Cancel any scheduled rest notification if the screen unmounts mid-session
+  // (e.g. navigating Home without finishing or abandoning)
+  useEffectT(() => {
+    return () => { cancelPushover(); };
+  }, []);
 
   // beep + auto-open modal when rest timer hits zero
   const prevRestRemaining = useRefT(null);
@@ -395,7 +401,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   if (!entry) {
-    return <Screen><Empty title="Diese Session ist leer" action={<Btn onClick={() => go({ name: 'home' })}>Zurück</Btn>} /></Screen>;
+    return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
   }
 
   const completed = entry.sets.filter(s => s.done).length;
@@ -938,7 +944,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       </Sheet>
 
       {/* exercise swap picker */}
-      {swapOpen && <window.Screens.ExercisePicker store={store} onClose={() => setSwapOpen(false)} onPick={doSwap} />}
+      {swapOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSwapOpen(false)} onPick={doSwap} />}
 
       {/* rest timer modal */}
       <Sheet open={restModalOpen} onClose={() => setRestModalOpen(false)} title="Rest">

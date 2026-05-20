@@ -1,4 +1,5 @@
-const CACHE = 'zane-v1.5';
+const CACHE = 'zane-v1.6';
+const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 const ASSETS = [
   '/training/',
   '/training/index.html',
@@ -52,16 +53,42 @@ self.addEventListener('message', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
-  if (url.origin !== location.origin) return;
 
-  // Network-first: always try to fetch fresh, fall back to cache when offline
+  // Supabase REST / Realtime / Edge functions — never cache, always hit network
+  if (url.hostname.endsWith('supabase.co')) return;
+
+  const sameOrigin = url.origin === location.origin;
+  const isCdn = CDN_HOSTS.includes(url.hostname);
+  if (!sameOrigin && !isCdn) return;
+
+  if (sameOrigin) {
+    // App shell: stale-while-revalidate — serve cache instantly, refresh in background
+    e.respondWith(
+      caches.match(e.request).then(cached => {
+        const network = fetch(e.request).then(res => {
+          if (res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE).then(c => c.put(e.request, clone));
+          }
+          return res;
+        }).catch(() => cached);
+        return cached || network;
+      })
+    );
+    return;
+  }
+
+  // CDN libraries / fonts: cache-first so the app can boot fully offline
   e.respondWith(
-    fetch(e.request).then(res => {
-      if (res.ok) {
-        const clone = res.clone();
-        caches.open(CACHE).then(c => c.put(e.request, clone));
-      }
-      return res;
-    }).catch(() => caches.match(e.request))
+    caches.match(e.request).then(cached => {
+      if (cached) return cached;
+      return fetch(e.request).then(res => {
+        if (res.ok || res.type === 'opaque') {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+        }
+        return res;
+      });
+    })
   );
 });
