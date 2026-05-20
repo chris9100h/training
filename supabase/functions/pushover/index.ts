@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
     userKey = '',
   } = await req.json().catch(() => ({}));
 
-  const user = userKey || Deno.env.get('PUSHOVER_USER') ?? 'uxrg8gh43b1tpw31pq4r4i4ebqrhjt';
+  const user = userKey || (Deno.env.get('PUSHOVER_USER') ?? 'uxrg8gh43b1tpw31pq4r4i4ebqrhjt');
 
   // First call only: register this nonce as the currently active one.
   // Relay hops skip this — the nonce is already stored from the initial call.
