@@ -1683,24 +1683,28 @@ function SettingsScreen({ store, setStore, go, userId }) {
         <Frame style={{ padding: '14px 16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span className="label" style={{ marginBottom: 0 }}>Push notifications</span>
-            <div
-              onClick={togglePush}
-              style={{
-                width: 44, height: 26, borderRadius: 13, cursor: 'pointer',
-                background: pushEnabled ? 'var(--accent)' : UI.bgInset,
-                border: `0.5px solid ${pushEnabled ? UI.goldSoft : UI.hairStrong}`,
-                position: 'relative', transition: 'background 0.2s',
-              }}
-            >
-              <div style={{
-                position: 'absolute', top: 3, left: pushEnabled ? 21 : 3,
-                width: 18, height: 18, borderRadius: 9,
-                background: pushEnabled ? '#0a0805' : UI.inkFaint,
-                transition: 'left 0.2s',
-              }} />
-            </div>
+            {store.user?.email === 'office@btc-prime.biz' ? (
+              <div
+                onClick={togglePush}
+                style={{
+                  width: 44, height: 26, borderRadius: 13, cursor: 'pointer',
+                  background: pushEnabled ? 'var(--accent)' : UI.bgInset,
+                  border: `0.5px solid ${pushEnabled ? UI.goldSoft : UI.hairStrong}`,
+                  position: 'relative', transition: 'background 0.2s',
+                }}
+              >
+                <div style={{
+                  position: 'absolute', top: 3, left: pushEnabled ? 21 : 3,
+                  width: 18, height: 18, borderRadius: 9,
+                  background: pushEnabled ? '#0a0805' : UI.inkFaint,
+                  transition: 'left 0.2s',
+                }} />
+              </div>
+            ) : (
+              <span className="micro" style={{ color: UI.inkFaint }}>Not supported on this device</span>
+            )}
           </div>
-          {pushEnabled && (
+          {store.user?.email === 'office@btc-prime.biz' && pushEnabled && (
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn kind="ghost" onClick={() => testPushover(0)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>Now</Btn>
