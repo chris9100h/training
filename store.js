@@ -114,7 +114,7 @@ async function loadFromSupabase(userId, _depth = 0) {
     _supabase.from('exercises').select('id, name, tags, note, category, unilateral').eq('user_id', userId),
     _supabase.from('schedules').select('id, name, days').eq('user_id', userId),
     _supabase.from('sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries')
-      .eq('user_id', userId).order('date', { ascending: false }).limit(500),
+      .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
   ]);
 
