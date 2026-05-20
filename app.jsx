@@ -221,27 +221,17 @@ function App() {
             const localOnlyExercises = (cur.exercises || []).filter(x => !serverExIds.has(x.id));
             const serverSchIds = new Set(fresh.schedules.map(s => s.id));
             const localOnlySchedules = (cur.schedules || []).filter(x => !serverSchIds.has(x.id));
-            // settings & cycle state: keep values the user changed locally that
-            // the server hasn't confirmed yet (i.e. they differ from the base).
-            let settings = fresh.settings, userBlk = fresh.user;
-            const scalars = {};
-            if (base) {
-              settings = { ...fresh.settings };
-              for (const k of Object.keys(fresh.settings)) {
-                if (cur.settings?.[k] !== base.settings?.[k]) settings[k] = cur.settings[k];
-              }
-              for (const k of ['activeScheduleId', 'cycleIndex', 'cycleStartDate', 'lastAdvancedDate']) {
-                if (cur[k] !== base[k]) scalars[k] = cur[k];
-              }
-              if (cur.user?.name && cur.user.name !== base.user?.name) {
-                userBlk = { ...fresh.user, name: cur.user.name };
-              }
-            }
+            // Scalar state: the local cache is authoritative — it always holds
+            // the most recent state on this device, including unsynced offline
+            // edits. For items with IDs we use an ID-based merge instead.
             merged = {
               ...fresh,
-              ...scalars,
-              user: userBlk,
-              settings,
+              settings: { ...fresh.settings, ...cur.settings },
+              activeScheduleId: cur.activeScheduleId,
+              cycleIndex: cur.cycleIndex,
+              cycleStartDate: cur.cycleStartDate,
+              lastAdvancedDate: cur.lastAdvancedDate,
+              user: cur.user?.name ? { ...fresh.user, name: cur.user.name } : fresh.user,
               inProgress: inProgressId,
               sessions: [...localOnly, ...sessions],
               exercises: [...localOnlyExercises, ...fresh.exercises],
