@@ -118,6 +118,11 @@ async function loadFromSupabase(userId, _depth = 0) {
     _supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
   ]);
 
+  // A failed request (offline, RLS, server error) also yields no data — bail
+  // out so the caller can surface an error instead of mistaking this for a
+  // new user and re-seeding starter data over an existing account.
+  if (profileRes.error) throw profileRes.error;
+
   // First login after email confirmation — profile not yet created
   if (!profileRes.data) {
     // guard against infinite recursion if setupNewUser silently fails (e.g. RLS)

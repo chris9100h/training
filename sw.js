@@ -61,6 +61,8 @@ self.addEventListener('fetch', e => {
   const isCdn = CDN_HOSTS.includes(url.hostname);
   if (!sameOrigin && !isCdn) return;
 
+  const offlineResponse = () => new Response('', { status: 504, statusText: 'Offline' });
+
   if (sameOrigin) {
     // App shell: stale-while-revalidate — serve cache instantly, refresh in background
     e.respondWith(
@@ -71,7 +73,7 @@ self.addEventListener('fetch', e => {
             caches.open(CACHE).then(c => c.put(e.request, clone));
           }
           return res;
-        }).catch(() => cached);
+        }).catch(() => cached || offlineResponse());
         return cached || network;
       })
     );
@@ -90,7 +92,7 @@ self.addEventListener('fetch', e => {
           caches.open(CACHE).then(c => c.put(e.request, clone));
         }
         return res;
-      });
+      }).catch(() => offlineResponse());
     })
   );
 });
