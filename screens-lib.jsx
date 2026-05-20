@@ -1472,6 +1472,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [nickname, setNickname] = useStateL(store.user?.name || '');
   const [restOpen, setRestOpen] = useStateL(false);
   const [appearanceOpen, setAppearanceOpen] = useStateL(false);
+  const [pushOpen, setPushOpen] = useStateL(false);
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
   const [pushEnabled, setPushEnabled] = useStateL(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
@@ -1703,37 +1704,47 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
         {/* Push notifications */}
         <Frame style={{ padding: '14px 16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <button onClick={() => setPushOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
             <span className="label" style={{ marginBottom: 0 }}>Push notifications</span>
-            <div onClick={togglePush} style={{
-              width: 44, height: 26, borderRadius: 13, cursor: 'pointer',
-              background: pushEnabled ? 'var(--accent)' : UI.bgInset,
-              border: `0.5px solid ${pushEnabled ? UI.goldSoft : UI.hairStrong}`,
-              position: 'relative', transition: 'background 0.2s',
-            }}>
-              <div style={{
-                position: 'absolute', top: 3, left: pushEnabled ? 21 : 3,
-                width: 18, height: 18, borderRadius: 9,
-                background: pushEnabled ? '#0a0805' : UI.inkFaint,
-                transition: 'left 0.2s',
-              }} />
-            </div>
-          </div>
-          {pushEnabled && store.settings?.pushoverUserKey && (
-            <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={{ marginTop: 6, background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-              Change user key
-            </button>
-          )}
-          {pushEnabled && (
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Btn kind="ghost" onClick={() => testPushover(0)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>Now</Btn>
-                <Btn kind="ghost" onClick={() => testPushover(10)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>10s</Btn>
-                <Btn kind="ghost" onClick={() => testPushover(30)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>30s</Btn>
+            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: pushOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+              <path d="M2 1l5 5-5 5"/>
+            </svg>
+          </button>
+          {pushOpen && (
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span className="micro" style={{ color: UI.inkSoft }}>Enabled</span>
+                <div onClick={togglePush} style={{
+                  width: 44, height: 26, borderRadius: 13, cursor: 'pointer',
+                  background: pushEnabled ? 'var(--accent)' : UI.bgInset,
+                  border: `0.5px solid ${pushEnabled ? UI.goldSoft : UI.hairStrong}`,
+                  position: 'relative', transition: 'background 0.2s',
+                }}>
+                  <div style={{
+                    position: 'absolute', top: 3, left: pushEnabled ? 21 : 3,
+                    width: 18, height: 18, borderRadius: 9,
+                    background: pushEnabled ? '#0a0805' : UI.inkFaint,
+                    transition: 'left 0.2s',
+                  }} />
+                </div>
               </div>
-              {pushStatus && (
-                <div className="micro" style={{ color: pushStatus.startsWith('✓') ? UI.gold : UI.inkSoft, textAlign: 'center' }}>
-                  {pushStatus}
+              {store.settings?.pushoverUserKey && (
+                <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'left' }}>
+                  Change user key
+                </button>
+              )}
+              {pushEnabled && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Btn kind="ghost" onClick={() => testPushover(0)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>Now</Btn>
+                    <Btn kind="ghost" onClick={() => testPushover(10)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>10s</Btn>
+                    <Btn kind="ghost" onClick={() => testPushover(30)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>30s</Btn>
+                  </div>
+                  {pushStatus && (
+                    <div className="micro" style={{ color: pushStatus.startsWith('✓') ? UI.gold : UI.inkSoft, textAlign: 'center' }}>
+                      {pushStatus}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
