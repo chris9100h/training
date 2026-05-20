@@ -36,8 +36,8 @@ Deno.serve(async (req) => {
   const token = Deno.env.get('PUSHOVER_TOKEN') ?? 'a2vfbj4vu92hwzp5t9b6cbzkc18vw9';
 
   const {
-    message = 'Pause vorbei — weiter gehts! 💪',
-    title = 'Logbook',
+    message = 'Rest over — keep going! 💪',
+    title = 'Zane',
     delaySeconds = 0,
     nonce = '',   // unique token per rest period; empty = no cancellation check
     _relay = false,
