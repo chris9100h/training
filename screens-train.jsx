@@ -698,7 +698,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
                   gap: 8, alignItems: 'center',
                   padding: '10px 4px',
                   borderBottom: i < entry.sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
-                  opacity: s.done ? 0.4 : 1,
+                  opacity: s.done || s.skipped ? 0.4 : 1,
                   animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
                 }}>
                   <div style={{
@@ -716,8 +716,8 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
                   <KgInput
                     value={s.kg}
-                    done={s.done}
-                    style={setInputStyle(s.done, isCurrent)}
+                    done={s.done || s.skipped}
+                    style={setInputStyle(s.done || s.skipped, isCurrent)}
                     onChange={kg => updateSession(sess => ({
                       ...sess,
                       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
@@ -733,25 +733,26 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
 
                   {isUnilateral ? (
                     <>
-                      <input type="number" inputMode="numeric" value={s.repsL ?? ''} placeholder="L" onFocus={e => e.target.select()} onChange={e => updateSet(i, { repsL: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done} style={setInputStyle(s.done, isCurrent)} />
-                      <input type="number" inputMode="numeric" value={s.repsR ?? ''} placeholder="R" onFocus={e => e.target.select()} onChange={e => updateSet(i, { repsR: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done} style={setInputStyle(s.done, isCurrent)} />
+                      <input type="number" inputMode="numeric" value={s.repsL ?? ''} placeholder="L" onFocus={e => e.target.select()} onChange={e => updateSet(i, { repsL: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done || s.skipped} style={setInputStyle(s.done || s.skipped, isCurrent)} />
+                      <input type="number" inputMode="numeric" value={s.repsR ?? ''} placeholder="R" onFocus={e => e.target.select()} onChange={e => updateSet(i, { repsR: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done || s.skipped} style={setInputStyle(s.done || s.skipped, isCurrent)} />
                     </>
                   ) : (
-                    <input type="number" inputMode="numeric" value={s.reps ?? ''} placeholder="—" onFocus={e => e.target.select()} onChange={e => updateSet(i, { reps: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done} style={setInputStyle(s.done, isCurrent)} />
+                    <input type="number" inputMode="numeric" value={s.reps ?? ''} placeholder="—" onFocus={e => e.target.select()} onChange={e => updateSet(i, { reps: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done || s.skipped} style={setInputStyle(s.done || s.skipped, isCurrent)} />
                   )}
 
-                  <button onClick={() => s.done ? updateSet(i, { done: false }) : completeSet(i)}
-                    disabled={!s.done && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps))}
+                  <button onClick={() => s.skipped ? updateSet(i, { skipped: false }) : s.done ? updateSet(i, { done: false }) : completeSet(i)}
+                    disabled={!s.done && !s.skipped && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps))}
                     style={{
                       width: 26, height: 26, borderRadius: 5, border: 'none', cursor: 'pointer',
                       background: s.done ? UI.gold : 'transparent',
-                      outline: `0.5px solid ${s.done ? UI.gold : (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
+                      outline: `0.5px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 14, fontWeight: 700, color: s.done ? '#0a0805' : 'transparent',
-                      opacity: !s.done && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? 0.35 : 1,
+                      fontSize: s.skipped ? 12 : 14, fontWeight: 700,
+                      color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
+                      opacity: !s.done && !s.skipped && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? 0.35 : 1,
                       flexShrink: 0,
                       WebkitTapHighlightColor: 'transparent',
-                    }}>✓</button>
+                    }}>{s.skipped ? '×' : '✓'}</button>
 
                   {!s.done && entry.sets.length > 1 ? (
                     <button onClick={() => removeSet(i)} style={{
@@ -820,7 +821,7 @@ function TrainingScreen({ store, setStore, go, sessionId }) {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
         <Btn onClick={allDone ? () => navigate(1) : skipExercise} style={{ flex: 1 }}>
-          {exIdx === session.entries.length - 1 ? 'Finish →' : allDone ? 'Next exercise →' : 'Skip exercise'}
+          {exIdx === session.entries.length - 1 ? 'Finish →' : allDone ? 'Next exercise →' : completed === 0 ? 'Skip exercise' : 'Skip remaining'}
         </Btn>
       </div>
 
