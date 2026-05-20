@@ -1259,11 +1259,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
               const renderEntry = (e, i) => {
                 const prev = prevEntryMap[e.exId];
+                const exName = store.exercises.find(ex => ex.id === e.exId)?.name ?? e.name;
                 const hasImprovement = e.sets.some((st, j) => isPR(st, e.exId) || isImprovement(st, prev?.sets?.[j]));
                 return (
                 <div key={i}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{e.name}</div>
+                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{exName}</div>
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {e.sets.map((st, j) => {
@@ -1390,7 +1391,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
               || e.sets.some(st => st.repsL != null || st.repsR != null);
             return (
               <div key={eIdx}>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{e.name.toUpperCase()}</div>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{(exercises?.find(ex => ex.id === e.exId)?.name ?? e.name).toUpperCase()}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {e.sets.map((st, sIdx) => (
                     <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: UI.bgInset, borderRadius: 10, padding: '8px 12px' }}>
