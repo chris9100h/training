@@ -47,7 +47,7 @@ function LoginScreen() {
       {/* Centered block: logo + title + form */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
         <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain' }} />
-        <div style={{ textAlign: 'center', marginTop: -30, marginBottom: 28 }}>
+        <div style={{ textAlign: 'center', marginTop: 0, marginBottom: 28 }}>
           <div className="display" style={{ fontSize: 48, fontWeight: 700, color: UI.ink, letterSpacing: '0.22em' }}>ZANE</div>
           <div className="display-it" style={{ marginTop: -5, fontSize: 20, fontWeight: 700, color: UI.gold, letterSpacing: '0.03em' }}>Train like Zane or remain the same.</div>
         </div>
