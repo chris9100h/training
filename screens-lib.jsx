@@ -629,21 +629,32 @@ function StatsTab({ store, sessions, go }) {
   // Determine whether we're in cycle mode and compute current cycle window
   const sch = store.schedules.find(s => s.id === store.activeScheduleId);
   const isCycleMode = sch && !LB.isWeekdayPlan(sch) && !!store.cycleStartDate;
+  const cycleLen = sch?.days?.length || 1;
   const cycleWindowStart = (() => {
     if (!isCycleMode) return null;
     const start = new Date(store.cycleStartDate + 'T12:00:00');
     const n = Math.round((today.getTime() - start.getTime()) / 86400000);
-    const idxInCycle = ((n % sch.days.length) + sch.days.length) % sch.days.length;
+    const idxInCycle = ((n % cycleLen) + cycleLen) % cycleLen;
     const d = new Date(today); d.setDate(today.getDate() - idxInCycle);
     return d;
   })();
+  const currentCycleNum = isCycleMode ? Math.floor(Math.round((today.getTime() - new Date(store.cycleStartDate + 'T12:00:00').getTime()) / 86400000) / cycleLen) : 0;
 
-  // Sessions in the current training period (cycle or calendar week)
+  const [cycleViewOffset, setCycleViewOffset] = useStateL(0);
+  const selectedCycleStart = isCycleMode && cycleWindowStart ? (() => {
+    const d = new Date(cycleWindowStart); d.setDate(cycleWindowStart.getDate() + cycleViewOffset * cycleLen); return d;
+  })() : null;
+  const selectedCycleEnd = isCycleMode && selectedCycleStart ? (cycleViewOffset === 0 ? today : (() => {
+    const d = new Date(selectedCycleStart); d.setDate(selectedCycleStart.getDate() + cycleLen - 1); return d;
+  })()) : null;
+  const selectedCycleNum = currentCycleNum + cycleViewOffset;
+
+  // Sessions in the selected training period (cycle or calendar week)
   const thisPeriodSessions = useMemoL(() => sessions.filter(s => {
     const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
-    if (isCycleMode) return cycleWindowStart && d >= cycleWindowStart && d <= today;
+    if (isCycleMode) return selectedCycleStart && selectedCycleEnd && d >= selectedCycleStart && d <= selectedCycleEnd;
     return d >= monday && d <= sunday;
-  }), [sessions, isCycleMode, cycleWindowStart]);
+  }), [sessions, isCycleMode, selectedCycleStart, selectedCycleEnd]);
 
   // Calendar-week sessions — used for consistency card ("This Week")
   const thisWeekSessions = useMemoL(() => sessions.filter(s => {
@@ -789,9 +800,19 @@ function StatsTab({ store, sessions, go }) {
 
       {/* Weekly sets per muscle */}
       <div>
-        <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>{isCycleMode ? 'THIS CYCLE · SETS PER MUSCLE' : 'THIS WEEK · SETS PER MUSCLE'}</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div className="micro" style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>
+            {isCycleMode ? `CYCLE ${selectedCycleNum + 1} · SETS PER MUSCLE` : 'THIS WEEK · SETS PER MUSCLE'}
+          </div>
+          {isCycleMode && (
+            <div style={{ display: 'flex', gap: 2 }}>
+              <button onClick={() => setCycleViewOffset(o => Math.max(-currentCycleNum, o - 1))} style={{ background: 'none', border: 'none', color: cycleViewOffset <= -currentCycleNum ? UI.inkFaint : UI.inkSoft, cursor: cycleViewOffset <= -currentCycleNum ? 'default' : 'pointer', fontSize: 16, padding: '0 6px', lineHeight: 1 }}>‹</button>
+              <button onClick={() => setCycleViewOffset(o => Math.min(0, o + 1))} style={{ background: 'none', border: 'none', color: cycleViewOffset >= 0 ? UI.inkFaint : UI.inkSoft, cursor: cycleViewOffset >= 0 ? 'default' : 'pointer', fontSize: 16, padding: '0 6px', lineHeight: 1 }}>›</button>
+            </div>
+          )}
+        </div>
         {setsPerMuscle.length === 0 ? (
-          <div style={{ color: UI.inkFaint, fontSize: 13, fontFamily: UI.fontUi }}>{isCycleMode ? 'No sessions this cycle yet.' : 'No sessions this week yet.'}</div>
+          <div style={{ color: UI.inkFaint, fontSize: 13, fontFamily: UI.fontUi }}>{isCycleMode ? `No sessions in cycle ${selectedCycleNum + 1}.` : 'No sessions this week yet.'}</div>
         ) : setsPerMuscle.map(({ muscle, sets }) => (
           <div key={muscle} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <div style={{ width: 100, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.05em' }}>{muscle}</div>
