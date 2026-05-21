@@ -158,8 +158,21 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
         )
       )}
       {remainder > 0.01 && (
-        <div style={{ marginTop: 14, textAlign: 'center', fontFamily: UI.fontUi, fontSize: 10, color: UI.danger, letterSpacing: '0.1em' }}>
-          CANNOT REACH EXACTLY — {remainder} KG REMAINING
+        <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.danger, letterSpacing: '0.1em' }}>
+            CAN'T REACH EXACTLY — {remainder} KG REMAINING
+          </span>
+          <button onClick={() => {
+            const delta = Math.round(remainder * (tab === 0 ? 2 : 1) * 1000) / 1000;
+            const next = Math.round((target + delta) * 1000) / 1000;
+            setRaw(String(next).replace('.', ','));
+          }} style={{
+            padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
+            background: 'transparent', border: `0.5px solid ${UI.danger}`,
+            color: UI.danger, fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '0.06em',
+          }}>
+            +{Math.round(remainder * (tab === 0 ? 2 : 1) * 1000) / 1000} kg
+          </button>
         </div>
       )}
     </Sheet>
