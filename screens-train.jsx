@@ -65,10 +65,13 @@ function calcPlates(weight) {
 function PlateCalcSheet({ open, onClose, initialWeight }) {
   const [tab, setTab] = useStateT(0);
   const [raw, setRaw] = useStateT('');
+  const [fresh, setFresh] = useStateT(false);
   const prevOpen = useRefT(false);
   useEffectT(() => {
-    if (open && !prevOpen.current)
+    if (open && !prevOpen.current) {
       setRaw(initialWeight != null ? String(initialWeight).replace('.', ',') : '');
+      setFresh(initialWeight != null);
+    }
     prevOpen.current = open;
   }, [open, initialWeight]);
 
@@ -192,9 +195,10 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
         {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
           <button key={k} onPointerDown={e => {
             e.preventDefault();
-            if (k === '⌫') { setRaw(r => r.slice(0, -1)); return; }
-            if (k === ',' && raw.includes(',')) return;
-            setRaw(r => r + k);
+            if (k === '⌫') { setRaw(fresh ? '' : r => r.slice(0, -1)); setFresh(false); return; }
+            if (k === ',' && !fresh && raw.includes(',')) return;
+            setRaw(fresh ? k : r => r + k);
+            setFresh(false);
           }} style={{
             height: 46, borderRadius: 8, border: 'none', cursor: 'pointer',
             background: 'var(--bg-raised)', boxShadow: `0 0 0 0.5px var(--hair)`,
