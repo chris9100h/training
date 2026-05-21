@@ -83,11 +83,11 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
         {['Dual side', 'Single'].map((l, i) => (
           <button key={i} onClick={() => setTab(i)} style={{
             flex: 1, padding: '8px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
-            background: tab === i ? UI.bgRaised : 'transparent',
-            color: tab === i ? UI.ink : UI.inkFaint,
+            background: tab === i ? 'var(--accent)' : 'transparent',
+            color: tab === i ? '#0a0805' : UI.inkFaint,
             fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.06em',
             fontWeight: tab === i ? 600 : 400,
-            boxShadow: tab === i ? '0 1px 4px rgba(0,0,0,0.3)' : 'none',
+            boxShadow: 'none',
             transition: 'all 0.15s',
           }}>{l}</button>
         ))}
@@ -145,15 +145,8 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
                       background: 'var(--bg)',
                       boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)',
                     }} />
-                    <span style={{
-                      fontFamily: UI.fontNum, fontWeight: 700,
-                      fontSize: Math.max(10, Math.round(size * 0.23)),
-                      color: PLATE_TEXT[p] || '#fff',
-                      position: 'relative', zIndex: 1,
-                      textShadow: '0 1px 3px rgba(0,0,0,0.5)',
-                    }}>{p}</span>
                   </div>
-                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.02em' }}>×{n}</span>
+                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.02em' }}>{p} × {n}</span>
                 </div>
               );
             })}
