@@ -83,7 +83,7 @@ function LoginScreen() {
 }
 
 // ─── HOME ─────────────────────────────────────────────────────────────
-function HomeScreen({ store, setStore, go }) {
+function HomeScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const today = LB.todaysDay(store);
   const sch = today?.schedule;
@@ -465,6 +465,7 @@ function HomeScreen({ store, setStore, go }) {
             </span>
             <button onClick={async () => {
               if (!await confirm('The session will be deleted.', { title: 'Cancel training?', ok: 'Cancel', cancel: 'Back', danger: true })) return;
+              LB.cancelPushover(store.settings, userId);
               setStore(s => ({ ...s, sessions: s.sessions.filter(x => x.id !== store.inProgress), inProgress: null }));
             }} style={{
               background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0,
