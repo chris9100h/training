@@ -134,42 +134,43 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
 }
 
 // ─── Custom Keyboard ──────────────────────────────────────────────────
-function CustomKeyboard({ visible, field, kbRaw, onType, onBackspace, onAdjust, onConfirm, onDismiss, onPlateCalc }) {
+function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfirm, onDismiss, onPlateCalc }) {
   if (!visible) return null;
   const isKg = field === 'kg';
+  const H = 40;
   const base = {
-    background: 'var(--bg-raised)', border: `0.5px solid var(--hair)`, borderRadius: 10,
-    color: 'var(--ink)', fontFamily: '"JetBrains Mono", monospace', fontSize: 20, fontWeight: 500,
+    background: 'var(--bg-raised)', border: `0.5px solid var(--hair)`, borderRadius: 8,
+    color: 'var(--ink)', fontFamily: '"JetBrains Mono", monospace', fontSize: 18, fontWeight: 500,
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    height: 50, WebkitTapHighlightColor: 'transparent', userSelect: 'none', padding: 0,
+    WebkitTapHighlightColor: 'transparent', userSelect: 'none', padding: 0,
   };
-  const action = { ...base, background: 'var(--bg-inset)', color: 'var(--ink-soft)', fontSize: 15, fontFamily: '"Inter", sans-serif' };
-  const confirm = { ...base, gridColumn: '4', gridRow: '1 / span 4', height: '100%', background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', fontSize: 22, fontWeight: 700, borderColor: 'var(--accent-deep)' };
+  const act = { ...base, background: 'var(--bg-inset)', color: 'var(--ink-soft)', fontSize: 13, fontFamily: '"Inter", sans-serif' };
 
   return (
     <div style={{
-      position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 300,
+      position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
       background: 'var(--bg)', borderTop: `0.5px solid var(--hair)`,
-      padding: `8px 10px calc(env(safe-area-inset-bottom, 0px) + 8px)`,
+      padding: `5px 8px calc(env(safe-area-inset-bottom, 0px) + 5px)`,
     }}>
-      <div style={{ maxWidth: 480, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gridTemplateRows: 'repeat(4, 50px)', gap: 6 }}>
-        <button style={action} onClick={onDismiss}>⌄</button>
-        <button style={action} onClick={onPlateCalc}><i className="fa-solid fa-dumbbell" style={{ fontSize: 12 }} /></button>
-        <button style={action} onClick={() => onAdjust(1)}>↑</button>
-        <button style={confirm} onClick={onConfirm}>✓</button>
+      <div style={{ maxWidth: 480, margin: '0 auto', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gridTemplateRows: `repeat(5, ${H}px)`, gap: 4 }}>
+        {/* Row 1: ↓ 🏋 ↑ | ✓ (spans rows 1-4) */}
+        <button style={act} onClick={() => onAdjust(-1)}>↓</button>
+        <button style={act} onClick={onPlateCalc}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>
+        <button style={act} onClick={() => onAdjust(1)}>↑</button>
+        <button onClick={onConfirm} style={{ ...base, gridColumn: 4, gridRow: '1 / span 4', background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', fontSize: 20, fontWeight: 700, borderColor: 'var(--accent-deep)' }}>✓</button>
 
+        {/* Row 2: 1 2 3 */}
+        {[1,2,3].map(n => <button key={n} style={base} onClick={() => onType(String(n))}>{n}</button>)}
+        {/* Row 3: 4 5 6 */}
+        {[4,5,6].map(n => <button key={n} style={base} onClick={() => onType(String(n))}>{n}</button>)}
+        {/* Row 4: 7 8 9 */}
         {[7,8,9].map(n => <button key={n} style={base} onClick={() => onType(String(n))}>{n}</button>)}
 
-        <button style={action} onClick={() => onAdjust(-1)}>↓</button>
-        {[4,5,6].map(n => <button key={n} style={base} onClick={() => onType(String(n))}>{n}</button>)}
-
-        {[1,2,3].map(n => <button key={n} style={base} onClick={() => onType(String(n))}>{n}</button>)}
-
-        <button style={{ ...base, color: isKg ? 'var(--ink)' : 'var(--ink-faint)' }} onClick={() => isKg && onType(',')}>
-          {isKg ? ',' : ''}
-        </button>
+        {/* Row 5: , 0 ⌫ | ⌄ */}
+        <button style={{ ...base, color: isKg ? 'var(--ink)' : 'var(--ink-faint)' }} onClick={() => isKg && onType(',')}>{isKg ? ',' : ''}</button>
         <button style={base} onClick={() => onType('0')}>0</button>
-        <button style={action} onClick={onBackspace}>⌫</button>
+        <button style={act} onClick={onBackspace}>⌫</button>
+        <button style={act} onClick={onDismiss}>⌄</button>
       </div>
     </div>
   );
