@@ -1020,7 +1020,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               return (
                 <div key={i} data-kb-row={i} style={{
                   display: 'grid',
-                  gridTemplateColumns: isUnilateral ? '28px 1fr 56px 44px 44px 28px 18px' : '28px 1fr 56px 56px 28px 18px',
+                  gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
                   gap: 8, alignItems: 'center',
                   padding: '10px 4px',
                   borderBottom: i < entry.sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
