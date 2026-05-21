@@ -131,18 +131,19 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
               const size = PLATE_SIZE[p] || 32;
               const hole = Math.round(size * 0.3);
               return (
-                <div key={p} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7 }}>
+                <div key={p} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, width: 72 }}>
                   <div style={{
                     width: size, height: size, borderRadius: '50%', flexShrink: 0,
                     background: PLATE_COLORS[p] || UI.bgInset,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     position: 'relative',
-                    boxShadow: `0 4px 16px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)`,
+                    boxShadow: `0 4px 16px rgba(0,0,0,0.5), 0 0 0 1.5px rgba(255,255,255,0.18)`,
                   }}>
                     <div style={{
                       position: 'absolute',
                       width: hole, height: hole, borderRadius: '50%',
                       background: 'var(--bg)',
+                      boxShadow: '0 0 0 1.5px rgba(255,255,255,0.18)',
                     }} />
                   </div>
                   <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.02em' }}>{p} × {n}</span>
