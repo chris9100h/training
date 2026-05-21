@@ -1687,7 +1687,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   <div className="micro" style={{ color: UI.inkFaint, padding: '6px 0' }}>Nobody training right now.</div>
                 ) : activeSessions.map((s, i) => (
                   <div key={i} style={{
-                    display: 'grid', gridTemplateColumns: '14px 1fr 1fr auto',
+                    display: 'grid', gridTemplateColumns: '14px 1fr 1fr 1fr',
                     alignItems: 'center', gap: 10,
                     padding: '9px 0',
                     borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none',
