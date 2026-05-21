@@ -18,7 +18,7 @@ function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }
         value={isKbActive ? kbRaw : fmt(value)}
         placeholder="—"
         disabled={done}
-        style={{ ...style, caretColor: 'transparent', userSelect: 'none', ...(isKbActive ? { borderBottom: '2px solid var(--accent)', paddingBottom: 0 } : { borderBottom: '2px solid transparent', paddingBottom: 0 }) }}
+        style={{ ...style, caretColor: 'transparent', userSelect: 'none', ...(isKbActive ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
         onPointerDown={e => { e.preventDefault(); if (!done) onActivate(); }}
       />
     );
@@ -47,7 +47,8 @@ function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }
 
 // ─── Plate Calculator ────────────────────────────────────────────────
 const PLATES_KG = [20, 10, 5, 2.5, 1.25, 0.75, 0.5, 0.25];
-const PLATE_COLORS = { 20:'#c0392b', 10:'#27ae60', 5:'#d4a017', 2.5:'#2980b9', 1.25:'#7f8c8d', 0.75:'#e67e22', 0.5:'#bdc3c7', 0.25:'#95a5a6' };
+const PLATE_COLORS = { 20:'#2471a3', 10:'#1a1a1a', 5:'#1e8449', 2.5:'#ca6f1e', 1.25:'#148f77', 0.75:'#808b96', 0.5:'#808b96', 0.25:'#808b96' };
+const PLATE_TEXT   = { 20:'#fff',    10:'#ccc',  5:'#fff',    2.5:'#fff',    1.25:'#fff',   0.75:'#fff',   0.5:'#fff',   0.25:'#fff'  };
 
 function calcPlates(weight) {
   const result = [];
@@ -105,19 +106,18 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
       {target > 0 && (
         <div style={{ marginTop: 14 }}>
           {plates.length > 0 ? (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {plates.flatMap(({ p, n }) =>
-                Array(n).fill(null).map((_, i) => (
-                  <div key={`${p}-${i}`} style={{
-                    width: 48, height: 48, borderRadius: 8,
-                    background: PLATE_COLORS[p] || UI.bgInset,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontFamily: UI.fontNum, fontWeight: 700, fontSize: 12,
-                    color: p <= 0.5 ? '#0a0805' : '#fff',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                  }}>{p}</div>
-                ))
-              )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {plates.map(({ p, n }) => (
+                <div key={p} style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                  minWidth: 56, padding: '10px 8px', borderRadius: 10,
+                  background: PLATE_COLORS[p] || UI.bgInset,
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                }}>
+                  <span style={{ fontFamily: UI.fontNum, fontWeight: 700, fontSize: 15, color: PLATE_TEXT[p] || '#fff' }}>{p}</span>
+                  <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: PLATE_TEXT[p] || '#fff', opacity: 0.75 }}>× {n}</span>
+                </div>
+              ))}
             </div>
           ) : (
             <div className="micro" style={{ textAlign: 'center', color: UI.inkFaint }}>NO PLATES NEEDED</div>
@@ -484,6 +484,10 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     setKbField({ setIdx, field });
     setKbRaw(val);
     setKbFresh(true);
+    setTimeout(() => {
+      const el = document.querySelector(`[data-kb-row="${setIdx}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
   };
 
   const kbApply = (newRaw, field, setIdx) => {
@@ -875,7 +879,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                       <input readOnly type="text"
                         value={kbField?.setIdx === currentSetIdx && kbField?.field === 'repsL' ? kbRaw : (heroSet.repsL ?? '')}
                         placeholder="—"
-                        style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', borderBottom: kbField?.setIdx === currentSetIdx && kbField?.field === 'repsL' ? '2px solid var(--accent)' : '2px solid transparent' }}
+                        style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === currentSetIdx && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
                         onPointerDown={e => { e.preventDefault(); activateKb(currentSetIdx, 'repsL'); }}
                       />
                       <div className="micro" style={{ marginTop: 2 }}>LEFT</div>
@@ -885,7 +889,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                       <input readOnly type="text"
                         value={kbField?.setIdx === currentSetIdx && kbField?.field === 'repsR' ? kbRaw : (heroSet.repsR ?? '')}
                         placeholder="—"
-                        style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', borderBottom: kbField?.setIdx === currentSetIdx && kbField?.field === 'repsR' ? '2px solid var(--accent)' : '2px solid transparent' }}
+                        style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === currentSetIdx && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
                         onPointerDown={e => { e.preventDefault(); activateKb(currentSetIdx, 'repsR'); }}
                       />
                       <div className="micro" style={{ marginTop: 2 }}>RIGHT</div>
@@ -896,7 +900,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                     <input readOnly type="text"
                       value={kbField?.setIdx === currentSetIdx && kbField?.field === 'reps' ? kbRaw : (heroSet.reps ?? '')}
                       placeholder="—"
-                      style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', borderBottom: kbField?.setIdx === currentSetIdx && kbField?.field === 'reps' ? '2px solid var(--accent)' : '2px solid transparent' }}
+                      style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === currentSetIdx && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
                       onPointerDown={e => { e.preventDefault(); activateKb(currentSetIdx, 'reps'); }}
                     />
                     <div className="micro" style={{ marginTop: 2 }}>REPETITIONS</div>
@@ -948,7 +952,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               const prevSet = last?.entry?.sets?.[i];
               const isCurrent = i === currentSetIdx;
               return (
-                <div key={i} style={{
+                <div key={i} data-kb-row={i} style={{
                   display: 'grid',
                   gridTemplateColumns: isUnilateral ? '28px 1fr 56px 44px 44px 28px 18px' : '28px 1fr 56px 56px 28px 18px',
                   gap: 8, alignItems: 'center',
@@ -992,11 +996,11 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
                   {isUnilateral ? (
                     <>
-                      <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { borderColor: UI.gold, boxShadow: `0 0 0 1.5px ${UI.goldSoft}` } : {}) }} onPointerDown={e => { e.preventDefault(); if (!s.done && !s.skipped) activateKb(i, 'repsL'); }} />
-                      <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { borderColor: UI.gold, boxShadow: `0 0 0 1.5px ${UI.goldSoft}` } : {}) }} onPointerDown={e => { e.preventDefault(); if (!s.done && !s.skipped) activateKb(i, 'repsR'); }} />
+                      <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); if (!s.done && !s.skipped) activateKb(i, 'repsL'); }} />
+                      <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); if (!s.done && !s.skipped) activateKb(i, 'repsR'); }} />
                     </>
                   ) : (
-                    <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder="—" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { borderColor: UI.gold, boxShadow: `0 0 0 1.5px ${UI.goldSoft}` } : {}) }} onPointerDown={e => { e.preventDefault(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
+                    <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder="—" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
                   )}
 
                   <button onClick={() => s.skipped ? updateSet(i, { skipped: false }) : s.done ? updateSet(i, { done: false }) : completeSet(i)}
