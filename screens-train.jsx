@@ -269,7 +269,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         'Authorization': `Bearer ${LB.SUPABASE_ANON_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ delaySeconds, nonce: String(restStart), userKey: store.settings?.pushoverUserKey ?? '', userId }),
+      body: JSON.stringify({ delaySeconds, nonce: String(restStart), userKey: store.settings?.pushoverUserKey ?? '', userId, priority: 1 }),
     }).catch(() => {});
   }, [restStart]);
 
@@ -572,7 +572,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         {/* HERO CURRENT SET */}
         {allDone ? (
           <Frame accent style={{ padding: 28, textAlign: 'center' }}>
-            <div className="micro-gold" style={{ marginBottom: 10 }}>ALL SETS DONE</div>
+            <div className="micro-gold" style={{ marginBottom: 10 }}>ALL SETS</div>
             <div className="display" style={{ fontSize: 28, color: UI.gold, fontStyle: 'italic', fontWeight: 300, marginBottom: 6 }}>Done.</div>
             <div style={{ color: UI.inkSoft, fontSize: 13 }}>Next exercise ready.</div>
             <Btn onClick={() => navigate(1)} style={{ marginTop: 18 }}>
