@@ -717,7 +717,7 @@ function totalVolume(session) {
   return session.entries.reduce((sum, ex) =>
     sum + (ex.sets || []).reduce((s, st) => {
       const reps = (st.repsL != null || st.repsR != null)
-        ? (st.repsL ?? 0) + (st.repsR ?? 0)
+        ? Math.min(st.repsL ?? 0, st.repsR ?? 0)
         : (+st.reps || 0);
       return s + (+st.kg || 0) * reps;
     }, 0), 0
