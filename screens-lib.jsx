@@ -1763,7 +1763,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
                       transition: 'background 0.15s',
                     }}>Add</button>
                   </div>
-                </div>
+                </div>}
               </div>
             )}
           </Frame>
