@@ -1485,6 +1485,11 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [appearanceOpen, setAppearanceOpen] = useStateL(false);
   const [pushOpen, setPushOpen] = useStateL(false);
   const [dataOpen, setDataOpen] = useStateL(false);
+  const [activeUsersOpen, setActiveUsersOpen] = useStateL(false);
+  const [activeSessions, setActiveSessions] = useStateL([]);
+  const [activeGrants, setActiveGrants] = useStateL([]);
+  const [newGrantEmail, setNewGrantEmail] = useStateL('');
+  const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateL(false);
   const [importing, setImporting] = useStateL(false);
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
@@ -1493,6 +1498,44 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [pushKeyModalOpen, setPushKeyModalOpen] = useStateL(false);
   const [cycleWeekView, setCycleWeekView] = useStateL(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateL(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
+  const isAdmin = store.user?.email === 'office@btc-prime.biz';
+
+  useEffectL(() => {
+    let mounted = true;
+    LB.supabase.rpc('check_active_users_access')
+      .then(({ data }) => { if (mounted) setHasActiveUsersAccess(!!data); })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
+  useEffectL(() => {
+    if (!hasActiveUsersAccess) return;
+    let mounted = true;
+    const loadSessions = () => LB.supabase.rpc('get_active_sessions_overview')
+      .then(({ data }) => { if (mounted) setActiveSessions(data || []); })
+      .catch(() => {});
+    const loadGrants = () => LB.supabase.rpc('get_active_users_grants')
+      .then(({ data }) => { if (mounted) setActiveGrants((data || []).map(r => r.email)); })
+      .catch(() => {});
+    loadSessions();
+    if (isAdmin) loadGrants();
+    const iv = setInterval(loadSessions, 30000);
+    return () => { mounted = false; clearInterval(iv); };
+  }, [hasActiveUsersAccess, isAdmin]);
+
+  const addGrant = async () => {
+    const email = newGrantEmail.trim().toLowerCase();
+    if (!email.includes('@') || activeGrants.includes(email)) return;
+    await LB.supabase.rpc('set_active_users_grant', { p_email: email, p_granted: true });
+    setActiveGrants(g => [...g, email]);
+    setNewGrantEmail('');
+  };
+
+  const removeGrant = async (email) => {
+    await LB.supabase.rpc('set_active_users_grant', { p_email: email, p_granted: false });
+    setActiveGrants(g => g.filter(x => x !== email));
+  };
+
   const pushStatusTimer = React.useRef(null);
   useEffectL(() => {
     if (!('caches' in window)) return;
@@ -1644,6 +1687,87 @@ function SettingsScreen({ store, setStore, go, userId }) {
             Logged in as {store.user?.email || userId}
           </div>
         </Frame>
+
+        {/* Active users — visible to admin + granted users */}
+        {hasActiveUsersAccess && (
+          <Frame style={{ padding: '14px 16px' }}>
+            <button onClick={() => setActiveUsersOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
+              <span className="label" style={{ marginBottom: 0 }}>Active users</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {activeSessions.length > 0 && (
+                  <div style={{
+                    background: UI.gold, color: '#0a0805',
+                    borderRadius: 999, minWidth: 18, height: 18,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 11, fontWeight: 700, fontFamily: UI.fontUi, padding: '0 5px',
+                  }}>
+                    {activeSessions.length}
+                  </div>
+                )}
+                <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: activeUsersOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+                  <path d="M2 1l5 5-5 5"/>
+                </svg>
+              </div>
+            </button>
+            {activeUsersOpen && (
+              <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column' }}>
+                {activeSessions.length === 0 ? (
+                  <div className="micro" style={{ color: UI.inkFaint, padding: '6px 0' }}>Nobody training right now.</div>
+                ) : activeSessions.map((s, i) => (
+                  <div key={i} style={{
+                    display: 'grid', gridTemplateColumns: '14px 1fr 1fr 1fr',
+                    alignItems: 'center', gap: 10,
+                    padding: '9px 0',
+                    borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none',
+                  }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
+                    <span style={{ fontSize: 14, color: UI.ink, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
+                    <span className="display-it" style={{ fontSize: 14, color: UI.inkSoft, textAlign: 'center' }}>{s.day_name}</span>
+                    <span className="num" style={{ fontSize: 13, color: UI.gold, textAlign: 'right' }}>{s.sets_done}/{s.sets_total}</span>
+                  </div>
+                ))}
+
+                {/* Access management — admin only */}
+                {isAdmin && <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ACCESS</div>
+                  {activeGrants.length === 0 && (
+                    <div className="micro" style={{ color: UI.inkGhost, marginBottom: 8 }}>No other users have access yet.</div>
+                  )}
+                  {activeGrants.map(email => (
+                    <div key={email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+                      <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi }}>{email}</span>
+                      <button onClick={() => removeGrant(email)} style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: UI.danger, fontSize: 16, lineHeight: 1, padding: '0 2px',
+                        fontFamily: UI.fontUi,
+                      }}>×</button>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+                    <input
+                      value={newGrantEmail}
+                      onChange={e => setNewGrantEmail(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && addGrant()}
+                      placeholder="email@example.com"
+                      style={{
+                        flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+                        borderRadius: 8, padding: '7px 10px', color: UI.ink,
+                        fontFamily: UI.fontUi, fontSize: 13, outline: 'none',
+                      }}
+                    />
+                    <button onClick={addGrant} disabled={!newGrantEmail.includes('@')} style={{
+                      padding: '7px 14px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                      background: newGrantEmail.includes('@') ? UI.gold : UI.bgInset,
+                      color: newGrantEmail.includes('@') ? '#0a0805' : UI.inkFaint,
+                      fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+                      transition: 'background 0.15s',
+                    }}>Add</button>
+                  </div>
+                </div>}
+              </div>
+            )}
+          </Frame>
+        )}
 
         {/* Rest Settings */}
         <Frame style={{ padding: '14px 16px' }}>

@@ -326,6 +326,15 @@ function seedStarter(state) {
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────
 
+function cancelPushover(settings, userId) {
+  if (!settings?.pushEnabled) return;
+  fetch(PUSHOVER_URL, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nonce: `cancel-${Date.now()}`, cancel: true, userKey: settings?.pushoverUserKey ?? '', userId }),
+  }).catch(() => {});
+}
+
 function findExercise(state, exId) {
   return state.exercises.find(e => e.id === exId);
 }
@@ -432,4 +441,5 @@ window.LB = {
   loadFromSupabase, syncStore, seedStarter,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay, isWeekdayPlan,
+  cancelPushover,
 };

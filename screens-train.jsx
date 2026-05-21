@@ -379,17 +379,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     navigate(1);
   };
 
-  const cancelPushover = () => {
-    if (!store.settings?.pushEnabled) return;
-    fetch(LB.PUSHOVER_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LB.SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ nonce: `cancel-${Date.now()}`, cancel: true, userKey: store.settings?.pushoverUserKey ?? '', userId }),
-    }).catch(() => {});
-  };
+  const cancelPushover = () => LB.cancelPushover(store.settings, userId);
 
   const finish = () => {
     cancelPushover();
