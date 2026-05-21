@@ -76,6 +76,18 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
   const perSide = tab === 0 ? target / 2 : target;
   const { plates, remainder } = calcPlates(perSide);
 
+  // round up per-side to next achievable multiple of smallest plate
+  const sides = tab === 0 ? 2 : 1;
+  const correctedTotal = remainder > 0.01 ? (() => {
+    const smallest = PLATES_KG[PLATES_KG.length - 1]; // 0.25
+    const units = Math.round(smallest * 1000);
+    const newPerSide = Math.ceil(Math.round(perSide * 1000) / units) * units / 1000;
+    return Math.round(newPerSide * sides * 1000) / 1000;
+  })() : null;
+  const correctionDelta = correctedTotal !== null
+    ? Math.round((correctedTotal - target) * 1000) / 1000
+    : null;
+
   return (
     <Sheet open={open} onClose={onClose} title="Plate Calculator">
       {/* Segmented control */}
@@ -157,21 +169,17 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
           </div>
         )
       )}
-      {remainder > 0.01 && (
+      {correctionDelta !== null && (
         <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.danger, letterSpacing: '0.1em' }}>
-            CAN'T REACH EXACTLY — {remainder} KG REMAINING
+            CAN'T REACH EXACTLY — {correctionDelta} KG MISSING
           </span>
-          <button onClick={() => {
-            const delta = Math.round(remainder * (tab === 0 ? 2 : 1) * 1000) / 1000;
-            const next = Math.round((target + delta) * 1000) / 1000;
-            setRaw(String(next).replace('.', ','));
-          }} style={{
+          <button onClick={() => setRaw(String(correctedTotal).replace('.', ','))} style={{
             padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
-            background: 'transparent', border: `0.5px solid ${UI.danger}`,
-            color: UI.danger, fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '0.06em',
+            background: UI.goldFaint, border: `0.5px solid var(--accent)`,
+            color: 'var(--accent)', fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '0.06em',
           }}>
-            +{Math.round(remainder * (tab === 0 ? 2 : 1) * 1000) / 1000} kg
+            +{correctionDelta} kg
           </button>
         </div>
       )}
