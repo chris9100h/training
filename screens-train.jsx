@@ -14,7 +14,8 @@ function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }
   if (onActivate !== undefined) {
     return (
       <input
-        type="text" readOnly
+        type="text" readOnly inputMode="none"
+        autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
         value={isKbActive ? kbRaw : fmt(value)}
         placeholder="—"
         disabled={done}
@@ -49,6 +50,7 @@ function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }
 const PLATES_KG = [20, 10, 5, 2.5, 1.25, 0.75, 0.5, 0.25];
 const PLATE_COLORS = { 20:'#2471a3', 10:'#1a1a1a', 5:'#1e8449', 2.5:'#ca6f1e', 1.25:'#148f77', 0.75:'#808b96', 0.5:'#808b96', 0.25:'#808b96' };
 const PLATE_TEXT   = { 20:'#fff',    10:'#ccc',  5:'#fff',    2.5:'#fff',    1.25:'#fff',   0.75:'#fff',   0.5:'#fff',   0.25:'#fff'  };
+const PLATE_SIZE   = { 20: 64,       10: 56,     5: 48,       2.5: 42,       1.25: 36,      0.75: 30,      0.5: 30,      0.25: 30     };
 
 function calcPlates(weight) {
   const result = [];
@@ -74,59 +76,97 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
   const perSide = tab === 0 ? target / 2 : target;
   const { plates, remainder } = calcPlates(perSide);
 
-  const tabBtn = (label, i) => (
-    <button key={i} onClick={() => setTab(i)} style={{
-      flex: 1, padding: '8px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
-      background: tab === i ? 'var(--accent)' : UI.bgInset,
-      color: tab === i ? '#0a0805' : UI.inkFaint,
-      fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', fontWeight: 700,
-    }}>{label}</button>
-  );
-
   return (
     <Sheet open={open} onClose={onClose} title="Plate Calculator">
-      <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-        {['DUAL SIDE', 'SINGLE'].map((l, i) => tabBtn(l, i))}
+      {/* Segmented control */}
+      <div style={{ display: 'flex', gap: 3, marginBottom: 24, background: UI.bgInset, borderRadius: 10, padding: 3 }}>
+        {['Dual side', 'Single'].map((l, i) => (
+          <button key={i} onClick={() => setTab(i)} style={{
+            flex: 1, padding: '8px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
+            background: tab === i ? UI.bgRaised : 'transparent',
+            color: tab === i ? UI.ink : UI.inkFaint,
+            fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.06em',
+            fontWeight: tab === i ? 600 : 400,
+            boxShadow: tab === i ? '0 1px 4px rgba(0,0,0,0.3)' : 'none',
+            transition: 'all 0.15s',
+          }}>{l}</button>
+        ))}
       </div>
-      <input
-        type="text" inputMode="decimal"
-        value={raw} placeholder="Target kg"
-        onChange={e => setRaw(e.target.value)}
-        style={{
-          width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-          borderRadius: 8, padding: '10px 12px', color: UI.ink,
-          fontFamily: UI.fontNum, fontSize: 18, outline: 'none', boxSizing: 'border-box',
-        }}
-      />
-      {tab === 0 && target > 0 && (
-        <div className="micro" style={{ marginTop: 6, textAlign: 'center' }}>
-          PER SIDE — <span className="num" style={{ color: UI.gold }}>{perSide}</span> KG
-        </div>
-      )}
+
+      {/* Weight input — large, centered */}
+      <div style={{ position: 'relative', textAlign: 'center', marginBottom: 6 }}>
+        <input
+          type="text" inputMode="decimal"
+          value={raw} placeholder="0"
+          onChange={e => setRaw(e.target.value)}
+          style={{
+            background: 'transparent', border: 'none', outline: 'none',
+            color: UI.ink, fontFamily: UI.fontNum, fontSize: 48, fontWeight: 300,
+            letterSpacing: '-0.03em', textAlign: 'center',
+            width: '100%', boxSizing: 'border-box',
+            borderBottom: `0.5px solid ${UI.hair}`, paddingBottom: 8,
+          }}
+        />
+        <span style={{
+          position: 'absolute', right: 6, bottom: 14,
+          fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.1em',
+        }}>KG</span>
+      </div>
+
+      {/* Per-side hint */}
+      <div style={{ minHeight: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
+        {tab === 0 && target > 0 && (
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span style={{ fontFamily: UI.fontNum, fontSize: 20, fontWeight: 300, color: UI.gold, letterSpacing: '-0.02em' }}>{perSide}</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.14em' }}>KG PER SIDE</span>
+          </div>
+        )}
+      </div>
+
+      {/* Plate circles */}
       {target > 0 && (
-        <div style={{ marginTop: 14 }}>
-          {plates.length > 0 ? (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {plates.map(({ p, n }) => (
-                <div key={p} style={{
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                  minWidth: 56, padding: '10px 8px', borderRadius: 10,
-                  background: PLATE_COLORS[p] || UI.bgInset,
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                }}>
-                  <span style={{ fontFamily: UI.fontNum, fontWeight: 700, fontSize: 15, color: PLATE_TEXT[p] || '#fff' }}>{p}</span>
-                  <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: PLATE_TEXT[p] || '#fff', opacity: 0.75 }}>× {n}</span>
+        plates.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, justifyContent: 'center', alignItems: 'flex-end', paddingBottom: 4 }}>
+            {plates.map(({ p, n }) => {
+              const size = PLATE_SIZE[p] || 32;
+              const hole = Math.round(size * 0.3);
+              return (
+                <div key={p} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7 }}>
+                  <div style={{
+                    width: size, height: size, borderRadius: '50%', flexShrink: 0,
+                    background: PLATE_COLORS[p] || UI.bgInset,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    position: 'relative',
+                    boxShadow: `0 4px 16px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)`,
+                  }}>
+                    <div style={{
+                      position: 'absolute',
+                      width: hole, height: hole, borderRadius: '50%',
+                      background: 'var(--bg)',
+                      boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)',
+                    }} />
+                    <span style={{
+                      fontFamily: UI.fontNum, fontWeight: 700,
+                      fontSize: Math.max(10, Math.round(size * 0.23)),
+                      color: PLATE_TEXT[p] || '#fff',
+                      position: 'relative', zIndex: 1,
+                      textShadow: '0 1px 3px rgba(0,0,0,0.5)',
+                    }}>{p}</span>
+                  </div>
+                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.02em' }}>×{n}</span>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="micro" style={{ textAlign: 'center', color: UI.inkFaint }}>NO PLATES NEEDED</div>
-          )}
-          {remainder > 0.01 && (
-            <div className="micro" style={{ marginTop: 10, color: UI.danger }}>
-              CANNOT REACH EXACTLY — {remainder} KG MISSING
-            </div>
-          )}
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.12em', paddingBottom: 8 }}>
+            NO PLATES NEEDED
+          </div>
+        )
+      )}
+      {remainder > 0.01 && (
+        <div style={{ marginTop: 14, textAlign: 'center', fontFamily: UI.fontUi, fontSize: 10, color: UI.danger, letterSpacing: '0.1em' }}>
+          CANNOT REACH EXACTLY — {remainder} KG REMAINING
         </div>
       )}
     </Sheet>
@@ -883,7 +923,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                 {isUnilateral ? (
                   <div style={{ flex: 1, display: 'flex', gap: 4 }}>
                     <div style={{ flex: 1, textAlign: 'center' }}>
-                      <input readOnly type="text"
+                      <input readOnly type="text" inputMode="none"
+                        autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
                         value={kbField?.setIdx === currentSetIdx && kbField?.field === 'repsL' ? kbRaw : (heroSet.repsL ?? '')}
                         placeholder="—"
                         style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === currentSetIdx && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
@@ -893,7 +934,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                     </div>
                     <div style={{ fontSize: 22, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 200, alignSelf: 'flex-start', marginTop: 10 }}>/</div>
                     <div style={{ flex: 1, textAlign: 'center' }}>
-                      <input readOnly type="text"
+                      <input readOnly type="text" inputMode="none"
+                        autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
                         value={kbField?.setIdx === currentSetIdx && kbField?.field === 'repsR' ? kbRaw : (heroSet.repsR ?? '')}
                         placeholder="—"
                         style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === currentSetIdx && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
@@ -904,7 +946,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                   </div>
                 ) : (
                   <div style={{ flex: 1, textAlign: 'center' }}>
-                    <input readOnly type="text"
+                    <input readOnly type="text" inputMode="none"
+                      autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
                       value={kbField?.setIdx === currentSetIdx && kbField?.field === 'reps' ? kbRaw : (heroSet.reps ?? '')}
                       placeholder="—"
                       style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === currentSetIdx && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
@@ -1003,11 +1046,11 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
                   {isUnilateral ? (
                     <>
-                      <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsL'); }} />
-                      <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsR'); }} />
+                      <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsL'); }} />
+                      <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsR'); }} />
                     </>
                   ) : (
-                    <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder="—" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
+                    <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder="—" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
                   )}
 
                   <button onClick={() => s.skipped ? updateSet(i, { skipped: false }) : s.done ? updateSet(i, { done: false }) : completeSet(i)}
