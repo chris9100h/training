@@ -176,8 +176,10 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
           </span>
           <button onClick={() => setRaw(String(correctedTotal).replace('.', ','))} style={{
             padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
-            background: UI.goldFaint, border: `0.5px solid var(--accent)`,
-            color: 'var(--accent)', fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '0.06em',
+            background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
+            border: `0.5px solid var(--accent-deep)`,
+            color: '#0a0805', fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '0.06em',
+            fontWeight: 700, boxShadow: '0 2px 8px rgba(var(--accent-rgb),0.45)',
           }}>
             +{correctionDelta} kg
           </button>
