@@ -1291,7 +1291,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         </div>
       </Sheet>
 
-      {kbField && <div style={{ height: 300 }} />}
+      {kbField && <div style={{ height: 225 }} />}
 
       {confirmEl}
 
