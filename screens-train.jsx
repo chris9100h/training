@@ -19,7 +19,7 @@ function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }
         placeholder="—"
         disabled={done}
         style={{ ...style, caretColor: 'transparent', userSelect: 'none', ...(isKbActive ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
-        onPointerDown={e => { e.preventDefault(); if (!done) onActivate(); }}
+        onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!done) onActivate(); }}
       />
     );
   }
@@ -147,7 +147,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   const act = { ...base, background: 'var(--bg-inset)', color: 'var(--ink-soft)', fontSize: 13, fontFamily: '"Inter", sans-serif' };
 
   return (
-    <div style={{
+    <div onPointerDown={e => e.stopPropagation()} style={{
       position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
       background: 'var(--bg)', borderTop: `0.5px solid var(--hair)`,
       padding: `5px 8px calc(env(safe-area-inset-bottom, 0px) + 5px)`,
@@ -475,6 +475,13 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
 
   useEffectT(() => { setKbField(null); setKbRaw(''); setKbFresh(false); }, [exIdx, sessionId]);
+
+  useEffectT(() => {
+    if (!kbField) return;
+    const dismiss = () => { setKbField(null); setKbRaw(''); setKbFresh(false); };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [!!kbField]);
 
   const activateKb = (setIdx, field) => {
     const s = (store.sessions.find(x => x.id === sessionId)?.entries[exIdx]?.sets[setIdx]);
@@ -880,7 +887,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                         value={kbField?.setIdx === currentSetIdx && kbField?.field === 'repsL' ? kbRaw : (heroSet.repsL ?? '')}
                         placeholder="—"
                         style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === currentSetIdx && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
-                        onPointerDown={e => { e.preventDefault(); activateKb(currentSetIdx, 'repsL'); }}
+                        onPointerDown={e => { e.preventDefault(); e.stopPropagation(); activateKb(currentSetIdx, 'repsL'); }}
                       />
                       <div className="micro" style={{ marginTop: 2 }}>LEFT</div>
                     </div>
@@ -890,7 +897,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                         value={kbField?.setIdx === currentSetIdx && kbField?.field === 'repsR' ? kbRaw : (heroSet.repsR ?? '')}
                         placeholder="—"
                         style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === currentSetIdx && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
-                        onPointerDown={e => { e.preventDefault(); activateKb(currentSetIdx, 'repsR'); }}
+                        onPointerDown={e => { e.preventDefault(); e.stopPropagation(); activateKb(currentSetIdx, 'repsR'); }}
                       />
                       <div className="micro" style={{ marginTop: 2 }}>RIGHT</div>
                     </div>
@@ -901,7 +908,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                       value={kbField?.setIdx === currentSetIdx && kbField?.field === 'reps' ? kbRaw : (heroSet.reps ?? '')}
                       placeholder="—"
                       style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === currentSetIdx && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
-                      onPointerDown={e => { e.preventDefault(); activateKb(currentSetIdx, 'reps'); }}
+                      onPointerDown={e => { e.preventDefault(); e.stopPropagation(); activateKb(currentSetIdx, 'reps'); }}
                     />
                     <div className="micro" style={{ marginTop: 2 }}>REPETITIONS</div>
                   </div>
@@ -996,11 +1003,11 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
                   {isUnilateral ? (
                     <>
-                      <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); if (!s.done && !s.skipped) activateKb(i, 'repsL'); }} />
-                      <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); if (!s.done && !s.skipped) activateKb(i, 'repsR'); }} />
+                      <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsL'); }} />
+                      <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsR'); }} />
                     </>
                   ) : (
-                    <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder="—" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
+                    <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder="—" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
                   )}
 
                   <button onClick={() => s.skipped ? updateSet(i, { skipped: false }) : s.done ? updateSet(i, { done: false }) : completeSet(i)}
