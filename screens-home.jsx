@@ -90,8 +90,8 @@ function ActiveSessionsWidget({ store }) {
   useEffect(() => {
     if (!isAdmin) return;
     let active = true;
-    const load = () => LB.loadActiveSessionsOverview()
-      .then(d => { if (active) setSessions(d); })
+    const load = () => LB.supabase.rpc('get_active_sessions_overview')
+      .then(({ data }) => { if (active) setSessions(data || []); })
       .catch(() => {});
     load();
     const iv = setInterval(load, 30000);
