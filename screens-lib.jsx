@@ -1487,6 +1487,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [dataOpen, setDataOpen] = useStateL(false);
   const [activeUsersOpen, setActiveUsersOpen] = useStateL(false);
   const [activeSessions, setActiveSessions] = useStateL([]);
+  const [activeGrants, setActiveGrants] = useStateL([]);
+  const [newGrantEmail, setNewGrantEmail] = useStateL('');
   const [importing, setImporting] = useStateL(false);
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
@@ -1500,13 +1502,30 @@ function SettingsScreen({ store, setStore, go, userId }) {
   useEffectL(() => {
     if (!isAdmin) return;
     let mounted = true;
-    const load = () => LB.supabase.rpc('get_active_sessions_overview')
+    const loadSessions = () => LB.supabase.rpc('get_active_sessions_overview')
       .then(({ data }) => { if (mounted) setActiveSessions(data || []); })
       .catch(() => {});
-    load();
-    const iv = setInterval(load, 30000);
+    const loadGrants = () => LB.supabase.rpc('get_active_users_grants')
+      .then(({ data }) => { if (mounted) setActiveGrants((data || []).map(r => r.email)); })
+      .catch(() => {});
+    loadSessions();
+    loadGrants();
+    const iv = setInterval(loadSessions, 30000);
     return () => { mounted = false; clearInterval(iv); };
   }, [isAdmin]);
+
+  const addGrant = async () => {
+    const email = newGrantEmail.trim().toLowerCase();
+    if (!email.includes('@') || activeGrants.includes(email)) return;
+    await LB.supabase.rpc('set_active_users_grant', { p_email: email, p_granted: true });
+    setActiveGrants(g => [...g, email]);
+    setNewGrantEmail('');
+  };
+
+  const removeGrant = async (email) => {
+    await LB.supabase.rpc('set_active_users_grant', { p_email: email, p_granted: false });
+    setActiveGrants(g => g.filter(x => x !== email));
+  };
 
   const pushStatusTimer = React.useRef(null);
   useEffectL(() => {
@@ -1698,6 +1717,44 @@ function SettingsScreen({ store, setStore, go, userId }) {
                     <span className="num" style={{ fontSize: 13, color: UI.gold, textAlign: 'right' }}>{s.sets_done}/{s.sets_total}</span>
                   </div>
                 ))}
+
+                {/* Access management */}
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ACCESS</div>
+                  {activeGrants.length === 0 && (
+                    <div className="micro" style={{ color: UI.inkGhost, marginBottom: 8 }}>No other users have access yet.</div>
+                  )}
+                  {activeGrants.map(email => (
+                    <div key={email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+                      <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi }}>{email}</span>
+                      <button onClick={() => removeGrant(email)} style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: UI.danger, fontSize: 16, lineHeight: 1, padding: '0 2px',
+                        fontFamily: UI.fontUi,
+                      }}>×</button>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+                    <input
+                      value={newGrantEmail}
+                      onChange={e => setNewGrantEmail(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && addGrant()}
+                      placeholder="email@example.com"
+                      style={{
+                        flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+                        borderRadius: 8, padding: '7px 10px', color: UI.ink,
+                        fontFamily: UI.fontUi, fontSize: 13, outline: 'none',
+                      }}
+                    />
+                    <button onClick={addGrant} disabled={!newGrantEmail.includes('@')} style={{
+                      padding: '7px 14px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                      background: newGrantEmail.includes('@') ? UI.gold : UI.bgInset,
+                      color: newGrantEmail.includes('@') ? '#0a0805' : UI.inkFaint,
+                      fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+                      transition: 'background 0.15s',
+                    }}>Add</button>
+                  </div>
+                </div>
               </div>
             )}
           </Frame>
