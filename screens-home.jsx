@@ -400,7 +400,7 @@ function HomeScreen({ store, setStore, go }) {
     return (
       <Screen>
         <TopBar
-          title={<span>Hey, <em style={{ fontFamily: UI.fontDisplay, fontStyle: 'italic', fontWeight: 900, color: UI.gold }}>{store.user.name}</em></span>}
+          title={<span>Hey, <em style={{ fontFamily: UI.fontDisplay, fontStyle: 'italic', fontWeight: 300, color: UI.gold }}>{store.user.name}</em></span>}
           sub={new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
           right={<button onClick={() => go({ name: 'settings' })} style={{ ...btnIcon, fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: '50%', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
         />
@@ -431,8 +431,8 @@ function HomeScreen({ store, setStore, go }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <div className="micro">{new Date().toLocaleDateString('en-US', { weekday:'long', day:'2-digit', month:'long' }).toUpperCase()}</div>
-            <div style={{ marginTop: 6, fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 700, lineHeight: 1.1 }}>
-              Hey, <em style={{ fontStyle: 'italic', fontWeight: 900, color: UI.gold }}>{store.user.name}</em>
+            <div style={{ marginTop: 6, fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
+              Hey, <em style={{ fontStyle: 'italic', fontWeight: 300, color: UI.gold }}>{store.user.name}</em>
             </div>
           </div>
           <button onClick={() => go({ name: 'settings' })} style={{
@@ -595,7 +595,7 @@ function HomeScreen({ store, setStore, go }) {
         {isActiveRest ? (
           <BracketFrame style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: 28 }}>
             <div className="micro" style={{ marginBottom: 8 }}>{cardLabel}</div>
-            <div className="display-it" style={{ fontSize: 44, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 900, letterSpacing: '0.02em', marginBottom: 6 }}>
+            <div className="display-it" style={{ fontSize: 44, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, letterSpacing: '0.02em', marginBottom: 6 }}>
               Recover.
             </div>
             <div style={{ fontSize: 13, color: UI.inkFaint, marginBottom: 22, maxWidth: 220 }}>
@@ -611,7 +611,7 @@ function HomeScreen({ store, setStore, go }) {
             <div className="micro-gold" style={{ marginBottom: 6 }}>{cardLabel}</div>
             <div className="display" style={{
               fontSize: 56, color: UI.gold,
-              fontWeight: 900, fontStyle: 'italic',
+              fontWeight: 400, fontStyle: 'italic',
               letterSpacing: '0.04em', lineHeight: 1, marginBottom: 24,
             }}>
               {activeDay.name}
