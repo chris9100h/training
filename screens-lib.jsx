@@ -1489,6 +1489,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [activeSessions, setActiveSessions] = useStateL([]);
   const [activeGrants, setActiveGrants] = useStateL([]);
   const [newGrantEmail, setNewGrantEmail] = useStateL('');
+  const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateL(false);
   const [importing, setImporting] = useStateL(false);
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
@@ -1500,7 +1501,15 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
 
   useEffectL(() => {
-    if (!isAdmin) return;
+    let mounted = true;
+    LB.supabase.rpc('check_active_users_access')
+      .then(({ data }) => { if (mounted) setHasActiveUsersAccess(!!data); })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
+  useEffectL(() => {
+    if (!hasActiveUsersAccess) return;
     let mounted = true;
     const loadSessions = () => LB.supabase.rpc('get_active_sessions_overview')
       .then(({ data }) => { if (mounted) setActiveSessions(data || []); })
@@ -1509,10 +1518,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
       .then(({ data }) => { if (mounted) setActiveGrants((data || []).map(r => r.email)); })
       .catch(() => {});
     loadSessions();
-    loadGrants();
+    if (isAdmin) loadGrants();
     const iv = setInterval(loadSessions, 30000);
     return () => { mounted = false; clearInterval(iv); };
-  }, [isAdmin]);
+  }, [hasActiveUsersAccess, isAdmin]);
 
   const addGrant = async () => {
     const email = newGrantEmail.trim().toLowerCase();
@@ -1679,8 +1688,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </div>
         </Frame>
 
-        {/* Active users — admin only */}
-        {isAdmin && (
+        {/* Active users — visible to admin + granted users */}
+        {hasActiveUsersAccess && (
           <Frame style={{ padding: '14px 16px' }}>
             <button onClick={() => setActiveUsersOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
               <span className="label" style={{ marginBottom: 0 }}>Active users</span>
@@ -1718,8 +1727,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   </div>
                 ))}
 
-                {/* Access management */}
-                <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+                {/* Access management — admin only */}
+                {isAdmin && <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
                   <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ACCESS</div>
                   {activeGrants.length === 0 && (
                     <div className="micro" style={{ color: UI.inkGhost, marginBottom: 8 }}>No other users have access yet.</div>
