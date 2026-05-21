@@ -471,9 +471,10 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [swapOpen, setSwapOpen] = useStateT(false);
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
   const [kbRaw, setKbRaw] = useStateT('');
+  const [kbFresh, setKbFresh] = useStateT(false);
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
 
-  useEffectT(() => { setKbField(null); setKbRaw(''); }, [exIdx, sessionId]);
+  useEffectT(() => { setKbField(null); setKbRaw(''); setKbFresh(false); }, [exIdx, sessionId]);
 
   const activateKb = (setIdx, field) => {
     const s = (store.sessions.find(x => x.id === sessionId)?.entries[exIdx]?.sets[setIdx]);
@@ -482,6 +483,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       : (s?.[field] != null ? String(s[field]) : '');
     setKbField({ setIdx, field });
     setKbRaw(val);
+    setKbFresh(true);
   };
 
   const kbApply = (newRaw, field, setIdx) => {
@@ -509,17 +511,20 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const kbTypeChar = (char) => {
     if (!kbField) return;
     const { setIdx, field } = kbField;
-    if (char === ',' && (field !== 'kg' || kbRaw.includes(','))) return;
-    const newRaw = kbRaw + char;
+    const base = kbFresh ? '' : kbRaw;
+    if (char === ',' && (field !== 'kg' || base.includes(','))) return;
+    const newRaw = base + char;
     setKbRaw(newRaw);
+    setKbFresh(false);
     kbApply(newRaw, field, setIdx);
   };
 
   const kbBackspace = () => {
     if (!kbField) return;
     const { setIdx, field } = kbField;
-    const newRaw = kbRaw.slice(0, -1);
+    const newRaw = kbFresh ? '' : kbRaw.slice(0, -1);
     setKbRaw(newRaw);
+    setKbFresh(false);
     kbApply(newRaw, field, setIdx);
   };
 
