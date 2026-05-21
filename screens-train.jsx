@@ -143,7 +143,6 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
                       position: 'absolute',
                       width: hole, height: hole, borderRadius: '50%',
                       background: 'var(--bg)',
-                      boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)',
                     }} />
                   </div>
                   <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.02em' }}>{p} × {n}</span>
