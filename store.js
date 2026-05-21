@@ -324,6 +324,14 @@ function seedStarter(state) {
   };
 }
 
+// ─── ADMIN OVERVIEW ──────────────────────────────────────────────────────
+
+async function loadActiveSessionsOverview() {
+  const { data, error } = await _supabase.rpc('get_active_sessions_overview');
+  if (error) throw error;
+  return data || [];
+}
+
 // ─── HELPERS ─────────────────────────────────────────────────────────────
 
 function findExercise(state, exId) {
@@ -432,4 +440,5 @@ window.LB = {
   loadFromSupabase, syncStore, seedStarter,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay, isWeekdayPlan,
+  loadActiveSessionsOverview,
 };

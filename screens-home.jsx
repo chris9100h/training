@@ -82,6 +82,51 @@ function LoginScreen() {
   );
 }
 
+// ─── ACTIVE SESSIONS WIDGET (admin-only) ──────────────────────────────
+function ActiveSessionsWidget({ store }) {
+  const [sessions, setSessions] = useState([]);
+  const isAdmin = store.user?.email === 'office@btc-prime.biz';
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let active = true;
+    const load = () => LB.loadActiveSessionsOverview()
+      .then(d => { if (active) setSessions(d); })
+      .catch(() => {});
+    load();
+    const iv = setInterval(load, 30000);
+    return () => { active = false; clearInterval(iv); };
+  }, [isAdmin]);
+
+  if (!isAdmin || sessions.length === 0) return null;
+
+  return (
+    <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div className="micro" style={{ color: UI.inkFaint }}>ACTIVE NOW</div>
+      {sessions.map((s, i) => (
+        <div key={i} style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '9px 13px',
+          background: UI.bgInset,
+          border: `0.5px solid ${UI.hairStrong}`,
+          borderRadius: 10,
+        }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, flexShrink: 0, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
+          <span style={{ flex: 1, fontSize: 14, color: UI.ink, fontWeight: 500 }}>
+            {s.user_name}
+          </span>
+          <span className="display-it" style={{ fontSize: 14, color: UI.inkSoft }}>
+            {s.day_name}
+          </span>
+          <span className="num" style={{ fontSize: 13, color: UI.gold, minWidth: 36, textAlign: 'right' }}>
+            {s.sets_done}/{s.sets_total}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── HOME ─────────────────────────────────────────────────────────────
 function HomeScreen({ store, setStore, go }) {
   const [confirmEl, confirm] = useConfirm();
@@ -482,6 +527,8 @@ function HomeScreen({ store, setStore, go }) {
       })()}
 
       <div style={{ flex: 1, minHeight: 0, padding: '16px 22px 18px', display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
+
+        <ActiveSessionsWidget store={store} />
 
         {/* Period navigation */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
