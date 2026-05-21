@@ -5,11 +5,24 @@
 
 const { useState: useStateT, useEffect: useEffectT, useRef: useRefT } = React;
 
-function KgInput({ value, onChange, done, style }) {
+function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }) {
   const fmt = v => v != null ? String(v).replace('.', ',') : '';
   const [raw, setRaw] = useStateT(() => fmt(value));
   const focused = useRefT(false);
-  useEffectT(() => { if (!focused.current) setRaw(fmt(value)); }, [value]);
+  useEffectT(() => { if (!focused.current && !isKbActive) setRaw(fmt(value)); }, [value, isKbActive]);
+
+  if (onActivate !== undefined) {
+    return (
+      <input
+        type="text" readOnly
+        value={isKbActive ? kbRaw : fmt(value)}
+        placeholder="—"
+        disabled={done}
+        style={{ ...style, caretColor: 'transparent', userSelect: 'none' }}
+        onPointerDown={e => { e.preventDefault(); if (!done) onActivate(); }}
+      />
+    );
+  }
   return (
     <input
       type="text" inputMode="decimal"
@@ -29,6 +42,136 @@ function KgInput({ value, onChange, done, style }) {
         if (str === '' || !isNaN(num)) onChange(num ?? null);
       }}
     />
+  );
+}
+
+// ─── Plate Calculator ────────────────────────────────────────────────
+const PLATES_KG = [20, 10, 5, 2.5, 1.25, 0.75, 0.5, 0.25];
+const PLATE_COLORS = { 20:'#c0392b', 10:'#27ae60', 5:'#d4a017', 2.5:'#2980b9', 1.25:'#7f8c8d', 0.75:'#e67e22', 0.5:'#bdc3c7', 0.25:'#95a5a6' };
+
+function calcPlates(weight) {
+  const result = [];
+  let rem = Math.round(weight * 1000) / 1000;
+  for (const p of PLATES_KG) {
+    const n = Math.floor(rem / p + 1e-9);
+    if (n > 0) { result.push({ p, n }); rem = Math.round((rem - p * n) * 1000) / 1000; }
+  }
+  return { plates: result, remainder: rem };
+}
+
+function PlateCalcSheet({ open, onClose, initialWeight }) {
+  const [tab, setTab] = useStateT(0);
+  const [raw, setRaw] = useStateT('');
+  const prevOpen = useRefT(false);
+  useEffectT(() => {
+    if (open && !prevOpen.current)
+      setRaw(initialWeight != null ? String(initialWeight).replace('.', ',') : '');
+    prevOpen.current = open;
+  }, [open, initialWeight]);
+
+  const target = parseFloat(raw.replace(',', '.')) || 0;
+  const perSide = tab === 0 ? target / 2 : target;
+  const { plates, remainder } = calcPlates(perSide);
+
+  const tabBtn = (label, i) => (
+    <button key={i} onClick={() => setTab(i)} style={{
+      flex: 1, padding: '8px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
+      background: tab === i ? 'var(--accent)' : UI.bgInset,
+      color: tab === i ? '#0a0805' : UI.inkFaint,
+      fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', fontWeight: 700,
+    }}>{label}</button>
+  );
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Plate Calculator">
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+        {['DUAL SIDE', 'SINGLE'].map((l, i) => tabBtn(l, i))}
+      </div>
+      <input
+        type="text" inputMode="decimal"
+        value={raw} placeholder="Target kg"
+        onChange={e => setRaw(e.target.value)}
+        style={{
+          width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+          borderRadius: 8, padding: '10px 12px', color: UI.ink,
+          fontFamily: UI.fontNum, fontSize: 18, outline: 'none', boxSizing: 'border-box',
+        }}
+      />
+      {tab === 0 && target > 0 && (
+        <div className="micro" style={{ marginTop: 6, textAlign: 'center' }}>
+          PER SIDE — <span className="num" style={{ color: UI.gold }}>{perSide}</span> KG
+        </div>
+      )}
+      {target > 0 && (
+        <div style={{ marginTop: 14 }}>
+          {plates.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {plates.flatMap(({ p, n }) =>
+                Array(n).fill(null).map((_, i) => (
+                  <div key={`${p}-${i}`} style={{
+                    width: 48, height: 48, borderRadius: 8,
+                    background: PLATE_COLORS[p] || UI.bgInset,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: UI.fontNum, fontWeight: 700, fontSize: 12,
+                    color: p <= 0.5 ? '#0a0805' : '#fff',
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                  }}>{p}</div>
+                ))
+              )}
+            </div>
+          ) : (
+            <div className="micro" style={{ textAlign: 'center', color: UI.inkFaint }}>NO PLATES NEEDED</div>
+          )}
+          {remainder > 0.01 && (
+            <div className="micro" style={{ marginTop: 10, color: UI.danger }}>
+              CANNOT REACH EXACTLY — {remainder} KG MISSING
+            </div>
+          )}
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+// ─── Custom Keyboard ──────────────────────────────────────────────────
+function CustomKeyboard({ visible, field, kbRaw, onType, onBackspace, onAdjust, onConfirm, onDismiss, onPlateCalc }) {
+  if (!visible) return null;
+  const isKg = field === 'kg';
+  const base = {
+    background: 'var(--bg-raised)', border: `0.5px solid var(--hair)`, borderRadius: 10,
+    color: 'var(--ink)', fontFamily: '"JetBrains Mono", monospace', fontSize: 20, fontWeight: 500,
+    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    height: 50, WebkitTapHighlightColor: 'transparent', userSelect: 'none', padding: 0,
+  };
+  const action = { ...base, background: 'var(--bg-inset)', color: 'var(--ink-soft)', fontSize: 15, fontFamily: '"Inter", sans-serif' };
+  const confirm = { ...base, gridColumn: '4', gridRow: '1 / span 4', height: '100%', background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', fontSize: 22, fontWeight: 700, borderColor: 'var(--accent-deep)' };
+
+  return (
+    <div style={{
+      position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 300,
+      background: 'var(--bg)', borderTop: `0.5px solid var(--hair)`,
+      padding: `8px 10px calc(env(safe-area-inset-bottom, 0px) + 8px)`,
+    }}>
+      <div style={{ maxWidth: 480, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gridTemplateRows: 'repeat(4, 50px)', gap: 6 }}>
+        <button style={action} onClick={onDismiss}>⌄</button>
+        <button style={action} onClick={onPlateCalc}><i className="fa-solid fa-dumbbell" style={{ fontSize: 12 }} /></button>
+        <button style={action} onClick={() => onAdjust(1)}>↑</button>
+        <button style={confirm} onClick={onConfirm}>✓</button>
+
+        {[7,8,9].map(n => <button key={n} style={base} onClick={() => onType(String(n))}>{n}</button>)}
+
+        <button style={action} onClick={() => onAdjust(-1)}>↓</button>
+        {[4,5,6].map(n => <button key={n} style={base} onClick={() => onType(String(n))}>{n}</button>)}
+
+        {[1,2,3].map(n => <button key={n} style={base} onClick={() => onType(String(n))}>{n}</button>)}
+
+        <button style={{ ...base, color: isKg ? 'var(--ink)' : 'var(--ink-faint)' }} onClick={() => isKg && onType(',')}>
+          {isKg ? ',' : ''}
+        </button>
+        <button style={base} onClick={() => onType('0')}>0</button>
+        <button style={action} onClick={onBackspace}>⌫</button>
+      </div>
+    </div>
   );
 }
 
@@ -58,6 +201,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const entry = session.entries[exIdx];
   const exercise = entry ? LB.findExercise(store, entry.exId) : null;
   const last = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayId) : null;
+  const isUnilateral = !!exercise?.unilateral;
 
   const updateSession = (fn) => {
     setStore(s => ({
@@ -324,6 +468,100 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [planDiffOpen, setPlanDiffOpen] = useStateT(false);
   const [planDiff, setPlanDiff] = useStateT([]);
   const [swapOpen, setSwapOpen] = useStateT(false);
+  const [kbField, setKbField] = useStateT(null); // { setIdx, field }
+  const [kbRaw, setKbRaw] = useStateT('');
+  const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
+
+  useEffectT(() => { setKbField(null); setKbRaw(''); }, [exIdx, sessionId]);
+
+  const activateKb = (setIdx, field) => {
+    const s = (store.sessions.find(x => x.id === sessionId)?.entries[exIdx]?.sets[setIdx]);
+    const val = field === 'kg'
+      ? (s?.kg != null ? String(s.kg).replace('.', ',') : '')
+      : (s?.[field] != null ? String(s[field]) : '');
+    setKbField({ setIdx, field });
+    setKbRaw(val);
+  };
+
+  const kbApply = (newRaw, field, setIdx) => {
+    if (field === 'kg') {
+      const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
+      if (newRaw === '' || !isNaN(num)) {
+        updateSession(sess => ({
+          ...sess,
+          entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+            ...en,
+            sets: en.sets.map((st, si) =>
+              si === setIdx ? { ...st, kg: num ?? null, done: false }
+              : si > setIdx && !st.done ? { ...st, kg: num ?? null }
+              : st
+            ),
+          }),
+        }));
+      }
+    } else {
+      const num = newRaw === '' ? null : parseInt(newRaw, 10);
+      if (newRaw === '' || !isNaN(num)) updateSet(setIdx, { [field]: num ?? null, done: false });
+    }
+  };
+
+  const kbTypeChar = (char) => {
+    if (!kbField) return;
+    const { setIdx, field } = kbField;
+    if (char === ',' && (field !== 'kg' || kbRaw.includes(','))) return;
+    const newRaw = kbRaw + char;
+    setKbRaw(newRaw);
+    kbApply(newRaw, field, setIdx);
+  };
+
+  const kbBackspace = () => {
+    if (!kbField) return;
+    const { setIdx, field } = kbField;
+    const newRaw = kbRaw.slice(0, -1);
+    setKbRaw(newRaw);
+    kbApply(newRaw, field, setIdx);
+  };
+
+  const kbAdjust = (dir) => {
+    if (!kbField) return;
+    const { setIdx, field } = kbField;
+    if (field === 'kg') {
+      const cur = parseFloat(kbRaw.replace(',', '.')) || 0;
+      const next = Math.max(0, Math.round((cur + dir * 1.25) * 100) / 100);
+      const newRaw = String(next).replace('.', ',');
+      setKbRaw(newRaw);
+      updateSession(sess => ({
+        ...sess,
+        entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+          ...en,
+          sets: en.sets.map((st, si) =>
+            si === setIdx ? { ...st, kg: next, done: false }
+            : si > setIdx && !st.done ? { ...st, kg: next }
+            : st
+          ),
+        }),
+      }));
+    } else {
+      const cur = parseInt(kbRaw, 10) || 0;
+      const next = Math.max(0, cur + dir);
+      setKbRaw(String(next));
+      updateSet(setIdx, { [field]: next, done: false });
+    }
+  };
+
+  const kbConfirm = () => {
+    if (!kbField) return;
+    const { setIdx, field } = kbField;
+    if (field === 'kg') {
+      activateKb(setIdx, isUnilateral ? 'repsL' : 'reps');
+    } else if (field === 'repsL') {
+      activateKb(setIdx, 'repsR');
+    } else {
+      setKbField(null);
+      setKbRaw('');
+      completeSet(setIdx);
+    }
+  };
 
   const saveExNote = () => {
     setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === entry.exId ? { ...e, note: exNoteVal.trim() } : e) }));
@@ -412,7 +650,6 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const heroSet = currentSetIdx >= 0 ? entry.sets[currentSetIdx] : null;
   const prevHeroSet = last?.entry?.sets?.[currentSetIdx >= 0 ? currentSetIdx : 0];
 
-  const isUnilateral = !!exercise?.unilateral;
   const anyMissingData = entry.sets.some(st => !st.done && (st.kg == null || (isUnilateral ? (!st.repsL || !st.repsR) : !st.reps)));
 
   const checkAllSets = async () => {
@@ -605,6 +842,9 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                       letterSpacing: '-0.02em',
                       textAlign: 'center', width: '100%', padding: 0,
                     }}
+                    onActivate={() => activateKb(currentSetIdx, 'kg')}
+                    kbRaw={kbRaw}
+                    isKbActive={kbField?.setIdx === currentSetIdx && kbField?.field === 'kg'}
                     onChange={kg => updateSession(sess => ({
                       ...sess,
                       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
@@ -623,35 +863,32 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                 {isUnilateral ? (
                   <div style={{ flex: 1, display: 'flex', gap: 4 }}>
                     <div style={{ flex: 1, textAlign: 'center' }}>
-                      <input
-                        type="number" inputMode="numeric"
-                        value={heroSet.repsL ?? ''} placeholder="—"
-                        onFocus={e => e.target.select()}
-                        onChange={e => updateSet(currentSetIdx, { repsL: e.target.value === '' ? null : +e.target.value, done: false })}
-                        style={{ background: 'transparent', border: 'none', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0 }}
+                      <input readOnly type="text"
+                        value={kbField?.setIdx === currentSetIdx && kbField?.field === 'repsL' ? kbRaw : (heroSet.repsL ?? '')}
+                        placeholder="—"
+                        style={{ background: 'transparent', border: 'none', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent' }}
+                        onPointerDown={e => { e.preventDefault(); activateKb(currentSetIdx, 'repsL'); }}
                       />
                       <div className="micro" style={{ marginTop: 2 }}>LEFT</div>
                     </div>
                     <div style={{ fontSize: 22, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 200, alignSelf: 'flex-start', marginTop: 10 }}>/</div>
                     <div style={{ flex: 1, textAlign: 'center' }}>
-                      <input
-                        type="number" inputMode="numeric"
-                        value={heroSet.repsR ?? ''} placeholder="—"
-                        onFocus={e => e.target.select()}
-                        onChange={e => updateSet(currentSetIdx, { repsR: e.target.value === '' ? null : +e.target.value, done: false })}
-                        style={{ background: 'transparent', border: 'none', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0 }}
+                      <input readOnly type="text"
+                        value={kbField?.setIdx === currentSetIdx && kbField?.field === 'repsR' ? kbRaw : (heroSet.repsR ?? '')}
+                        placeholder="—"
+                        style={{ background: 'transparent', border: 'none', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent' }}
+                        onPointerDown={e => { e.preventDefault(); activateKb(currentSetIdx, 'repsR'); }}
                       />
                       <div className="micro" style={{ marginTop: 2 }}>RIGHT</div>
                     </div>
                   </div>
                 ) : (
                   <div style={{ flex: 1, textAlign: 'center' }}>
-                    <input
-                      type="number" inputMode="numeric"
-                      value={heroSet.reps ?? ''} placeholder="—"
-                      onFocus={e => e.target.select()}
-                      onChange={e => updateSet(currentSetIdx, { reps: e.target.value === '' ? null : +e.target.value, done: false })}
-                      style={{ background: 'transparent', border: 'none', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0 }}
+                    <input readOnly type="text"
+                      value={kbField?.setIdx === currentSetIdx && kbField?.field === 'reps' ? kbRaw : (heroSet.reps ?? '')}
+                      placeholder="—"
+                      style={{ background: 'transparent', border: 'none', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent' }}
+                      onPointerDown={e => { e.preventDefault(); activateKb(currentSetIdx, 'reps'); }}
                     />
                     <div className="micro" style={{ marginTop: 2 }}>REPETITIONS</div>
                   </div>
@@ -728,6 +965,9 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                     value={s.kg}
                     done={s.done || s.skipped}
                     style={setInputStyle(s.done || s.skipped, isCurrent)}
+                    onActivate={() => activateKb(i, 'kg')}
+                    kbRaw={kbRaw}
+                    isKbActive={kbField?.setIdx === i && kbField?.field === 'kg'}
                     onChange={kg => updateSession(sess => ({
                       ...sess,
                       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
@@ -743,11 +983,11 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
                   {isUnilateral ? (
                     <>
-                      <input type="number" inputMode="numeric" value={s.repsL ?? ''} placeholder="L" onFocus={e => e.target.select()} onChange={e => updateSet(i, { repsL: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done || s.skipped} style={setInputStyle(s.done || s.skipped, isCurrent)} />
-                      <input type="number" inputMode="numeric" value={s.repsR ?? ''} placeholder="R" onFocus={e => e.target.select()} onChange={e => updateSet(i, { repsR: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done || s.skipped} style={setInputStyle(s.done || s.skipped, isCurrent)} />
+                      <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent' }} onPointerDown={e => { e.preventDefault(); if (!s.done && !s.skipped) activateKb(i, 'repsL'); }} />
+                      <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent' }} onPointerDown={e => { e.preventDefault(); if (!s.done && !s.skipped) activateKb(i, 'repsR'); }} />
                     </>
                   ) : (
-                    <input type="number" inputMode="numeric" value={s.reps ?? ''} placeholder="—" onFocus={e => e.target.select()} onChange={e => updateSet(i, { reps: e.target.value === '' ? null : +e.target.value, done: false })} disabled={s.done || s.skipped} style={setInputStyle(s.done || s.skipped, isCurrent)} />
+                    <input readOnly type="text" value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder="—" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent' }} onPointerDown={e => { e.preventDefault(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
                   )}
 
                   <button onClick={() => s.skipped ? updateSet(i, { skipped: false }) : s.done ? updateSet(i, { done: false }) : completeSet(i)}
@@ -995,7 +1235,29 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         </div>
       </Sheet>
 
+      {kbField && <div style={{ height: 300 }} />}
+
       {confirmEl}
+
+      <CustomKeyboard
+        visible={!!kbField}
+        field={kbField?.field}
+        kbRaw={kbRaw}
+        onType={kbTypeChar}
+        onBackspace={kbBackspace}
+        onAdjust={kbAdjust}
+        onConfirm={kbConfirm}
+        onDismiss={() => { setKbField(null); setKbRaw(''); }}
+        onPlateCalc={() => setPlateCalcOpen(true)}
+      />
+
+      <PlateCalcSheet
+        open={plateCalcOpen}
+        onClose={() => setPlateCalcOpen(false)}
+        initialWeight={kbField?.field === 'kg'
+          ? (parseFloat(kbRaw.replace(',', '.')) || null)
+          : (session.entries[exIdx]?.sets[kbField?.setIdx]?.kg ?? null)}
+      />
     </Screen>
   );
 }
