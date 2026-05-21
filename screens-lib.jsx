@@ -1058,24 +1058,35 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
   const volDelta = prevSameDay != null ? vol - totalVolume(prevSameDay) : null;
 
+  const exIsUnilateral = (exId) => !!store.exercises.find(x => x.id === exId)?.unilateral;
+  const prReps = (st, exId) => exIsUnilateral(exId)
+    ? Math.min(st.repsL ?? 0, st.repsR ?? 0)
+    : (st.reps ?? 0);
+  const prRepsValid = (st, exId) => exIsUnilateral(exId)
+    ? (st.repsL != null && st.repsR != null)
+    : st.reps != null;
+
   const prMap = {};
   store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended).forEach(sess =>
-    sess.entries.forEach(e => e.sets.filter(st => st.done && st.kg != null && st.reps != null).forEach(st => {
+    sess.entries.forEach(e => e.sets.filter(st => st.done && st.kg != null && prRepsValid(st, e.exId)).forEach(st => {
       const cur = prMap[e.exId];
-      if (!cur || st.kg > cur.kg || (st.kg === cur.kg && st.reps > cur.reps)) prMap[e.exId] = { kg: st.kg, reps: st.reps };
+      const reps = prReps(st, e.exId);
+      if (!cur || st.kg > cur.kg || (st.kg === cur.kg && reps > cur.reps)) prMap[e.exId] = { kg: st.kg, reps };
     }))
   );
   const sessionBestMap = {};
-  s.entries.forEach(e => e.sets.filter(st => st.done && st.kg != null && st.reps != null).forEach(st => {
+  s.entries.forEach(e => e.sets.filter(st => st.done && st.kg != null && prRepsValid(st, e.exId)).forEach(st => {
     const cur = sessionBestMap[e.exId];
-    if (!cur || st.kg > cur.kg || (st.kg === cur.kg && st.reps > cur.reps)) sessionBestMap[e.exId] = { kg: st.kg, reps: st.reps };
+    const reps = prReps(st, e.exId);
+    if (!cur || st.kg > cur.kg || (st.kg === cur.kg && reps > cur.reps)) sessionBestMap[e.exId] = { kg: st.kg, reps };
   }));
   const isPR = (st, exId) => {
-    if (!st.done || st.kg == null || st.reps == null) return false;
+    if (!st.done || st.kg == null || !prRepsValid(st, exId)) return false;
+    const reps = prReps(st, exId);
     const sessionBest = sessionBestMap[exId];
-    if (!sessionBest || st.kg !== sessionBest.kg || st.reps !== sessionBest.reps) return false;
+    if (!sessionBest || st.kg !== sessionBest.kg || reps !== sessionBest.reps) return false;
     const best = prMap[exId];
-    return !best || st.kg > best.kg || (st.kg === best.kg && st.reps > best.reps);
+    return !best || st.kg > best.kg || (st.kg === best.kg && reps > best.reps);
   };
 
   const muscleGroups = [...new Set(

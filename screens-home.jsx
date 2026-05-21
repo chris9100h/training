@@ -611,7 +611,7 @@ function HomeScreen({ store, setStore, go }) {
             <div className="micro-gold" style={{ marginBottom: 6 }}>{cardLabel}</div>
             <div className="display" style={{
               fontSize: 56, color: UI.gold,
-              fontWeight: 300, fontStyle: 'italic',
+              fontWeight: 400, fontStyle: 'italic',
               letterSpacing: '0.04em', lineHeight: 1, marginBottom: 24,
             }}>
               {activeDay.name}
@@ -715,7 +715,12 @@ function HomeScreen({ store, setStore, go }) {
 
 function totalVolume(session) {
   return session.entries.reduce((sum, ex) =>
-    sum + (ex.sets || []).reduce((s, st) => s + (+st.kg || 0) * (+st.reps || 0), 0), 0
+    sum + (ex.sets || []).reduce((s, st) => {
+      const reps = (st.repsL != null || st.repsR != null)
+        ? Math.min(st.repsL ?? 0, st.repsR ?? 0)
+        : (+st.reps || 0);
+      return s + (+st.kg || 0) * reps;
+    }, 0), 0
   );
 }
 
