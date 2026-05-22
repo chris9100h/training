@@ -309,6 +309,13 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     if (repsA == null || repsB == null) return false;
     return (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB);
   };
+  const isDecline = (st, prevSet) => {
+    if (!prevSet || !st || st.skipped || prevSet.skipped) return false;
+    if (st.kg == null || prevSet.kg == null) return false;
+    const rA = effReps(st); const rB = effReps(prevSet);
+    if (rA == null || rB == null) return false;
+    return st.kg < prevSet.kg || (st.kg === prevSet.kg && rA < rB);
+  };
 
   const completeSet = (setIdx) => {
     updateSet(setIdx, { done: true });
@@ -318,6 +325,12 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     if (isImprovement(entry.sets[setIdx], prevSet)) {
       setImprovedSet(true);
       setTimeout(() => setImprovedSet(false), 2500);
+    } else {
+      const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, last?.entry?.sets?.[k]));
+      if (!anyImprovementBefore && isDecline(entry.sets[setIdx], prevSet)) {
+        setRegressionSet(true);
+        setTimeout(() => setRegressionSet(false), 2500);
+      }
     }
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
     const group = entry.supersetGroup;
@@ -527,6 +540,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
   const [flashSet, setFlashSet] = useStateT(null);
   const [improvedSet, setImprovedSet] = useStateT(false);
+  const [regressionSet, setRegressionSet] = useStateT(false);
   const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(false);
   const [confirmEl, confirm] = useConfirm();
@@ -782,6 +796,29 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           }}>
             <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8), 0 0 80px rgba(201,169,97,0.4)' }}>IMPROVEMENT</span>
+          </div>
+        </div>
+      )}
+      {/* Regression overlay */}
+      {regressionSet && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
+          background: 'radial-gradient(ellipse at center, rgba(200,116,105,0.07) 0%, transparent 70%)',
+          animation: 'improvedFade 2.5s ease forwards',
+          animationFillMode: 'forwards',
+        }}>
+          <div style={{
+            position: 'absolute', inset: 0,
+            animation: 'regressionBorderPulse 0.65s ease-in-out infinite',
+            borderRadius: 0,
+          }} />
+          <div style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            gap: 6,
+          }}>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(200,116,105,0.9), 0 0 70px rgba(200,116,105,0.5)' }}>↓</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.danger, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(200,116,105,1), 0 0 40px rgba(200,116,105,0.8), 0 0 80px rgba(200,116,105,0.4)' }}>REGRESSION</span>
           </div>
         </div>
       )}
