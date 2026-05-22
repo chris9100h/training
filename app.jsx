@@ -287,8 +287,19 @@ function App() {
             // cache. The in-progress session is always kept regardless of its date.
             const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 2);
             const cutoffISO = cutoff.toISOString().slice(0, 10);
+            // Never resurrect ended=null sessions from cache — the localDirty
+            // guard above ensures this branch only runs when no active session
+            // is being written, so any unended local-only session is an orphan.
             const localOnly = (cur.sessions || []).filter(x =>
-              !serverIds.has(x.id) && (x.id === inProgressId || (x.date || '') >= cutoffISO)
+              !serverIds.has(x.id) &&
+              (x.id === inProgressId || (x.date || '') >= cutoffISO) &&
+              x.ended != null
+            );
+            // Drop inProgress if the session is gone from the server and not in
+            // localOnly (would only survive if it somehow has an ended timestamp).
+            const activeExists = inProgressId && (
+              serverIds.has(inProgressId) ||
+              localOnly.some(s => s.id === inProgressId)
             );
             const serverExIds = new Set(fresh.exercises.map(e => e.id));
             const localOnlyExercises = (cur.exercises || []).filter(x => !serverExIds.has(x.id));
@@ -305,7 +316,7 @@ function App() {
               cycleStartDate: cur.cycleStartDate,
               lastAdvancedDate: cur.lastAdvancedDate,
               user: cur.user?.name ? { ...fresh.user, name: cur.user.name } : fresh.user,
-              inProgress: inProgressId,
+              inProgress: activeExists ? inProgressId : null,
               sessions: [...localOnly, ...sessions],
               exercises: [...localOnlyExercises, ...fresh.exercises],
               schedules: [...localOnlySchedules, ...fresh.schedules],

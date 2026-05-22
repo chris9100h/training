@@ -23,7 +23,7 @@ function dbFetch(path: string, options: RequestInit = {}) {
 }
 
 async function isNonceCurrent(nonce: string, userId: string): Promise<boolean> {
-  const r = await dbFetch(`pushover_active?id=eq.${encodeURIComponent(userId)}&select=nonce`);
+  const r = await dbFetch(`zane_pushover_active?id=eq.${encodeURIComponent(userId)}&select=nonce`);
   const rows: { nonce: string }[] = await r.json().catch(() => []);
   return rows[0]?.nonce === nonce;
 }
@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
   // First call only: register this nonce as the currently active one.
   // Relay hops skip this — the nonce is already stored from the initial call.
   if (nonce && !_relay) {
-    await dbFetch('pushover_active', {
+    await dbFetch('zane_pushover_active', {
       method: 'POST',
       headers: { 'Prefer': 'resolution=merge-duplicates' },
       body: JSON.stringify({ id: userId, nonce }),

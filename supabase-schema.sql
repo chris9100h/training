@@ -3,12 +3,12 @@
 
 -- ── Tables ──────────────────────────────────────────────────────────────────
 
-CREATE TABLE IF NOT EXISTS public.profiles (
+CREATE TABLE IF NOT EXISTS public.zane_profiles (
   id   uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   name text NOT NULL DEFAULT ''
 );
 
-CREATE TABLE IF NOT EXISTS public.exercises (
+CREATE TABLE IF NOT EXISTS public.zane_exercises (
   id      text PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name    text NOT NULL DEFAULT '',
@@ -16,14 +16,14 @@ CREATE TABLE IF NOT EXISTS public.exercises (
   note    text NOT NULL DEFAULT ''
 );
 
-CREATE TABLE IF NOT EXISTS public.schedules (
+CREATE TABLE IF NOT EXISTS public.zane_schedules (
   id      text PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name    text NOT NULL DEFAULT '',
   days    jsonb NOT NULL DEFAULT '[]'
 );
 
-CREATE TABLE IF NOT EXISTS public.sessions (
+CREATE TABLE IF NOT EXISTS public.zane_sessions (
   id          text PRIMARY KEY,
   user_id     uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   schedule_id text,
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS public.sessions (
   entries     jsonb NOT NULL DEFAULT '[]'
 );
 
-CREATE TABLE IF NOT EXISTS public.user_settings (
+CREATE TABLE IF NOT EXISTS public.zane_user_settings (
   user_id                 uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   active_schedule_id      text,
   cycle_index             integer NOT NULL DEFAULT 0,
@@ -48,23 +48,23 @@ CREATE TABLE IF NOT EXISTS public.user_settings (
 
 -- ── Row Level Security ───────────────────────────────────────────────────────
 
-ALTER TABLE public.profiles      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.exercises     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.schedules     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.sessions      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.user_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_profiles      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_exercises     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_schedules     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_sessions      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_user_settings ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "own profile"   ON public.profiles      FOR ALL USING (auth.uid() = id);
-CREATE POLICY "own exercises" ON public.exercises     FOR ALL USING (auth.uid() = user_id);
-CREATE POLICY "own schedules" ON public.schedules     FOR ALL USING (auth.uid() = user_id);
-CREATE POLICY "own sessions"  ON public.sessions      FOR ALL USING (auth.uid() = user_id);
-CREATE POLICY "own settings"  ON public.user_settings FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "own profile"   ON public.zane_profiles      FOR ALL USING (auth.uid() = id);
+CREATE POLICY "own exercises" ON public.zane_exercises     FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "own schedules" ON public.zane_schedules     FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "own sessions"  ON public.zane_sessions      FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "own settings"  ON public.zane_user_settings FOR ALL USING (auth.uid() = user_id);
 
 -- ── Pushover cancellation token ─────────────────────────────────────────────
 -- Single-row table; the edge function uses the service role key to read/write it.
 -- No RLS needed — never exposed to clients.
 
-CREATE TABLE IF NOT EXISTS public.pushover_active (
+CREATE TABLE IF NOT EXISTS public.zane_pushover_active (
   id    text PRIMARY KEY DEFAULT 'singleton',
   nonce text NOT NULL DEFAULT ''
 );
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS public.pushover_active (
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS trigger AS $$
 BEGIN
-  INSERT INTO public.user_settings (user_id) VALUES (new.id)
+  INSERT INTO public.zane_user_settings (user_id) VALUES (new.id)
   ON CONFLICT DO NOTHING;
   RETURN new;
 END;

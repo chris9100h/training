@@ -397,6 +397,7 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   // ─── No-plan fallback
   if (!sch) {
+    const hasPlans = store.schedules?.length > 0;
     return (
       <Screen>
         <TopBar
@@ -405,12 +406,21 @@ function HomeScreen({ store, setStore, go, userId }) {
           right={<button onClick={() => go({ name: 'settings' })} style={{ ...btnIcon, fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: '50%', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
         />
         <div style={{ padding: 22 }}>
-          <Empty
-            title="No plan yet"
-            sub="Create a training plan to get started."
-            action={<Btn onClick={() => go({ name: 'schedule-new' })}>Create plan</Btn>}
-            icon={ICON_CALENDAR}
-          />
+          {hasPlans ? (
+            <Empty
+              title="No active plan"
+              sub="You have plans ready — just pick one to activate."
+              action={<Btn onClick={() => go({ name: 'plan' })}>View plans</Btn>}
+              icon={ICON_CALENDAR}
+            />
+          ) : (
+            <Empty
+              title="No plan yet"
+              sub="Create a training plan to get started."
+              action={<Btn onClick={() => go({ name: 'schedule-new' })}>Create plan</Btn>}
+              icon={ICON_CALENDAR}
+            />
+          )}
         </div>
         {confirmEl}
       </Screen>
