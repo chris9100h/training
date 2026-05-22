@@ -210,10 +210,9 @@ function App() {
       }
       reg.addEventListener('updatefound', () => trackWorker(reg.installing));
     });
-    // location.reload() unreliable in iOS PWA standalone mode
     // Only reload when the user explicitly clicked "Update now"
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (intentionalUpdate.current) window.location.href = window.location.href;
+      if (intentionalUpdate.current) window.location.reload(true);
     });
   }, []);
 
