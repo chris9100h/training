@@ -119,7 +119,17 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [selectedSlot, setSelectedSlot] = useState(dayIdx);
 
   const minOffset = (() => {
-    if (weekdayMode) return -8;
+    if (weekdayMode) {
+      if (store.weekPlanStartDate) {
+        const now = new Date(); now.setHours(12, 0, 0, 0);
+        const currentMondayMs = now.getTime() - todayWd * 86400000;
+        const start = new Date(store.weekPlanStartDate + 'T12:00:00');
+        const planMondayMs = start.getTime() - ((start.getDay() + 6) % 7) * 86400000;
+        const week0MondayMs = planMondayMs - 7 * 86400000;
+        return Math.round((week0MondayMs - currentMondayMs) / (7 * 86400000));
+      }
+      return -8;
+    }
     if (cycleWeekView && store.cycleStartDate && dayCount > 0) {
       const now = new Date(); now.setHours(12, 0, 0, 0);
       const currentMondayMs = now.getTime() - todayWd * 86400000;
