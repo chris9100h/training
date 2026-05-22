@@ -134,6 +134,7 @@ function App() {
   const [updateAvailable, setUpdateAvailable] = useStateA(false);
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
+  const swReg                     = useRefA(null);
   const prevStore                 = useRefA(null);
   const syncBase                  = useRefA(null);  // last state confirmed written to Supabase
   const pendingStore              = useRefA(null);  // latest state awaiting sync
@@ -165,6 +166,7 @@ function App() {
       if (!e.persisted) return;
       const ts = localStorage.getItem(KEY);
       if (ts && Date.now() - Number(ts) > THRESHOLD) window.location.reload();
+      swReg.current?.update().catch(() => {});
     };
     // visibilitychange as additional fallback
     const onVisibility = () => {
@@ -172,6 +174,7 @@ function App() {
       else {
         const ts = localStorage.getItem(KEY);
         if (ts && Date.now() - Number(ts) > THRESHOLD) window.location.reload();
+        swReg.current?.update().catch(() => {});
       }
     };
 
@@ -188,7 +191,7 @@ function App() {
   useEffectA(() => {
     if (!('serviceWorker' in navigator)) return;
     navigator.serviceWorker.ready.then(reg => {
-      // iOS PWA won't auto-check for SW updates — force it
+      swReg.current = reg;
       reg.update().catch(() => {});
 
       const trackWorker = (worker) => {
