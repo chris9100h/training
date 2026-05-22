@@ -1548,8 +1548,13 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
           };
           return (
             <div key={ei} style={{ marginBottom: 20 }}>
-              <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.07em', color: UI.inkSoft, marginBottom: 8 }}>
-                {entry.name}
+              <div style={{ display: 'grid', gridTemplateColumns: '20px 1fr 1fr 18px', gap: 10, marginBottom: 6 }}>
+                <span />
+                <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.07em', color: UI.inkSoft }}>
+                  {entry.name}
+                </span>
+                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'left' }}>LAST TIME</span>
+                <span />
               </div>
               {Array.from({ length: maxLen }).map((_, si) => {
                 const curr = sets[si];
@@ -1565,7 +1570,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
                                 : UI.inkFaint;
                 return (
                   <div key={si} style={{
-                    display: 'grid', gridTemplateColumns: '20px 1fr auto 20px',
+                    display: 'grid', gridTemplateColumns: '20px 1fr 1fr 18px',
                     alignItems: 'center', gap: 10, padding: '6px 0',
                     borderBottom: si < maxLen - 1 ? `0.5px solid ${UI.hair}` : 'none',
                   }}>
@@ -1573,11 +1578,9 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
                     <span className="num" style={{ fontSize: 14, color: curr && !curr.skipped ? UI.ink : UI.inkFaint }}>
                       {fmtSet(curr)}
                     </span>
-                    {prev ? (
-                      <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
-                        was {fmtSet(prev)}
-                      </span>
-                    ) : <span />}
+                    <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>
+                      {fmtSet(prev)}
+                    </span>
                     <span style={{ fontSize: 14, color: iconColor, textAlign: 'right' }}>{icon}</span>
                   </div>
                 );
