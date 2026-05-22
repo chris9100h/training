@@ -36,22 +36,50 @@ class ErrorBoundary extends React.Component {
 function UpdateBanner({ onUpdate }) {
   return (
     <div style={{
-      flexShrink: 0,
-      background: UI.goldFaint, borderBottom: `1px solid ${UI.goldSoft}`,
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '8px 16px', gap: 12,
+      position: 'fixed', inset: 0, zIndex: 9999,
+      background: 'rgba(0,0,0,0.72)',
+      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 32,
     }}>
-      <span style={{ fontSize: 13, color: UI.gold, fontFamily: UI.fontUi }}>
-        New version available
-      </span>
-      <button onClick={onUpdate} style={{
-        background: UI.gold, color: '#0a0a0a',
-        border: 'none', borderRadius: 8,
-        padding: '5px 12px', fontSize: 12, fontWeight: 600,
-        fontFamily: UI.fontUi, cursor: 'pointer', flexShrink: 0,
+      <div style={{
+        width: '100%', maxWidth: 320,
+        background: UI.bgRaised,
+        border: `0.5px solid ${UI.goldSoft}`,
+        borderRadius: 20,
+        padding: '32px 28px',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        gap: 10, textAlign: 'center',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(201,169,97,0.2)',
       }}>
-        Update now
-      </button>
+        <div style={{
+          width: 48, height: 48, borderRadius: '50%',
+          background: UI.goldFaint,
+          border: `0.5px solid ${UI.goldSoft}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          marginBottom: 6,
+        }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={UI.gold} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2v10m0 0l-3-3m3 3l3-3"/><path d="M3 17v1a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3v-1"/>
+          </svg>
+        </div>
+        <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 400 }}>
+          New version available
+        </div>
+        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+          A fresh update is ready to install. This only takes a second.
+        </div>
+        <button onClick={onUpdate} style={{
+          marginTop: 10, width: '100%', padding: '14px 0',
+          borderRadius: 12, border: 'none', cursor: 'pointer',
+          background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+          boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
+          color: '#0a0805', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
+          letterSpacing: '0.06em',
+        }}>
+          UPDATE NOW
+        </button>
+      </div>
     </div>
   );
 }
@@ -105,6 +133,9 @@ function App() {
   const [route, setRoute]         = useStateA({ name: 'home' });
   const [updateAvailable, setUpdateAvailable] = useStateA(false);
   const waitingWorker             = useRefA(null);
+  const intentionalUpdate         = useRefA(false);
+  const swReg                     = useRefA(null);
+  const lastSeenSWVersion         = useRefA(null);
   const prevStore                 = useRefA(null);
   const syncBase                  = useRefA(null);  // last state confirmed written to Supabase
   const pendingStore              = useRefA(null);  // latest state awaiting sync
@@ -136,6 +167,7 @@ function App() {
       if (!e.persisted) return;
       const ts = localStorage.getItem(KEY);
       if (ts && Date.now() - Number(ts) > THRESHOLD) window.location.reload();
+      swReg.current?.update().catch(() => {});
     };
     // visibilitychange as additional fallback
     const onVisibility = () => {
@@ -143,6 +175,7 @@ function App() {
       else {
         const ts = localStorage.getItem(KEY);
         if (ts && Date.now() - Number(ts) > THRESHOLD) window.location.reload();
+        swReg.current?.update().catch(() => {});
       }
     };
 
@@ -159,7 +192,7 @@ function App() {
   useEffectA(() => {
     if (!('serviceWorker' in navigator)) return;
     navigator.serviceWorker.ready.then(reg => {
-      // iOS PWA won't auto-check for SW updates — force it
+      swReg.current = reg;
       reg.update().catch(() => {});
 
       const trackWorker = (worker) => {
@@ -178,13 +211,22 @@ function App() {
       reg.addEventListener('updatefound', () => trackWorker(reg.installing));
     });
     // location.reload() unreliable in iOS PWA standalone mode
+    // Only reload when the user explicitly clicked "Update now"
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      window.location.href = window.location.href;
+      if (intentionalUpdate.current) window.location.href = window.location.href;
     });
   }, []);
 
   const applyUpdate = useCallbackA(() => {
-    waitingWorker.current?.postMessage({ type: 'SKIP_WAITING' });
+    if (waitingWorker.current) {
+      intentionalUpdate.current = true;
+      waitingWorker.current.postMessage({ type: 'SKIP_WAITING' });
+    } else {
+      // No waiting worker — SW already up to date. Dismiss the stale overlay
+      // and attempt a reload so the page runs the freshest cached assets.
+      setUpdateAvailable(false);
+      window.location.href = window.location.href;
+    }
   }, []);
 
   // Push pending local changes to Supabase. Serialized; on failure syncBase is
@@ -329,6 +371,28 @@ function App() {
     flushSync(userId);
   }, [store]);
 
+  // Check for SW updates on every screen navigation.
+  // Fetches sw.js directly from the network (bypassing the SW cache via ?_v=)
+  // and compares the CACHE version string. iOS Safari ignores reg.update() when
+  // the app is in the foreground, so this is the only reliable detection path.
+  useEffectA(() => {
+    fetch(`/training/sw.js?_v=${Date.now()}`)
+      .then(r => r.text())
+      .then(text => {
+        const m = text.match(/const CACHE = '([^']+)'/);
+        if (!m) return;
+        const v = m[1];
+        if (!lastSeenSWVersion.current) {
+          lastSeenSWVersion.current = v;
+        } else if (v !== lastSeenSWVersion.current) {
+          lastSeenSWVersion.current = v;
+          setUpdateAvailable(true);
+          swReg.current?.update().catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }, [route]);
+
   // Retry a failed sync as soon as connectivity returns
   useEffectA(() => {
     const onOnline = () => { if (userId) flushSync(userId); };
@@ -365,6 +429,7 @@ function App() {
     case 'hist':          screen = <window.Screens.HistoryScreen {...props} initialTab={route.initialTab} />; break;
     case 'session':       screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'settings':      screen = <window.Screens.SettingsScreen {...props} />; break;
+    case 'spectator':     screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} />; break;
     default:              screen = <window.Screens.HomeScreen {...props} />; break;
   }
 

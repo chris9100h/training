@@ -1477,6 +1477,219 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   );
 }
 
+// ─── SPECTATOR ───────────────────────────────────────────────────────
+function inferCurrentExIdx(entries) {
+  if (!entries?.length) return 0;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].sets?.some(s => s.done)) return i;
+  }
+  return 0;
+}
+
+function SpectatorScreen({ go, targetUserId, userName }) {
+  const [session, setSession] = useStateL(null);
+  const [exIdx, setExIdx] = useStateL(0);
+  const [loading, setLoading] = useStateL(true);
+  const [ended, setEnded] = useStateL(false);
+  const [now, setNow] = useStateL(Date.now());
+  const chipRowRef = useRefL(null);
+
+  useEffectL(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const load = () => {
+    LB.supabase.rpc('get_active_session_detail', { p_user_id: targetUserId })
+      .then(({ data }) => {
+        if (!data?.length) {
+          if (!loading) setEnded(true);
+          setSession(null);
+        } else {
+          const d = data[0];
+          setSession(d);
+          setEnded(false);
+          setExIdx(inferCurrentExIdx(d.entries || []));
+        }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  };
+
+  useEffectL(() => {
+    load();
+    const iv = setInterval(load, 2000);
+    return () => clearInterval(iv);
+  }, [targetUserId]);
+
+  useEffectL(() => {
+    const row = chipRowRef.current;
+    if (!row) return;
+    const chip = row.children[exIdx];
+    if (chip) chip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }, [exIdx]);
+
+  const elapsed = session?.started_at
+    ? Math.floor((now - new Date(session.started_at).getTime()) / 1000)
+    : 0;
+  const elapsedStr = elapsed >= 3600
+    ? `${Math.floor(elapsed/3600)}:${String(Math.floor((elapsed%3600)/60)).padStart(2,'0')}:${String(elapsed%60).padStart(2,'0')}`
+    : `${String(Math.floor(elapsed/60)).padStart(2,'0')}:${String(elapsed%60).padStart(2,'0')}`;
+
+  if (loading) return (
+    <Screen scroll={false} style={{ justifyContent: 'center', alignItems: 'center' }}>
+      <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div>
+    </Screen>
+  );
+
+  if (!session) return (
+    <Screen>
+      <TopBar title={userName} onBack={() => go({ name: 'settings' })} />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
+        <div style={{ fontSize: 32, color: UI.inkGhost }}>✓</div>
+        <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, color: UI.inkSoft }}>
+          {ended ? 'Session ended' : 'Not training right now'}
+        </div>
+        <div className="micro" style={{ color: UI.inkFaint }}>
+          {ended ? `${userName} has finished their workout.` : `${userName} has no active session.`}
+        </div>
+      </div>
+    </Screen>
+  );
+
+  const entries = session.entries || [];
+  const entry = entries[exIdx];
+
+  return (
+    <Screen scroll={false} style={{ position: 'relative' }}>
+      {/* TopBar */}
+      <div style={{
+        flexShrink: 0,
+        padding: `calc(env(safe-area-inset-top, 0px) + 14px) 22px 14px`,
+        borderBottom: `0.5px solid ${UI.hair}`,
+        position: 'sticky', top: 0, zIndex: 5,
+        background: 'rgba(var(--bg-rgb),0.9)',
+        backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+        display: 'flex', alignItems: 'center', gap: 12,
+      }}>
+        <button onClick={() => go({ name: 'settings' })} style={{
+          width: 32, height: 32, borderRadius: '50%',
+          border: `0.5px solid ${UI.hairStrong}`, background: 'transparent',
+          color: UI.gold, cursor: 'pointer', flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <svg width="9" height="14" viewBox="0 0 9 14" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"><path d="M7 1 1 7l6 6"/></svg>
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
+            {userName}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+            <span className="micro" style={{ color: UI.inkSoft }}>{session.day_name}</span>
+            <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{elapsedStr}</span>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
+          <span className="micro" style={{ color: UI.gold }}>LIVE</span>
+        </div>
+      </div>
+
+      {/* Exercise chips */}
+      <div ref={chipRowRef} style={{
+        flexShrink: 0, display: 'flex', gap: 6, overflowX: 'auto',
+        padding: '10px 16px', borderBottom: `0.5px solid ${UI.hair}`,
+        scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch',
+      }}>
+        {entries.map((e, i) => {
+          const allDone = e.sets?.length > 0 && e.sets.every(s => s.done || s.skipped);
+          const isCurrent = i === exIdx;
+          return (
+            <button key={i} onClick={() => setExIdx(i)} style={{
+              flexShrink: 0, padding: '6px 12px', borderRadius: 999,
+              border: `${isCurrent ? '1.5px' : '0.5px'} solid ${isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.hair}`,
+              background: isCurrent ? UI.goldFaint : allDone ? 'rgba(201,169,97,0.06)' : 'transparent',
+              color: isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.inkSoft,
+              fontFamily: UI.fontUi, fontSize: 12, fontWeight: isCurrent ? 600 : 400,
+              letterSpacing: '0.06em', cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              {e.name?.split(' ').slice(0, 2).join(' ')}
+              {allDone && !isCurrent && (
+                <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ marginLeft: 4, verticalAlign: 'middle' }}>
+                  <path d="M2 6l2.5 2.5L10 3"/>
+                </svg>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Sets */}
+      {entry && (
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 22px' }}>
+          <div style={{ marginBottom: 18 }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>
+              EXERCISE {exIdx + 1} OF {entries.length}
+            </div>
+            <div className="display" style={{ fontSize: 28, color: UI.ink, fontWeight: 400 }}>{entry.name}</div>
+            <div className="micro" style={{ marginTop: 4, color: UI.inkSoft }}>
+              {entry.plannedSets} SETS · {entry.plannedReps} REPS PLANNED
+            </div>
+          </div>
+
+          <Frame style={{ padding: '0 16px' }}>
+            {(entry.sets || []).map((s, i) => {
+              const done = s.done || s.skipped;
+              const unilateral = s.repsL != null || s.repsR != null;
+              return (
+                <div key={i} style={{
+                  display: 'grid', gridTemplateColumns: '20px 1fr 1fr 20px',
+                  alignItems: 'center', gap: 10, padding: '13px 0',
+                  borderBottom: i < entry.sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                  opacity: done ? 1 : 0.35,
+                  transition: 'opacity 0.3s',
+                }}>
+                  <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                    <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>
+                      {s.kg != null ? s.kg : '—'}
+                    </span>
+                    {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em' }}>kg</span>}
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    {unilateral ? (
+                      <span className="num" style={{ fontSize: 14, color: UI.ink }}>
+                        {s.repsL ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 11 }}> / </span>{s.repsR ?? '—'}
+                      </span>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, justifyContent: 'center' }}>
+                        <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>
+                          {s.reps != null ? s.reps : '—'}
+                        </span>
+                        {s.reps != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em' }}>reps</span>}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    {done ? (
+                      <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8">
+                        <path d="M2 6l2.5 2.5L10 3"/>
+                      </svg>
+                    ) : (
+                      <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </Frame>
+        </div>
+      )}
+    </Screen>
+  );
+}
+
 // ─── SETTINGS ────────────────────────────────────────────────────────
 function SettingsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
@@ -1714,16 +1927,23 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 {activeSessions.length === 0 ? (
                   <div className="micro" style={{ color: UI.inkFaint, padding: '6px 0' }}>Nobody training right now.</div>
                 ) : activeSessions.map((s, i) => (
-                  <div key={i} style={{
-                    display: 'grid', gridTemplateColumns: '14px 1fr 1fr 1fr',
-                    alignItems: 'center', gap: 10,
-                    padding: '9px 0',
-                    borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none',
-                  }}>
+                  <div key={i}
+                    onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name })}
+                    style={{
+                      display: 'grid', gridTemplateColumns: '14px 1fr 1fr 1fr',
+                      alignItems: 'center', gap: 10,
+                      padding: '9px 0',
+                      borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none',
+                      cursor: 'pointer',
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>
                     <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
                     <span style={{ fontSize: 14, color: UI.ink, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
                     <span className="display-it" style={{ fontSize: 14, color: UI.inkSoft, textAlign: 'center' }}>{s.day_name}</span>
-                    <span className="num" style={{ fontSize: 13, color: UI.gold, textAlign: 'right' }}>{s.sets_done}/{s.sets_total}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                      <span className="num" style={{ fontSize: 13, color: UI.gold }}>{s.sets_done}/{s.sets_total}</span>
+                      <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round"><path d="M1 1l4 4-4 4"/></svg>
+                    </div>
                   </div>
                 ))}
 
@@ -1986,4 +2206,4 @@ function SettingsScreen({ store, setStore, go, userId }) {
   );
 }
 
-Object.assign(window.Screens, { LibraryScreen, ExerciseCreator, ExerciseDetailScreen, HistoryScreen, SessionDetailScreen, SettingsScreen });
+Object.assign(window.Screens, { LibraryScreen, ExerciseCreator, ExerciseDetailScreen, HistoryScreen, SessionDetailScreen, SettingsScreen, SpectatorScreen });
