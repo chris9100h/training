@@ -237,7 +237,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         startMonday.setDate(start.getDate() - ((start.getDay() + 6) % 7));
         startMonday.setHours(12, 0, 0, 0);
         const weekNum = Math.floor(Math.round((monday - startMonday) / 86400000) / 7) + 1;
-        if (weekNum >= 1) return `WEEK ${weekNum}`;
+        if (weekNum >= 0) return `WEEK ${weekNum}`;
       }
       if (weekOffset === 0) return 'THIS WEEK';
       if (weekOffset === -1) return 'LAST WEEK';
