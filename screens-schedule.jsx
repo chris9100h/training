@@ -78,8 +78,8 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
     ...s,
     activeScheduleId: sch.id,
     cycleIndex: 0,
-    cycleStartDate:    isWeekday ? s.cycleStartDate    : LB.todayISO(),
-    weekPlanStartDate: isWeekday ? LB.todayISO()       : s.weekPlanStartDate,
+    cycleStartDate:    isWeekday ? s.cycleStartDate         : LB.todayISO(),
+    weekPlanStartDate: isWeekday ? (s.weekPlanStartDate || LB.todayISO()) : s.weekPlanStartDate,
   }));
   const duplicate = () => {
     const copy = JSON.parse(JSON.stringify(sch));
@@ -139,7 +139,7 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
             </div>
           </Frame>
         )}
-        {sch.id === store.activeScheduleId && isWeekday && (
+        {isWeekday && (
           <Frame style={{ padding: '14px 16px' }}>
             <span className="label">Week plan start date (Week 1)</span>
             <div style={{ overflow: 'hidden', borderRadius: 8, marginTop: 8 }}>
