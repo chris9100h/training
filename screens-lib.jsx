@@ -1721,8 +1721,8 @@ function SpectatorScreen({ go, targetUserId, userName }) {
         if (!blended) return null;
         const { remainingMin: remMin } = blended;
         const finishing = remMin === 0;
-        const elapsedSec = session?.started_at ? (now - new Date(session.started_at).getTime()) / 1000 : 0;
-        const timeRatio  = elapsedSec / Math.max(1, elapsedSec + remMin * 60);
+        const avgDurMin  = (session?.avg_duration_seconds || 0) / 60;
+        const timeRatio  = avgDurMin > 0 ? Math.min(1, Math.max(0, (avgDurMin - remMin) / avgDurMin)) : 0;
 
         const paceDelta = (() => {
           const avgDurMin = (session?.avg_duration_seconds || 0) / 60;
