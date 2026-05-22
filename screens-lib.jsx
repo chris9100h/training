@@ -1486,16 +1486,30 @@ function inferCurrentExIdx(entries) {
   return 0;
 }
 
-function calcRemainingMin(startedAt, avgDurSec, nowMs) {
+// Returns { remainingMin, progress } using a blended pace estimate.
+// Early in session: relies on historical pace. Later: shifts toward current pace.
+function calcBlended(startedAt, avgDurSec, avgSetsTotal, setsDone, setsTotal, nowMs) {
   if (!avgDurSec || !startedAt) return null;
   const elapsed = (nowMs - new Date(startedAt).getTime()) / 1000;
-  return Math.max(0, Math.round((avgDurSec - elapsed) / 60));
-}
+  const remainingSets = Math.max(0, setsTotal - setsDone);
+  const histPace = avgSetsTotal > 0 ? avgDurSec / avgSetsTotal : null;
+  const currPace = setsDone >= 2 ? elapsed / setsDone : null;
 
-function calcProgress(startedAt, avgDurSec, nowMs) {
-  if (!avgDurSec || !startedAt) return null;
-  const elapsed = (nowMs - new Date(startedAt).getTime()) / 1000;
-  return Math.min(1, Math.max(0, elapsed / avgDurSec));
+  let remainingSec;
+  if (!histPace || setsTotal === 0) {
+    remainingSec = Math.max(0, avgDurSec - elapsed);
+  } else if (!currPace) {
+    remainingSec = histPace * remainingSets;
+  } else {
+    const w = Math.min(setsDone / 8, 0.7);
+    remainingSec = Math.max(0, (w * currPace + (1 - w) * histPace) * remainingSets);
+  }
+
+  const progress = setsTotal > 0
+    ? setsDone / setsTotal
+    : Math.min(1, Math.max(0, elapsed / (elapsed + remainingSec || 1)));
+
+  return { remainingMin: Math.round(remainingSec / 60), progress };
 }
 
 function SpectatorScreen({ go, targetUserId, userName }) {
@@ -1701,9 +1715,11 @@ function SpectatorScreen({ go, targetUserId, userName }) {
 
       {/* Progress footer — only shown when historical avg is available */}
       {(() => {
-        const remMin = calcRemainingMin(session?.started_at, session?.avg_duration_seconds, now);
-        const ratio  = calcProgress(session?.started_at, session?.avg_duration_seconds, now);
-        if (ratio === null) return null;
+        const totalSetsDone  = entries.reduce((s, e) => s + (e.sets?.filter(x => x.done || x.skipped).length || 0), 0);
+        const totalSetsTotal = entries.reduce((s, e) => s + (e.sets?.length || 0), 0);
+        const blended = calcBlended(session?.started_at, session?.avg_duration_seconds, session?.avg_sets_total, totalSetsDone, totalSetsTotal, now);
+        if (!blended) return null;
+        const { remainingMin: remMin, progress: ratio } = blended;
         const finishing = remMin === 0;
         return (
           <div style={{
@@ -1973,8 +1989,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 {activeSessions.length === 0 ? (
                   <div className="micro" style={{ color: UI.inkFaint, padding: '6px 0' }}>Nobody training right now.</div>
                 ) : activeSessions.map((s, i) => {
-                  const remMin   = calcRemainingMin(s.started_at, s.avg_duration_seconds, nowS);
-                  const ratio    = calcProgress(s.started_at, s.avg_duration_seconds, nowS);
+                  const blended  = calcBlended(s.started_at, s.avg_duration_seconds, s.avg_sets_total, s.sets_done, s.sets_total, nowS);
+                  const remMin   = blended?.remainingMin ?? null;
+                  const ratio    = blended?.progress ?? null;
                   const finishing = remMin === 0;
                   return (
                     <div key={i}
