@@ -36,22 +36,50 @@ class ErrorBoundary extends React.Component {
 function UpdateBanner({ onUpdate }) {
   return (
     <div style={{
-      flexShrink: 0,
-      background: UI.goldFaint, borderBottom: `1px solid ${UI.goldSoft}`,
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '8px 16px', gap: 12,
+      position: 'fixed', inset: 0, zIndex: 9999,
+      background: 'rgba(0,0,0,0.72)',
+      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 32,
     }}>
-      <span style={{ fontSize: 13, color: UI.gold, fontFamily: UI.fontUi }}>
-        New version available
-      </span>
-      <button onClick={onUpdate} style={{
-        background: UI.gold, color: '#0a0a0a',
-        border: 'none', borderRadius: 8,
-        padding: '5px 12px', fontSize: 12, fontWeight: 600,
-        fontFamily: UI.fontUi, cursor: 'pointer', flexShrink: 0,
+      <div style={{
+        width: '100%', maxWidth: 320,
+        background: UI.bgRaised,
+        border: `0.5px solid ${UI.goldSoft}`,
+        borderRadius: 20,
+        padding: '32px 28px',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        gap: 10, textAlign: 'center',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(201,169,97,0.2)',
       }}>
-        Update now
-      </button>
+        <div style={{
+          width: 48, height: 48, borderRadius: '50%',
+          background: UI.goldFaint,
+          border: `0.5px solid ${UI.goldSoft}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          marginBottom: 6,
+        }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={UI.gold} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2v10m0 0l-3-3m3 3l3-3"/><path d="M3 17v1a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3v-1"/>
+          </svg>
+        </div>
+        <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 400 }}>
+          New version available
+        </div>
+        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+          A fresh update is ready to install. This only takes a second.
+        </div>
+        <button onClick={onUpdate} style={{
+          marginTop: 10, width: '100%', padding: '14px 0',
+          borderRadius: 12, border: 'none', cursor: 'pointer',
+          background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+          boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
+          color: '#0a0805', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
+          letterSpacing: '0.06em',
+        }}>
+          UPDATE NOW
+        </button>
+      </div>
     </div>
   );
 }
