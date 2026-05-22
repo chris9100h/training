@@ -133,6 +133,7 @@ function App() {
   const [route, setRoute]         = useStateA({ name: 'home' });
   const [updateAvailable, setUpdateAvailable] = useStateA(false);
   const waitingWorker             = useRefA(null);
+  const intentionalUpdate         = useRefA(false);
   const prevStore                 = useRefA(null);
   const syncBase                  = useRefA(null);  // last state confirmed written to Supabase
   const pendingStore              = useRefA(null);  // latest state awaiting sync
@@ -206,13 +207,20 @@ function App() {
       reg.addEventListener('updatefound', () => trackWorker(reg.installing));
     });
     // location.reload() unreliable in iOS PWA standalone mode
+    // Only reload when the user explicitly clicked "Update now"
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      window.location.href = window.location.href;
+      if (intentionalUpdate.current) window.location.href = window.location.href;
     });
   }, []);
 
   const applyUpdate = useCallbackA(() => {
-    waitingWorker.current?.postMessage({ type: 'SKIP_WAITING' });
+    if (waitingWorker.current) {
+      intentionalUpdate.current = true;
+      waitingWorker.current.postMessage({ type: 'SKIP_WAITING' });
+    } else {
+      // SW already activated on its own — just reload
+      window.location.href = window.location.href;
+    }
   }, []);
 
   // Push pending local changes to Supabase. Serialized; on failure syncBase is
