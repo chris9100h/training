@@ -288,7 +288,9 @@ function App() {
             const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 2);
             const cutoffISO = cutoff.toISOString().slice(0, 10);
             const localOnly = (cur.sessions || []).filter(x =>
-              !serverIds.has(x.id) && (x.id === inProgressId || (x.date || '') >= cutoffISO)
+              !serverIds.has(x.id) &&
+              (x.id === inProgressId || (x.date || '') >= cutoffISO) &&
+              (x.ended != null || x.id === inProgressId)
             );
             const serverExIds = new Set(fresh.exercises.map(e => e.id));
             const localOnlyExercises = (cur.exercises || []).filter(x => !serverExIds.has(x.id));
