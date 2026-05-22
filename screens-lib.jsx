@@ -1748,12 +1748,9 @@ function SpectatorScreen({ go, targetUserId, userName }) {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
               <span className="micro" style={{ color: UI.inkFaint }}>ESTIMATED REMAINING</span>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                {paceBadge}
-                <span className="num" style={{ fontSize: 13, color: finishing ? UI.goldSoft : UI.gold }}>
-                  {finishing ? 'finishing soon' : `~${remMin} min`}
-                </span>
-              </div>
+              <span className="num" style={{ fontSize: 13, color: finishing ? UI.goldSoft : UI.gold }}>
+                {finishing ? 'finishing soon' : `~${remMin} min`}
+              </span>
             </div>
             <div style={{ height: 4, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
               <div style={{
@@ -1764,6 +1761,9 @@ function SpectatorScreen({ go, targetUserId, userName }) {
                 transition: 'width 2s linear',
               }} />
             </div>
+            {paceBadge && (
+              <div style={{ textAlign: 'center', marginTop: 6 }}>{paceBadge}</div>
+            )}
             {totalSetsTotal > 0 && (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 10, marginBottom: 8 }}>
