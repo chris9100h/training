@@ -1548,12 +1548,12 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
           };
           return (
             <div key={ei} style={{ marginBottom: 20 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '20px 1fr 1fr 18px', gap: 10, marginBottom: 6 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px', gap: 10, marginBottom: 6 }}>
                 <span />
                 <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.07em', color: UI.inkSoft }}>
                   {entry.name}
                 </span>
-                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'left' }}>LAST TIME</span>
+                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'right' }}>LAST TIME</span>
                 <span />
               </div>
               {Array.from({ length: maxLen }).map((_, si) => {
@@ -1570,7 +1570,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
                                 : UI.inkFaint;
                 return (
                   <div key={si} style={{
-                    display: 'grid', gridTemplateColumns: '20px 1fr 1fr 18px',
+                    display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px',
                     alignItems: 'center', gap: 10, padding: '6px 0',
                     borderBottom: si < maxLen - 1 ? `0.5px solid ${UI.hair}` : 'none',
                   }}>
@@ -1578,7 +1578,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
                     <span className="num" style={{ fontSize: 14, color: curr && !curr.skipped ? UI.ink : UI.inkFaint }}>
                       {fmtSet(curr)}
                     </span>
-                    <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>
+                    <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right' }}>
                       {fmtSet(prev)}
                     </span>
                     <span style={{ fontSize: 14, color: iconColor, textAlign: 'right' }}>{icon}</span>
