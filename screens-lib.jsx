@@ -1762,7 +1762,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [activeSessions, setActiveSessions] = useStateL([]);
   const [activeGrants, setActiveGrants] = useStateL([]);
   const [newGrantEmail, setNewGrantEmail] = useStateL('');
-  const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateL(false);
   const [nowS, setNowS] = useStateL(Date.now());
   const [importing, setImporting] = useStateL(false);
   const [swVersion, setSwVersion] = useStateL('');
@@ -1773,14 +1772,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [cycleWeekView, setCycleWeekView] = useStateL(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateL(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
-
-  useEffectL(() => {
-    let mounted = true;
-    LB.supabase.rpc('check_active_users_access')
-      .then(({ data }) => { if (mounted) setHasActiveUsersAccess(!!data); })
-      .catch(() => {});
-    return () => { mounted = false; };
-  }, []);
+  const hasActiveUsersAccess = !!store.hasActiveUsersAccess;
 
   useEffectL(() => {
     if (!hasActiveUsersAccess) return;
