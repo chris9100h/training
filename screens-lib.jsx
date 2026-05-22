@@ -1027,6 +1027,27 @@ function HistoryScreen({ store, go, initialTab }) {
   );
 }
 
+// ─── SET COMPARISON HELPERS ──────────────────────────────────────────
+// Shared by SessionDetailScreen, ComparisonScreen, and the LAST TIME card.
+function effReps(st) {
+  if (st.repsL != null || st.repsR != null) return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
+  return st.reps;
+}
+function isImprovement(curr, prev) {
+  if (!prev || !curr || !curr.done || curr.skipped || curr.kg == null || prev.kg == null) return false;
+  const rA = effReps(curr); const rB = effReps(prev);
+  if (rA == null || rB == null) return false;
+  return (curr.kg > prev.kg && rA >= rB - 2) || (curr.kg >= prev.kg && rA > rB);
+}
+function isDecline(curr, prev) {
+  if (!prev || !curr || curr.skipped) return false;
+  if (prev.skipped) return false; // prev was already skipped, no baseline to decline from
+  if (!curr.done || curr.kg == null || prev.kg == null) return false;
+  const rA = effReps(curr); const rB = effReps(prev);
+  if (rA == null || rB == null) return false;
+  return curr.kg < prev.kg || (curr.kg === prev.kg && rA < rB);
+}
+
 // ─── SESSION DETAIL ──────────────────────────────────────────────────
 function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, back }) {
   const [confirmEl, confirm] = useConfirm();
@@ -1131,24 +1152,6 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       scrollParent.style.minHeight = saved.minHeight;
       setCapturing(false);
     }
-  };
-
-  const effReps = (st) => {
-    if (st.repsL != null || st.repsR != null) return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
-    return st.reps;
-  };
-  const isImprovement = (st, prevSet) => {
-    if (!prevSet || !st.done || st.kg == null || prevSet.kg == null) return false;
-    const repsA = effReps(st); const repsB = effReps(prevSet);
-    if (repsA == null || repsB == null) return false;
-    return (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB);
-  };
-
-  const isDecline = (st, prevSet) => {
-    if (!prevSet || !st.done || st.kg == null || prevSet.kg == null) return false;
-    const repsA = effReps(st); const repsB = effReps(prevSet);
-    if (repsA == null || repsB == null) return false;
-    return st.kg < prevSet.kg || (st.kg === prevSet.kg && repsA < repsB);
   };
 
   return (
@@ -1551,14 +1554,13 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
                 const curr = sets[si];
                 const prev = lastSets[si];
                 if (!curr && !prev) return null;
-                const currDone = curr && !curr.skipped;
                 const prevDone = prev && !prev.skipped;
-                const better = currDone && prevDone && (curr.kg > prev.kg || (curr.kg === prev.kg && (curr.reps ?? 0) > (prev.reps ?? 0)));
-                const worse  = (!curr || curr.skipped) && prevDone
-                               || currDone && prevDone && (curr.kg < prev.kg || (curr.kg === prev.kg && (curr.reps ?? 0) < (prev.reps ?? 0)));
-                const icon   = !curr ? '−' : !prev ? '+' : curr.skipped && !prev.skipped ? '↓' : !curr.skipped && prev.skipped ? '↑' : better ? '↑' : worse ? '↓' : '—';
-                const iconColor = (better || (!prev && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
-                                : (worse  || !curr || curr.skipped) && prevDone ? UI.danger
+                const improved = isImprovement(curr, prev);
+                const declined = isDecline(curr, prev)
+                                 || ((!curr || curr.skipped) && prevDone);
+                const icon   = !curr ? '−' : !prev ? '+' : curr.skipped && prevDone ? '↓' : curr && !curr.skipped && prev?.skipped ? '↑' : improved ? '↑' : declined ? '↓' : '—';
+                const iconColor = (improved || (!prev && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
+                                : declined ? UI.danger
                                 : UI.inkFaint;
                 return (
                   <div key={si} style={{
@@ -1812,13 +1814,12 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 <Frame style={{ padding: '0 16px' }}>
                   {lastEntry.sets.map((s, i) => {
                     const curr     = (entry.sets || [])[i];
-                    const currDone = curr?.done && !curr?.skipped;
                     const prevDone = !s.skipped;
-                    const better = currDone && prevDone && (curr.kg > s.kg || (curr.kg === s.kg && (curr.reps ?? 0) > (s.reps ?? 0)));
-                    const worse  = currDone && prevDone && (curr.kg < s.kg || (curr.kg === s.kg && (curr.reps ?? 0) < (s.reps ?? 0)));
-                    const showIcon = currDone || (curr?.skipped && prevDone);
-                    const icon  = curr?.skipped && prevDone ? '↓' : better ? '↑' : worse ? '↓' : '—';
-                    const iconColor = better ? 'var(--accent)' : (worse || (curr?.skipped && prevDone)) ? UI.danger : UI.inkFaint;
+                    const improved = isImprovement(curr, s);
+                    const declined = isDecline(curr, s) || (curr?.skipped && prevDone);
+                    const showIcon = (curr?.done || curr?.skipped) && !!s;
+                    const icon     = curr?.skipped && prevDone ? '↓' : improved ? '↑' : declined ? '↓' : '—';
+                    const iconColor = improved ? 'var(--accent)' : declined ? UI.danger : UI.inkFaint;
                     return (
                       <div key={i} style={{
                         display: 'grid', gridTemplateColumns: '20px 1fr 1fr 20px',
