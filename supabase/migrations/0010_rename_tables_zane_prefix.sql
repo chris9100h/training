@@ -6,6 +6,7 @@ ALTER TABLE public.schedules       RENAME TO zane_schedules;
 ALTER TABLE public.sessions        RENAME TO zane_sessions;
 ALTER TABLE public.user_settings   RENAME TO zane_user_settings;
 ALTER TABLE public.pushover_active RENAME TO zane_pushover_active;
+ALTER TABLE public.feature_grants  RENAME TO zane_feature_grants;
 
 -- Update trigger function to reference the renamed table.
 CREATE OR REPLACE FUNCTION handle_new_user()
@@ -17,7 +18,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Recreate RPC functions with updated table names.
+-- Recreate all RPC functions that reference renamed tables.
 -- get_active_sessions_overview must be dropped first because the return type changed in 0009.
 DROP FUNCTION IF EXISTS public.get_active_sessions_overview();
 CREATE FUNCTION public.get_active_sessions_overview()
@@ -35,7 +36,7 @@ AS $$
 BEGIN
   IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' AND
      NOT EXISTS (
-       SELECT 1 FROM feature_grants
+       SELECT 1 FROM zane_feature_grants
        WHERE feature = 'active_users' AND email = auth.email()
      )
   THEN
@@ -76,7 +77,7 @@ AS $$
 BEGIN
   IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' AND
      NOT EXISTS (
-       SELECT 1 FROM feature_grants
+       SELECT 1 FROM zane_feature_grants
        WHERE feature = 'active_users' AND email = auth.email()
      )
   THEN
@@ -95,5 +96,58 @@ BEGIN
   WHERE us.user_id = p_user_id
     AND us.in_progress_session_id IS NOT NULL
     AND s.ended IS NULL;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.check_active_users_access()
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF auth.email() = 'office@btc-prime.biz' THEN
+    RETURN true;
+  END IF;
+  RETURN EXISTS (
+    SELECT 1 FROM zane_feature_grants
+    WHERE feature = 'active_users' AND email = auth.email()
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_active_users_grants()
+RETURNS TABLE (email text)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
+    RETURN;
+  END IF;
+  RETURN QUERY
+  SELECT fg.email FROM zane_feature_grants fg WHERE fg.feature = 'active_users' ORDER BY fg.email;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.set_active_users_grant(p_email text, p_granted boolean)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+  IF p_granted THEN
+    INSERT INTO zane_feature_grants (feature, email)
+    VALUES ('active_users', lower(trim(p_email)))
+    ON CONFLICT DO NOTHING;
+  ELSE
+    DELETE FROM zane_feature_grants
+    WHERE feature = 'active_users' AND email = lower(trim(p_email));
+  END IF;
 END;
 $$;

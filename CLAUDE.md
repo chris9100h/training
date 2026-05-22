@@ -72,6 +72,8 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_exercises`:** `id` (text), `user_id` (uuid), `name`, `note`, `category` (text), `tags` (array), `unilateral` (boolean)
 
+**`zane_feature_grants`:** `feature` (text), `email` (text)
+
 **`zane_profiles`:** `id` (uuid), `name` (text)
 
 **`zane_pushover_active`:** `id` (text), `nonce` (text)
