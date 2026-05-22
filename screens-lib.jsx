@@ -1518,7 +1518,7 @@ function SpectatorScreen({ go, targetUserId, userName }) {
 
   useEffectL(() => {
     load();
-    const iv = setInterval(load, 10000);
+    const iv = setInterval(load, 2000);
     return () => clearInterval(iv);
   }, [targetUserId]);
 
