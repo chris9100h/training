@@ -1725,13 +1725,11 @@ function SpectatorScreen({ go, targetUserId, userName }) {
         const paceBadge = (() => {
           const avgSets = session?.avg_sets_total;
           const avgDur  = session?.avg_duration_seconds;
-          const elapsed = session?.started_at ? (now - new Date(session.started_at).getTime()) / 1000 : 0;
           if (!avgSets || !avgDur || totalSetsDone < 2) return null;
           const remainingSets = Math.max(0, totalSetsTotal - totalSetsDone);
           if (remainingSets === 0) return null;
-          const histPace = avgDur / avgSets;
-          const currPace = elapsed / totalSetsDone;
-          const diffMin  = Math.round(((currPace - histPace) * remainingSets) / 60);
+          const histRemainMin = Math.round((avgDur / avgSets) * remainingSets / 60);
+          const diffMin = remMin - histRemainMin;
           if (Math.abs(diffMin) < 2) return null;
           const ahead = diffMin < 0;
           return (
