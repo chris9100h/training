@@ -1722,7 +1722,7 @@ function SpectatorScreen({ go, targetUserId, userName }) {
         const { remainingMin: remMin, progress: ratio } = blended;
         const finishing = remMin === 0;
 
-        const paceBadge = (() => {
+        const paceDelta = (() => {
           const avgSets = session?.avg_sets_total;
           const avgDur  = session?.avg_duration_seconds;
           if (!avgSets || !avgDur || totalSetsDone < 2) return null;
@@ -1731,12 +1731,7 @@ function SpectatorScreen({ go, targetUserId, userName }) {
           const histRemainMin = Math.round((avgDur / avgSets) * remainingSets / 60);
           const diffMin = remMin - histRemainMin;
           if (Math.abs(diffMin) < 2) return null;
-          const ahead = diffMin < 0;
-          return (
-            <span className="num" style={{ fontSize: 11, color: ahead ? UI.gold : UI.inkFaint }}>
-              {ahead ? `${Math.abs(diffMin)}m ahead` : `+${diffMin}m behind`}
-            </span>
-          );
+          return diffMin; // negative = ahead, positive = behind
         })();
 
         return (
@@ -1761,9 +1756,32 @@ function SpectatorScreen({ go, targetUserId, userName }) {
                 transition: 'width 2s linear',
               }} />
             </div>
-            {paceBadge && (
-              <div style={{ textAlign: 'center', marginTop: 6 }}>{paceBadge}</div>
-            )}
+            {paceDelta !== null && (() => {
+              const ahead = paceDelta < 0;
+              const pct   = Math.min(Math.abs(paceDelta) / 20 * 50, 50);
+              return (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                    <span className="micro" style={{ color: UI.inkFaint }}>PACE</span>
+                    <span className="num" style={{ fontSize: 11, color: ahead ? UI.gold : UI.inkFaint }}>
+                      {ahead ? `${Math.abs(paceDelta)}m ahead` : `+${paceDelta}m behind`}
+                    </span>
+                  </div>
+                  <div style={{ position: 'relative', height: 4 }}>
+                    <div style={{ position: 'absolute', inset: 0, borderRadius: 999, background: UI.hairStrong }} />
+                    <div style={{
+                      position: 'absolute', top: 0, height: '100%',
+                      left:  ahead ? '50%' : `${50 - pct}%`,
+                      width: `${pct}%`,
+                      background: ahead ? UI.gold : UI.inkFaint,
+                      borderRadius: ahead ? '0 999px 999px 0' : '999px 0 0 999px',
+                      transition: 'left 2s linear, width 2s linear',
+                    }} />
+                    <div style={{ position: 'absolute', left: '50%', top: -2, width: 1.5, height: 8, background: UI.inkSoft, transform: 'translateX(-50%)' }} />
+                  </div>
+                </div>
+              );
+            })()}
             {totalSetsTotal > 0 && (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 10, marginBottom: 8 }}>
