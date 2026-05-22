@@ -70,17 +70,17 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 ### Aktuelle Tabellen & Spalten
 
-**`exercises`:** `id` (text), `user_id` (uuid), `name`, `note`, `category` (text), `tags` (array), `unilateral` (boolean)
+**`zane_exercises`:** `id` (text), `user_id` (uuid), `name`, `note`, `category` (text), `tags` (array), `unilateral` (boolean)
 
-**`profiles`:** `id` (uuid), `name` (text)
+**`zane_profiles`:** `id` (uuid), `name` (text)
 
-**`pushover_active`:** `id` (text), `nonce` (text)
+**`zane_pushover_active`:** `id` (text), `nonce` (text)
 
-**`schedules`:** `id` (text), `user_id` (uuid), `name` (text), `days` (jsonb)
+**`zane_schedules`:** `id` (text), `user_id` (uuid), `name` (text), `days` (jsonb)
 
-**`sessions`:** `id` (text), `user_id` (uuid), `schedule_id`, `day_id`, `day_name` (text), `date`, `started_at`, `ended` (timestamptz), `entries` (jsonb)
+**`zane_sessions`:** `id` (text), `user_id` (uuid), `schedule_id`, `day_id`, `day_name` (text), `date`, `started_at`, `ended` (timestamptz), `entries` (jsonb)
 
-**`user_settings`:** `user_id` (uuid), `active_schedule_id` (text), `cycle_index` (int), `cycle_start_date` (text), `last_advanced_date` (date), `in_progress_session_id` (text), `unit` (text), `rest_default`, `rest_big`, `rest_medium`, `rest_small` (int), `push_enabled` (boolean), `pushover_user_key` (text), `cycle_week_view` (boolean), `accent_color` (text), `dark_mode` (text)
+**`zane_user_settings`:** `user_id` (uuid), `active_schedule_id` (text), `cycle_index` (int), `cycle_start_date` (text), `last_advanced_date` (date), `in_progress_session_id` (text), `unit` (text), `rest_default`, `rest_big`, `rest_medium`, `rest_small` (int), `push_enabled` (boolean), `pushover_user_key` (text), `cycle_week_view` (boolean), `accent_color` (text), `dark_mode` (text)
 
 ## Deployment
 

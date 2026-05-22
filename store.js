@@ -38,11 +38,11 @@ async function signOut() {
 
 async function deleteAllData(userId) {
   await Promise.all([
-    _supabase.from('sessions').delete().eq('user_id', userId),
-    _supabase.from('exercises').delete().eq('user_id', userId),
-    _supabase.from('schedules').delete().eq('user_id', userId),
-    _supabase.from('user_settings').delete().eq('user_id', userId),
-    _supabase.from('profiles').delete().eq('id', userId),
+    _supabase.from('zane_sessions').delete().eq('user_id', userId),
+    _supabase.from('zane_exercises').delete().eq('user_id', userId),
+    _supabase.from('zane_schedules').delete().eq('user_id', userId),
+    _supabase.from('zane_user_settings').delete().eq('user_id', userId),
+    _supabase.from('zane_profiles').delete().eq('id', userId),
   ]);
 }
 
@@ -50,14 +50,14 @@ async function importFromBackup(backup, userId) {
   await deleteAllData(userId);
   const sett = backup.settings ?? {};
   await Promise.all([
-    backup.user?.name && _supabase.from('profiles').upsert({ id: userId, name: backup.user.name }),
-    backup.exercises?.length && _supabase.from('exercises').upsert(
+    backup.user?.name && _supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name }),
+    backup.exercises?.length && _supabase.from('zane_exercises').upsert(
       backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, user_id: userId }))
     ),
-    backup.schedules?.length && _supabase.from('schedules').upsert(
+    backup.schedules?.length && _supabase.from('zane_schedules').upsert(
       backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
     ),
-    backup.sessions?.length && _supabase.from('sessions').upsert(
+    backup.sessions?.length && _supabase.from('zane_sessions').upsert(
       backup.sessions.filter(s => s.id).map(s => {
         const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, ...rest } = s;
         const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
@@ -65,7 +65,7 @@ async function importFromBackup(backup, userId) {
         return row;
       })
     ),
-    _supabase.from('user_settings').upsert({
+    _supabase.from('zane_user_settings').upsert({
       user_id: userId,
       active_schedule_id: backup.activeScheduleId ?? null,
       cycle_index: backup.cycleIndex ?? 0,
@@ -95,10 +95,10 @@ async function setupNewUser(userId, name) {
     inProgress: null, customDayTypes: [], settings: { unit: 'kg', restDefault: 120 },
   });
   await Promise.all([
-    _supabase.from('profiles').upsert({ id: userId, name }),
-    _supabase.from('exercises').insert(seeded.exercises.map(e => ({ ...e, user_id: userId }))),
-    _supabase.from('schedules').insert(seeded.schedules.map(s => ({ ...s, user_id: userId }))),
-    _supabase.from('user_settings').upsert({
+    _supabase.from('zane_profiles').upsert({ id: userId, name }),
+    _supabase.from('zane_exercises').insert(seeded.exercises.map(e => ({ ...e, user_id: userId }))),
+    _supabase.from('zane_schedules').insert(seeded.schedules.map(s => ({ ...s, user_id: userId }))),
+    _supabase.from('zane_user_settings').upsert({
       user_id: userId,
       active_schedule_id: seeded.activeScheduleId,
       cycle_index: 0, unit: 'kg', rest_default: 120,
@@ -110,12 +110,12 @@ async function setupNewUser(userId, name) {
 
 async function loadFromSupabase(userId, _depth = 0) {
   const [profileRes, exRes, schRes, sessRes, settRes] = await Promise.all([
-    _supabase.from('profiles').select('id, name').eq('id', userId).maybeSingle(),
-    _supabase.from('exercises').select('id, name, tags, note, category, unilateral').eq('user_id', userId),
-    _supabase.from('schedules').select('id, name, days').eq('user_id', userId),
-    _supabase.from('sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries')
+    _supabase.from('zane_profiles').select('id, name').eq('id', userId).maybeSingle(),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral').eq('user_id', userId),
+    _supabase.from('zane_schedules').select('id, name, days').eq('user_id', userId),
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries')
       .eq('user_id', userId).order('date', { ascending: false }),
-    _supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
+    _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
   ]);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
@@ -193,8 +193,8 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, user_id: userId }))));
-    if (removed.length) ops.push(_supabase.from('exercises').delete().in('id', removed.map(e => e.id)));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, user_id: userId }))));
+    if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
   if (prev.schedules !== next.schedules) {
@@ -203,8 +203,8 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(s);
     });
     const removed = prev.schedules.filter(s => !next.schedules.find(x => x.id === s.id));
-    if (upsert.length)  ops.push(_supabase.from('schedules').upsert(upsert.map(({ mode, ...s }) => ({ ...s, user_id: userId }))));
-    if (removed.length) ops.push(_supabase.from('schedules').delete().in('id', removed.map(s => s.id)));
+    if (upsert.length)  ops.push(_supabase.from('zane_schedules').upsert(upsert.map(({ mode, ...s }) => ({ ...s, user_id: userId }))));
+    if (removed.length) ops.push(_supabase.from('zane_schedules').delete().in('id', removed.map(s => s.id)));
   }
 
   if (prev.sessions !== next.sessions) {
@@ -213,12 +213,12 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(s);
     });
     const removed = prev.sessions.filter(s => !next.sessions.find(x => x.id === s.id));
-    if (upsert.length)  ops.push(_supabase.from('sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
-    if (removed.length) ops.push(_supabase.from('sessions').delete().in('id', removed.map(s => s.id)));
+    if (upsert.length)  ops.push(_supabase.from('zane_sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
+    if (removed.length) ops.push(_supabase.from('zane_sessions').delete().in('id', removed.map(s => s.id)));
   }
 
   if (prev.user?.name !== next.user?.name && next.user?.name) {
-    ops.push(_supabase.from('profiles').upsert({ id: userId, name: next.user.name }));
+    ops.push(_supabase.from('zane_profiles').upsert({ id: userId, name: next.user.name }));
   }
 
   const settingsChanged =
@@ -239,7 +239,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.darkMode        !== next.settings?.darkMode;
 
   if (settingsChanged) {
-    ops.push(_supabase.from('user_settings').upsert({
+    ops.push(_supabase.from('zane_user_settings').upsert({
       user_id: userId,
       active_schedule_id: next.activeScheduleId ?? null,
       cycle_index: next.cycleIndex ?? 0,
