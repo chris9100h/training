@@ -1374,7 +1374,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
 
   const updateSet = (eIdx, sIdx, patch) => {
     setDraftEntries(entries => entries.map((e, i) =>
-      i !== eIdx ? e : { ...e, sets: e.sets.map((st, k) => k !== sIdx ? st : { ...st, ...patch }) }
+      i !== eIdx ? e : { ...e, sets: e.sets.map((st, k) => k !== sIdx ? st : { ...st, ...patch, skipped: false, done: true }) }
     ));
   };
 
