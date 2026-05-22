@@ -1762,7 +1762,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [activeSessions, setActiveSessions] = useStateL([]);
   const [activeGrants, setActiveGrants] = useStateL([]);
   const [newGrantEmail, setNewGrantEmail] = useStateL('');
-  const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateL(false);
+  const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateL(
+    () => localStorage.getItem('logbook-active-users-access') === 'true'
+  );
   const [nowS, setNowS] = useStateL(Date.now());
   const [importing, setImporting] = useStateL(false);
   const [swVersion, setSwVersion] = useStateL('');
@@ -1777,7 +1779,11 @@ function SettingsScreen({ store, setStore, go, userId }) {
   useEffectL(() => {
     let mounted = true;
     LB.supabase.rpc('check_active_users_access')
-      .then(({ data }) => { if (mounted) setHasActiveUsersAccess(!!data); })
+      .then(({ data }) => {
+        const val = !!data;
+        localStorage.setItem('logbook-active-users-access', val);
+        if (mounted) setHasActiveUsersAccess(val);
+      })
       .catch(() => {});
     return () => { mounted = false; };
   }, []);
