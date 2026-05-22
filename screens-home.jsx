@@ -410,7 +410,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             <Empty
               title="No active plan"
               sub="You have plans ready — just pick one to activate."
-              action={<Btn onClick={() => go({ name: 'schedule' })}>View plans</Btn>}
+              action={<Btn onClick={() => go({ name: 'plan' })}>View plans</Btn>}
               icon={ICON_CALENDAR}
             />
           ) : (
