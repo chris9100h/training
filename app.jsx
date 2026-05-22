@@ -135,6 +135,7 @@ function App() {
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
   const swReg                     = useRefA(null);
+  const lastSeenSWVersion         = useRefA(null);
   const prevStore                 = useRefA(null);
   const syncBase                  = useRefA(null);  // last state confirmed written to Supabase
   const pendingStore              = useRefA(null);  // latest state awaiting sync
@@ -370,9 +371,26 @@ function App() {
     flushSync(userId);
   }, [store]);
 
-  // Check for SW updates on every screen navigation
+  // Check for SW updates on every screen navigation.
+  // Fetches sw.js directly from the network (bypassing the SW cache via ?_v=)
+  // and compares the CACHE version string. iOS Safari ignores reg.update() when
+  // the app is in the foreground, so this is the only reliable detection path.
   useEffectA(() => {
-    swReg.current?.update().catch(() => {});
+    fetch(`/training/sw.js?_v=${Date.now()}`)
+      .then(r => r.text())
+      .then(text => {
+        const m = text.match(/const CACHE = '([^']+)'/);
+        if (!m) return;
+        const v = m[1];
+        if (!lastSeenSWVersion.current) {
+          lastSeenSWVersion.current = v;
+        } else if (v !== lastSeenSWVersion.current) {
+          lastSeenSWVersion.current = v;
+          setUpdateAvailable(true);
+          swReg.current?.update().catch(() => {});
+        }
+      })
+      .catch(() => {});
   }, [route]);
 
   // Retry a failed sync as soon as connectivity returns

@@ -1,4 +1,4 @@
-const CACHE = 'zane-v1.541';
+const CACHE = 'zane-v1.542';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 const ASSETS = [
   '/training/',
@@ -47,6 +47,11 @@ self.addEventListener('fetch', e => {
   const offlineResponse = () => new Response('', { status: 504, statusText: 'Offline' });
 
   if (sameOrigin) {
+    // _v=timestamp requests are version-check probes — always hit network, never cache
+    if (url.searchParams.has('_v')) {
+      e.respondWith(fetch(e.request.url).catch(() => offlineResponse()));
+      return;
+    }
     // App shell: stale-while-revalidate — serve cache instantly, refresh in background
     e.respondWith(
       caches.match(e.request).then(cached => {
