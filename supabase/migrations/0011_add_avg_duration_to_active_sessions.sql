@@ -50,7 +50,7 @@ BEGIN
     )::float AS avg_duration_seconds
   FROM zane_user_settings us
   JOIN zane_sessions s ON s.id = us.in_progress_session_id
-  JOIN zane_profiles p ON p.id = us.user_id
+  LEFT JOIN zane_profiles p ON p.id = us.user_id
   WHERE us.in_progress_session_id IS NOT NULL
     AND s.ended IS NULL;
 END;
@@ -96,7 +96,7 @@ BEGIN
     )::float AS avg_duration_seconds
   FROM zane_user_settings us
   JOIN zane_sessions s ON s.id = us.in_progress_session_id
-  JOIN zane_profiles p ON p.id = us.user_id
+  LEFT JOIN zane_profiles p ON p.id = us.user_id
   WHERE us.user_id = p_user_id
     AND us.in_progress_session_id IS NOT NULL
     AND s.ended IS NULL;
