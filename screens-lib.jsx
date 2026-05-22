@@ -1295,17 +1295,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               const renderEntry = (e, i) => {
                 const prev = prevEntryMap[e.exId];
                 const exName = store.exercises.find(ex => ex.id === e.exId)?.name ?? e.name;
-                const hasImprovement = e.sets.some((st, j) => isPR(st, e.exId) || isImprovement(st, prev?.sets?.[j]));
+                const filteredSets = e.sets.filter(st => !st.skipped);
                 return (
                 <div key={i}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
                     <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{exName}</div>
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {e.sets.filter(st => !st.skipped).map((st, j) => {
+                    {filteredSets.map((st, j) => {
                       const pr = isPR(st, e.exId);
                       const highlight = pr || isImprovement(st, prev?.sets?.[j]);
-                      const decline = !hasImprovement && isDecline(st, prev?.sets?.[j]);
+                      const anyImprovementBefore = filteredSets.slice(0, j).some((s, k) => isPR(s, e.exId) || isImprovement(s, prev?.sets?.[k]));
+                      const decline = !anyImprovementBefore && isDecline(st, prev?.sets?.[j]);
                       return (
                         <span key={j} style={{
                           opacity: st.done ? 1 : 0.3,
