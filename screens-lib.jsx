@@ -1743,6 +1743,23 @@ function SpectatorScreen({ go, targetUserId, userName }) {
                 transition: 'width 2s linear',
               }} />
             </div>
+            {totalSetsTotal > 0 && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 10, marginBottom: 8 }}>
+                  <span className="micro" style={{ color: UI.inkFaint }}>SETS</span>
+                  <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{totalSetsDone} / {totalSetsTotal}</span>
+                </div>
+                <div style={{ height: 4, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%',
+                    width: `${(totalSetsDone / totalSetsTotal) * 100}%`,
+                    background: UI.inkSoft,
+                    borderRadius: 999,
+                    transition: 'width 2s linear',
+                  }} />
+                </div>
+              </>
+            )}
           </div>
         );
       })()}
