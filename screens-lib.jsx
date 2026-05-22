@@ -1719,19 +1719,19 @@ function SpectatorScreen({ go, targetUserId, userName }) {
         const totalSetsTotal = entries.reduce((s, e) => s + (e.sets?.length || 0), 0);
         const blended = calcBlended(session?.started_at, session?.avg_duration_seconds, session?.avg_sets_total, totalSetsDone, totalSetsTotal, now);
         if (!blended) return null;
-        const { remainingMin: remMin, progress: ratio } = blended;
+        const { remainingMin: remMin } = blended;
         const finishing = remMin === 0;
+        const elapsedSec = session?.started_at ? (now - new Date(session.started_at).getTime()) / 1000 : 0;
+        const timeRatio  = elapsedSec / Math.max(1, elapsedSec + remMin * 60);
 
         const paceDelta = (() => {
-          const avgSets = session?.avg_sets_total;
-          const avgDur  = session?.avg_duration_seconds;
-          if (!avgSets || !avgDur || totalSetsDone < 2) return null;
-          const remainingSets = Math.max(0, totalSetsTotal - totalSetsDone);
-          if (remainingSets === 0) return null;
-          const histRemainMin = Math.round((avgDur / avgSets) * remainingSets / 60);
-          const diffMin = remMin - histRemainMin;
+          const avgDurMin = (session?.avg_duration_seconds || 0) / 60;
+          const elapsed   = session?.started_at ? (now - new Date(session.started_at).getTime()) / 60000 : 0;
+          if (!avgDurMin || totalSetsDone < 2) return null;
+          if (Math.max(0, totalSetsTotal - totalSetsDone) === 0) return null;
+          const diffMin = Math.round(elapsed + remMin - avgDurMin); // positive = behind, negative = ahead
           if (Math.abs(diffMin) < 2) return null;
-          return diffMin; // negative = ahead, positive = behind
+          return diffMin;
         })();
 
         return (
@@ -1752,7 +1752,7 @@ function SpectatorScreen({ go, targetUserId, userName }) {
                 height: '100%',
                 width: '100%',
                 background: `linear-gradient(to right, ${UI.inkFaint}, var(--accent))`,
-                clipPath: `inset(0 ${(1 - ratio) * 100}% 0 0)`,
+                clipPath: `inset(0 ${(1 - timeRatio) * 100}% 0 0)`,
                 transition: 'clip-path 2s linear',
               }} />
             </div>
