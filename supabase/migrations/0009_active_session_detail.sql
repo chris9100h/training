@@ -1,5 +1,6 @@
 -- Add user_id to the overview so the client can navigate to the detail view.
-CREATE OR REPLACE FUNCTION public.get_active_sessions_overview()
+DROP FUNCTION IF EXISTS public.get_active_sessions_overview();
+CREATE FUNCTION public.get_active_sessions_overview()
 RETURNS TABLE (
   user_id    uuid,
   user_name  text,
