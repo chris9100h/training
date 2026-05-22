@@ -1793,7 +1793,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
       .catch(() => {});
     loadSessions();
     if (isAdmin) loadGrants();
-    const iv = setInterval(() => { loadSessions(); setNowS(Date.now()); }, 30000);
+    const iv = setInterval(() => { loadSessions(); setNowS(Date.now()); }, 2000);
     return () => { mounted = false; clearInterval(iv); };
   }, [hasActiveUsersAccess, isAdmin]);
 
