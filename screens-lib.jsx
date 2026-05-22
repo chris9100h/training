@@ -1540,7 +1540,6 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
           const sets      = entry.sets || [];
           const lastSets  = lastEntry?.sets || [];
           const maxLen    = Math.max(sets.length, lastSets.length);
-          const hasImprovement = sets.some((curr, j) => isImprovement(curr, lastSets[j]));
           const fmtSet = s => {
             if (!s) return '—';
             if (s.skipped) return 'skipped';
@@ -1557,7 +1556,8 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
                 if (!curr && !prev) return null;
                 const prevDone = prev && !prev.skipped;
                 const improved = isImprovement(curr, prev);
-                const declined = !hasImprovement && (isDecline(curr, prev) || ((!curr || curr.skipped) && prevDone));
+                const anyImprovementBefore = sets.slice(0, si).some((c, j) => isImprovement(c, lastSets[j]));
+                const declined = !anyImprovementBefore && (isDecline(curr, prev) || ((!curr || curr.skipped) && prevDone));
                 const icon   = !curr ? '−' : !prev ? '+' : curr.skipped && prevDone ? '↓' : curr && !curr.skipped && prev?.skipped ? '↑' : improved ? '↑' : declined ? '↓' : '—';
                 const iconColor = (improved || (!prev && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
                                 : declined ? UI.danger
@@ -1808,7 +1808,6 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
           {(() => {
             const lastEntry = (session.last_session_entries || []).find(e => e.name === entry.name);
             if (!lastEntry?.sets?.length) return null;
-            const hasImprovementLive = (entry.sets || []).some((curr, j) => isImprovement(curr, lastEntry.sets[j]));
             return (
               <div style={{ marginTop: 16 }}>
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>LAST TIME</div>
@@ -1817,7 +1816,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                     const curr     = (entry.sets || [])[i];
                     const prevDone = !s.skipped;
                     const improved = isImprovement(curr, s);
-                    const declined = !hasImprovementLive && (isDecline(curr, s) || (curr?.skipped && prevDone));
+                    const anyImprovementBefore = (entry.sets || []).slice(0, i).some((c, j) => isImprovement(c, lastEntry.sets[j]));
+                    const declined = !anyImprovementBefore && (isDecline(curr, s) || (curr?.skipped && prevDone));
                     const showIcon = (curr?.done || curr?.skipped) && !!s;
                     const icon     = curr?.skipped && prevDone ? '↓' : improved ? '↑' : declined ? '↓' : '—';
                     const iconColor = improved ? 'var(--accent)' : declined ? UI.danger : UI.inkFaint;
