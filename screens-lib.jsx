@@ -1486,6 +1486,18 @@ function inferCurrentExIdx(entries) {
   return 0;
 }
 
+function calcRemainingMin(startedAt, avgDurSec, nowMs) {
+  if (!avgDurSec || !startedAt) return null;
+  const elapsed = (nowMs - new Date(startedAt).getTime()) / 1000;
+  return Math.max(0, Math.round((avgDurSec - elapsed) / 60));
+}
+
+function calcProgress(startedAt, avgDurSec, nowMs) {
+  if (!avgDurSec || !startedAt) return null;
+  const elapsed = (nowMs - new Date(startedAt).getTime()) / 1000;
+  return Math.min(1, Math.max(0, elapsed / avgDurSec));
+}
+
 function SpectatorScreen({ go, targetUserId, userName }) {
   const [session, setSession] = useStateL(null);
   const [exIdx, setExIdx] = useStateL(0);
@@ -1686,6 +1698,38 @@ function SpectatorScreen({ go, targetUserId, userName }) {
           </Frame>
         </div>
       )}
+
+      {/* Progress footer — only shown when historical avg is available */}
+      {(() => {
+        const remMin = calcRemainingMin(session?.started_at, session?.avg_duration_seconds, now);
+        const ratio  = calcProgress(session?.started_at, session?.avg_duration_seconds, now);
+        if (ratio === null) return null;
+        const finishing = remMin === 0;
+        return (
+          <div style={{
+            flexShrink: 0,
+            padding: '14px 22px',
+            paddingBottom: `calc(14px + env(safe-area-inset-bottom, 0px))`,
+            borderTop: `0.5px solid ${UI.hair}`,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+              <span className="micro" style={{ color: UI.inkFaint }}>ESTIMATED REMAINING</span>
+              <span className="num" style={{ fontSize: 13, color: finishing ? UI.goldSoft : UI.gold }}>
+                {finishing ? 'finishing soon' : `~${remMin} min`}
+              </span>
+            </div>
+            <div style={{ height: 4, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%',
+                width: `${ratio * 100}%`,
+                background: finishing ? UI.goldSoft : UI.gold,
+                borderRadius: 999,
+                transition: 'width 2s linear',
+              }} />
+            </div>
+          </div>
+        );
+      })()}
     </Screen>
   );
 }
@@ -1703,6 +1747,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [activeGrants, setActiveGrants] = useStateL([]);
   const [newGrantEmail, setNewGrantEmail] = useStateL('');
   const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateL(false);
+  const [nowS, setNowS] = useStateL(Date.now());
   const [importing, setImporting] = useStateL(false);
   const [swVersion, setSwVersion] = useStateL('');
   const [pushStatus, setPushStatus] = useStateL(null);
@@ -1732,7 +1777,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
       .catch(() => {});
     loadSessions();
     if (isAdmin) loadGrants();
-    const iv = setInterval(loadSessions, 30000);
+    const iv = setInterval(() => { loadSessions(); setNowS(Date.now()); }, 30000);
     return () => { mounted = false; clearInterval(iv); };
   }, [hasActiveUsersAccess, isAdmin]);
 
@@ -1927,26 +1972,42 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column' }}>
                 {activeSessions.length === 0 ? (
                   <div className="micro" style={{ color: UI.inkFaint, padding: '6px 0' }}>Nobody training right now.</div>
-                ) : activeSessions.map((s, i) => (
-                  <div key={i}
-                    onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name })}
-                    style={{
-                      display: 'grid', gridTemplateColumns: '14px 1fr 1fr 1fr',
-                      alignItems: 'center', gap: 10,
-                      padding: '9px 0',
-                      borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none',
-                      cursor: 'pointer',
-                      WebkitTapHighlightColor: 'transparent',
-                    }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
-                    <span style={{ fontSize: 14, color: UI.ink, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
-                    <span className="display-it" style={{ fontSize: 14, color: UI.inkSoft, textAlign: 'center' }}>{s.day_name}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                      <span className="num" style={{ fontSize: 13, color: UI.gold }}>{s.sets_done}/{s.sets_total}</span>
-                      <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round"><path d="M1 1l4 4-4 4"/></svg>
+                ) : activeSessions.map((s, i) => {
+                  const remMin   = calcRemainingMin(s.started_at, s.avg_duration_seconds, nowS);
+                  const ratio    = calcProgress(s.started_at, s.avg_duration_seconds, nowS);
+                  const finishing = remMin === 0;
+                  return (
+                    <div key={i}
+                      onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name })}
+                      style={{
+                        display: 'grid', gridTemplateColumns: '14px 1fr 1fr 1fr',
+                        alignItems: 'center', gap: 10,
+                        padding: '9px 0',
+                        borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none',
+                        cursor: 'pointer',
+                        WebkitTapHighlightColor: 'transparent',
+                      }}>
+                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
+                      <span style={{ fontSize: 14, color: UI.ink, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
+                      <span className="display-it" style={{ fontSize: 14, color: UI.inkSoft, textAlign: 'center' }}>{s.day_name}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                        {ratio !== null ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                            <span className="num" style={{ fontSize: 11, color: finishing ? UI.goldSoft : UI.gold }}>
+                              {finishing ? 'soon' : `~${remMin}m`}
+                            </span>
+                            <div style={{ width: 44, height: 2, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${ratio * 100}%`, background: finishing ? UI.goldSoft : UI.gold, borderRadius: 999 }} />
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{s.sets_done}/{s.sets_total}</span>
+                        )}
+                        <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round"><path d="M1 1l4 4-4 4"/></svg>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
 
                 {/* Access management — admin only */}
                 {isAdmin && <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
