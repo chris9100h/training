@@ -135,6 +135,15 @@ async function loadFromSupabase(userId, _depth = 0) {
 
   const sett = settRes.data || {};
 
+  // Sessions with no ended timestamp that aren't the current in-progress
+  // session are orphans (app crashed / closed mid-session). Delete them now.
+  const orphanIds = (sessRes.data || [])
+    .filter(s => s.ended === null && s.id !== sett.in_progress_session_id)
+    .map(s => s.id);
+  if (orphanIds.length) {
+    _supabase.from('zane_sessions').delete().in('id', orphanIds).catch(() => {});
+  }
+
   const { data: { user: authUser } } = await _supabase.auth.getUser();
 
   return {
