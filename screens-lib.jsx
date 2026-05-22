@@ -1750,10 +1750,10 @@ function SpectatorScreen({ go, targetUserId, userName }) {
             <div style={{ height: 4, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
               <div style={{
                 height: '100%',
-                width: `${ratio * 100}%`,
-                background: finishing ? 'var(--accent-light)' : 'var(--accent)',
-                borderRadius: 999,
-                transition: 'width 2s linear',
+                width: '100%',
+                background: `linear-gradient(to right, ${UI.inkFaint}, var(--accent))`,
+                clipPath: `inset(0 ${(1 - ratio) * 100}% 0 0)`,
+                transition: 'clip-path 2s linear',
               }} />
             </div>
             {paceDelta !== null && (() => {
@@ -1791,10 +1791,10 @@ function SpectatorScreen({ go, targetUserId, userName }) {
                 <div style={{ height: 4, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
                   <div style={{
                     height: '100%',
-                    width: `${(totalSetsDone / totalSetsTotal) * 100}%`,
-                    background: UI.inkSoft,
-                    borderRadius: 999,
-                    transition: 'width 2s linear',
+                    width: '100%',
+                    background: `linear-gradient(to right, ${UI.inkFaint}, var(--accent))`,
+                    clipPath: `inset(0 ${(1 - totalSetsDone / totalSetsTotal) * 100}% 0 0)`,
+                    transition: 'clip-path 2s linear',
                   }} />
                 </div>
               </>
