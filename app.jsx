@@ -217,15 +217,16 @@ function App() {
     });
   }, []);
 
-  const applyUpdate = useCallbackA(() => {
+  const applyUpdate = useCallbackA(async () => {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
     if (waitingWorker.current) {
       intentionalUpdate.current = true;
       waitingWorker.current.postMessage({ type: 'SKIP_WAITING' });
     } else {
-      // No waiting worker — SW already up to date. Dismiss the stale overlay
-      // and attempt a reload so the page runs the freshest cached assets.
-      setUpdateAvailable(false);
-      window.location.href = window.location.href;
+      window.location.reload(true);
     }
   }, []);
 
