@@ -109,14 +109,13 @@ async function setupNewUser(userId, name) {
 // ─── LOAD ────────────────────────────────────────────────────────────────
 
 async function loadFromSupabase(userId, _depth = 0) {
-  const [profileRes, exRes, schRes, sessRes, settRes, accessRes] = await Promise.all([
+  const [profileRes, exRes, schRes, sessRes, settRes] = await Promise.all([
     _supabase.from('zane_profiles').select('id, name').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days').eq('user_id', userId),
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
-    _supabase.rpc('check_active_users_access').catch(() => ({ data: false })),
   ]);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
@@ -162,7 +161,6 @@ async function loadFromSupabase(userId, _depth = 0) {
       ended: s.ended,
       entries: s.entries,
     })),
-    hasActiveUsersAccess: !!accessRes.data,
     activeScheduleId: sett.active_schedule_id ?? null,
     cycleIndex: sett.cycle_index ?? 0,
     cycleStartDate: sett.cycle_start_date ?? null,
