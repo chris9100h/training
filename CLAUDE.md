@@ -68,6 +68,9 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 2. Den Nutzer explizit darauf hinweisen, dass sie ausgeführt werden muss
 3. Die Spalten-Liste unter "Aktuelle Tabellen & Spalten" in dieser Datei aktualisieren
 
+**Bei Tabellen-Umbenennung zusätzlich prüfen:**
+- `supabase/functions/` — Edge Functions greifen per REST direkt auf Tabellennamen zu (z.B. `dbFetch('zane_pushover_active?...')`). Kein Compiler warnt bei falschen Namen. Alle Funktionen nach alten Tabellennamen durchsuchen und neu deployen.
+
 ### Aktuelle Tabellen & Spalten
 
 **`zane_exercises`:** `id` (text), `user_id` (uuid), `name`, `note`, `category` (text), `tags` (array), `unilateral` (boolean)
