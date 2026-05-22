@@ -1721,6 +1721,26 @@ function SpectatorScreen({ go, targetUserId, userName }) {
         if (!blended) return null;
         const { remainingMin: remMin, progress: ratio } = blended;
         const finishing = remMin === 0;
+
+        const paceBadge = (() => {
+          const avgSets = session?.avg_sets_total;
+          const avgDur  = session?.avg_duration_seconds;
+          const elapsed = session?.started_at ? (now - new Date(session.started_at).getTime()) / 1000 : 0;
+          if (!avgSets || !avgDur || totalSetsDone < 2) return null;
+          const remainingSets = Math.max(0, totalSetsTotal - totalSetsDone);
+          if (remainingSets === 0) return null;
+          const histPace = avgDur / avgSets;
+          const currPace = elapsed / totalSetsDone;
+          const diffMin  = Math.round(((currPace - histPace) * remainingSets) / 60);
+          if (Math.abs(diffMin) < 2) return null;
+          const ahead = diffMin < 0;
+          return (
+            <span className="num" style={{ fontSize: 11, color: ahead ? UI.gold : UI.inkFaint }}>
+              {ahead ? `${Math.abs(diffMin)}m ahead` : `+${diffMin}m behind`}
+            </span>
+          );
+        })();
+
         return (
           <div style={{
             flexShrink: 0,
@@ -1730,9 +1750,12 @@ function SpectatorScreen({ go, targetUserId, userName }) {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
               <span className="micro" style={{ color: UI.inkFaint }}>ESTIMATED REMAINING</span>
-              <span className="num" style={{ fontSize: 13, color: finishing ? UI.goldSoft : UI.gold }}>
-                {finishing ? 'finishing soon' : `~${remMin} min`}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                {paceBadge}
+                <span className="num" style={{ fontSize: 13, color: finishing ? UI.goldSoft : UI.gold }}>
+                  {finishing ? 'finishing soon' : `~${remMin} min`}
+                </span>
+              </div>
             </div>
             <div style={{ height: 4, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
               <div style={{
