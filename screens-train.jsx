@@ -65,10 +65,13 @@ function calcPlates(weight) {
 function PlateCalcSheet({ open, onClose, initialWeight }) {
   const [tab, setTab] = useStateT(0);
   const [raw, setRaw] = useStateT('');
+  const [fresh, setFresh] = useStateT(false);
   const prevOpen = useRefT(false);
   useEffectT(() => {
-    if (open && !prevOpen.current)
+    if (open && !prevOpen.current) {
       setRaw(initialWeight != null ? String(initialWeight).replace('.', ',') : '');
+      setFresh(initialWeight != null);
+    }
     prevOpen.current = open;
   }, [open, initialWeight]);
 
@@ -108,15 +111,16 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
       {/* Weight input — large, centered */}
       <div style={{ position: 'relative', textAlign: 'center', marginBottom: 6 }}>
         <input
-          type="text" inputMode="decimal"
+          type="text" inputMode="none" readOnly
           value={raw} placeholder="0"
-          onChange={e => setRaw(e.target.value)}
+          onPointerDown={e => e.preventDefault()}
           style={{
             background: 'transparent', border: 'none', outline: 'none',
             color: UI.ink, fontFamily: UI.fontNum, fontSize: 48, fontWeight: 300,
             letterSpacing: '-0.03em', textAlign: 'center',
             width: '100%', boxSizing: 'border-box',
             borderBottom: `0.5px solid ${UI.hair}`, paddingBottom: 8,
+            caretColor: 'transparent', userSelect: 'none',
           }}
         />
         <span style={{
@@ -185,6 +189,25 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
           </button>
         </div>
       )}
+
+      {/* Inline numpad — avoids native keyboard / floating cursor */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 20, paddingTop: 16, borderTop: `0.5px solid ${UI.hair}` }}>
+        {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
+          <button key={k} onPointerDown={e => {
+            e.preventDefault();
+            if (k === '⌫') { setRaw(fresh ? '' : r => r.slice(0, -1)); setFresh(false); return; }
+            if (k === ',' && !fresh && raw.includes(',')) return;
+            setRaw(fresh ? k : r => r + k);
+            setFresh(false);
+          }} style={{
+            height: 46, borderRadius: 8, border: 'none', cursor: 'pointer',
+            background: 'var(--bg-raised)', boxShadow: `0 0 0 0.5px var(--hair)`,
+            color: k === '⌫' ? UI.inkSoft : UI.ink,
+            fontFamily: UI.fontNum, fontSize: 20, fontWeight: 400,
+            WebkitTapHighlightColor: 'transparent', userSelect: 'none',
+          }}>{k}</button>
+        ))}
+      </div>
     </Sheet>
   );
 }
