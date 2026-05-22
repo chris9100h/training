@@ -1027,6 +1027,27 @@ function HistoryScreen({ store, go, initialTab }) {
   );
 }
 
+// ─── SET COMPARISON HELPERS ──────────────────────────────────────────
+// Shared by SessionDetailScreen, ComparisonScreen, and the LAST TIME card.
+function effReps(st) {
+  if (st.repsL != null || st.repsR != null) return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
+  return st.reps;
+}
+function isImprovement(curr, prev) {
+  if (!prev || !curr || !curr.done || curr.skipped || curr.kg == null || prev.kg == null) return false;
+  const rA = effReps(curr); const rB = effReps(prev);
+  if (rA == null || rB == null) return false;
+  return (curr.kg > prev.kg && rA >= rB - 2) || (curr.kg >= prev.kg && rA > rB);
+}
+function isDecline(curr, prev) {
+  if (!prev || !curr || curr.skipped) return false;
+  if (prev.skipped) return false; // prev was already skipped, no baseline to decline from
+  if (!curr.done || curr.kg == null || prev.kg == null) return false;
+  const rA = effReps(curr); const rB = effReps(prev);
+  if (rA == null || rB == null) return false;
+  return curr.kg < prev.kg || (curr.kg === prev.kg && rA < rB);
+}
+
 // ─── SESSION DETAIL ──────────────────────────────────────────────────
 function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, back }) {
   const [confirmEl, confirm] = useConfirm();
@@ -1131,24 +1152,6 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       scrollParent.style.minHeight = saved.minHeight;
       setCapturing(false);
     }
-  };
-
-  const effReps = (st) => {
-    if (st.repsL != null || st.repsR != null) return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
-    return st.reps;
-  };
-  const isImprovement = (st, prevSet) => {
-    if (!prevSet || !st.done || st.kg == null || prevSet.kg == null) return false;
-    const repsA = effReps(st); const repsB = effReps(prevSet);
-    if (repsA == null || repsB == null) return false;
-    return (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB);
-  };
-
-  const isDecline = (st, prevSet) => {
-    if (!prevSet || !st.done || st.kg == null || prevSet.kg == null) return false;
-    const repsA = effReps(st); const repsB = effReps(prevSet);
-    if (repsA == null || repsB == null) return false;
-    return st.kg < prevSet.kg || (st.kg === prevSet.kg && repsA < repsB);
   };
 
   return (
@@ -1292,17 +1295,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               const renderEntry = (e, i) => {
                 const prev = prevEntryMap[e.exId];
                 const exName = store.exercises.find(ex => ex.id === e.exId)?.name ?? e.name;
-                const hasImprovement = e.sets.some((st, j) => isPR(st, e.exId) || isImprovement(st, prev?.sets?.[j]));
+                const filteredSets = e.sets.filter(st => !st.skipped);
                 return (
                 <div key={i}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
                     <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{exName}</div>
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {e.sets.filter(st => !st.skipped).map((st, j) => {
+                    {filteredSets.map((st, j) => {
                       const pr = isPR(st, e.exId);
                       const highlight = pr || isImprovement(st, prev?.sets?.[j]);
-                      const decline = !hasImprovement && isDecline(st, prev?.sets?.[j]);
+                      const anyImprovementBefore = filteredSets.slice(0, j).some((s, k) => isPR(s, e.exId) || isImprovement(s, prev?.sets?.[k]));
+                      const decline = !anyImprovementBefore && isDecline(st, prev?.sets?.[j]);
                       return (
                         <span key={j} style={{
                           opacity: st.done ? 1 : 0.3,
@@ -1512,7 +1516,88 @@ function calcBlended(startedAt, avgDurSec, avgSetsTotal, setsDone, setsTotal, no
   return { remainingMin: Math.round(remainingSec / 60), progress };
 }
 
-function SpectatorScreen({ go, targetUserId, userName }) {
+function ComparisonScreen({ session, onDismiss, go, userName }) {
+  const entries     = session.entries || [];
+  const lastEntries = session.last_session_entries || [];
+  const duration    = session.ended && session.started_at
+    ? Math.round((new Date(session.ended) - new Date(session.started_at)) / 60000)
+    : null;
+
+  return (
+    <Screen scroll={false} style={{ position: 'relative' }}>
+      <TopBar title={userName} onBack={() => go({ name: 'settings' })} />
+      <div style={{ flexShrink: 0, padding: '12px 22px', borderBottom: `0.5px solid ${UI.hair}` }}>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>
+          {session.day_name} · COMPLETE
+        </div>
+        {duration != null && (
+          <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{duration} min</span>
+        )}
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 22px' }}>
+        {entries.map((entry, ei) => {
+          const lastEntry = lastEntries.find(e => e.name === entry.name);
+          const sets      = entry.sets || [];
+          const lastSets  = lastEntry?.sets || [];
+          const maxLen    = Math.max(sets.length, lastSets.length);
+          const fmtSet = s => {
+            if (!s) return '—';
+            if (s.skipped) return 'skipped';
+            return `${s.kg != null ? s.kg + 'kg' : '—'} × ${s.reps ?? '—'}`;
+          };
+          return (
+            <div key={ei} style={{ marginBottom: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px', gap: 10, marginBottom: 6 }}>
+                <span />
+                <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.07em', color: UI.inkSoft }}>
+                  {entry.name}
+                </span>
+                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'right' }}>LAST TIME</span>
+                <span />
+              </div>
+              {Array.from({ length: maxLen }).map((_, si) => {
+                const curr = sets[si];
+                const prev = lastSets[si];
+                if (!curr && !prev) return null;
+                const prevDone = prev && !prev.skipped;
+                const improved = isImprovement(curr, prev);
+                const anyImprovementBefore = sets.slice(0, si).some((c, j) => isImprovement(c, lastSets[j]));
+                const declined = !anyImprovementBefore && (isDecline(curr, prev) || ((!curr || curr.skipped) && prevDone));
+                const icon   = !curr ? '−' : !prev ? '+' : curr.skipped && prevDone ? '↓' : curr && !curr.skipped && prev?.skipped ? '↑' : improved ? '↑' : declined ? '↓' : '—';
+                const iconColor = (improved || (!prev && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
+                                : declined ? UI.danger
+                                : UI.inkFaint;
+                return (
+                  <div key={si} style={{
+                    display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px',
+                    alignItems: 'center', gap: 10, padding: '6px 0',
+                    borderBottom: si < maxLen - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                  }}>
+                    <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
+                    <span className="num" style={{ fontSize: 14, color: curr && !curr.skipped ? UI.ink : UI.inkFaint }}>
+                      {fmtSet(curr)}
+                    </span>
+                    <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right' }}>
+                      {fmtSet(prev)}
+                    </span>
+                    <span style={{ fontSize: 14, color: iconColor, textAlign: 'right' }}>{icon}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ flexShrink: 0, padding: '14px 22px', paddingBottom: `calc(14px + env(safe-area-inset-bottom, 0px))`, borderTop: `0.5px solid ${UI.hair}` }}>
+        <Btn onClick={onDismiss}>Got it</Btn>
+      </div>
+    </Screen>
+  );
+}
+
+function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
   const [session, setSession] = useStateL(null);
   const [exIdx, setExIdx] = useStateL(0);
   const [loading, setLoading] = useStateL(true);
@@ -1526,7 +1611,9 @@ function SpectatorScreen({ go, targetUserId, userName }) {
   }, []);
 
   const load = () => {
-    LB.supabase.rpc('get_active_session_detail', { p_user_id: targetUserId })
+    const params = { p_user_id: targetUserId };
+    if (sessionId) params.p_session_id = sessionId;
+    LB.supabase.rpc('get_active_session_detail', params)
       .then(({ data }) => {
         if (!data?.length) {
           if (!loading) setEnded(true);
@@ -1535,7 +1622,7 @@ function SpectatorScreen({ go, targetUserId, userName }) {
           const d = data[0];
           setSession(d);
           setEnded(false);
-          setExIdx(inferCurrentExIdx(d.entries || []));
+          if (!sessionId) setExIdx(inferCurrentExIdx(d.entries || []));
         }
         setLoading(false);
       })
@@ -1544,9 +1631,10 @@ function SpectatorScreen({ go, targetUserId, userName }) {
 
   useEffectL(() => {
     load();
+    if (sessionId) return; // finished session: single fetch, no polling
     const iv = setInterval(load, 2000);
     return () => clearInterval(iv);
-  }, [targetUserId]);
+  }, [targetUserId, sessionId]);
 
   useEffectL(() => {
     const row = chipRowRef.current;
@@ -1567,6 +1655,15 @@ function SpectatorScreen({ go, targetUserId, userName }) {
       <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div>
     </Screen>
   );
+
+  if (session && sessionId) {
+    const dismiss = () => {
+      const list = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
+      if (!list.includes(sessionId)) { list.push(sessionId); localStorage.setItem('logbook-dismissed-sessions', JSON.stringify(list)); }
+      go({ name: 'settings' });
+    };
+    return <ComparisonScreen session={session} onDismiss={dismiss} go={go} userName={userName} />;
+  }
 
   if (!session) return (
     <Screen>
@@ -1710,6 +1807,54 @@ function SpectatorScreen({ go, targetUserId, userName }) {
               );
             })}
           </Frame>
+
+          {/* Last time card */}
+          {(() => {
+            const lastEntry = (session.last_session_entries || []).find(e => e.name === entry.name);
+            if (!lastEntry?.sets?.length) return null;
+            return (
+              <div style={{ marginTop: 16 }}>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>LAST TIME</div>
+                <Frame style={{ padding: '0 16px' }}>
+                  {lastEntry.sets.map((s, i) => {
+                    const curr     = (entry.sets || [])[i];
+                    const prevDone = !s.skipped;
+                    const improved = isImprovement(curr, s);
+                    const anyImprovementBefore = (entry.sets || []).slice(0, i).some((c, j) => isImprovement(c, lastEntry.sets[j]));
+                    const declined = !anyImprovementBefore && (isDecline(curr, s) || (curr?.skipped && prevDone));
+                    const showIcon = (curr?.done || curr?.skipped) && !!s;
+                    const icon     = curr?.skipped && prevDone ? '↓' : improved ? '↑' : declined ? '↓' : '—';
+                    const iconColor = improved ? 'var(--accent)' : declined ? UI.danger : UI.inkFaint;
+                    return (
+                      <div key={i} style={{
+                        display: 'grid', gridTemplateColumns: '20px 1fr 1fr 20px',
+                        alignItems: 'center', gap: 10, padding: '10px 0',
+                        borderBottom: i < lastEntry.sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                      }}>
+                        <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{i + 1}</span>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                          {s.skipped
+                            ? <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>skipped</span>
+                            : <><span className="num" style={{ fontSize: 16, color: UI.inkSoft }}>{s.kg != null ? s.kg : '—'}</span>
+                               {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>kg</span>}</>
+                          }
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, justifyContent: 'center' }}>
+                          {!s.skipped && <>
+                            <span className="num" style={{ fontSize: 16, color: UI.inkSoft }}>{s.reps != null ? s.reps : '—'}</span>
+                            {s.reps != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>reps</span>}
+                          </>}
+                        </div>
+                        <div style={{ textAlign: 'right', fontSize: 13, color: iconColor }}>
+                          {showIcon ? icon : ''}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </Frame>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1719,8 +1864,21 @@ function SpectatorScreen({ go, targetUserId, userName }) {
         const totalSetsTotal = entries.reduce((s, e) => s + (e.sets?.length || 0), 0);
         const blended = calcBlended(session?.started_at, session?.avg_duration_seconds, session?.avg_sets_total, totalSetsDone, totalSetsTotal, now);
         if (!blended) return null;
-        const { remainingMin: remMin, progress: ratio } = blended;
+        const { remainingMin: remMin } = blended;
         const finishing = remMin === 0;
+        const avgDurMin  = (session?.avg_duration_seconds || 0) / 60;
+        const timeRatio  = avgDurMin > 0 ? Math.min(1, Math.max(0, (avgDurMin - remMin) / avgDurMin)) : 0;
+
+        const paceDelta = (() => {
+          const avgDurMin = (session?.avg_duration_seconds || 0) / 60;
+          const elapsed   = session?.started_at ? (now - new Date(session.started_at).getTime()) / 60000 : 0;
+          if (!avgDurMin || totalSetsDone < 2) return null;
+          if (Math.max(0, totalSetsTotal - totalSetsDone) === 0) return null;
+          const diffMin = Math.round(elapsed + remMin - avgDurMin); // positive = behind, negative = ahead
+          if (Math.abs(diffMin) < 2) return null;
+          return diffMin;
+        })();
+
         return (
           <div style={{
             flexShrink: 0,
@@ -1730,19 +1888,45 @@ function SpectatorScreen({ go, targetUserId, userName }) {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
               <span className="micro" style={{ color: UI.inkFaint }}>ESTIMATED REMAINING</span>
-              <span className="num" style={{ fontSize: 13, color: finishing ? UI.goldSoft : UI.gold }}>
+              <span className="num" style={{ fontSize: 13, color: finishing ? 'var(--accent-light)' : 'var(--accent)' }}>
                 {finishing ? 'finishing soon' : `~${remMin} min`}
               </span>
             </div>
             <div style={{ height: 4, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
               <div style={{
                 height: '100%',
-                width: `${ratio * 100}%`,
-                background: finishing ? UI.goldSoft : UI.gold,
-                borderRadius: 999,
-                transition: 'width 2s linear',
+                width: '100%',
+                background: `linear-gradient(to right, ${UI.inkFaint}, var(--accent))`,
+                clipPath: `inset(0 ${(1 - timeRatio) * 100}% 0 0)`,
+                transition: 'clip-path 2s linear',
               }} />
             </div>
+            {paceDelta !== null && (() => {
+              const ahead = paceDelta < 0;
+              const pct   = Math.min(Math.abs(paceDelta) / 20 * 50, 50);
+              return (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                    <span className="micro" style={{ color: UI.inkFaint }}>PACE</span>
+                    <span className="num" style={{ fontSize: 11, color: ahead ? 'var(--accent)' : UI.inkFaint }}>
+                      {ahead ? `${Math.abs(paceDelta)}m ahead` : `+${paceDelta}m behind`}
+                    </span>
+                  </div>
+                  <div style={{ position: 'relative', height: 4 }}>
+                    <div style={{ position: 'absolute', inset: 0, borderRadius: 999, background: UI.hairStrong }} />
+                    <div style={{
+                      position: 'absolute', top: 0, height: '100%',
+                      left:  ahead ? '50%' : `${50 - pct}%`,
+                      width: `${pct}%`,
+                      background: ahead ? 'var(--accent)' : UI.inkFaint,
+                      borderRadius: ahead ? '0 999px 999px 0' : '999px 0 0 999px',
+                      transition: 'left 2s linear, width 2s linear',
+                    }} />
+                    <div style={{ position: 'absolute', left: '50%', top: -2, width: 1.5, height: 8, background: UI.inkSoft, transform: 'translateX(-50%)' }} />
+                  </div>
+                </div>
+              );
+            })()}
             {totalSetsTotal > 0 && (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 10, marginBottom: 8 }}>
@@ -1752,10 +1936,10 @@ function SpectatorScreen({ go, targetUserId, userName }) {
                 <div style={{ height: 4, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
                   <div style={{
                     height: '100%',
-                    width: `${(totalSetsDone / totalSetsTotal) * 100}%`,
-                    background: UI.inkSoft,
-                    borderRadius: 999,
-                    transition: 'width 2s linear',
+                    width: '100%',
+                    background: `linear-gradient(to right, ${UI.inkFaint}, var(--accent))`,
+                    clipPath: `inset(0 ${(1 - totalSetsDone / totalSetsTotal) * 100}% 0 0)`,
+                    transition: 'clip-path 2s linear',
                   }} />
                 </div>
               </>
@@ -1989,65 +2173,88 @@ function SettingsScreen({ store, setStore, go, userId }) {
         {/* Active users — visible to admin + granted users */}
         {hasActiveUsersAccess && (
           <Frame style={{ padding: '14px 16px' }}>
-            <button onClick={() => setActiveUsersOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
-              <span className="label" style={{ marginBottom: 0 }}>Active users</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {activeSessions.length > 0 && (
-                  <div style={{
-                    background: UI.gold, color: '#0a0805',
-                    borderRadius: 999, minWidth: 18, height: 18,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 11, fontWeight: 700, fontFamily: UI.fontUi, padding: '0 5px',
-                  }}>
-                    {activeSessions.length}
+            {(() => {
+              const dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
+              const activeCount = activeSessions.filter(s => !s.is_finished).length;
+              const visibleSessions = activeSessions.filter(s => !s.is_finished || !dismissed.includes(s.session_id));
+              return (
+                <button onClick={() => setActiveUsersOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
+                  <span className="label" style={{ marginBottom: 0 }}>Active users</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {activeCount > 0 && (
+                      <div style={{
+                        background: 'var(--accent)', color: '#0a0805',
+                        borderRadius: 999, minWidth: 18, height: 18,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 11, fontWeight: 700, fontFamily: UI.fontUi, padding: '0 5px',
+                      }}>
+                        {activeCount}
+                      </div>
+                    )}
+                    <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: activeUsersOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+                      <path d="M2 1l5 5-5 5"/>
+                    </svg>
                   </div>
-                )}
-                <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: activeUsersOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-                  <path d="M2 1l5 5-5 5"/>
-                </svg>
-              </div>
-            </button>
+                </button>
+              );
+            })()}
             {activeUsersOpen && (
               <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column' }}>
-                {activeSessions.length === 0 ? (
-                  <div className="micro" style={{ color: UI.inkFaint, padding: '6px 0' }}>Nobody training right now.</div>
-                ) : activeSessions.map((s, i) => {
-                  const blended  = calcBlended(s.started_at, s.avg_duration_seconds, s.avg_sets_total, s.sets_done, s.sets_total, nowS);
-                  const remMin   = blended?.remainingMin ?? null;
-                  const ratio    = blended?.progress ?? null;
-                  const finishing = remMin === 0;
-                  return (
-                    <div key={i}
-                      onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name })}
-                      style={{
-                        display: 'grid', gridTemplateColumns: '14px 1fr 1fr 1fr',
-                        alignItems: 'center', gap: 10,
-                        padding: '9px 0',
-                        borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none',
-                        cursor: 'pointer',
-                        WebkitTapHighlightColor: 'transparent',
-                      }}>
-                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
-                      <span style={{ fontSize: 14, color: UI.ink, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
-                      <span className="display-it" style={{ fontSize: 14, color: UI.inkSoft, textAlign: 'center' }}>{s.day_name}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-                        {ratio !== null ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                            <span className="num" style={{ fontSize: 11, color: finishing ? UI.goldSoft : UI.gold }}>
-                              {finishing ? 'soon' : `~${remMin}m`}
-                            </span>
-                            <div style={{ width: 44, height: 2, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
-                              <div style={{ height: '100%', width: `${ratio * 100}%`, background: finishing ? UI.goldSoft : UI.gold, borderRadius: 999 }} />
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{s.sets_done}/{s.sets_total}</span>
-                        )}
-                        <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round"><path d="M1 1l4 4-4 4"/></svg>
-                      </div>
-                    </div>
+                {(() => {
+                  const dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
+                  const visibleSessions = activeSessions.filter(s => !s.is_finished || !dismissed.includes(s.session_id));
+                  if (visibleSessions.length === 0) return (
+                    <div className="micro" style={{ color: UI.inkFaint, padding: '6px 0' }}>Nobody training right now.</div>
                   );
-                })}
+                  return visibleSessions.map((s, i) => {
+                    const isFinished = s.is_finished;
+                    if (isFinished) {
+                      const finishedMin = s.ended ? Math.round((nowS - new Date(s.ended).getTime()) / 60000) : null;
+                      const finishedStr = finishedMin != null ? (finishedMin < 60 ? `${finishedMin}m ago` : `${Math.round(finishedMin/60)}h ago`) : 'done';
+                      return (
+                        <div key={s.session_id}
+                          onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name, sessionId: s.session_id })}
+                          style={{ display: 'grid', gridTemplateColumns: '14px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                          <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.inkFaint }} />
+                          <span style={{ fontSize: 14, color: UI.inkSoft, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
+                          <span className="display-it" style={{ fontSize: 14, color: UI.inkFaint, textAlign: 'center' }}>{s.day_name}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                            <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{finishedStr}</span>
+                            <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round"><path d="M1 1l4 4-4 4"/></svg>
+                          </div>
+                        </div>
+                      );
+                    }
+                    const blended  = calcBlended(s.started_at, s.avg_duration_seconds, s.avg_sets_total, s.sets_done, s.sets_total, nowS);
+                    const remMin   = blended?.remainingMin ?? null;
+                    const ratio    = blended?.progress ?? null;
+                    const finishing = remMin === 0;
+                    return (
+                      <div key={s.session_id || i}
+                        onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name })}
+                        style={{ display: 'grid', gridTemplateColumns: '14px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: 'pulseDot 1.4s ease-in-out infinite' }} />
+                        <span style={{ fontSize: 14, color: UI.ink, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
+                        <span className="display-it" style={{ fontSize: 14, color: UI.inkSoft, textAlign: 'center' }}>{s.day_name}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                          {ratio !== null ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                              <span className="num" style={{ fontSize: 11, color: finishing ? 'var(--accent-light)' : 'var(--accent)' }}>
+                                {finishing ? 'soon' : `~${remMin}m`}
+                              </span>
+                              <div style={{ width: 44, height: 2, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
+                                <div style={{ height: '100%', width: `${ratio * 100}%`, background: finishing ? 'var(--accent-light)' : 'var(--accent)', borderRadius: 999 }} />
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{s.sets_done}/{s.sets_total}</span>
+                          )}
+                          <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round"><path d="M1 1l4 4-4 4"/></svg>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
 
                 {/* Access management — admin only */}
                 {isAdmin && <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
