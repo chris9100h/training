@@ -1537,6 +1537,11 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
           const sets      = entry.sets || [];
           const lastSets  = lastEntry?.sets || [];
           const maxLen    = Math.max(sets.length, lastSets.length);
+          const fmtSet = s => {
+            if (!s) return '—';
+            if (s.skipped) return 'skipped';
+            return `${s.kg != null ? s.kg + 'kg' : '—'} × ${s.reps ?? '—'}`;
+          };
           return (
             <div key={ei} style={{ marginBottom: 20 }}>
               <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.07em', color: UI.inkSoft, marginBottom: 8 }}>
@@ -1546,11 +1551,15 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
                 const curr = sets[si];
                 const prev = lastSets[si];
                 if (!curr && !prev) return null;
-                const better = curr && prev && (curr.kg > prev.kg || (curr.kg === prev.kg && (curr.reps ?? 0) > (prev.reps ?? 0)));
-                const worse  = curr && prev && (curr.kg < prev.kg || (curr.kg === prev.kg && (curr.reps ?? 0) < (prev.reps ?? 0)));
-                const icon   = !curr ? '−' : !prev ? '+' : better ? '↑' : worse ? '↓' : '—';
-                const iconColor = better || !prev ? 'var(--accent)' : worse || !curr ? UI.danger : UI.inkFaint;
-                const fmtSet = s => s ? `${s.kg != null ? s.kg + 'kg' : '—'} × ${s.reps ?? '—'}` : '—';
+                const currDone = curr && !curr.skipped;
+                const prevDone = prev && !prev.skipped;
+                const better = currDone && prevDone && (curr.kg > prev.kg || (curr.kg === prev.kg && (curr.reps ?? 0) > (prev.reps ?? 0)));
+                const worse  = (!curr || curr.skipped) && prevDone
+                               || currDone && prevDone && (curr.kg < prev.kg || (curr.kg === prev.kg && (curr.reps ?? 0) < (prev.reps ?? 0)));
+                const icon   = !curr ? '−' : !prev ? '+' : curr.skipped && !prev.skipped ? '↓' : !curr.skipped && prev.skipped ? '↑' : better ? '↑' : worse ? '↓' : '—';
+                const iconColor = (better || (!prev && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
+                                : (worse  || !curr || curr.skipped) && prevDone ? UI.danger
+                                : UI.inkFaint;
                 return (
                   <div key={si} style={{
                     display: 'grid', gridTemplateColumns: '20px 1fr auto 20px',
@@ -1558,7 +1567,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
                     borderBottom: si < maxLen - 1 ? `0.5px solid ${UI.hair}` : 'none',
                   }}>
                     <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
-                    <span className="num" style={{ fontSize: 14, color: curr ? UI.ink : UI.inkFaint }}>
+                    <span className="num" style={{ fontSize: 14, color: curr && !curr.skipped ? UI.ink : UI.inkFaint }}>
                       {fmtSet(curr)}
                     </span>
                     {prev ? (
@@ -1576,7 +1585,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
       </div>
 
       <div style={{ flexShrink: 0, padding: '14px 22px', paddingBottom: `calc(14px + env(safe-area-inset-bottom, 0px))`, borderTop: `0.5px solid ${UI.hair}` }}>
-        <Btn label="Got it" onPress={onDismiss} />
+        <Btn onClick={onDismiss}>Got it</Btn>
       </div>
     </Screen>
   );
@@ -1802,9 +1811,14 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>LAST TIME</div>
                 <Frame style={{ padding: '0 16px' }}>
                   {lastEntry.sets.map((s, i) => {
-                    const curr = (entry.sets || [])[i];
-                    const better = curr?.done && (curr.kg > s.kg || (curr.kg === s.kg && (curr.reps ?? 0) > (s.reps ?? 0)));
-                    const worse  = curr?.done && (curr.kg < s.kg || (curr.kg === s.kg && (curr.reps ?? 0) < (s.reps ?? 0)));
+                    const curr     = (entry.sets || [])[i];
+                    const currDone = curr?.done && !curr?.skipped;
+                    const prevDone = !s.skipped;
+                    const better = currDone && prevDone && (curr.kg > s.kg || (curr.kg === s.kg && (curr.reps ?? 0) > (s.reps ?? 0)));
+                    const worse  = currDone && prevDone && (curr.kg < s.kg || (curr.kg === s.kg && (curr.reps ?? 0) < (s.reps ?? 0)));
+                    const showIcon = currDone || (curr?.skipped && prevDone);
+                    const icon  = curr?.skipped && prevDone ? '↓' : better ? '↑' : worse ? '↓' : '—';
+                    const iconColor = better ? 'var(--accent)' : (worse || (curr?.skipped && prevDone)) ? UI.danger : UI.inkFaint;
                     return (
                       <div key={i} style={{
                         display: 'grid', gridTemplateColumns: '20px 1fr 1fr 20px',
@@ -1813,15 +1827,20 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                       }}>
                         <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{i + 1}</span>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                          <span className="num" style={{ fontSize: 16, color: UI.inkSoft }}>{s.kg != null ? s.kg : '—'}</span>
-                          {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>kg</span>}
+                          {s.skipped
+                            ? <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>skipped</span>
+                            : <><span className="num" style={{ fontSize: 16, color: UI.inkSoft }}>{s.kg != null ? s.kg : '—'}</span>
+                               {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>kg</span>}</>
+                          }
                         </div>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, justifyContent: 'center' }}>
-                          <span className="num" style={{ fontSize: 16, color: UI.inkSoft }}>{s.reps != null ? s.reps : '—'}</span>
-                          {s.reps != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>reps</span>}
+                          {!s.skipped && <>
+                            <span className="num" style={{ fontSize: 16, color: UI.inkSoft }}>{s.reps != null ? s.reps : '—'}</span>
+                            {s.reps != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>reps</span>}
+                          </>}
                         </div>
-                        <div style={{ textAlign: 'right', fontSize: 13, color: better ? 'var(--accent)' : worse ? UI.danger : UI.inkFaint }}>
-                          {curr?.done ? (better ? '↑' : worse ? '↓' : '—') : ''}
+                        <div style={{ textAlign: 'right', fontSize: 13, color: iconColor }}>
+                          {showIcon ? icon : ''}
                         </div>
                       </div>
                     );
