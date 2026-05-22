@@ -1743,7 +1743,7 @@ function SpectatorScreen({ go, targetUserId, userName }) {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
               <span className="micro" style={{ color: UI.inkFaint }}>ESTIMATED REMAINING</span>
-              <span className="num" style={{ fontSize: 13, color: finishing ? UI.goldSoft : UI.gold }}>
+              <span className="num" style={{ fontSize: 13, color: finishing ? 'var(--accent-light)' : 'var(--accent)' }}>
                 {finishing ? 'finishing soon' : `~${remMin} min`}
               </span>
             </div>
@@ -1751,7 +1751,7 @@ function SpectatorScreen({ go, targetUserId, userName }) {
               <div style={{
                 height: '100%',
                 width: `${ratio * 100}%`,
-                background: finishing ? UI.goldSoft : UI.gold,
+                background: finishing ? 'var(--accent-light)' : 'var(--accent)',
                 borderRadius: 999,
                 transition: 'width 2s linear',
               }} />
@@ -1763,7 +1763,7 @@ function SpectatorScreen({ go, targetUserId, userName }) {
                 <div style={{ marginTop: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
                     <span className="micro" style={{ color: UI.inkFaint }}>PACE</span>
-                    <span className="num" style={{ fontSize: 11, color: ahead ? UI.gold : UI.inkFaint }}>
+                    <span className="num" style={{ fontSize: 11, color: ahead ? 'var(--accent)' : UI.inkFaint }}>
                       {ahead ? `${Math.abs(paceDelta)}m ahead` : `+${paceDelta}m behind`}
                     </span>
                   </div>
@@ -1773,7 +1773,7 @@ function SpectatorScreen({ go, targetUserId, userName }) {
                       position: 'absolute', top: 0, height: '100%',
                       left:  ahead ? '50%' : `${50 - pct}%`,
                       width: `${pct}%`,
-                      background: ahead ? UI.gold : UI.inkFaint,
+                      background: ahead ? 'var(--accent)' : UI.inkFaint,
                       borderRadius: ahead ? '0 999px 999px 0' : '999px 0 0 999px',
                       transition: 'left 2s linear, width 2s linear',
                     }} />
