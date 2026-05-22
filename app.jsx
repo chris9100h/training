@@ -365,6 +365,7 @@ function App() {
     case 'hist':          screen = <window.Screens.HistoryScreen {...props} initialTab={route.initialTab} />; break;
     case 'session':       screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'settings':      screen = <window.Screens.SettingsScreen {...props} />; break;
+    case 'spectator':     screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} />; break;
     default:              screen = <window.Screens.HomeScreen {...props} />; break;
   }
 
