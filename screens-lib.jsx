@@ -1856,6 +1856,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
       setImporting(true);
       try {
         await LB.importFromBackup(backup, userId);
+        LB.clearLocal(userId);
         window.location.reload();
       } catch (err) {
         setImporting(false);
