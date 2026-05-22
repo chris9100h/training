@@ -119,7 +119,17 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [selectedSlot, setSelectedSlot] = useState(dayIdx);
 
   const minOffset = (() => {
-    if (weekdayMode) return -8;
+    if (weekdayMode) {
+      if (store.weekPlanStartDate) {
+        const now = new Date(); now.setHours(12, 0, 0, 0);
+        const currentMondayMs = now.getTime() - todayWd * 86400000;
+        const start = new Date(store.weekPlanStartDate + 'T12:00:00');
+        const planMondayMs = start.getTime() - ((start.getDay() + 6) % 7) * 86400000;
+        const week0MondayMs = planMondayMs - 7 * 86400000;
+        return Math.round((week0MondayMs - currentMondayMs) / (7 * 86400000));
+      }
+      return -8;
+    }
     if (cycleWeekView && store.cycleStartDate && dayCount > 0) {
       const now = new Date(); now.setHours(12, 0, 0, 0);
       const currentMondayMs = now.getTime() - todayWd * 86400000;
@@ -219,6 +229,16 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const periodLabel = useMemo(() => {
     if (weekdayMode) {
+      if (store.weekPlanStartDate) {
+        const monday = new Date(); monday.setHours(12, 0, 0, 0);
+        monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
+        const start = new Date(store.weekPlanStartDate + 'T12:00:00');
+        const startMonday = new Date(start);
+        startMonday.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+        startMonday.setHours(12, 0, 0, 0);
+        const weekNum = Math.floor(Math.round((monday - startMonday) / 86400000) / 7) + 1;
+        if (weekNum >= 0) return `WEEK ${weekNum}`;
+      }
       if (weekOffset === 0) return 'THIS WEEK';
       if (weekOffset === -1) return 'LAST WEEK';
       return `${-weekOffset} WEEKS AGO`;
@@ -507,7 +527,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M6 1 1 6l5 5"/></svg>
           </button>
           <div style={{ flex: 1, textAlign: 'center' }}>
-            <span className="micro" style={{ color: UI.inkSoft }}>{periodLabel}</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft, textTransform: 'uppercase' }}>{periodLabel}</span>
           </div>
           <button onClick={goForward} disabled={weekOffset === 0} style={{
             width: 30, height: 30, borderRadius: '50%',
