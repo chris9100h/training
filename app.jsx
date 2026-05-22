@@ -370,6 +370,11 @@ function App() {
     flushSync(userId);
   }, [store]);
 
+  // Check for SW updates on every screen navigation
+  useEffectA(() => {
+    swReg.current?.update().catch(() => {});
+  }, [route]);
+
   // Retry a failed sync as soon as connectivity returns
   useEffectA(() => {
     const onOnline = () => { if (userId) flushSync(userId); };
