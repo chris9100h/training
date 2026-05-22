@@ -73,7 +73,14 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
   if (!sch) return null;
 
   const updateSch = (fn) => setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === sch.id ? fn(x) : x) }));
-  const setActive = () => setStore(s => ({ ...s, activeScheduleId: sch.id, cycleIndex: 0, cycleStartDate: LB.todayISO() }));
+  const isWeekday = LB.isWeekdayPlan(sch);
+  const setActive = () => setStore(s => ({
+    ...s,
+    activeScheduleId: sch.id,
+    cycleIndex: 0,
+    cycleStartDate:    isWeekday ? s.cycleStartDate    : LB.todayISO(),
+    weekPlanStartDate: isWeekday ? LB.todayISO()       : s.weekPlanStartDate,
+  }));
   const duplicate = () => {
     const copy = JSON.parse(JSON.stringify(sch));
     copy.id = LB.uid();
@@ -112,7 +119,7 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
           <Btn kind="ghost" onClick={setActive} style={{ marginBottom: 4, fontSize: 12 }}>Activate this plan</Btn>
         )}
         <Btn kind="ghost" onClick={duplicate} style={{ marginBottom: 4, fontSize: 12 }}>Duplicate plan</Btn>
-        {sch.id === store.activeScheduleId && !LB.isWeekdayPlan(sch) && (
+        {sch.id === store.activeScheduleId && !isWeekday && (
           <Frame style={{ padding: '14px 16px' }}>
             <span className="label">Cycle start date (Day 1)</span>
             <div style={{ overflow: 'hidden', borderRadius: 8, marginTop: 8 }}>
@@ -130,6 +137,29 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
             <div className="micro" style={{ marginTop: 8 }}>
               Today = Day {activeCycleDayIdx + 1} of {sch.days.length}
             </div>
+          </Frame>
+        )}
+        {sch.id === store.activeScheduleId && isWeekday && (
+          <Frame style={{ padding: '14px 16px' }}>
+            <span className="label">Week plan start date (Week 1)</span>
+            <div style={{ overflow: 'hidden', borderRadius: 8, marginTop: 8 }}>
+              <input type="date"
+                value={store.weekPlanStartDate || ''}
+                onChange={e => { if (e.target.value) setStore(s => ({ ...s, weekPlanStartDate: e.target.value })); }}
+                style={{
+                  background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+                  borderRadius: 8, padding: '10px 14px', color: UI.ink,
+                  fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
+                  width: '100%', boxSizing: 'border-box', display: 'block',
+                }}
+              />
+            </div>
+            {store.weekPlanStartDate && (() => {
+              const start = new Date(store.weekPlanStartDate + 'T12:00:00');
+              const today = new Date(); today.setHours(12, 0, 0, 0);
+              const weekNum = Math.floor(Math.round((today - start) / 86400000) / 7) + 1;
+              return <div className="micro" style={{ marginTop: 8 }}>Today = Week {weekNum}</div>;
+            })()}
           </Frame>
         )}
 

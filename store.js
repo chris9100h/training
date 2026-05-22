@@ -164,6 +164,7 @@ async function loadFromSupabase(userId, _depth = 0) {
     activeScheduleId: sett.active_schedule_id ?? null,
     cycleIndex: sett.cycle_index ?? 0,
     cycleStartDate: sett.cycle_start_date ?? null,
+    weekPlanStartDate: sett.week_plan_start_date ?? null,
     lastAdvancedDate: sett.last_advanced_date ?? null,
     inProgress: sett.in_progress_session_id ?? null,
     customDayTypes: [],
@@ -234,6 +235,7 @@ async function syncStore(prev, next, userId) {
     prev.activeScheduleId          !== next.activeScheduleId          ||
     prev.cycleIndex                !== next.cycleIndex                ||
     prev.cycleStartDate            !== next.cycleStartDate            ||
+    prev.weekPlanStartDate         !== next.weekPlanStartDate         ||
     prev.lastAdvancedDate          !== next.lastAdvancedDate          ||
     prev.inProgress                !== next.inProgress                ||
     prev.settings?.unit            !== next.settings?.unit            ||
@@ -253,6 +255,7 @@ async function syncStore(prev, next, userId) {
       active_schedule_id: next.activeScheduleId ?? null,
       cycle_index: next.cycleIndex ?? 0,
       cycle_start_date: next.cycleStartDate ?? null,
+      week_plan_start_date: next.weekPlanStartDate ?? null,
       last_advanced_date: next.lastAdvancedDate ?? null,
       unit: next.settings?.unit || 'kg',
       rest_default: next.settings?.restDefault || 120,
