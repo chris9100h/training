@@ -218,7 +218,9 @@ function App() {
       intentionalUpdate.current = true;
       waitingWorker.current.postMessage({ type: 'SKIP_WAITING' });
     } else {
-      // SW already activated on its own — just reload
+      // No waiting worker — SW already up to date. Dismiss the stale overlay
+      // and attempt a reload so the page runs the freshest cached assets.
+      setUpdateAvailable(false);
       window.location.href = window.location.href;
     }
   }, []);
