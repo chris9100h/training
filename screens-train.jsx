@@ -434,8 +434,6 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
       osc.start(t);
       osc.stop(t + 0.15);
-      setTempoFlash(true);
-      setTimeout(() => setTempoFlash(false), 120);
     } catch (e) {}
   };
 
@@ -449,8 +447,6 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     const eccSecs = store.settings?.tempoEccentric ?? 4;
     const conSecs = store.settings?.tempoConcentric ?? 1;
     tempoStateRef.current = { phase: 'ecc', tick: 0 };
-    setTempoPhase('ecc');
-    setTempoTick(0);
     setTempoActive(true);
     playBeep('ecc');
     tempoTimerRef.current = setInterval(() => {
@@ -460,8 +456,6 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       let newPhase = phase;
       if (newTick >= phaseLen) { newPhase = phase === 'ecc' ? 'con' : 'ecc'; newTick = 0; }
       tempoStateRef.current = { phase: newPhase, tick: newTick };
-      setTempoPhase(newPhase);
-      setTempoTick(newTick);
       playBeep(newPhase);
     }, 1000);
   };
@@ -603,9 +597,6 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [swapOpen, setSwapOpen] = useStateT(false);
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
-  const [tempoPhase, setTempoPhase] = useStateT('ecc');
-  const [tempoTick, setTempoTick] = useStateT(0);
-  const [tempoFlash, setTempoFlash] = useStateT(false);
   const tempoStateRef = useRefT({ phase: 'ecc', tick: 0 });
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
@@ -1274,30 +1265,6 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           </div>
 
           {/* Add set / swap / note */}
-          {/* Tempo phase indicator */}
-          {tempoActive && (
-            <div style={{
-              marginTop: 10, padding: '8px 14px', borderRadius: 10,
-              background: tempoFlash ? (tempoPhase === 'ecc' ? 'rgba(120,100,60,0.25)' : 'rgba(var(--accent-rgb),0.18)') : UI.bgInset,
-              border: `0.5px solid ${tempoFlash ? 'var(--accent)' : UI.hairStrong}`,
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              transition: 'background 0.08s, border-color 0.08s',
-            }}>
-              <span style={{ fontFamily: UI.fontDisplay, fontSize: 28, lineHeight: 1, color: tempoPhase === 'ecc' ? UI.inkSoft : 'var(--accent)', fontStyle: 'italic' }}>
-                {tempoPhase === 'ecc' ? '↓' : '↑'}
-              </span>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                <span className="micro" style={{ color: UI.inkFaint }}>{tempoPhase === 'ecc' ? 'ECCENTRIC' : 'CONCENTRIC'}</span>
-                <span className="num" style={{ fontSize: 22, color: tempoPhase === 'ecc' ? UI.inkSoft : 'var(--accent)', lineHeight: 1 }}>
-                  {(tempoPhase === 'ecc' ? (store.settings?.tempoEccentric ?? 4) : (store.settings?.tempoConcentric ?? 1)) - tempoTick}
-                </span>
-              </div>
-              <span style={{ fontFamily: UI.fontDisplay, fontSize: 28, lineHeight: 1, color: tempoPhase === 'con' ? UI.inkSoft : 'var(--accent)', fontStyle: 'italic', opacity: 0.25 }}>
-                {tempoPhase === 'ecc' ? '↑' : '↓'}
-              </span>
-            </div>
-          )}
-
           <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
             <button onClick={addSet} style={{
               width: 32, height: 32, borderRadius: '50%',
