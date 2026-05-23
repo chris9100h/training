@@ -1963,6 +1963,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [activeUsersOpen, setActiveUsersOpen] = useStateL(false);
   const [activeSessions, setActiveSessions] = useStateL([]);
   const [qsSwitching, setQsSwitching] = useStateL(false);
+  const [qsOpen, setQsOpen] = useStateL(false);
   const [activeGrants, setActiveGrants] = useStateL([]);
   const [newGrantEmail, setNewGrantEmail] = useStateL('');
   const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateL(
@@ -2182,8 +2183,13 @@ function SettingsScreen({ store, setStore, go, userId }) {
           const otherName = LB.getQsName(otherEmail) || otherEmail.split('@')[0];
           return (
             <Frame style={{ padding: '14px 16px' }}>
-              <span className="label">Quick Switch</span>
-              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <button onClick={() => setQsOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
+                <span className="label" style={{ marginBottom: 0 }}>Quick Switch</span>
+                <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: qsOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+                  <path d="M2 1l5 5-5 5"/>
+                </svg>
+              </button>
+              {qsOpen && <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                 {/* Current user */}
                 <div style={{
                   flex: 1,
@@ -2233,7 +2239,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   </div>
                   <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: hasSession ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1 }}>{otherName}</div>
                 </button>
-              </div>
+              </div>}
             </Frame>
           );
         })()}
