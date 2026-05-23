@@ -154,7 +154,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: 10,
-                  padding: '30px 16px',
+                  padding: '26px 16px',
                   borderRadius: 14,
                   background: on
                     ? `linear-gradient(135deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.04))`
