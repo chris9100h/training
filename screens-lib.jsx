@@ -1962,6 +1962,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [dataOpen, setDataOpen] = useStateL(false);
   const [activeUsersOpen, setActiveUsersOpen] = useStateL(false);
   const [activeSessions, setActiveSessions] = useStateL([]);
+  const [qsSwitching, setQsSwitching] = useStateL(false);
   const [activeGrants, setActiveGrants] = useStateL([]);
   const [newGrantEmail, setNewGrantEmail] = useStateL('');
   const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateL(
@@ -2170,6 +2171,73 @@ function SettingsScreen({ store, setStore, go, userId }) {
             Logged in as {store.user?.email || userId}
           </div>
         </Frame>
+
+        {/* Quick Switch */}
+        {(() => {
+          const currentEmail = store.user?.email || '';
+          const otherEmail = LB.QS_EMAILS.find(e => e !== currentEmail);
+          if (!LB.QS_EMAILS.includes(currentEmail) || !otherEmail) return null;
+          const hasSession = LB.hasQuickSwitchSession(otherEmail);
+          return (
+            <Frame style={{ padding: '14px 16px' }}>
+              <span className="label">Quick Switch</span>
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, flexShrink: 0 }} />
+                  <div style={{ flex: 1, fontSize: 13, color: UI.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {currentEmail}
+                  </div>
+                  <span className="micro-gold">Active</span>
+                </div>
+                <Hairline />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.hairStrong, flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, color: hasSession ? UI.inkSoft : UI.inkFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {otherEmail}
+                    </div>
+                    {!hasSession && (
+                      <div className="micro" style={{ marginTop: 2 }}>Log in once to enable quick switch</div>
+                    )}
+                  </div>
+                  <button
+                    disabled={qsSwitching}
+                    onClick={async () => {
+                      if (hasSession) {
+                        setQsSwitching(true);
+                        try {
+                          await LB.quickSwitch(otherEmail);
+                        } catch (e) {
+                          setQsSwitching(false);
+                          console.error('Quick switch failed', e);
+                        }
+                      } else {
+                        const ok = await confirm(
+                          `You'll be signed out so ${otherEmail} can log in. Their session will then be saved for future quick switches.`,
+                          { title: 'Sign in as other user?', ok: 'Sign out', cancel: 'Cancel' }
+                        );
+                        if (ok) await LB.signOut();
+                      }
+                    }}
+                    style={{
+                      flexShrink: 0,
+                      background: hasSession ? `rgba(var(--accent-rgb),0.10)` : 'transparent',
+                      border: `0.5px solid ${hasSession ? UI.goldSoft : UI.hairStrong}`,
+                      borderRadius: 999,
+                      padding: '5px 14px', minHeight: 28,
+                      color: hasSession ? UI.gold : UI.inkFaint,
+                      fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em',
+                      cursor: qsSwitching ? 'default' : 'pointer',
+                      WebkitTapHighlightColor: 'transparent',
+                    }}
+                  >
+                    {qsSwitching ? '…' : (hasSession ? 'Switch' : 'Sign in')}
+                  </button>
+                </div>
+              </div>
+            </Frame>
+          );
+        })()}
 
         {/* Active users — visible to admin + granted users */}
         {hasActiveUsersAccess && (

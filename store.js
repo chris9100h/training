@@ -10,6 +10,40 @@ const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
+// ─── QUICK SWITCH ────────────────────────────────────────────────────────
+
+const QS_EMAILS = ['office@btc-prime.biz', 'anja.knamm@gmail.com'];
+
+function _qsKey(email) { return `zane-qs-${email}`; }
+
+function _persistQsSession(session, email) {
+  if (!email || !session?.access_token || !session?.refresh_token) return;
+  if (!QS_EMAILS.includes(email)) return;
+  try { localStorage.setItem(_qsKey(email), JSON.stringify({ access_token: session.access_token, refresh_token: session.refresh_token })); } catch (_) {}
+}
+
+// Auto-save session on every sign-in and token refresh so quick switch stays current
+_supabase.auth.onAuthStateChange((event, session) => {
+  if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user?.email) {
+    _persistQsSession(session, session.user.email);
+  }
+});
+
+function hasQuickSwitchSession(email) {
+  try { return !!localStorage.getItem(_qsKey(email)); } catch (_) { return false; }
+}
+
+async function quickSwitch(targetEmail) {
+  const raw = localStorage.getItem(_qsKey(targetEmail));
+  if (!raw) throw new Error('No saved session for ' + targetEmail);
+  const { access_token, refresh_token } = JSON.parse(raw);
+  const { error } = await _supabase.auth.setSession({ access_token, refresh_token });
+  if (error) {
+    localStorage.removeItem(_qsKey(targetEmail)); // remove stale tokens
+    throw error;
+  }
+}
+
 // ─── AUTH ────────────────────────────────────────────────────────────────
 
 async function signIn(email, password) {
@@ -458,6 +492,7 @@ function clearLocal(userId) {
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
+  QS_EMAILS, hasQuickSwitchSession, quickSwitch,
   signIn, signUp, signOut, deleteAllData, importFromBackup,
   loadFromSupabase, syncStore, seedStarter,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
