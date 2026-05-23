@@ -318,6 +318,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   const completeSet = (setIdx) => {
+    stopTempo();
     updateSet(setIdx, { done: true });
     setFlashSet(setIdx);
     setTimeout(() => setFlashSet(null), 1400);
