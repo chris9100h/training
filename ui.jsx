@@ -108,7 +108,7 @@ const TAB_ICONS = {
   ),
 };
 
-function TabBar({ active, onChange }) {
+function TabBar({ active, onChange, sidebar = false }) {
   const tabs = [
     { id: 'home', label: 'Today' },
     { id: 'plan', label: 'Plan' },
@@ -116,6 +116,58 @@ function TabBar({ active, onChange }) {
     { id: 'hist', label: 'History' },
   ];
   const idx = tabs.findIndex(t => t.id === active);
+
+  if (sidebar) {
+    return (
+      <div style={{
+        width: 220,
+        flexShrink: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        borderRight: `0.5px solid ${UI.hair}`,
+        background: UI.bgRaised,
+        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 28px)',
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)',
+        zIndex: 10,
+        overflow: 'hidden',
+      }}>
+        <div style={{ padding: '0 22px 32px', flexShrink: 0 }}>
+          <div className="micro" style={{ marginBottom: 4 }}>Logbook</div>
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, color: UI.ink, fontWeight: 400, letterSpacing: '-0.01em' }}>Zane</div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '0 12px', flex: 1 }}>
+          {tabs.map(t => {
+            const on = t.id === active;
+            return (
+              <button key={t.id} onClick={() => onChange(t.id)} style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '11px 14px',
+                borderRadius: 12,
+                background: on
+                  ? `linear-gradient(135deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.04))`
+                  : 'transparent',
+                border: `0.5px solid ${on ? UI.goldSoft : 'transparent'}`,
+                color: on ? UI.gold : UI.inkFaint,
+                fontFamily: UI.fontUi,
+                fontSize: 13,
+                fontWeight: on ? 600 : 400,
+                letterSpacing: '0.02em',
+                cursor: 'pointer',
+                textAlign: 'left',
+                transition: 'background 0.2s, color 0.2s, border-color 0.2s',
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                {TAB_ICONS[t.id]}
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{

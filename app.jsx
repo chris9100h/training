@@ -2,6 +2,16 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useCallback: useCallbackA } = React;
 
+function useIsPad() {
+  const [isPad, setIsPad] = useStateA(() => window.innerWidth >= 768);
+  useEffectA(() => {
+    const handler = () => setIsPad(window.innerWidth >= 768);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+  return isPad;
+}
+
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -127,6 +137,7 @@ function ErrorScreen({ onRetry }) {
 }
 
 function App() {
+  const isPad = useIsPad();
   const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error'
   const [store, setStore]         = useStateA(null);
   const [userId, setUserId]       = useStateA(null);
@@ -442,6 +453,20 @@ function App() {
     case 'settings':      screen = <window.Screens.SettingsScreen {...props} />; break;
     case 'spectator':     screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
     default:              screen = <window.Screens.HomeScreen {...props} />; break;
+  }
+
+  if (isPad && showTab) {
+    return (
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <TabBar active={route.name} onChange={(t) => go({ name: t })} sidebar />
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
+            {screen}
+          </ErrorBoundary>
+        </div>
+        {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
+      </div>
+    );
   }
 
   return (
