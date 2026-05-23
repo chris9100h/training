@@ -154,6 +154,12 @@ function App() {
   const localDirty                = useRefA(false); // true if user changed store after cache load
 
   useEffectA(() => {
+    if (store?.user?.email && store?.user?.name) {
+      LB.saveQsName(store.user.email, store.user.name);
+    }
+  }, [store?.user?.email, store?.user?.name]);
+
+  useEffectA(() => {
     const color = store?.settings?.accentColor;
     if (color) {
       window.applyAccentColor(color);

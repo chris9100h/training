@@ -29,6 +29,24 @@ _supabase.auth.onAuthStateChange((event, session) => {
   }
 });
 
+function saveQsName(email, name) {
+  if (!email || !name || !QS_EMAILS.includes(email)) return;
+  try {
+    const raw = localStorage.getItem(_qsKey(email));
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    data.name = name;
+    localStorage.setItem(_qsKey(email), JSON.stringify(data));
+  } catch (_) {}
+}
+
+function getQsName(email) {
+  try {
+    const raw = localStorage.getItem(_qsKey(email));
+    return raw ? (JSON.parse(raw).name || null) : null;
+  } catch (_) { return null; }
+}
+
 function hasQuickSwitchSession(email) {
   try { return !!localStorage.getItem(_qsKey(email)); } catch (_) { return false; }
 }
@@ -492,7 +510,7 @@ function clearLocal(userId) {
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
-  QS_EMAILS, hasQuickSwitchSession, quickSwitch,
+  QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
   signIn, signUp, signOut, deleteAllData, importFromBackup,
   loadFromSupabase, syncStore, seedStarter,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,

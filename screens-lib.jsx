@@ -2178,62 +2178,61 @@ function SettingsScreen({ store, setStore, go, userId }) {
           const otherEmail = LB.QS_EMAILS.find(e => e !== currentEmail);
           if (!LB.QS_EMAILS.includes(currentEmail) || !otherEmail) return null;
           const hasSession = LB.hasQuickSwitchSession(otherEmail);
+          const currentName = store.user?.name || currentEmail.split('@')[0];
+          const otherName = LB.getQsName(otherEmail) || otherEmail.split('@')[0];
           return (
             <Frame style={{ padding: '14px 16px' }}>
               <span className="label">Quick Switch</span>
-              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, flexShrink: 0 }} />
-                  <div style={{ flex: 1, fontSize: 13, color: UI.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {currentEmail}
-                  </div>
-                  <span className="micro-gold">Active</span>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                {/* Current user */}
+                <div style={{
+                  flex: 1,
+                  background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.10), rgba(var(--accent-rgb),0.04))`,
+                  border: `0.5px solid ${UI.goldSoft}`,
+                  borderRadius: 10,
+                  padding: '10px 12px',
+                }}>
+                  <div className="micro-gold" style={{ marginBottom: 5 }}>Active</div>
+                  <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: UI.ink, lineHeight: 1.1 }}>{currentName}</div>
                 </div>
-                <Hairline />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.hairStrong, flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, color: hasSession ? UI.inkSoft : UI.inkFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {otherEmail}
-                    </div>
-                    {!hasSession && (
-                      <div className="micro" style={{ marginTop: 2 }}>Log in once to enable quick switch</div>
-                    )}
-                  </div>
-                  <button
-                    disabled={qsSwitching}
-                    onClick={async () => {
-                      if (hasSession) {
-                        setQsSwitching(true);
-                        try {
-                          await LB.quickSwitch(otherEmail);
-                        } catch (e) {
-                          setQsSwitching(false);
-                          console.error('Quick switch failed', e);
-                        }
-                      } else {
-                        const ok = await confirm(
-                          `You'll be signed out so ${otherEmail} can log in. Their session will then be saved for future quick switches.`,
-                          { title: 'Sign in as other user?', ok: 'Sign out', cancel: 'Cancel' }
-                        );
-                        if (ok) await LB.signOut();
+                {/* Other user */}
+                <button
+                  disabled={qsSwitching}
+                  onClick={async () => {
+                    if (hasSession) {
+                      setQsSwitching(true);
+                      try {
+                        await LB.quickSwitch(otherEmail);
+                        window.location.reload();
+                      } catch (e) {
+                        setQsSwitching(false);
+                        console.error('Quick switch failed', e);
                       }
-                    }}
-                    style={{
-                      flexShrink: 0,
-                      background: hasSession ? `rgba(var(--accent-rgb),0.10)` : 'transparent',
-                      border: `0.5px solid ${hasSession ? UI.goldSoft : UI.hairStrong}`,
-                      borderRadius: 999,
-                      padding: '5px 14px', minHeight: 28,
-                      color: hasSession ? UI.gold : UI.inkFaint,
-                      fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em',
-                      cursor: qsSwitching ? 'default' : 'pointer',
-                      WebkitTapHighlightColor: 'transparent',
-                    }}
-                  >
-                    {qsSwitching ? '…' : (hasSession ? 'Switch' : 'Sign in')}
-                  </button>
-                </div>
+                    } else {
+                      const ok = await confirm(
+                        `You'll be signed out so ${otherName} can log in. Their session will be saved for future quick switches.`,
+                        { title: 'Set up quick switch?', ok: 'Sign out', cancel: 'Cancel' }
+                      );
+                      if (ok) await LB.signOut();
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    background: hasSession ? 'rgba(236,228,208,0.02)' : 'transparent',
+                    border: `0.5px solid ${hasSession ? UI.hair : UI.hairStrong}`,
+                    borderRadius: 10,
+                    padding: '10px 12px',
+                    textAlign: 'left',
+                    cursor: qsSwitching ? 'default' : 'pointer',
+                    WebkitTapHighlightColor: 'transparent',
+                    opacity: qsSwitching ? 0.5 : 1,
+                  }}
+                >
+                  <div className="micro" style={{ marginBottom: 5, color: hasSession ? UI.inkFaint : 'rgba(200,116,105,0.7)' }}>
+                    {qsSwitching ? 'Switching…' : (hasSession ? 'Tap to switch' : 'Log in first')}
+                  </div>
+                  <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: hasSession ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1 }}>{otherName}</div>
+                </button>
               </div>
             </Frame>
           );
