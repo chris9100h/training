@@ -496,7 +496,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         'Authorization': `Bearer ${LB.SUPABASE_ANON_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ delaySeconds, nonce: String(restStart), userKey: store.settings?.pushoverUserKey ?? '', userId, priority: 1 }),
+      body: JSON.stringify({ delaySeconds, nonce: String(restStart) + '-' + Math.random().toString(36).slice(2, 8), userKey: store.settings?.pushoverUserKey ?? '', userId, priority: 1 }),
     }).catch(() => {});
   }, [restStart]);
 
@@ -552,12 +552,33 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [planDiffOpen, setPlanDiffOpen] = useStateT(false);
   const [planDiff, setPlanDiff] = useStateT([]);
   const [swapOpen, setSwapOpen] = useStateT(false);
+  const [avgStats, setAvgStats] = useStateT(null);
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
   const [kbRaw, setKbRaw] = useStateT('');
   const [kbFresh, setKbFresh] = useStateT(false);
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
 
   useEffectT(() => { setKbField(null); setKbRaw(''); setKbFresh(false); }, [exIdx, sessionId]);
+
+  useEffectT(() => {
+    if (!session?.dayId || !session?.id || !userId) return;
+    LB.supabase
+      .from('zane_sessions')
+      .select('started_at, ended, entries')
+      .eq('user_id', userId)
+      .eq('day_id', session.dayId)
+      .not('ended', 'is', null)
+      .not('started_at', 'is', null)
+      .neq('id', session.id)
+      .then(({ data }) => {
+        if (!data?.length) return;
+        const valid = data.filter(s => new Date(s.ended) > new Date(s.started_at));
+        if (!valid.length) return;
+        const avgDurSec = valid.reduce((sum, s) => sum + (new Date(s.ended) - new Date(s.started_at)) / 1000, 0) / valid.length;
+        const avgSetsTotal = valid.reduce((sum, s) => sum + (s.entries || []).reduce((t, e) => t + (e.sets?.length || 0), 0), 0) / valid.length;
+        setAvgStats({ avgDurSec, avgSetsTotal });
+      });
+  }, [session?.id]);
 
   useEffectT(() => {
     if (!kbField) return;
@@ -869,6 +890,58 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         </button>
       </div>
 
+      {/* Pace bar — only when historical avg is available */}
+      {avgStats && (() => {
+        const totalSetsDone  = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done || x.skipped).length || 0), 0);
+        const totalSetsTotal = session.entries.reduce((s, e) => s + (e.sets?.length || 0), 0);
+        const avgDurSec = avgStats.avgDurSec;
+        const avgSetsTotal = avgStats.avgSetsTotal;
+        if (!avgDurSec || !session.startedAt) return null;
+        const elapsedSec = (now - new Date(session.startedAt).getTime()) / 1000;
+        const remainingSets = Math.max(0, totalSetsTotal - totalSetsDone);
+        const histPace = avgSetsTotal > 0 ? avgDurSec / avgSetsTotal : null;
+        const currPace = totalSetsDone >= 2 ? elapsedSec / totalSetsDone : null;
+        let remainingSec;
+        if (!histPace || totalSetsTotal === 0) {
+          remainingSec = Math.max(0, avgDurSec - elapsedSec);
+        } else if (!currPace) {
+          remainingSec = histPace * remainingSets;
+        } else {
+          const w = Math.min(totalSetsDone / 8, 0.7);
+          remainingSec = Math.max(0, (w * currPace + (1 - w) * histPace) * remainingSets);
+        }
+        const remMin = Math.round(remainingSec / 60);
+        const avgDurMin = avgDurSec / 60;
+        const elapsedMin = elapsedSec / 60;
+        if (totalSetsDone < 2) return null;
+        if (remainingSets === 0) return null;
+        const diffMin = Math.round(elapsedMin + remMin - avgDurMin);
+        if (Math.abs(diffMin) < 2) return null;
+        const ahead = diffMin < 0;
+        const pct = Math.min(Math.abs(diffMin) / 20 * 50, 50);
+        return (
+          <div style={{ flexShrink: 0, padding: '0 22px 8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+              <span className="num" style={{ fontSize: 10, color: ahead ? 'var(--accent)' : UI.inkFaint }}>
+                {ahead ? `${Math.abs(diffMin)}m ahead` : `+${diffMin}m behind`}
+              </span>
+            </div>
+            <div style={{ position: 'relative', height: 3 }}>
+              <div style={{ position: 'absolute', inset: 0, borderRadius: 999, background: UI.hairStrong }} />
+              <div style={{
+                position: 'absolute', top: 0, height: '100%',
+                left:  ahead ? '50%' : `${50 - pct}%`,
+                width: `${pct}%`,
+                background: ahead ? 'var(--accent)' : UI.inkFaint,
+                borderRadius: ahead ? '0 999px 999px 0' : '999px 0 0 999px',
+                transition: 'left 2s linear, width 2s linear',
+              }} />
+              <div style={{ position: 'absolute', left: '50%', top: -1, width: 1.5, height: 5, background: UI.inkSoft, transform: 'translateX(-50%)' }} />
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Day name + exercise position */}
       <div style={{ flexShrink: 0, padding: '6px 22px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span className="micro-gold">{session.dayName}</span>
@@ -1159,7 +1232,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>⇄</button>
             <div style={{ flex: 1 }} />
-            <button onClick={() => setNotePicker(true)} style={{
+            <button onClick={() => entry.note ? setSessionNoteOpen(true) : setNotePicker(true)} style={{
               background: entry.note ? UI.goldFaint : 'transparent',
               border: `0.5px solid ${entry.note ? UI.goldSoft : UI.hairStrong}`,
               borderRadius: 999, padding: '6px 12px', cursor: 'pointer',
@@ -1169,6 +1242,20 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               {entry.note ? 'Note' : '+ Note'}
             </button>
           </div>
+
+          {/* Session note display — tap to edit */}
+          {entry.note ? (
+            <button onClick={() => setSessionNoteOpen(true)} style={{
+              marginTop: 10, width: '100%', textAlign: 'left',
+              background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`,
+              borderRadius: 10, padding: '10px 12px', cursor: 'pointer',
+              fontFamily: UI.fontDisplay, fontSize: 15, color: UI.gold,
+              fontStyle: 'italic', lineHeight: 1.5, whiteSpace: 'pre-wrap',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              {entry.note}
+            </button>
+          ) : null}
         </div>
 
         {/* Exercise note (permanent, from exercise definition) */}
