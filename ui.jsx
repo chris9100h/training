@@ -141,11 +141,11 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
           zIndex: 10,
           overflow: 'hidden',
         }}>
-          <div style={{ padding: '0 22px 32px', flexShrink: 0 }}>
-            <div className="micro" style={{ marginBottom: 4 }}>Logbook</div>
-            <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, color: UI.ink, fontWeight: 400, letterSpacing: '-0.01em' }}>Zane</div>
+          <div style={{ padding: '0 22px 20px', flexShrink: 0 }}>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 32, color: UI.gold, letterSpacing: '-0.01em', lineHeight: 1, marginBottom: 14 }}>Zane</div>
+            <img src="icons/zane-logo.png" style={{ width: 72, height: 72, objectFit: 'contain', opacity: 0.9 }} />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '0 12px', flex: 1 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', padding: '0 12px', flex: 1, justifyContent: 'space-evenly' }}>
             {tabs.map(t => {
               const on = t.id === active;
               return (
@@ -153,15 +153,15 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 12,
-                  padding: '11px 14px',
-                  borderRadius: 12,
+                  padding: '14px 16px',
+                  borderRadius: 14,
                   background: on
                     ? `linear-gradient(135deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.04))`
-                    : 'transparent',
-                  border: `0.5px solid ${on ? UI.goldSoft : 'transparent'}`,
-                  color: on ? UI.gold : UI.inkFaint,
+                    : 'rgba(236,228,208,0.025)',
+                  border: `0.5px solid ${on ? UI.goldSoft : UI.hair}`,
+                  color: on ? UI.gold : UI.inkSoft,
                   fontFamily: UI.fontUi,
-                  fontSize: 13,
+                  fontSize: 14,
                   fontWeight: on ? 600 : 400,
                   letterSpacing: '0.02em',
                   cursor: 'pointer',
