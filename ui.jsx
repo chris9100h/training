@@ -141,9 +141,9 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
           zIndex: 10,
           overflow: 'hidden',
         }}>
-          <div style={{ padding: '0 22px 20px', flexShrink: 0 }}>
+          <div style={{ padding: '0 22px 20px', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 32, color: UI.gold, letterSpacing: '-0.01em', lineHeight: 1, marginBottom: 14 }}>Zane</div>
-            <img src="icons/zane-logo.png" style={{ width: 72, height: 72, objectFit: 'contain', opacity: 0.9 }} />
+            <img src="icons/zane-logo.png" style={{ width: 144, height: 144, objectFit: 'contain', opacity: 0.9 }} />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', padding: '0 12px', flex: 1, justifyContent: 'space-evenly' }}>
             {tabs.map(t => {
@@ -153,7 +153,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 12,
-                  padding: '14px 16px',
+                  padding: '18px 16px',
                   borderRadius: 14,
                   background: on
                     ? `linear-gradient(135deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.04))`
