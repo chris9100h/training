@@ -298,13 +298,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
                   </div>
                 </button>
               </div>
-              <button onClick={() => setSwitchModal(false)} style={{
-                width: '100%', marginTop: 18, padding: '10px 0',
-                background: 'transparent', border: 'none',
-                color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11,
-                letterSpacing: '0.12em', textTransform: 'uppercase',
-                cursor: 'pointer',
-              }}>Cancel</button>
+              <button onClick={() => setSwitchModal(false)} style={{ ...btnPrimary, width: '100%', marginTop: 18 }}>Cancel</button>
             </div>
           </div>
         )}
