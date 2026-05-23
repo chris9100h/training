@@ -430,7 +430,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       osc.type = 'sine';
       osc.frequency.value = phase === 'ecc' ? 220 : 880;
       const t = ctx.currentTime;
-      gain.gain.setValueAtTime(0.5, t);
+      gain.gain.setValueAtTime(1.0, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
       osc.start(t);
       osc.stop(t + 0.15);
