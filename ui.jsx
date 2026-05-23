@@ -108,7 +108,7 @@ const TAB_ICONS = {
   ),
 };
 
-function TabBar({ active, onChange, sidebar = false }) {
+function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
   const tabs = [
     { id: 'home', label: 'Today' },
     { id: 'plan', label: 'Plan' },
@@ -116,56 +116,155 @@ function TabBar({ active, onChange, sidebar = false }) {
     { id: 'hist', label: 'History' },
   ];
   const idx = tabs.findIndex(t => t.id === active);
+  const [switchModal, setSwitchModal] = React.useState(false);
 
   if (sidebar) {
+    const currentEmail = currentUser?.email || '';
+    const currentName  = currentUser?.name  || currentEmail.split('@')[0] || '—';
+    const qs           = window.LB || {};
+    const otherEmail   = (qs.QS_EMAILS || []).find(e => e !== currentEmail);
+    const isQsUser     = (qs.QS_EMAILS || []).includes(currentEmail);
+    const hasOther     = otherEmail ? (qs.hasQuickSwitchSession?.(otherEmail) ?? false) : false;
+    const otherName    = otherEmail ? (qs.getQsName?.(otherEmail) || otherEmail.split('@')[0]) : '';
+
     return (
-      <div style={{
-        width: 220,
-        flexShrink: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        borderRight: `0.5px solid ${UI.goldSoft}`,
-        background: UI.bg,
-        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 28px)',
-        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)',
-        zIndex: 10,
-        overflow: 'hidden',
-      }}>
-        <div style={{ padding: '0 22px 32px', flexShrink: 0 }}>
-          <div className="micro" style={{ marginBottom: 4 }}>Logbook</div>
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, color: UI.ink, fontWeight: 400, letterSpacing: '-0.01em' }}>Zane</div>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '0 12px', flex: 1 }}>
-          {tabs.map(t => {
-            const on = t.id === active;
-            return (
-              <button key={t.id} onClick={() => onChange(t.id)} style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '11px 14px',
-                borderRadius: 12,
-                background: on
-                  ? `linear-gradient(135deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.04))`
-                  : 'transparent',
-                border: `0.5px solid ${on ? UI.goldSoft : 'transparent'}`,
-                color: on ? UI.gold : UI.inkFaint,
-                fontFamily: UI.fontUi,
-                fontSize: 13,
-                fontWeight: on ? 600 : 400,
-                letterSpacing: '0.02em',
-                cursor: 'pointer',
-                textAlign: 'left',
-                transition: 'background 0.2s, color 0.2s, border-color 0.2s',
+      <>
+        <div style={{
+          width: 220,
+          flexShrink: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          borderRight: `0.5px solid ${UI.goldSoft}`,
+          background: UI.bg,
+          paddingTop: 'calc(env(safe-area-inset-top, 0px) + 28px)',
+          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
+          zIndex: 10,
+          overflow: 'hidden',
+        }}>
+          <div style={{ padding: '0 22px 32px', flexShrink: 0 }}>
+            <div className="micro" style={{ marginBottom: 4 }}>Logbook</div>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, color: UI.ink, fontWeight: 400, letterSpacing: '-0.01em' }}>Zane</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '0 12px', flex: 1 }}>
+            {tabs.map(t => {
+              const on = t.id === active;
+              return (
+                <button key={t.id} onClick={() => onChange(t.id)} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '11px 14px',
+                  borderRadius: 12,
+                  background: on
+                    ? `linear-gradient(135deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.04))`
+                    : 'transparent',
+                  border: `0.5px solid ${on ? UI.goldSoft : 'transparent'}`,
+                  color: on ? UI.gold : UI.inkFaint,
+                  fontFamily: UI.fontUi,
+                  fontSize: 13,
+                  fontWeight: on ? 600 : 400,
+                  letterSpacing: '0.02em',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'background 0.2s, color 0.2s, border-color 0.2s',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  {TAB_ICONS[t.id]}
+                  <span>{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          {isQsUser && otherEmail && (
+            <div style={{ padding: '0 12px' }}>
+              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 2px 6px' }} />
+              <button onClick={() => setSwitchModal(true)} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                width: '100%', padding: '9px 14px', borderRadius: 12,
+                background: 'transparent', border: '0.5px solid transparent',
+                color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12,
+                letterSpacing: '0.02em', cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
+                transition: 'color 0.2s',
               }}>
-                {TAB_ICONS[t.id]}
-                <span>{t.label}</span>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 8h14M3 8l4-4M3 8l4 4M21 16H7M21 16l-4-4M21 16l-4 4"/>
+                </svg>
+                <span>Switch User</span>
               </button>
-            );
-          })}
+            </div>
+          )}
         </div>
-      </div>
+
+        {switchModal && isQsUser && otherEmail && (
+          <div onClick={() => setSwitchModal(false)} style={{
+            position: 'fixed', inset: 0, zIndex: 200,
+            background: 'rgba(0,0,0,0.65)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 32,
+            animation: 'sheet-fade 0.15s ease',
+          }}>
+            <div onClick={e => e.stopPropagation()} style={{
+              width: '100%', maxWidth: 300,
+              background: UI.bgRaised,
+              border: `0.5px solid ${UI.hairStrong}`,
+              borderRadius: 20,
+              padding: '22px 18px 14px',
+              boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
+              animation: 'fadeUp 0.2s ease',
+            }}>
+              <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, color: UI.ink, marginBottom: 14 }}>Switch User</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{
+                  flex: 1,
+                  background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.10), rgba(var(--accent-rgb),0.04))`,
+                  border: `0.5px solid ${UI.goldSoft}`,
+                  borderRadius: 12, padding: '12px',
+                }}>
+                  <div className="micro-gold" style={{ marginBottom: 5 }}>Active</div>
+                  <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: UI.ink, lineHeight: 1.1 }}>{currentName}</div>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (!hasOther) return;
+                    setSwitchModal(false);
+                    try {
+                      await qs.quickSwitch(otherEmail);
+                      window.location.reload();
+                    } catch (e) {
+                      console.error('Quick switch failed', e);
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    background: hasOther ? 'rgba(236,228,208,0.02)' : 'transparent',
+                    border: `0.5px solid ${hasOther ? UI.hair : UI.hairStrong}`,
+                    borderRadius: 12, padding: '12px',
+                    textAlign: 'left',
+                    cursor: hasOther ? 'pointer' : 'default',
+                    WebkitTapHighlightColor: 'transparent',
+                    opacity: hasOther ? 1 : 0.45,
+                  }}
+                >
+                  <div className="micro" style={{ marginBottom: 5, color: hasOther ? UI.inkFaint : 'rgba(200,116,105,0.7)' }}>
+                    {hasOther ? 'Tap to switch' : 'Set up in Settings'}
+                  </div>
+                  <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: hasOther ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1 }}>{otherName}</div>
+                </button>
+              </div>
+              <button onClick={() => setSwitchModal(false)} style={{
+                width: '100%', marginTop: 10, padding: '8px 0',
+                background: 'transparent', border: 'none',
+                color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11,
+                letterSpacing: '0.1em', textTransform: 'uppercase',
+                cursor: 'pointer',
+              }}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </>
     );
   }
 

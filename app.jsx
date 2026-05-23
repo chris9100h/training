@@ -464,7 +464,7 @@ function App() {
   if (isPad && showTab) {
     return (
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <TabBar active={route.name} onChange={(t) => go({ name: t })} sidebar />
+        <TabBar active={route.name} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} />
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
             {screen}
