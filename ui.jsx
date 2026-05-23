@@ -150,8 +150,10 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
               return (
                 <button key={t.id} onClick={() => onChange(t.id)} style={{
                   display: 'flex',
+                  flexDirection: 'column',
                   alignItems: 'center',
-                  gap: 12,
+                  justifyContent: 'center',
+                  gap: 10,
                   padding: '30px 16px',
                   borderRadius: 14,
                   background: on
@@ -160,15 +162,17 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
                   border: `0.5px solid ${on ? UI.goldSoft : UI.hair}`,
                   color: on ? UI.gold : UI.inkSoft,
                   fontFamily: UI.fontUi,
-                  fontSize: 14,
+                  fontSize: 16,
                   fontWeight: on ? 600 : 400,
-                  letterSpacing: '0.02em',
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
                   cursor: 'pointer',
-                  textAlign: 'left',
                   transition: 'background 0.2s, color 0.2s, border-color 0.2s',
                   WebkitTapHighlightColor: 'transparent',
                 }}>
-                  {TAB_ICONS[t.id]}
+                  <div style={{ transform: 'scale(1.5)', display: 'inline-flex', margin: '0 0 2px' }}>
+                    {TAB_ICONS[t.id]}
+                  </div>
                   <span>{t.label}</span>
                 </button>
               );
