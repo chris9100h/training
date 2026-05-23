@@ -1260,7 +1260,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
         {/* Exercise note (permanent, from exercise definition) */}
         {exercise?.note && (
-          <Frame style={{ padding: 14 }}>
+          <Frame style={{ padding: 14 }} onClick={() => { setExNoteVal(exercise?.note || ''); setExNoteOpen(true); }}>
             <div className="micro" style={{ marginBottom: 6 }}>NOTE · {entry.name.toUpperCase()}</div>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.inkSoft, lineHeight: 1.5, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>
               {exercise.note}
