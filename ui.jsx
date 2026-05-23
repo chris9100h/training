@@ -176,21 +176,34 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
             })}
           </div>
           {isQsUser && otherEmail && (
-            <div style={{ padding: '0 12px' }}>
-              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 2px 6px' }} />
+            <div style={{ padding: '0 14px' }}>
+              <div style={{ height: '0.5px', background: UI.hair, marginBottom: 12 }} />
               <button onClick={() => setSwitchModal(true)} style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                width: '100%', padding: '9px 14px', borderRadius: 12,
-                background: 'transparent', border: '0.5px solid transparent',
-                color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12,
-                letterSpacing: '0.02em', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 12,
+                width: '100%', padding: '12px 14px', borderRadius: 14,
+                background: 'rgba(236,228,208,0.03)',
+                border: `0.5px solid ${UI.hair}`,
+                cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
-                transition: 'color 0.2s',
               }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                <div style={{
+                  width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                  background: `rgba(var(--accent-rgb),0.12)`,
+                  border: `0.5px solid ${UI.goldSoft}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontFamily: UI.fontDisplay, fontSize: 18, color: UI.gold,
+                }}>
+                  {currentName[0]?.toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {currentName}
+                  </div>
+                  <div className="micro" style={{ marginTop: 2 }}>Switch User</div>
+                </div>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                   <path d="M3 8h14M3 8l4-4M3 8l4 4M21 16H7M21 16l-4-4M21 16l-4 4"/>
                 </svg>
-                <span>Switch User</span>
               </button>
             </div>
           )}
@@ -199,33 +212,49 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
         {switchModal && isQsUser && otherEmail && (
           <div onClick={() => setSwitchModal(false)} style={{
             position: 'fixed', inset: 0, zIndex: 200,
-            background: 'rgba(0,0,0,0.65)',
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)',
+            background: 'rgba(0,0,0,0.72)',
+            backdropFilter: 'blur(14px)',
+            WebkitBackdropFilter: 'blur(14px)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: 32,
+            padding: 40,
             animation: 'sheet-fade 0.15s ease',
           }}>
             <div onClick={e => e.stopPropagation()} style={{
-              width: '100%', maxWidth: 300,
+              width: '100%', maxWidth: 520,
               background: UI.bgRaised,
               border: `0.5px solid ${UI.hairStrong}`,
-              borderRadius: 20,
-              padding: '22px 18px 14px',
-              boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
-              animation: 'fadeUp 0.2s ease',
+              borderRadius: 28,
+              padding: '32px 28px 22px',
+              boxShadow: '0 40px 100px rgba(0,0,0,0.7)',
+              animation: 'fadeUp 0.22s ease',
             }}>
-              <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, color: UI.ink, marginBottom: 14 }}>Switch User</div>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div className="micro" style={{ marginBottom: 8 }}>Accounts</div>
+              <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, color: UI.ink, marginBottom: 24, letterSpacing: '-0.01em' }}>Switch User</div>
+              <div style={{ display: 'flex', gap: 12 }}>
+                {/* Current user */}
                 <div style={{
                   flex: 1,
-                  background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.10), rgba(var(--accent-rgb),0.04))`,
+                  background: `linear-gradient(160deg, rgba(var(--accent-rgb),0.12) 0%, rgba(var(--accent-rgb),0.03) 100%)`,
                   border: `0.5px solid ${UI.goldSoft}`,
-                  borderRadius: 12, padding: '12px',
+                  borderRadius: 18,
+                  padding: '28px 20px',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
                 }}>
-                  <div className="micro-gold" style={{ marginBottom: 5 }}>Active</div>
-                  <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: UI.ink, lineHeight: 1.1 }}>{currentName}</div>
+                  <div style={{
+                    width: 64, height: 64, borderRadius: '50%',
+                    background: `rgba(var(--accent-rgb),0.15)`,
+                    border: `0.5px solid ${UI.goldSoft}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: UI.fontDisplay, fontSize: 28, color: UI.gold,
+                  }}>
+                    {currentName[0]?.toUpperCase()}
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, lineHeight: 1.1, marginBottom: 8 }}>{currentName}</div>
+                    <div className="micro-gold">Active</div>
+                  </div>
                 </div>
+                {/* Other user */}
                 <button
                   onClick={async () => {
                     if (!hasOther) return;
@@ -239,26 +268,41 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
                   }}
                   style={{
                     flex: 1,
-                    background: hasOther ? 'rgba(236,228,208,0.02)' : 'transparent',
-                    border: `0.5px solid ${hasOther ? UI.hair : UI.hairStrong}`,
-                    borderRadius: 12, padding: '12px',
-                    textAlign: 'left',
+                    background: hasOther
+                      ? 'linear-gradient(160deg, rgba(236,228,208,0.04) 0%, transparent 100%)'
+                      : 'transparent',
+                    border: `0.5px solid ${hasOther ? UI.hairStrong : UI.hair}`,
+                    borderRadius: 18,
+                    padding: '28px 20px',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
                     cursor: hasOther ? 'pointer' : 'default',
                     WebkitTapHighlightColor: 'transparent',
-                    opacity: hasOther ? 1 : 0.45,
+                    opacity: hasOther ? 1 : 0.4,
+                    transition: 'background 0.2s',
                   }}
                 >
-                  <div className="micro" style={{ marginBottom: 5, color: hasOther ? UI.inkFaint : 'rgba(200,116,105,0.7)' }}>
-                    {hasOther ? 'Tap to switch' : 'Set up in Settings'}
+                  <div style={{
+                    width: 64, height: 64, borderRadius: '50%',
+                    background: 'rgba(236,228,208,0.06)',
+                    border: `0.5px solid ${UI.hairStrong}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: UI.fontDisplay, fontSize: 28, color: UI.inkSoft,
+                  }}>
+                    {otherName[0]?.toUpperCase()}
                   </div>
-                  <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: hasOther ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1 }}>{otherName}</div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: hasOther ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1, marginBottom: 8 }}>{otherName}</div>
+                    <div className="micro" style={{ color: hasOther ? UI.inkFaint : 'rgba(200,116,105,0.7)' }}>
+                      {hasOther ? 'Tap to switch' : 'Set up in Settings'}
+                    </div>
+                  </div>
                 </button>
               </div>
               <button onClick={() => setSwitchModal(false)} style={{
-                width: '100%', marginTop: 10, padding: '8px 0',
+                width: '100%', marginTop: 18, padding: '10px 0',
                 background: 'transparent', border: 'none',
                 color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11,
-                letterSpacing: '0.1em', textTransform: 'uppercase',
+                letterSpacing: '0.12em', textTransform: 'uppercase',
                 cursor: 'pointer',
               }}>Cancel</button>
             </div>
