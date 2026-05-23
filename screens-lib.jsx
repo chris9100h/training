@@ -1956,6 +1956,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateL(store.user?.name || '');
   const [restOpen, setRestOpen] = useStateL(false);
+  const [tempoOpen, setTempoOpen] = useStateL(false);
   const [appearanceOpen, setAppearanceOpen] = useStateL(false);
   const [pushOpen, setPushOpen] = useStateL(false);
   const [dataOpen, setDataOpen] = useStateL(false);
@@ -2403,6 +2404,51 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   <div style={{ position: 'absolute', top: 3, left: darkMode === 'black' ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: darkMode === 'black' ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
                 </div>
               </div>
+            </div>
+          )}
+        </Frame>
+
+        {/* Rep tempo */}
+        <Frame style={{ padding: '14px 16px' }}>
+          <button onClick={() => setTempoOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
+            <span className="label" style={{ marginBottom: 0 }}>Rep tempo</span>
+            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: tempoOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+              <path d="M2 1l5 5-5 5"/>
+            </svg>
+          </button>
+          {tempoOpen && (
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span className="micro" style={{ color: UI.inkSoft }}>Enabled</span>
+                <div onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, tempoEnabled: !s.settings?.tempoEnabled } }))} style={{
+                  width: 44, height: 26, borderRadius: 13, cursor: 'pointer',
+                  background: store.settings?.tempoEnabled ? 'var(--accent)' : UI.bgInset,
+                  border: `0.5px solid ${store.settings?.tempoEnabled ? UI.goldSoft : UI.hairStrong}`,
+                  position: 'relative', transition: 'background 0.2s',
+                }}>
+                  <div style={{
+                    position: 'absolute', top: 3, left: store.settings?.tempoEnabled ? 21 : 3,
+                    width: 18, height: 18, borderRadius: 9,
+                    background: store.settings?.tempoEnabled ? '#0a0805' : UI.inkFaint,
+                    transition: 'left 0.2s',
+                  }} />
+                </div>
+              </div>
+              {store.settings?.tempoEnabled && (<>
+                <div>
+                  <div className="micro" style={{ marginBottom: 6 }}>ECCENTRIC (DOWN)</div>
+                  <Stepper value={store.settings?.tempoEccentric ?? 4} step={1} min={1} max={10} suffix="s"
+                    onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoEccentric: v } }))} />
+                </div>
+                <div>
+                  <div className="micro" style={{ marginBottom: 6 }}>CONCENTRIC (UP)</div>
+                  <Stepper value={store.settings?.tempoConcentric ?? 1} step={1} min={1} max={10} suffix="s"
+                    onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoConcentric: v } }))} />
+                </div>
+                <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
+                  Low beep every second during eccentric · High beep every second during concentric
+                </div>
+              </>)}
             </div>
           )}
         </Frame>

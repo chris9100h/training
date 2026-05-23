@@ -318,6 +318,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   const completeSet = (setIdx) => {
+    stopTempo();
     updateSet(setIdx, { done: true });
     setFlashSet(setIdx);
     setTimeout(() => setFlashSet(null), 1400);
@@ -417,6 +418,48 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
   const cancelPushover = () => LB.cancelPushover(store.settings, userId);
 
+  const playBeep = (phase) => {
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = phase === 'ecc' ? 220 : 880;
+      const t = ctx.currentTime;
+      gain.gain.setValueAtTime(1.0, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+      osc.start(t);
+      osc.stop(t + 0.15);
+    } catch (e) {}
+  };
+
+  const stopTempo = () => {
+    if (tempoTimerRef.current) { clearInterval(tempoTimerRef.current); tempoTimerRef.current = null; }
+    setTempoActive(false);
+  };
+
+  const startTempo = () => {
+    stopTempo();
+    const eccSecs = store.settings?.tempoEccentric ?? 4;
+    const conSecs = store.settings?.tempoConcentric ?? 1;
+    tempoStateRef.current = { phase: 'ecc', tick: 0 };
+    setTempoActive(true);
+    playBeep('ecc');
+    tempoTimerRef.current = setInterval(() => {
+      const { phase, tick } = tempoStateRef.current;
+      const phaseLen = phase === 'ecc' ? eccSecs : conSecs;
+      let newTick = tick + 1;
+      let newPhase = phase;
+      if (newTick >= phaseLen) { newPhase = phase === 'ecc' ? 'con' : 'ecc'; newTick = 0; }
+      tempoStateRef.current = { phase: newPhase, tick: newTick };
+      playBeep(newPhase);
+    }, 1000);
+  };
+
   const finish = () => {
     cancelPushover();
     updateSession(sess => ({ ...sess, ended: new Date().toISOString() }));
@@ -496,7 +539,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         'Authorization': `Bearer ${LB.SUPABASE_ANON_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ delaySeconds, nonce: String(restStart), userKey: store.settings?.pushoverUserKey ?? '', userId, priority: 1 }),
+      body: JSON.stringify({ delaySeconds, nonce: String(restStart) + '-' + Math.random().toString(36).slice(2, 8), userKey: store.settings?.pushoverUserKey ?? '', userId, priority: 1 }),
     }).catch(() => {});
   }, [restStart]);
 
@@ -552,12 +595,37 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [planDiffOpen, setPlanDiffOpen] = useStateT(false);
   const [planDiff, setPlanDiff] = useStateT([]);
   const [swapOpen, setSwapOpen] = useStateT(false);
+  const [avgStats, setAvgStats] = useStateT(null);
+  const [tempoActive, setTempoActive] = useStateT(false);
+  const tempoStateRef = useRefT({ phase: 'ecc', tick: 0 });
+  const tempoTimerRef = useRefT(null);
+  const audioCtxRef = useRefT(null);
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
   const [kbRaw, setKbRaw] = useStateT('');
   const [kbFresh, setKbFresh] = useStateT(false);
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
 
-  useEffectT(() => { setKbField(null); setKbRaw(''); setKbFresh(false); }, [exIdx, sessionId]);
+  useEffectT(() => { setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
+
+  useEffectT(() => {
+    if (!session?.dayId || !session?.id || !userId) return;
+    LB.supabase
+      .from('zane_sessions')
+      .select('started_at, ended, entries')
+      .eq('user_id', userId)
+      .eq('day_id', session.dayId)
+      .not('ended', 'is', null)
+      .not('started_at', 'is', null)
+      .neq('id', session.id)
+      .then(({ data }) => {
+        if (!data?.length) return;
+        const valid = data.filter(s => new Date(s.ended) > new Date(s.started_at));
+        if (!valid.length) return;
+        const avgDurSec = valid.reduce((sum, s) => sum + (new Date(s.ended) - new Date(s.started_at)) / 1000, 0) / valid.length;
+        const avgSetsTotal = valid.reduce((sum, s) => sum + (s.entries || []).reduce((t, e) => t + (e.sets?.length || 0), 0), 0) / valid.length;
+        setAvgStats({ avgDurSec, avgSetsTotal });
+      });
+  }, [session?.id]);
 
   useEffectT(() => {
     if (!kbField) return;
@@ -869,6 +937,58 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         </button>
       </div>
 
+      {/* Pace bar — only when historical avg is available */}
+      {avgStats && (() => {
+        const totalSetsDone  = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done || x.skipped).length || 0), 0);
+        const totalSetsTotal = session.entries.reduce((s, e) => s + (e.sets?.length || 0), 0);
+        const avgDurSec = avgStats.avgDurSec;
+        const avgSetsTotal = avgStats.avgSetsTotal;
+        if (!avgDurSec || !session.startedAt) return null;
+        const elapsedSec = (now - new Date(session.startedAt).getTime()) / 1000;
+        const remainingSets = Math.max(0, totalSetsTotal - totalSetsDone);
+        const histPace = avgSetsTotal > 0 ? avgDurSec / avgSetsTotal : null;
+        const currPace = totalSetsDone >= 2 ? elapsedSec / totalSetsDone : null;
+        let remainingSec;
+        if (!histPace || totalSetsTotal === 0) {
+          remainingSec = Math.max(0, avgDurSec - elapsedSec);
+        } else if (!currPace) {
+          remainingSec = histPace * remainingSets;
+        } else {
+          const w = Math.min(totalSetsDone / 8, 0.7);
+          remainingSec = Math.max(0, (w * currPace + (1 - w) * histPace) * remainingSets);
+        }
+        const remMin = Math.round(remainingSec / 60);
+        const avgDurMin = avgDurSec / 60;
+        const elapsedMin = elapsedSec / 60;
+        if (totalSetsDone < 2) return null;
+        if (remainingSets === 0) return null;
+        const diffMin = Math.round(elapsedMin + remMin - avgDurMin);
+        if (Math.abs(diffMin) < 2) return null;
+        const ahead = diffMin < 0;
+        const pct = Math.min(Math.abs(diffMin) / 20 * 50, 50);
+        return (
+          <div style={{ flexShrink: 0, padding: '0 22px 8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+              <span className="num" style={{ fontSize: 10, color: ahead ? 'var(--accent)' : UI.inkFaint }}>
+                {ahead ? `${Math.abs(diffMin)}m ahead` : `+${diffMin}m behind`}
+              </span>
+            </div>
+            <div style={{ position: 'relative', height: 3 }}>
+              <div style={{ position: 'absolute', inset: 0, borderRadius: 999, background: UI.hairStrong }} />
+              <div style={{
+                position: 'absolute', top: 0, height: '100%',
+                left:  ahead ? '50%' : `${50 - pct}%`,
+                width: `${pct}%`,
+                background: ahead ? 'var(--accent)' : UI.inkFaint,
+                borderRadius: ahead ? '0 999px 999px 0' : '999px 0 0 999px',
+                transition: 'left 2s linear, width 2s linear',
+              }} />
+              <div style={{ position: 'absolute', left: '50%', top: -1, width: 1.5, height: 5, background: UI.inkSoft, transform: 'translateX(-50%)' }} />
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Day name + exercise position */}
       <div style={{ flexShrink: 0, padding: '6px 22px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span className="micro-gold">{session.dayName}</span>
@@ -1158,8 +1278,19 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>⇄</button>
+            {store.settings?.tempoEnabled && (
+              <button onClick={() => tempoActive ? stopTempo() : startTempo()} style={{
+                borderRadius: 999, padding: '6px 12px', cursor: 'pointer',
+                background: tempoActive ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                border: `0.5px solid ${tempoActive ? 'var(--accent)' : UI.hairStrong}`,
+                color: tempoActive ? 'var(--accent)' : UI.inkFaint,
+                fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
+              }}>
+                {tempoActive ? 'Stop' : 'Tempo'}
+              </button>
+            )}
             <div style={{ flex: 1 }} />
-            <button onClick={() => setNotePicker(true)} style={{
+            <button onClick={() => entry.note ? setSessionNoteOpen(true) : setNotePicker(true)} style={{
               background: entry.note ? UI.goldFaint : 'transparent',
               border: `0.5px solid ${entry.note ? UI.goldSoft : UI.hairStrong}`,
               borderRadius: 999, padding: '6px 12px', cursor: 'pointer',
@@ -1169,11 +1300,25 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               {entry.note ? 'Note' : '+ Note'}
             </button>
           </div>
+
+          {/* Session note display — tap to edit */}
+          {entry.note ? (
+            <button onClick={() => setSessionNoteOpen(true)} style={{
+              marginTop: 10, width: '100%', textAlign: 'left',
+              background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`,
+              borderRadius: 10, padding: '10px 12px', cursor: 'pointer',
+              fontFamily: UI.fontDisplay, fontSize: 15, color: UI.gold,
+              fontStyle: 'italic', lineHeight: 1.5, whiteSpace: 'pre-wrap',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              {entry.note}
+            </button>
+          ) : null}
         </div>
 
         {/* Exercise note (permanent, from exercise definition) */}
         {exercise?.note && (
-          <Frame style={{ padding: 14 }}>
+          <Frame style={{ padding: 14 }} onClick={() => { setExNoteVal(exercise?.note || ''); setExNoteOpen(true); }}>
             <div className="micro" style={{ marginBottom: 6 }}>NOTE · {entry.name.toUpperCase()}</div>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.inkSoft, lineHeight: 1.5, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>
               {exercise.note}

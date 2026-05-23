@@ -687,7 +687,8 @@ function HomeScreen({ store, setStore, go, userId }) {
               </Frame>
             ) : (
               <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', width: '100%' }}>
-                <button onClick={startSession} style={{
+                <button onClick={startSession} disabled={!!store.inProgress} style={{
+                  opacity: store.inProgress ? 0.35 : 1,
                   flex: 1, minHeight: 90, borderRadius: 18, border: 'none', cursor: 'pointer',
                   background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
                   boxShadow: '0 16px 50px rgba(var(--accent-rgb),0.35), 0 0 0 0.5px rgba(var(--accent-rgb),0.6), inset 0 1px 0 rgba(255,240,200,0.4)',

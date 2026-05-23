@@ -179,6 +179,9 @@ async function loadFromSupabase(userId, _depth = 0) {
         cycleWeekView: sett.cycle_week_view ?? false,
         accentColor: sett.accent_color ?? 'copper',
         darkMode: sett.dark_mode ?? 'dark',
+        tempoEnabled: sett.tempo_enabled ?? false,
+        tempoEccentric: sett.tempo_eccentric ?? 4,
+        tempoConcentric: sett.tempo_concentric ?? 1,
       },
   };
 }
@@ -246,8 +249,11 @@ async function syncStore(prev, next, userId) {
     prev.settings?.pushEnabled     !== next.settings?.pushEnabled     ||
     prev.settings?.pushoverUserKey  !== next.settings?.pushoverUserKey  ||
     prev.settings?.cycleWeekView   !== next.settings?.cycleWeekView   ||
-    prev.settings?.accentColor     !== next.settings?.accentColor     ||
-    prev.settings?.darkMode        !== next.settings?.darkMode;
+    prev.settings?.accentColor      !== next.settings?.accentColor      ||
+    prev.settings?.darkMode         !== next.settings?.darkMode          ||
+    prev.settings?.tempoEnabled     !== next.settings?.tempoEnabled      ||
+    prev.settings?.tempoEccentric   !== next.settings?.tempoEccentric    ||
+    prev.settings?.tempoConcentric  !== next.settings?.tempoConcentric;
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
@@ -267,6 +273,9 @@ async function syncStore(prev, next, userId) {
       cycle_week_view: next.settings?.cycleWeekView ?? false,
       accent_color: next.settings?.accentColor ?? 'copper',
       dark_mode: next.settings?.darkMode ?? 'dark',
+      tempo_enabled: next.settings?.tempoEnabled ?? false,
+      tempo_eccentric: next.settings?.tempoEccentric ?? 4,
+      tempo_concentric: next.settings?.tempoConcentric ?? 1,
       in_progress_session_id: next.inProgress ?? null,
     }));
   }
