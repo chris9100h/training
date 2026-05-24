@@ -442,13 +442,9 @@ function HomeScreen({ store, setStore, go, userId }) {
   };
 
   const skipRest = () => {
-    if (store.cycleStartDate) {
-      const start = new Date(store.cycleStartDate + 'T12:00:00');
-      start.setDate(start.getDate() - 1);
-      setStore(s => ({ ...s, cycleStartDate: start.toISOString().slice(0, 10), lastAdvancedDate: LB.todayISO() }));
-    } else {
-      setStore(s => ({ ...s, cycleIndex: s.cycleIndex + 1, lastAdvancedDate: LB.todayISO() }));
-    }
+    // Calendar-based cycle advances automatically — no date shift needed.
+    // Just record the acknowledgment date for streak logic.
+    setStore(s => ({ ...s, lastAdvancedDate: LB.todayISO() }));
   };
 
   // ─── No-plan fallback
