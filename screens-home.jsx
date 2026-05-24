@@ -411,6 +411,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       if (sk) continue; // already actioned — edit via calendar card
       let trainingDay = null;
       if (weekdayMode) {
+        if (store.weekPlanStartDate && dateKey < store.weekPlanStartDate) continue;
         const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
         trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
       } else if (store.cycleStartDate) {
@@ -626,8 +627,10 @@ function HomeScreen({ store, setStore, go, userId }) {
             }
             const dateKey = d.date.toISOString().slice(0, 10);
             const isPast = !d.isToday && d.date < new Date();
-            const isBeforeCycleStart = !weekdayMode && cycleWeekView && d.daysFromStart != null && d.daysFromStart < 0;
-            const isMissed = !r && isPast && !isCompleted && !skipsMap.has(dateKey) && !isBeforeCycleStart;
+            const isBeforePlanStart = weekdayMode
+              ? (store.weekPlanStartDate ? d.date < new Date(store.weekPlanStartDate + 'T12:00:00') : false)
+              : (store.cycleStartDate ? d.date < new Date(store.cycleStartDate + 'T12:00:00') : false);
+            const isMissed = !r && isPast && !isCompleted && !skipsMap.has(dateKey) && !isBeforePlanStart;
             const isSkipped = !r && isPast && !isCompleted && skipsMap.has(dateKey);
             return (
               <div key={d.id ?? i}

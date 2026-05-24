@@ -293,6 +293,7 @@ async function autoArchiveMissedDays(userId, state) {
     if (sessionDates.has(dateKey) || skipDates.has(dateKey)) continue;
     let trainingDay = null;
     if (isWd) {
+      if (state.weekPlanStartDate && dateKey < state.weekPlanStartDate) continue;
       const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
       trainingDay = activeSch.days.find(day => day.weekday === wd && (day.items || []).length > 0) || null;
     } else {
