@@ -394,22 +394,32 @@ function App() {
   // UI state (currentExIdx, restStart) so the training screen isn't disrupted.
   useEffectA(() => {
     if (!userId) return;
-    return LB.subscribeToChanges(userId, (session) => {
-      setStore(s => {
-        if (!s) return s;
-        const idx = s.sessions.findIndex(x => x.id === session.id);
-        if (idx === -1) return { ...s, sessions: [...s.sessions, session] };
-        const existing = s.sessions[idx];
-        const sessions = [...s.sessions];
-        sessions[idx] = {
-          ...existing,
-          entries: session.entries,
-          ended: session.ended,
-          startedAt: session.startedAt,
-        };
-        return { ...s, sessions };
-      });
-    });
+    return LB.subscribeToChanges(
+      userId,
+      (session) => {
+        setStore(s => {
+          if (!s) return s;
+          const idx = s.sessions.findIndex(x => x.id === session.id);
+          if (idx === -1) return { ...s, sessions: [...s.sessions, session] };
+          const existing = s.sessions[idx];
+          const sessions = [...s.sessions];
+          sessions[idx] = { ...existing, entries: session.entries, ended: session.ended, startedAt: session.startedAt };
+          return { ...s, sessions };
+        });
+      },
+      ({ sessionId, exIdx }) => {
+        setStore(s => {
+          if (!s) return s;
+          const idx = s.sessions.findIndex(x => x.id === sessionId);
+          if (idx === -1) return s;
+          const existing = s.sessions[idx];
+          if (existing.currentExIdx === exIdx) return s;
+          const sessions = [...s.sessions];
+          sessions[idx] = { ...existing, currentExIdx: exIdx };
+          return { ...s, sessions };
+        });
+      },
+    );
   }, [userId]);
 
   // Sync to Supabase + save to localStorage on every store change.

@@ -611,6 +611,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
 
   useEffectT(() => { setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
+  useEffectT(() => { if (userId && sessionId) LB.broadcastExIdx(sessionId, exIdx); }, [exIdx]);
 
   useEffectT(() => {
     if (!session?.dayId || !session?.id || !userId) return;
