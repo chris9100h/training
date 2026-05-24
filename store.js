@@ -530,6 +530,25 @@ function clearLocal(userId) {
   } catch (_) {}
 }
 
+function subscribeToChanges(userId, onSession) {
+  const mapRow = row => ({
+    id: row.id,
+    scheduleId: row.schedule_id,
+    dayId: row.day_id,
+    dayName: row.day_name,
+    date: row.date,
+    startedAt: row.started_at ?? null,
+    ended: row.ended,
+    entries: row.entries,
+  });
+  const channel = _supabase
+    .channel(`rt-${userId}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_sessions', filter: `user_id=eq.${userId}` }, p => onSession(mapRow(p.new)))
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'zane_sessions', filter: `user_id=eq.${userId}` }, p => onSession(mapRow(p.new)))
+    .subscribe();
+  return () => _supabase.removeChannel(channel);
+}
+
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
@@ -539,4 +558,5 @@ window.LB = {
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay, isWeekdayPlan,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
+  subscribeToChanges,
 };

@@ -388,6 +388,23 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Real-time session sync across devices.
+  // When another device writes to zane_sessions, apply the update locally.
+  // Skip the active inProgress session — the training device is authoritative.
+  useEffectA(() => {
+    if (!userId) return;
+    return LB.subscribeToChanges(userId, (session) => {
+      setStore(s => {
+        if (!s || s.inProgress === session.id) return s;
+        const idx = s.sessions.findIndex(x => x.id === session.id);
+        if (idx === -1) return { ...s, sessions: [...s.sessions, session] };
+        const sessions = [...s.sessions];
+        sessions[idx] = { ...sessions[idx], ...session };
+        return { ...s, sessions };
+      });
+    });
+  }, [userId]);
+
   // Sync to Supabase + save to localStorage on every store change.
   // A failed sync leaves syncBase unchanged so the pending diff is retried later.
   useEffectA(() => {
