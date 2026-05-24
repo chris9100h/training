@@ -409,11 +409,9 @@ function HomeScreen({ store, setStore, go, userId }) {
       } else if (store.cycleStartDate) {
         const start = new Date(store.cycleStartDate + 'T12:00:00');
         const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-        if (n >= 0) {
-          const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
-          const dayData = sch.days[idx];
-          if (dayData?.items?.length > 0) trainingDay = dayData;
-        }
+        const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
+        const dayData = sch.days[idx];
+        if (dayData?.items?.length > 0) trainingDay = dayData;
       }
       if (!trainingDay) continue;
       return { date: d, dateKey, dayName: trainingDay.name, dayId: trainingDay.id, daysAgo, skip: skipsMap.get(dateKey) || null, dayData: trainingDay };
