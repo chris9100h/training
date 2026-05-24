@@ -1487,7 +1487,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
                               </>
                             )}
                             {isEmpty && (
-                              <button onClick={() => skipSet(eIdx, sIdx, true)} style={{ background: 'none', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '3px 8px', color: UI.inkFaint, fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>skip?</button>
+                              <button onClick={() => skipSet(eIdx, sIdx, true)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Skip</button>
                             )}
                           </>
                         )}
