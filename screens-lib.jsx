@@ -2580,9 +2580,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
                   If target is 8 reps and range top is +4, weight increases only when all sets reach 12 reps.
                 </div>
-                <button onClick={() => setProgConfigOpen(true)} style={{ padding: '8px 14px', borderRadius: 10, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, color: UI.inkSoft, fontSize: 11, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left' }}>
-                  Configure exercises →
-                </button>
+                <Btn onClick={() => setProgConfigOpen(true)}>Configure exercises</Btn>
               </>)}
             </div>
           )}
