@@ -284,9 +284,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const isUnilateral = !!exercise?.unilateral;
   const progressionTarget = (() => {
     if (!store.settings?.smartProgression) return null;
-    const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
-    if (!catCfg.increment) return null;
-    return (entry?.plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+    const target = (entry?.plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+    return target > 0 ? target : null;
   })();
 
   const updateSession = (fn) => {
