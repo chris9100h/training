@@ -122,6 +122,11 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
     const currentEmail = currentUser?.email || '';
     const currentName  = currentUser?.name  || currentEmail.split('@')[0] || '—';
     const qs           = window.LB || {};
+    const qsIcon = (email) => {
+      if (email === 'office@btc-prime.biz') return <i className="fa-solid fa-dumbbell" style={{ fontSize: 26 }} />;
+      if (email === 'anja.knamm@gmail.com') return <span style={{ fontSize: 30, lineHeight: 1 }}>🩷</span>;
+      return null;
+    };
     const otherEmail   = (qs.QS_EMAILS || []).find(e => e !== currentEmail);
     const isQsUser     = (qs.QS_EMAILS || []).includes(currentEmail);
     const hasOther     = otherEmail ? (qs.hasQuickSwitchSession?.(otherEmail) ?? false) : false;
@@ -250,7 +255,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontFamily: UI.fontDisplay, fontSize: 28, color: UI.gold,
                   }}>
-                    {currentName[0]?.toUpperCase()}
+                    {qsIcon(currentEmail) ?? currentName[0]?.toUpperCase()}
                   </div>
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, lineHeight: 1.1, marginBottom: 8 }}>{currentName}</div>
@@ -291,7 +296,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontFamily: UI.fontDisplay, fontSize: 28, color: UI.inkSoft,
                   }}>
-                    {otherName[0]?.toUpperCase()}
+                    {qsIcon(otherEmail) ?? otherName[0]?.toUpperCase()}
                   </div>
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: hasOther ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1, marginBottom: 8 }}>{otherName}</div>
