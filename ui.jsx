@@ -141,7 +141,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
           zIndex: 10,
           overflow: 'hidden',
         }}>
-          <div style={{ padding: '0 22px 20px', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <div style={{ padding: '0 22px 6px', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <img src="icons/zane-logo.png" style={{ width: 180, height: 180, objectFit: 'contain', opacity: 0.9 }} />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', padding: '0 12px', flex: 1, justifyContent: 'space-evenly' }}>
