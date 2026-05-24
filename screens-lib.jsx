@@ -2033,6 +2033,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [accountOpen, setAccountOpen] = useStateL(false);
   const [trainingOpen, setTrainingOpen] = useStateL(false);
   const [progConfigOpen, setProgConfigOpen] = React.useState(false);
+  const [progDisclaimer, setProgDisclaimer] = React.useState(false);
   const [activeSessions, setActiveSessions] = useStateL([]);
   const [qsSwitching, setQsSwitching] = useStateL(false);
   const [qsOpen, setQsOpen] = useStateL(false);
@@ -2567,7 +2568,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <div className="micro">SMART PROGRESSION</div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span className="micro" style={{ color: UI.inkSoft }}>Enabled</span>
-                <div onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, smartProgression: !s.settings?.smartProgression } }))} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', background: store.settings?.smartProgression ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${store.settings?.smartProgression ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>
+                <div onClick={() => { const turningOn = !store.settings?.smartProgression; setStore(s => ({ ...s, settings: { ...s.settings, smartProgression: turningOn } })); if (turningOn) setProgDisclaimer(true); }} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', background: store.settings?.smartProgression ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${store.settings?.smartProgression ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>
                   <div style={{ position: 'absolute', top: 3, left: store.settings?.smartProgression ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: store.settings?.smartProgression ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
                 </div>
               </div>
@@ -2622,6 +2623,18 @@ function SettingsScreen({ store, setStore, go, userId }) {
             Set equipment categories on exercises in the Library. Individual overrides can be set per exercise.
           </div>
           <Btn onClick={() => setProgConfigOpen(false)}>Done</Btn>
+        </Sheet>
+
+        <Sheet open={progDisclaimer} onClose={() => setProgDisclaimer(false)} title="Smart Progression">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
+            <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
+              The reps shown in your sets are <span style={{ color: UI.gold }}>minimum reps</span> — the floor the algorithm needs to track progression.
+            </div>
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
+              Always train past that number. Push to failure or near-failure on each set. The algo only bumps weight when <em>all</em> sets hit the top of the range — so getting extra reps is how you earn the next weight.
+            </div>
+          </div>
+          <Btn onClick={() => setProgDisclaimer(false)}>Got it</Btn>
         </Sheet>
 
         <Btn kind="ghost" onClick={async () => {

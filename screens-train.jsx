@@ -1220,7 +1220,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                 <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>R</span>
               </>
             ) : (
-              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>Reps</span>
+              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{store.settings?.smartProgression ? 'Reps (min)' : 'Reps'}</span>
             )}
             <div /><div />
           </div>
