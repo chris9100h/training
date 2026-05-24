@@ -467,7 +467,11 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
   const finish = () => {
     cancelPushover();
-    updateSession(sess => ({ ...sess, ended: new Date().toISOString() }));
+    updateSession(sess => {
+      const now = new Date();
+      const mins = sess.startedAt ? Math.round((now - new Date(sess.startedAt)) / 60000) : null;
+      return { ...sess, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }) };
+    });
     setStore(s => ({
       ...s,
       inProgress: null,
@@ -618,18 +622,27 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     if (!session?.dayId || !session?.id || !userId) return;
     LB.supabase
       .from('zane_sessions')
-      .select('started_at, ended, entries')
+      .select('started_at, ended, entries, duration_minutes')
       .eq('user_id', userId)
       .eq('day_id', session.dayId)
       .not('ended', 'is', null)
-      .not('started_at', 'is', null)
       .neq('id', session.id)
       .then(({ data }) => {
         if (!data?.length) return;
-        const valid = data.filter(s => new Date(s.ended) > new Date(s.started_at));
+        const valid = data.filter(s => {
+          const durSec = s.duration_minutes != null
+            ? s.duration_minutes * 60
+            : (s.started_at ? (new Date(s.ended) - new Date(s.started_at)) / 1000 : null);
+          return durSec != null && durSec > 0;
+        });
         if (!valid.length) return;
-        const avgDurSec = valid.reduce((sum, s) => sum + (new Date(s.ended) - new Date(s.started_at)) / 1000, 0) / valid.length;
-        const avgSetsTotal = valid.reduce((sum, s) => sum + (s.entries || []).reduce((t, e) => t + (e.sets?.length || 0), 0), 0) / valid.length;
+        const avgDurSec = valid.reduce((sum, s) => {
+          const sec = s.duration_minutes != null
+            ? s.duration_minutes * 60
+            : (new Date(s.ended) - new Date(s.started_at)) / 1000;
+          return sum + sec;
+        }, 0) / valid.length;
+        const avgSetsTotal = valid.reduce((sum, s) => sum + (s.entries || []).reduce((t, e) => t + (e.sets?.filter(st => st.done).length || 0), 0), 0) / valid.length;
         setAvgStats({ avgDurSec, avgSetsTotal });
       });
   }, [session?.id]);
@@ -946,8 +959,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
       {/* Pace bar — only when historical avg is available */}
       {avgStats && (() => {
-        const totalSetsDone  = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done || x.skipped).length || 0), 0);
-        const totalSetsTotal = session.entries.reduce((s, e) => s + (e.sets?.length || 0), 0);
+        const totalSetsDone  = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done).length || 0), 0);
+        const totalSetsTotal = session.entries.reduce((s, e) => s + (e.sets?.filter(x => !x.skipped).length || 0), 0);
         const avgDurSec = avgStats.avgDurSec;
         const avgSetsTotal = avgStats.avgSetsTotal;
         if (!avgDurSec || !session.startedAt) return null;
@@ -959,7 +972,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         if (!histPace || totalSetsTotal === 0) {
           remainingSec = Math.max(0, avgDurSec - elapsedSec);
         } else if (!currPace) {
-          remainingSec = histPace * remainingSets;
+          remainingSec = Math.max(0, avgDurSec - elapsedSec);
         } else {
           const w = Math.min(totalSetsDone / 8, 0.7);
           remainingSec = Math.max(0, (w * currPace + (1 - w) * histPace) * remainingSets);
@@ -1359,6 +1372,23 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       {/* finish confirmation */}
       <Sheet open={finishOpen} onClose={() => setFinishOpen(false)} title="End session?">
         <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 18, lineHeight: 1.6 }}>
+          {(() => {
+            const incomplete = session.entries
+              .map(e => ({ name: e.name, remaining: e.sets.filter(s => !s.done && !s.skipped).length }))
+              .filter(e => e.remaining > 0);
+            if (!incomplete.length) return null;
+            return (
+              <div style={{ background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 10, padding: '10px 12px', marginBottom: 14 }}>
+                <div className="label" style={{ color: 'var(--accent)', marginBottom: 8 }}>Incomplete sets</div>
+                {incomplete.map(e => (
+                  <div key={e.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 4 }}>
+                    <span style={{ color: UI.inkSoft }}>{e.name}</span>
+                    <span className="num" style={{ color: 'var(--accent)' }}>{e.remaining} left</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
             <span>Sets</span>
             <span className="num" style={{ color: UI.ink }}>

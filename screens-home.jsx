@@ -275,6 +275,18 @@ function HomeScreen({ store, setStore, go, userId }) {
     return `${dateStr} · DAY ${selectedSlot + 1} OF ${dayCount}`;
   }, [isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, dayCount, sessionDate, week]);
 
+  const avgDayDuration = useMemo(() => {
+    if (!activeDay?.id) return null;
+    const past = store.sessions.filter(s => s.dayId === activeDay.id && s.ended);
+    if (!past.length) return null;
+    const mins = past.map(s => s.durationMinutes != null
+      ? s.durationMinutes
+      : (s.startedAt && s.ended ? Math.round((new Date(s.ended) - new Date(s.startedAt)) / 60000) : null)
+    ).filter(d => d != null && d > 0);
+    if (!mins.length) return null;
+    return Math.round(mins.reduce((a, b) => a + b, 0) / mins.length);
+  }, [store.sessions, activeDay?.id]);
+
   const lastSession = useMemo(() => {
     return [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''))[0];
   }, [store.sessions]);
@@ -691,7 +703,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 28 }}>
               <SubDial size={80} label="EXERCISES" value={activeDay.items.length} />
               <div style={{ width: '0.5px', height: 36, background: UI.hair }} />
-              <SubDial size={80} label="MIN" value={`~${Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))}`} />
+              <SubDial size={80} label="MIN" value={avgDayDuration != null ? `~${avgDayDuration}` : `~${Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))}`} />
               <div style={{ width: '0.5px', height: 36, background: UI.hair }} />
               <SubDial size={80} label="SETS" value={activeDay.items.reduce((a,b) => a + b.sets, 0)} />
             </div>
@@ -870,7 +882,7 @@ function HomeScreen({ store, setStore, go, userId }) {
 
 function totalVolume(session) {
   return session.entries.reduce((sum, ex) =>
-    sum + (ex.sets || []).reduce((s, st) => {
+    sum + (ex.sets || []).filter(st => st.done).reduce((s, st) => {
       const reps = (st.repsL != null || st.repsR != null)
         ? Math.min(st.repsL ?? 0, st.repsR ?? 0)
         : (+st.reps || 0);
