@@ -1372,6 +1372,23 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       {/* finish confirmation */}
       <Sheet open={finishOpen} onClose={() => setFinishOpen(false)} title="End session?">
         <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 18, lineHeight: 1.6 }}>
+          {(() => {
+            const incomplete = session.entries
+              .map(e => ({ name: e.name, remaining: e.sets.filter(s => !s.done && !s.skipped).length }))
+              .filter(e => e.remaining > 0);
+            if (!incomplete.length) return null;
+            return (
+              <div style={{ background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 10, padding: '10px 12px', marginBottom: 14 }}>
+                <div className="label" style={{ color: 'var(--accent)', marginBottom: 8 }}>Incomplete sets</div>
+                {incomplete.map(e => (
+                  <div key={e.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 4 }}>
+                    <span style={{ color: UI.inkSoft }}>{e.name}</span>
+                    <span className="num" style={{ color: 'var(--accent)' }}>{e.remaining} left</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
             <span>Sets</span>
             <span className="num" style={{ color: UI.ink }}>
