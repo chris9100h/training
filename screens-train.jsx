@@ -907,7 +907,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       {improvedSet && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
-          background: 'radial-gradient(ellipse at center, rgba(201,169,97,0.07) 0%, transparent 70%)',
+          background: 'rgb(8,6,3)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
         }}>
@@ -932,7 +932,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       {regressionSet && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
-          background: 'radial-gradient(ellipse at center, rgba(200,116,105,0.07) 0%, transparent 70%)',
+          background: 'rgb(8,6,3)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
         }}>
