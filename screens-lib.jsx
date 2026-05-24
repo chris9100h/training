@@ -1388,6 +1388,12 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
     ));
   };
 
+  const skipSet = (eIdx, sIdx, skip) => {
+    setDraftEntries(entries => entries.map((e, i) =>
+      i !== eIdx ? e : { ...e, sets: e.sets.map((st, k) => k !== sIdx ? st : { ...st, skipped: skip, done: false, kg: null, reps: null, repsL: null, repsR: null }) }
+    ));
+  };
+
   const save = () => {
     const patch = { entries: draftEntries };
     if (draftDate && draftDate !== session.date?.slice(0, 10)) {
@@ -1440,39 +1446,54 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
               <div key={eIdx}>
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{(exercises?.find(ex => ex.id === e.exId)?.name ?? e.name).toUpperCase()}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {e.sets.map((st, sIdx) => (
-                    <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: UI.bgInset, borderRadius: 10, padding: '8px 12px' }}>
-                      <span className="num" style={{ width: 20, fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{sIdx + 1}</span>
-                      <input type="number" inputMode="decimal" step="0.5" value={st.kg ?? ''}
-                        placeholder="—" onFocus={e => e.target.select()}
-                        onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
-                        style={numInputStyle} />
-                      <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>kg</span>
-                      <span style={{ color: UI.hair, fontSize: 14, margin: '0 2px', fontFamily: UI.fontDisplay, fontStyle: 'italic' }}>×</span>
-                      {isUnilateral ? (
-                        <>
-                          <input type="number" inputMode="numeric" value={st.repsL ?? ''}
-                            placeholder="—" onFocus={e => e.target.select()}
-                            onChange={ev => updateSet(eIdx, sIdx, { repsL: ev.target.value === '' ? null : +ev.target.value })}
-                            style={numInputStyle} />
-                          <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>L</span>
-                          <input type="number" inputMode="numeric" value={st.repsR ?? ''}
-                            placeholder="—" onFocus={e => e.target.select()}
-                            onChange={ev => updateSet(eIdx, sIdx, { repsR: ev.target.value === '' ? null : +ev.target.value })}
-                            style={numInputStyle} />
-                          <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>R</span>
-                        </>
-                      ) : (
-                        <>
-                          <input type="number" inputMode="numeric" value={st.reps ?? ''}
-                            placeholder="—" onFocus={e => e.target.select()}
-                            onChange={ev => updateSet(eIdx, sIdx, { reps: ev.target.value === '' ? null : +ev.target.value })}
-                            style={numInputStyle} />
-                          <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>reps</span>
-                        </>
-                      )}
-                    </div>
-                  ))}
+                  {e.sets.map((st, sIdx) => {
+                    const isEmpty = st.kg == null && st.reps == null && st.repsL == null && st.repsR == null;
+                    return (
+                      <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: UI.bgInset, borderRadius: 10, padding: '8px 12px', opacity: st.skipped ? 0.5 : 1 }}>
+                        <span className="num" style={{ width: 20, fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{sIdx + 1}</span>
+                        {st.skipped ? (
+                          <>
+                            <span className="num" style={{ flex: 1, fontSize: 12, color: UI.inkFaint }}>skipped</span>
+                            <button onClick={() => skipSet(eIdx, sIdx, false)} style={{ background: 'none', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '3px 8px', color: UI.inkFaint, fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>undo</button>
+                          </>
+                        ) : (
+                          <>
+                            <input type="number" inputMode="decimal" step="0.5" value={st.kg ?? ''}
+                              placeholder="—" onFocus={e => e.target.select()}
+                              onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
+                              style={numInputStyle} />
+                            <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>kg</span>
+                            <span style={{ color: UI.hair, fontSize: 14, margin: '0 2px', fontFamily: UI.fontDisplay, fontStyle: 'italic' }}>×</span>
+                            {isUnilateral ? (
+                              <>
+                                <input type="number" inputMode="numeric" value={st.repsL ?? ''}
+                                  placeholder="—" onFocus={e => e.target.select()}
+                                  onChange={ev => updateSet(eIdx, sIdx, { repsL: ev.target.value === '' ? null : +ev.target.value })}
+                                  style={numInputStyle} />
+                                <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>L</span>
+                                <input type="number" inputMode="numeric" value={st.repsR ?? ''}
+                                  placeholder="—" onFocus={e => e.target.select()}
+                                  onChange={ev => updateSet(eIdx, sIdx, { repsR: ev.target.value === '' ? null : +ev.target.value })}
+                                  style={numInputStyle} />
+                                <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>R</span>
+                              </>
+                            ) : (
+                              <>
+                                <input type="number" inputMode="numeric" value={st.reps ?? ''}
+                                  placeholder="—" onFocus={e => e.target.select()}
+                                  onChange={ev => updateSet(eIdx, sIdx, { reps: ev.target.value === '' ? null : +ev.target.value })}
+                                  style={numInputStyle} />
+                                <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>reps</span>
+                              </>
+                            )}
+                            {isEmpty && (
+                              <button onClick={() => skipSet(eIdx, sIdx, true)} style={{ background: 'none', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '3px 8px', color: UI.inkFaint, fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>skip?</button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
