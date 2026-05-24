@@ -850,7 +850,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                       const id = LB.uid();
                       LB.createSkip(userId, { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason }).catch(() => {});
                       setStore(s => ({ ...s, skips: [...(s.skips || []), { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason, skippedAt: new Date().toISOString() }] }));
-                      if (mode === 'skip') skipRest();
+                      // 'skip' just records the skip; the cycle advances with calendar days automatically
                     }
                     setSkipReasonModal(null);
                   }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 10, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
