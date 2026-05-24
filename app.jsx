@@ -152,6 +152,7 @@ function App() {
   const pendingStore              = useRefA(null);  // latest state awaiting sync
   const syncing                   = useRefA(false); // true while a sync is in flight
   const localDirty                = useRefA(false); // true if user changed store after cache load
+  const pendingTrainNav           = useRefA(null);  // sessionId to navigate to once its data arrives
 
   useEffectA(() => {
     if (store?.user?.email && store?.user?.name) {
@@ -400,11 +401,18 @@ function App() {
         setStore(s => {
           if (!s) return s;
           const idx = s.sessions.findIndex(x => x.id === session.id);
-          if (idx === -1) return { ...s, sessions: [...s.sessions, session] };
+          if (idx === -1) {
+            // New session — navigate if we were waiting for it
+            if (pendingTrainNav.current === session.id) {
+              pendingTrainNav.current = null;
+              setRoute({ name: 'train', sessionId: session.id });
+            }
+            return { ...s, sessions: [...s.sessions, session] };
+          }
           const existing = s.sessions[idx];
           const sessions = [...s.sessions];
           sessions[idx] = { ...existing, entries: session.entries, ended: session.ended, startedAt: session.startedAt };
-          // If this device was in-progress on this session and it just got finished remotely, clear inProgress
+          // Session finished remotely — clear inProgress and go to summary
           if (session.ended && s.inProgress === session.id) {
             setRoute({ name: 'session', sessionId: session.id });
             return { ...s, sessions, inProgress: null };
@@ -423,6 +431,19 @@ function App() {
           sessions[idx] = { ...existing, currentExIdx: exIdx };
           return { ...s, sessions };
         });
+      },
+      ({ action, sessionId }) => {
+        if (action === 'start') {
+          // Mark session as pending navigation; actual nav fires when postgres_changes INSERT arrives
+          pendingTrainNav.current = sessionId;
+          setStore(s => (s && !s.inProgress) ? { ...s, inProgress: sessionId } : s);
+        } else if (action === 'cancel') {
+          pendingTrainNav.current = null;
+          setStore(s => s?.inProgress !== sessionId ? s : {
+            ...s, inProgress: null, sessions: s.sessions.filter(x => x.id !== sessionId),
+          });
+          setRoute({ name: 'home' });
+        }
       },
     );
   }, [userId]);

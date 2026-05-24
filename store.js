@@ -540,7 +540,7 @@ function clearLocal(userId) {
 
 let _realtimeChannel = null;
 
-function subscribeToChanges(userId, onSession, onExIdx) {
+function subscribeToChanges(userId, onSession, onExIdx, onSessionNav) {
   const mapRow = row => ({
     id: row.id,
     scheduleId: row.schedule_id,
@@ -556,6 +556,7 @@ function subscribeToChanges(userId, onSession, onExIdx) {
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_sessions', filter: `user_id=eq.${userId}` }, p => onSession(mapRow(p.new)))
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'zane_sessions', filter: `user_id=eq.${userId}` }, p => onSession(mapRow(p.new)))
     .on('broadcast', { event: 'ex_idx' }, ({ payload }) => onExIdx?.(payload))
+    .on('broadcast', { event: 'session_nav' }, ({ payload }) => onSessionNav?.(payload))
     .subscribe();
   return () => { _supabase.removeChannel(_realtimeChannel); _realtimeChannel = null; };
 }
@@ -564,6 +565,13 @@ function broadcastExIdx(sessionId, exIdx) {
   if (!_realtimeChannel) return;
   try {
     _realtimeChannel.send({ type: 'broadcast', event: 'ex_idx', payload: { sessionId, exIdx } });
+  } catch (e) {}
+}
+
+function broadcastSessionNav(action, sessionId) {
+  if (!_realtimeChannel) return;
+  try {
+    _realtimeChannel.send({ type: 'broadcast', event: 'session_nav', payload: { action, sessionId } });
   } catch (e) {}
 }
 
@@ -576,5 +584,5 @@ window.LB = {
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay, isWeekdayPlan,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
-  subscribeToChanges, broadcastExIdx,
+  subscribeToChanges, broadcastExIdx, broadcastSessionNav,
 };

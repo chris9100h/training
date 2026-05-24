@@ -485,6 +485,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       sessions: s.sessions.filter(x => x.id !== session.id),
       inProgress: null,
     }));
+    LB.broadcastSessionNav('cancel', session.id);
     go({ name: 'home' });
   };
 
