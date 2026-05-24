@@ -189,7 +189,7 @@ async function setupNewUser(userId, name) {
 async function loadFromSupabase(userId, _depth = 0) {
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes] = await Promise.all([
     _supabase.from('zane_profiles').select('id, name').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, prog_increment, prog_max_kg, equipment').eq('user_id', userId),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days').eq('user_id', userId),
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries, duration_minutes')
       .eq('user_id', userId).order('date', { ascending: false }),
@@ -294,7 +294,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, prog_increment: e.prog_increment ?? null, prog_max_kg: e.prog_max_kg ?? null, equipment: e.equipment ?? null, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -592,8 +592,8 @@ function progressionSuggestion(store, exId, dayId, plannedReps) {
   if (!store.settings?.smartProgression) return null;
   const ex = findExercise(store, exId);
   const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
-  const increment = ex?.prog_increment ?? catCfg.increment ?? null;
-  const maxKg = ex?.prog_max_kg ?? catCfg.maxKg ?? null;
+  const increment = catCfg.increment ?? null;
+  const maxKg = catCfg.maxKg ?? null;
   if (!increment) return null;
 
   const last = lastSessionForExercise(store, exId, dayId);
