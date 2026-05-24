@@ -191,7 +191,7 @@ async function loadFromSupabase(userId, _depth = 0) {
     _supabase.from('zane_profiles').select('id, name').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days').eq('user_id', userId),
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries')
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries, duration_minutes')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
@@ -239,6 +239,7 @@ async function loadFromSupabase(userId, _depth = 0) {
       startedAt: s.started_at ?? null,
       ended: s.ended,
       entries: s.entries,
+      durationMinutes: s.duration_minutes ?? null,
     })),
     skips: (skipsRes.data || []).map(s => ({
       id: s.id, date: s.date, dayId: s.day_id, dayName: s.day_name,
@@ -273,9 +274,10 @@ async function loadFromSupabase(userId, _depth = 0) {
 
 function sessionToRow(s, userId) {
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
+  if (durationMinutes != null) row.duration_minutes = durationMinutes;
   return row;
 }
 
@@ -550,6 +552,7 @@ function subscribeToChanges(userId, onSession, onExIdx, onSessionNav) {
     startedAt: row.started_at ?? null,
     ended: row.ended,
     entries: row.entries,
+    durationMinutes: row.duration_minutes ?? null,
   });
   _realtimeChannel = _supabase
     .channel(`rt-${userId}`)

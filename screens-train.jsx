@@ -467,7 +467,11 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
   const finish = () => {
     cancelPushover();
-    updateSession(sess => ({ ...sess, ended: new Date().toISOString() }));
+    updateSession(sess => {
+      const now = new Date();
+      const mins = sess.startedAt ? Math.round((now - new Date(sess.startedAt)) / 60000) : null;
+      return { ...sess, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }) };
+    });
     setStore(s => ({
       ...s,
       inProgress: null,
@@ -618,17 +622,26 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     if (!session?.dayId || !session?.id || !userId) return;
     LB.supabase
       .from('zane_sessions')
-      .select('started_at, ended, entries')
+      .select('started_at, ended, entries, duration_minutes')
       .eq('user_id', userId)
       .eq('day_id', session.dayId)
       .not('ended', 'is', null)
-      .not('started_at', 'is', null)
       .neq('id', session.id)
       .then(({ data }) => {
         if (!data?.length) return;
-        const valid = data.filter(s => new Date(s.ended) > new Date(s.started_at));
+        const valid = data.filter(s => {
+          const durSec = s.duration_minutes != null
+            ? s.duration_minutes * 60
+            : (s.started_at ? (new Date(s.ended) - new Date(s.started_at)) / 1000 : null);
+          return durSec != null && durSec > 0;
+        });
         if (!valid.length) return;
-        const avgDurSec = valid.reduce((sum, s) => sum + (new Date(s.ended) - new Date(s.started_at)) / 1000, 0) / valid.length;
+        const avgDurSec = valid.reduce((sum, s) => {
+          const sec = s.duration_minutes != null
+            ? s.duration_minutes * 60
+            : (new Date(s.ended) - new Date(s.started_at)) / 1000;
+          return sum + sec;
+        }, 0) / valid.length;
         const avgSetsTotal = valid.reduce((sum, s) => sum + (s.entries || []).reduce((t, e) => t + (e.sets?.length || 0), 0), 0) / valid.length;
         setAvgStats({ avgDurSec, avgSetsTotal });
       });

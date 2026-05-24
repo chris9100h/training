@@ -701,7 +701,11 @@ function StatsTab({ store, sessions, go }) {
   const totalSets = sessions.reduce((sum, s) => sum + s.entries.reduce((c, e) => c + e.sets.filter(st => st.done).length, 0), 0);
   const totalReps = sessions.reduce((sum, s) => sum + s.entries.reduce((c, e) => c + e.sets.filter(st => st.done).reduce((r, st) => r + (+st.reps || 0), 0), 0), 0);
   const avgVol = sessions.length ? Math.round(totalVol / sessions.length) : 0;
-  const durations = sessions.filter(s => s.startedAt && s.ended).map(s => Math.round((new Date(s.ended) - new Date(s.startedAt)) / 60000));
+  const durations = sessions
+    .map(s => s.durationMinutes != null
+      ? s.durationMinutes
+      : (s.startedAt && s.ended ? Math.round((new Date(s.ended) - new Date(s.startedAt)) / 60000) : null))
+    .filter(d => d != null && d > 0);
   const avgDuration = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0;
   const maxDuration = durations.length ? Math.max(...durations) : 0;
 
@@ -1057,7 +1061,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const s = store.sessions.find(x => x.id === sessionId);
   if (!s) { go({ name: 'hist' }); return null; }
   const vol = totalVolume(s);
-  const duration = s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null;
+  const duration = s.durationMinutes != null
+    ? s.durationMinutes
+    : (s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null);
 
   const deleteSession = async () => {
     if (!await confirm('This session will be permanently deleted.', { title: 'Delete session?', ok: 'Delete', danger: true })) return;
@@ -1391,8 +1397,8 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
       patch.date = original.toISOString();
     }
     const mins = parseInt(draftDuration, 10);
-    if (!isNaN(mins) && mins > 0 && session.ended) {
-      patch.startedAt = new Date(new Date(session.ended) - mins * 60000).toISOString();
+    if (!isNaN(mins) && mins > 0) {
+      patch.durationMinutes = mins;
     }
     onSave(patch);
   };
