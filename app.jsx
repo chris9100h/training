@@ -404,6 +404,11 @@ function App() {
           const existing = s.sessions[idx];
           const sessions = [...s.sessions];
           sessions[idx] = { ...existing, entries: session.entries, ended: session.ended, startedAt: session.startedAt };
+          // If this device was in-progress on this session and it just got finished remotely, clear inProgress
+          if (session.ended && s.inProgress === session.id) {
+            setRoute({ name: 'session', sessionId: session.id });
+            return { ...s, sessions, inProgress: null };
+          }
           return { ...s, sessions };
         });
       },
