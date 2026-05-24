@@ -416,6 +416,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       } else if (store.cycleStartDate) {
         const start = new Date(store.cycleStartDate + 'T12:00:00');
         const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+        if (n < 0) continue;
         const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
         const dayData = sch.days[idx];
         if (dayData?.items?.length > 0) trainingDay = dayData;
@@ -764,41 +765,47 @@ function HomeScreen({ store, setStore, go, userId }) {
                       <div style={{ flex: 1 }}>
                         <div className="micro" style={{ marginBottom: 2, color: UI.inkFaint }}>ARCHIVED</div>
                         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>
-                          {selectedDateSkip.skipReason === '—' ? 'Not logged in time' : selectedDateSkip.skipReason}
+                          {selectedDateSkip.skipReason === '—' ? 'Not logged in time · delete to log' : selectedDateSkip.skipReason}
                         </div>
                       </div>
+                      <button onClick={() => setSkipReasonModal({ mode: 'edit', skipId: selectedDateSkip.id, currentReason: selectedDateSkip.skipReason, data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                      </button>
+                      <button onClick={() => { LB.deleteSkip(selectedDateSkip.id).catch(() => {}); setStore(s => ({ ...s, skips: (s.skips || []).filter(x => x.id !== selectedDateSkip.id) })); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 18, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
                     </div>
                   </Frame>
                 )}
-                <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
-                <button onClick={startSession} disabled={!!store.inProgress} style={{
-                  opacity: store.inProgress ? 0.35 : 1,
-                  flex: 1, minHeight: 90, borderRadius: 18, border: 'none', cursor: 'pointer',
-                  background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-                  boxShadow: '0 16px 50px rgba(var(--accent-rgb),0.35), 0 0 0 0.5px rgba(var(--accent-rgb),0.6), inset 0 1px 0 rgba(255,240,200,0.4)',
-                  animation: 'pulseGold 3.5s ease-out infinite',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
-                  WebkitTapHighlightColor: 'transparent',
-                }}>
-                  <span style={{ color: 'rgba(10,8,5,0.75)', letterSpacing: '0.18em', fontWeight: 700, fontSize: 15, fontFamily: UI.fontUi }}>
-                    {isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION'}
-                  </span>
-                  <i className="fa-solid fa-dumbbell" style={{ fontSize: 22, color: 'rgba(10,8,5,0.55)' }} />
-                </button>
-                {!weekdayMode && isViewingToday && (
-                  <button onClick={() => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
-                    flex: 1, minHeight: 90, borderRadius: 18, cursor: 'pointer',
-                    background: 'transparent',
-                    border: `0.5px solid ${UI.hairStrong}`,
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
-                    WebkitTapHighlightColor: 'transparent',
-                  }}>
-                    <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.22em', fontWeight: 600 }}>DAY</span>
-                    <span style={{ fontSize: 24, color: UI.inkSoft, fontFamily: UI.fontDisplay, fontStyle: 'italic', lineHeight: 1 }}>→</span>
-                    <span className="micro" style={{ color: UI.inkFaint }}>SKIP</span>
-                  </button>
+                {!selectedDateSkip && (
+                  <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
+                    <button onClick={startSession} disabled={!!store.inProgress} style={{
+                      opacity: store.inProgress ? 0.35 : 1,
+                      flex: 1, minHeight: 90, borderRadius: 18, border: 'none', cursor: 'pointer',
+                      background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+                      boxShadow: '0 16px 50px rgba(var(--accent-rgb),0.35), 0 0 0 0.5px rgba(var(--accent-rgb),0.6), inset 0 1px 0 rgba(255,240,200,0.4)',
+                      animation: 'pulseGold 3.5s ease-out infinite',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <span style={{ color: 'rgba(10,8,5,0.75)', letterSpacing: '0.18em', fontWeight: 700, fontSize: 15, fontFamily: UI.fontUi }}>
+                        {isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION'}
+                      </span>
+                      <i className="fa-solid fa-dumbbell" style={{ fontSize: 22, color: 'rgba(10,8,5,0.55)' }} />
+                    </button>
+                    {!weekdayMode && isViewingToday && (
+                      <button onClick={() => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
+                        flex: 1, minHeight: 90, borderRadius: 18, cursor: 'pointer',
+                        background: 'transparent',
+                        border: `0.5px solid ${UI.hairStrong}`,
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
+                        WebkitTapHighlightColor: 'transparent',
+                      }}>
+                        <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.22em', fontWeight: 600 }}>DAY</span>
+                        <span style={{ fontSize: 24, color: UI.inkSoft, fontFamily: UI.fontDisplay, fontStyle: 'italic', lineHeight: 1 }}>→</span>
+                        <span className="micro" style={{ color: UI.inkFaint }}>SKIP</span>
+                      </button>
+                    )}
+                  </div>
                 )}
-                </div>
               </div>
             )}
           </div>

@@ -298,6 +298,7 @@ async function autoArchiveMissedDays(userId, state) {
     } else {
       const start = new Date(state.cycleStartDate + 'T12:00:00');
       const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+      if (n < 0) continue;
       const idx = ((n % activeSch.days.length) + activeSch.days.length) % activeSch.days.length;
       const dayData = activeSch.days[idx];
       if ((dayData?.items || []).length > 0) trainingDay = dayData;
