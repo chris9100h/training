@@ -442,8 +442,22 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     } catch (e) {}
   };
 
+  const TEMPO_WORDS = ['one','two','three','four','five','six','seven','eight','nine','ten'];
+
+  const speakTempo = (text) => {
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.4;
+      u.pitch = 1.0;
+      u.volume = 1.0;
+      window.speechSynthesis.speak(u);
+    } catch (e) {}
+  };
+
   const stopTempo = () => {
     if (tempoTimerRef.current) { clearInterval(tempoTimerRef.current); tempoTimerRef.current = null; }
+    try { window.speechSynthesis.cancel(); } catch (e) {}
     setTempoActive(false);
   };
 
@@ -451,9 +465,17 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     stopTempo();
     const eccSecs = store.settings?.tempoEccentric ?? 4;
     const conSecs = store.settings?.tempoConcentric ?? 1;
+    const voice = store.settings?.tempoVoice ?? false;
+    const signal = (phase, tick) => {
+      if (voice) {
+        speakTempo(phase === 'ecc' ? (TEMPO_WORDS[tick] ?? String(tick + 1)) : 'go');
+      } else {
+        playBeep(phase, phase === 'ecc' ? tick + 1 : 1);
+      }
+    };
     tempoStateRef.current = { phase: 'ecc', tick: 0 };
     setTempoActive(true);
-    playBeep('ecc', 1);
+    signal('ecc', 0);
     tempoTimerRef.current = setInterval(() => {
       const { phase, tick } = tempoStateRef.current;
       const phaseLen = phase === 'ecc' ? eccSecs : conSecs;
@@ -461,7 +483,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       let newPhase = phase;
       if (newTick >= phaseLen) { newPhase = phase === 'ecc' ? 'con' : 'ecc'; newTick = 0; }
       tempoStateRef.current = { phase: newPhase, tick: newTick };
-      playBeep(newPhase, newPhase === 'ecc' ? newTick + 1 : 1);
+      signal(newPhase, newTick);
     }, 1000);
   };
 
