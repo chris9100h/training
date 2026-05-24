@@ -956,7 +956,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       {progressionUnlocked && (
         <div onClick={() => { setProgressionUnlocked(null); if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); } }} style={{
           position: 'fixed', inset: 0, zIndex: 160,
-          background: 'radial-gradient(ellipse at center, rgba(201,169,97,0.18) 0%, rgba(10,8,5,0.88) 70%)',
+          background: 'radial-gradient(ellipse at 50% 44%, rgba(201,169,97,0.13) 0%, rgba(8,6,3,0.97) 52%)',
           animation: 'improvedFade 4s ease forwards',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: 8,
