@@ -122,9 +122,9 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
     const currentEmail = currentUser?.email || '';
     const currentName  = currentUser?.name  || currentEmail.split('@')[0] || '—';
     const qs           = window.LB || {};
-    const qsIcon = (email) => {
-      if (email === 'office@btc-prime.biz') return <i className="fa-solid fa-dumbbell" style={{ fontSize: 26 }} />;
-      if (email === 'anja.knamm@gmail.com') return <span style={{ fontSize: 30, lineHeight: 1 }}>🩷</span>;
+    const qsIcon = (email, size = 26) => {
+      if (email === 'office@btc-prime.biz') return <i className="fa-solid fa-dumbbell" style={{ fontSize: size }} />;
+      if (email === 'anja.knamm@gmail.com') return <span style={{ fontSize: size + 2, lineHeight: 1 }}>🩷</span>;
       return null;
     };
     const otherEmail   = (qs.QS_EMAILS || []).find(e => e !== currentEmail);
@@ -201,7 +201,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontFamily: UI.fontDisplay, fontSize: 18, color: UI.gold,
                 }}>
-                  {qsIcon(currentEmail) ?? currentName[0]?.toUpperCase()}
+                  {qsIcon(currentEmail, 16) ?? currentName[0]?.toUpperCase()}
                 </div>
                 <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                   <div style={{ fontSize: 13, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
