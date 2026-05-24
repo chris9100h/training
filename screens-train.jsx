@@ -283,10 +283,10 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const last = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayId) : null;
   const isUnilateral = !!exercise?.unilateral;
   const progressionTarget = (() => {
-    if (!store.settings?.smartProgression || !entry?.plannedReps) return null;
+    if (!store.settings?.smartProgression) return null;
     const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
     if (!catCfg.increment) return null;
-    return entry.plannedReps + (store.settings?.progressionRangeTop ?? 4);
+    return (entry?.plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
   })();
 
   const updateSession = (fn) => {
@@ -399,7 +399,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     } else {
       persistRestStart(Date.now(), restDef);
       if (updatedSets.every(st => st.done)) {
-        setTimeout(() => navigate(1), 600);
+        setTimeout(() => navigate(1), progressionResult ? 1400 : 600);
       }
     }
   };
