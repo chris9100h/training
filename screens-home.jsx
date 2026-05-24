@@ -408,7 +408,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       const dateKey = d.toISOString().slice(0, 10);
       if (sessionDates.has(dateKey)) continue;
       const sk = skipsMap.get(dateKey);
-      if (sk?.skipReason === '—') continue; // auto-archived, not for banner
+      if (sk) continue; // already actioned — edit via calendar card
       let trainingDay = null;
       if (weekdayMode) {
         const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
