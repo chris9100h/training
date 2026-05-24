@@ -364,9 +364,13 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     }
 
     if (progressionResult) {
+      pendingNavRef.current = true;
       setTimeout(() => {
         setProgressionUnlocked(progressionResult);
-        setTimeout(() => setProgressionUnlocked(null), 4000);
+        setTimeout(() => {
+          setProgressionUnlocked(null);
+          if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); }
+        }, 4000);
       }, 800);
     }
     const group = entry.supersetGroup;
@@ -398,7 +402,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     } else {
       persistRestStart(Date.now(), restDef);
       if (updatedSets.every(st => st.done)) {
-        setTimeout(() => navigate(1), progressionResult ? 1400 : 600);
+        if (!progressionResult) setTimeout(() => navigate(1), 600);
       }
     }
   };
@@ -650,6 +654,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [kbRaw, setKbRaw] = useStateT('');
   const [kbFresh, setKbFresh] = useStateT(false);
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
+  const pendingNavRef = useRefT(false);
 
   useEffectT(() => { setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
   useEffectT(() => { if (userId && sessionId) LB.broadcastExIdx(sessionId, exIdx); }, [exIdx]);
@@ -949,7 +954,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
       {/* Progression unlocked overlay */}
       {progressionUnlocked && (
-        <div onClick={() => setProgressionUnlocked(null)} style={{
+        <div onClick={() => { setProgressionUnlocked(null); if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); } }} style={{
           position: 'fixed', inset: 0, zIndex: 160,
           background: 'radial-gradient(ellipse at center, rgba(201,169,97,0.18) 0%, rgba(10,8,5,0.88) 70%)',
           animation: 'improvedFade 4s ease forwards',
