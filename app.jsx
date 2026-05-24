@@ -390,16 +390,23 @@ function App() {
 
   // Real-time session sync across devices.
   // When another device writes to zane_sessions, apply the update locally.
-  // Skip the active inProgress session — the training device is authoritative.
+  // For the active session: update DB fields (entries, ended) but keep local
+  // UI state (currentExIdx, restStart) so the training screen isn't disrupted.
   useEffectA(() => {
     if (!userId) return;
     return LB.subscribeToChanges(userId, (session) => {
       setStore(s => {
-        if (!s || s.inProgress === session.id) return s;
+        if (!s) return s;
         const idx = s.sessions.findIndex(x => x.id === session.id);
         if (idx === -1) return { ...s, sessions: [...s.sessions, session] };
+        const existing = s.sessions[idx];
         const sessions = [...s.sessions];
-        sessions[idx] = { ...sessions[idx], ...session };
+        sessions[idx] = {
+          ...existing,
+          entries: session.entries,
+          ended: session.ended,
+          startedAt: session.startedAt,
+        };
         return { ...s, sessions };
       });
     });
