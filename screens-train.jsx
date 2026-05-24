@@ -282,6 +282,12 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const exercise = entry ? LB.findExercise(store, entry.exId) : null;
   const last = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayId) : null;
   const isUnilateral = !!exercise?.unilateral;
+  const progressionTarget = (() => {
+    if (!store.settings?.smartProgression || !entry?.plannedReps) return null;
+    const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
+    if (!catCfg.increment) return null;
+    return entry.plannedReps + (store.settings?.progressionRangeTop ?? 4);
+  })();
 
   const updateSession = (fn) => {
     setStore(s => ({
@@ -323,40 +329,46 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     setFlashSet(setIdx);
     setTimeout(() => setFlashSet(null), 1400);
     const prevSet = last?.entry?.sets?.[setIdx];
-    if (isImprovement(entry.sets[setIdx], prevSet)) {
-      setImprovedSet(true);
-      setTimeout(() => setImprovedSet(false), 2500);
-    } else {
-      const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, last?.entry?.sets?.[k]));
-      if (!anyImprovementBefore && isDecline(entry.sets[setIdx], prevSet)) {
-        setRegressionSet(true);
-        setTimeout(() => setRegressionSet(false), 2500);
-      }
-    }
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
 
-    if (store.settings?.smartProgression && updatedSets.every(s => s.done || s.skipped)) {
+    const progressionResult = (() => {
+      if (!store.settings?.smartProgression) return null;
+      if (!updatedSets.every(s => s.done || s.skipped)) return null;
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? null;
-      if (increment) {
-        const targetRepsTop = (entry.plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
-        const doneSets = updatedSets.filter(s => s.done && !s.skipped && s.kg != null);
-        const allHitTop = doneSets.length > 0 && doneSets.every(s => {
-          const reps = s.repsL != null ? Math.min(s.repsL ?? 0, s.repsR ?? 0) : (s.reps ?? 0);
-          return reps >= targetRepsTop;
-        });
-        if (allHitTop) {
-          const refKg = doneSets[0].kg;
-          const newKg = Math.round((refKg + increment) * 100) / 100;
-          const nextKg = catCfg.maxKg ? Math.min(newKg, catCfg.maxKg) : newKg;
-          if (nextKg > refKg) {
-            setTimeout(() => {
-              setProgressionUnlocked({ exName: entry.name, currentKg: refKg, nextKg });
-              setTimeout(() => setProgressionUnlocked(null), 4000);
-            }, 800);
-          }
+      if (!increment) return null;
+      const targetRepsTop = (entry.plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+      const doneSets = updatedSets.filter(s => s.done && !s.skipped && s.kg != null);
+      if (!doneSets.length) return null;
+      const allHitTop = doneSets.every(s => {
+        const reps = s.repsL != null ? Math.min(s.repsL ?? 0, s.repsR ?? 0) : (s.reps ?? 0);
+        return reps >= targetRepsTop;
+      });
+      if (!allHitTop) return null;
+      const refKg = doneSets[0].kg;
+      const newKg = Math.round((refKg + increment) * 100) / 100;
+      const nextKg = catCfg.maxKg ? Math.min(newKg, catCfg.maxKg) : newKg;
+      return nextKg > refKg ? { exName: entry.name, currentKg: refKg, nextKg } : null;
+    })();
+
+    if (!progressionResult) {
+      if (isImprovement(entry.sets[setIdx], prevSet)) {
+        setImprovedSet(true);
+        setTimeout(() => setImprovedSet(false), 2500);
+      } else {
+        const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, last?.entry?.sets?.[k]));
+        if (!anyImprovementBefore && isDecline(entry.sets[setIdx], prevSet)) {
+          setRegressionSet(true);
+          setTimeout(() => setRegressionSet(false), 2500);
         }
       }
+    }
+
+    if (progressionResult) {
+      setTimeout(() => {
+        setProgressionUnlocked(progressionResult);
+        setTimeout(() => setProgressionUnlocked(null), 4000);
+      }, 800);
     }
     const group = entry.supersetGroup;
     if (group) {
@@ -1132,13 +1144,18 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         ) : heroSet && (
           <BracketFrame gold padding={0}>
             <div style={{ padding: '12px 6px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '0 18px', marginBottom: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0 18px', marginBottom: 8 }}>
                 <span className="micro-gold">SET {String(currentSetNum).padStart(2, '0')} / {String(entry.sets.length).padStart(2, '0')}</span>
-                {prevHeroSet && prevHeroSet.kg ? (
-                  <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>
-                    LAST TIME <span style={{ color: UI.inkSoft }}>{prevHeroSet.kg}kg × {(prevHeroSet.repsL != null || prevHeroSet.repsR != null) ? `L${prevHeroSet.repsL ?? '?'}/R${prevHeroSet.repsR ?? '?'}` : prevHeroSet.reps}</span>
-                  </span>
-                ) : <span />}
+                <div style={{ textAlign: 'right' }}>
+                  {prevHeroSet && prevHeroSet.kg ? (
+                    <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>
+                      LAST TIME <span style={{ color: UI.inkSoft }}>{prevHeroSet.kg}kg × {(prevHeroSet.repsL != null || prevHeroSet.repsR != null) ? `L${prevHeroSet.repsL ?? '?'}/R${prevHeroSet.repsR ?? '?'}` : prevHeroSet.reps}</span>
+                    </span>
+                  ) : null}
+                  {progressionTarget && (
+                    <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>≥{progressionTarget} reps · next weight</div>
+                  )}
+                </div>
               </div>
 
               {/* HUGE inputs */}
@@ -1267,7 +1284,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                 <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>R</span>
               </>
             ) : (
-              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{store.settings?.smartProgression ? 'Reps (min)' : 'Reps'}</span>
+              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{progressionTarget ? `Reps (≥${progressionTarget})` : store.settings?.smartProgression ? 'Reps (min)' : 'Reps'}</span>
             )}
             <div /><div />
           </div>
