@@ -321,6 +321,7 @@ function App() {
             );
             const serverExIds = new Set(fresh.exercises.map(e => e.id));
             const localOnlyExercises = (cur.exercises || []).filter(x => !serverExIds.has(x.id));
+            const curExMap = new Map((cur.exercises || []).map(e => [e.id, e]));
             const serverSchIds = new Set(fresh.schedules.map(s => s.id));
             const localOnlySchedules = (cur.schedules || []).filter(x => !serverSchIds.has(x.id));
             // Scalar state: the local cache is authoritative — it always holds
@@ -336,7 +337,7 @@ function App() {
               user: cur.user?.name ? { ...fresh.user, name: cur.user.name } : fresh.user,
               inProgress: activeExists ? inProgressId : null,
               sessions: [...localOnly, ...sessions],
-              exercises: [...localOnlyExercises, ...fresh.exercises],
+              exercises: [...localOnlyExercises, ...fresh.exercises.map(e => curExMap.get(e.id) || e)],
               schedules: [...localOnlySchedules, ...fresh.schedules],
             };
           }
