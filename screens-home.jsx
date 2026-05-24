@@ -882,7 +882,7 @@ function HomeScreen({ store, setStore, go, userId }) {
 
 function totalVolume(session) {
   return session.entries.reduce((sum, ex) =>
-    sum + (ex.sets || []).reduce((s, st) => {
+    sum + (ex.sets || []).filter(st => st.done).reduce((s, st) => {
       const reps = (st.repsL != null || st.repsR != null)
         ? Math.min(st.repsL ?? 0, st.repsR ?? 0)
         : (+st.reps || 0);
