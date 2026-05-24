@@ -107,50 +107,6 @@ function HomeScreen({ store, setStore, go, userId }) {
     }
   }, []); // eslint-disable-line
 
-  // Auto-archive missed training days older than the 7-day banner window
-  useEffect(() => {
-    const activeSchId = store.activeScheduleId;
-    const activeSch = store.schedules.find(s => s.id === activeSchId);
-    if (!activeSch || !userId) return;
-    const isWd = LB.isWeekdayPlan(activeSch);
-    if (!isWd && !store.cycleStartDate) return;
-
-    const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
-    const sessionDates = new Set(store.sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
-    const skipDates = new Set(store.skips.map(s => s.date));
-    const toCreate = [];
-
-    for (let daysAgo = 8; daysAgo <= 90; daysAgo++) {
-      const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
-      const dateKey = d.toISOString().slice(0, 10);
-      if (sessionDates.has(dateKey) || skipDates.has(dateKey)) continue;
-      let trainingDay = null;
-      if (isWd) {
-        const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
-        trainingDay = activeSch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
-      } else {
-        const start = new Date(store.cycleStartDate + 'T12:00:00');
-        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-        if (n >= 0) {
-          const idx = ((n % activeSch.days.length) + activeSch.days.length) % activeSch.days.length;
-          const dayData = activeSch.days[idx];
-          if (dayData?.items?.length > 0) trainingDay = dayData;
-        }
-      }
-      if (!trainingDay) continue;
-      toCreate.push({ date: dateKey, dayId: trainingDay.id, dayName: trainingDay.name });
-    }
-    if (!toCreate.length) return;
-
-    const nowISO = new Date().toISOString();
-    const newSkips = toCreate.map(({ date, dayId, dayName }) => ({
-      id: LB.uid(), date, dayId, dayName, skipReason: '—', skippedAt: nowISO,
-    }));
-    LB.supabase.from('zane_skips').insert(
-      newSkips.map(s => ({ id: s.id, user_id: userId, date: s.date, day_id: s.dayId, day_name: s.dayName, skip_reason: s.skipReason, skipped_at: s.skippedAt }))
-    ).then(({ error }) => { if (error) console.error('auto-archive skips:', error); });
-    setStore(s => ({ ...s, skips: [...s.skips, ...newSkips] }));
-  }, [store.sessions.length, store.skips.length, store.activeScheduleId, store.cycleStartDate, userId]); // eslint-disable-line
 
   const todayN = useMemo(() => {
     if (weekdayMode || !store.cycleStartDate) return store.cycleIndex || 0;

@@ -225,7 +225,7 @@ async function loadFromSupabase(userId, _depth = 0) {
 
   const { data: { user: authUser } } = await _supabase.auth.getUser();
 
-  return {
+  const result = {
     user: { name: profileRes.data.name, email: authUser?.email || '' },
     exercises: exRes.data || [],
     schedules: schRes.data || [],
@@ -271,6 +271,54 @@ async function loadFromSupabase(userId, _depth = 0) {
         equipmentConfig: sett.equipment_config ?? {},
       },
   };
+  await autoArchiveMissedDays(userId, result);
+  return result;
+}
+
+async function autoArchiveMissedDays(userId, state) {
+  const activeSch = state.schedules.find(s => s.id === state.activeScheduleId);
+  if (!activeSch) return;
+  const isWd = isWeekdayPlan(activeSch);
+  if (!isWd && !state.cycleStartDate) return;
+
+  const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
+  const sessionDates = new Set(state.sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
+  const skipDates = new Set(state.skips.map(s => s.date));
+  const toCreate = [];
+
+  for (let daysAgo = 8; daysAgo <= 90; daysAgo++) {
+    const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
+    const dateKey = d.toISOString().slice(0, 10);
+    if (sessionDates.has(dateKey) || skipDates.has(dateKey)) continue;
+    let trainingDay = null;
+    if (isWd) {
+      const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      trainingDay = activeSch.days.find(day => day.weekday === wd && (day.items || []).length > 0) || null;
+    } else {
+      const start = new Date(state.cycleStartDate + 'T12:00:00');
+      const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+      if (n >= 0) {
+        const idx = ((n % activeSch.days.length) + activeSch.days.length) % activeSch.days.length;
+        const dayData = activeSch.days[idx];
+        if ((dayData?.items || []).length > 0) trainingDay = dayData;
+      }
+    }
+    if (!trainingDay) continue;
+    toCreate.push({ date: dateKey, dayId: trainingDay.id, dayName: trainingDay.name });
+  }
+
+  if (!toCreate.length) return;
+  const nowISO = new Date().toISOString();
+  const rows = toCreate.map(({ date, dayId, dayName }) => ({
+    id: uid(), user_id: userId, date, day_id: dayId, day_name: dayName,
+    skip_reason: '—', skipped_at: nowISO,
+  }));
+  const { error } = await _supabase.from('zane_skips').insert(rows);
+  if (error) { console.error('auto-archive missed days:', error); return; }
+  state.skips.push(...rows.map(r => ({
+    id: r.id, date: r.date, dayId: r.day_id, dayName: r.day_name,
+    skipReason: r.skip_reason, skippedAt: r.skipped_at,
+  })));
 }
 
 // ─── SYNC ────────────────────────────────────────────────────────────────
