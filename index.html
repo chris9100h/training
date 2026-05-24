@@ -67,6 +67,12 @@
     display: flex; flex-direction: column;
     overflow: hidden;
   }
+  @media (min-width: 768px) {
+    #root {
+      max-width: 100%;
+      box-shadow: none;
+    }
+  }
   * { box-sizing: border-box; }
   input[type=number]::-webkit-outer-spin-button,
   input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }

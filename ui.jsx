@@ -108,7 +108,7 @@ const TAB_ICONS = {
   ),
 };
 
-function TabBar({ active, onChange }) {
+function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
   const tabs = [
     { id: 'home', label: 'Today' },
     { id: 'plan', label: 'Plan' },
@@ -116,6 +116,203 @@ function TabBar({ active, onChange }) {
     { id: 'hist', label: 'History' },
   ];
   const idx = tabs.findIndex(t => t.id === active);
+  const [switchModal, setSwitchModal] = React.useState(false);
+
+  if (sidebar) {
+    const currentEmail = currentUser?.email || '';
+    const currentName  = currentUser?.name  || currentEmail.split('@')[0] || '—';
+    const qs           = window.LB || {};
+    const qsIcon = (email, size = 26) => {
+      if (email === 'office@btc-prime.biz') return <i className="fa-solid fa-dumbbell" style={{ fontSize: size }} />;
+      if (email === 'anja.knamm@gmail.com') return <span style={{ fontSize: size + 2, lineHeight: 1 }}>🩷</span>;
+      return null;
+    };
+    const otherEmail   = (qs.QS_EMAILS || []).find(e => e !== currentEmail);
+    const isQsUser     = (qs.QS_EMAILS || []).includes(currentEmail);
+    const hasOther     = otherEmail ? (qs.hasQuickSwitchSession?.(otherEmail) ?? false) : false;
+    const otherName    = otherEmail ? (qs.getQsName?.(otherEmail) || otherEmail.split('@')[0]) : '';
+
+    return (
+      <>
+        <div style={{
+          width: 220,
+          flexShrink: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          borderRight: `0.5px solid ${UI.goldSoft}`,
+          background: UI.bg,
+          paddingTop: 'calc(env(safe-area-inset-top, 0px) + 28px)',
+          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
+          zIndex: 10,
+          overflow: 'hidden',
+        }}>
+          <div style={{ padding: '0 22px 6px', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <img src="icons/zane-logo.png" style={{ width: 180, height: 180, objectFit: 'contain', opacity: 0.9 }} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', padding: '0 12px', flex: 1, justifyContent: 'space-evenly' }}>
+            {tabs.map(t => {
+              const on = t.id === active;
+              return (
+                <button key={t.id} onClick={() => onChange(t.id)} style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 10,
+                  padding: '26px 16px',
+                  borderRadius: 14,
+                  background: on
+                    ? `linear-gradient(135deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.04))`
+                    : 'rgba(236,228,208,0.025)',
+                  border: `0.5px solid ${on ? UI.goldSoft : UI.hair}`,
+                  color: on ? UI.gold : UI.inkSoft,
+                  fontFamily: UI.fontUi,
+                  fontSize: 16,
+                  fontWeight: on ? 600 : 400,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s, color 0.2s, border-color 0.2s',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <div style={{ transform: 'scale(1.5)', display: 'inline-flex', margin: '0 0 2px' }}>
+                    {TAB_ICONS[t.id]}
+                  </div>
+                  <span>{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          {isQsUser && otherEmail && (
+            <div style={{ padding: '0 14px' }}>
+              <div style={{ height: '0.5px', background: UI.hair, marginBottom: 12 }} />
+              <button onClick={() => setSwitchModal(true)} style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                width: '100%', padding: '12px 14px', borderRadius: 14,
+                background: 'rgba(236,228,208,0.03)',
+                border: `0.5px solid ${UI.hair}`,
+                cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                <div style={{
+                  width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                  background: `rgba(var(--accent-rgb),0.12)`,
+                  border: `0.5px solid ${UI.goldSoft}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontFamily: UI.fontDisplay, fontSize: 18, color: UI.gold,
+                }}>
+                  {qsIcon(currentEmail, 16) ?? currentName[0]?.toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {currentName}
+                  </div>
+                  <div className="micro" style={{ marginTop: 2 }}>Switch User</div>
+                </div>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <path d="M3 8h14M3 8l4-4M3 8l4 4M21 16H7M21 16l-4-4M21 16l-4 4"/>
+                </svg>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {switchModal && isQsUser && otherEmail && (
+          <div onClick={() => setSwitchModal(false)} style={{
+            position: 'fixed', inset: 0, zIndex: 200,
+            background: 'rgba(0,0,0,0.72)',
+            backdropFilter: 'blur(14px)',
+            WebkitBackdropFilter: 'blur(14px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 40,
+            animation: 'sheet-fade 0.15s ease',
+          }}>
+            <div onClick={e => e.stopPropagation()} style={{
+              width: '100%', maxWidth: 520,
+              background: UI.bgRaised,
+              border: `0.5px solid ${UI.hairStrong}`,
+              borderRadius: 28,
+              padding: '32px 28px 22px',
+              boxShadow: '0 40px 100px rgba(0,0,0,0.7)',
+              animation: 'fadeUp 0.22s ease',
+            }}>
+              <div className="micro" style={{ marginBottom: 8 }}>Accounts</div>
+              <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, color: UI.ink, marginBottom: 24, letterSpacing: '-0.01em' }}>Switch User</div>
+              <div style={{ display: 'flex', gap: 12 }}>
+                {/* Current user */}
+                <div style={{
+                  flex: 1,
+                  background: `linear-gradient(160deg, rgba(var(--accent-rgb),0.12) 0%, rgba(var(--accent-rgb),0.03) 100%)`,
+                  border: `0.5px solid ${UI.goldSoft}`,
+                  borderRadius: 18,
+                  padding: '28px 20px',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
+                }}>
+                  <div style={{
+                    width: 64, height: 64, borderRadius: '50%',
+                    background: `rgba(var(--accent-rgb),0.15)`,
+                    border: `0.5px solid ${UI.goldSoft}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: UI.fontDisplay, fontSize: 28, color: UI.gold,
+                  }}>
+                    {qsIcon(currentEmail) ?? currentName[0]?.toUpperCase()}
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, lineHeight: 1.1, marginBottom: 8 }}>{currentName}</div>
+                    <div className="micro-gold">Active</div>
+                  </div>
+                </div>
+                {/* Other user */}
+                <button
+                  onClick={async () => {
+                    if (!hasOther) return;
+                    setSwitchModal(false);
+                    try {
+                      await qs.quickSwitch(otherEmail);
+                      window.location.reload();
+                    } catch (e) {
+                      console.error('Quick switch failed', e);
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    background: hasOther
+                      ? 'linear-gradient(160deg, rgba(236,228,208,0.04) 0%, transparent 100%)'
+                      : 'transparent',
+                    border: `0.5px solid ${hasOther ? UI.hairStrong : UI.hair}`,
+                    borderRadius: 18,
+                    padding: '28px 20px',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
+                    cursor: hasOther ? 'pointer' : 'default',
+                    WebkitTapHighlightColor: 'transparent',
+                    opacity: hasOther ? 1 : 0.4,
+                    transition: 'background 0.2s',
+                  }}
+                >
+                  <div style={{
+                    width: 64, height: 64, borderRadius: '50%',
+                    background: 'rgba(236,228,208,0.06)',
+                    border: `0.5px solid ${UI.hairStrong}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: UI.fontDisplay, fontSize: 28, color: UI.inkSoft,
+                  }}>
+                    {qsIcon(otherEmail) ?? otherName[0]?.toUpperCase()}
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: hasOther ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1, marginBottom: 8 }}>{otherName}</div>
+                    <div className="micro" style={{ color: hasOther ? UI.inkFaint : 'rgba(200,116,105,0.7)' }}>
+                      {hasOther ? 'Tap to switch' : 'Set up in Settings'}
+                    </div>
+                  </div>
+                </button>
+              </div>
+              <button onClick={() => setSwitchModal(false)} style={{ ...btnPrimary, width: '100%', marginTop: 18 }}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
 
   return (
     <div style={{

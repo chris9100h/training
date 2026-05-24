@@ -418,22 +418,27 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
   const cancelPushover = () => LB.cancelPushover(store.settings, userId);
 
-  const playBeep = (phase) => {
+  const playBeep = (phase, count = 1) => {
     try {
       if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
       const ctx = audioCtxRef.current;
       if (ctx.state === 'suspended') ctx.resume();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = 'sine';
-      osc.frequency.value = phase === 'ecc' ? 220 : 880;
-      const t = ctx.currentTime;
-      gain.gain.setValueAtTime(1.0, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
-      osc.start(t);
-      osc.stop(t + 0.15);
+      const freq = phase === 'ecc' ? 440 : 880;
+      const dur = 0.07;
+      const gap = 0.06;
+      for (let i = 0; i < count; i++) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        const t = ctx.currentTime + i * (dur + gap);
+        gain.gain.setValueAtTime(0.9, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        osc.start(t);
+        osc.stop(t + dur);
+      }
     } catch (e) {}
   };
 
@@ -448,7 +453,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     const conSecs = store.settings?.tempoConcentric ?? 1;
     tempoStateRef.current = { phase: 'ecc', tick: 0 };
     setTempoActive(true);
-    playBeep('ecc');
+    playBeep('ecc', 1);
     tempoTimerRef.current = setInterval(() => {
       const { phase, tick } = tempoStateRef.current;
       const phaseLen = phase === 'ecc' ? eccSecs : conSecs;
@@ -456,7 +461,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       let newPhase = phase;
       if (newTick >= phaseLen) { newPhase = phase === 'ecc' ? 'con' : 'ecc'; newTick = 0; }
       tempoStateRef.current = { phase: newPhase, tick: newTick };
-      playBeep(newPhase);
+      playBeep(newPhase, newPhase === 'ecc' ? newTick + 1 : 1);
     }, 1000);
   };
 
@@ -480,6 +485,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       sessions: s.sessions.filter(x => x.id !== session.id),
       inProgress: null,
     }));
+    LB.broadcastSessionNav('cancel', session.id);
     go({ name: 'home' });
   };
 
@@ -606,6 +612,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
 
   useEffectT(() => { setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
+  useEffectT(() => { if (userId && sessionId) LB.broadcastExIdx(sessionId, exIdx); }, [exIdx]);
 
   useEffectT(() => {
     if (!session?.dayId || !session?.id || !userId) return;

@@ -10,6 +10,66 @@ const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
+// ─── QUICK SWITCH ────────────────────────────────────────────────────────
+
+const QS_EMAILS = ['office@btc-prime.biz', 'anja.knamm@gmail.com'];
+
+function _qsKey(email) { return `zane-qs-${email}`; }
+
+function _persistQsSession(session, email) {
+  if (!email || !session?.access_token || !session?.refresh_token) return;
+  if (!QS_EMAILS.includes(email)) return;
+  try {
+    const existing = localStorage.getItem(_qsKey(email));
+    const name = existing ? (JSON.parse(existing).name || null) : null;
+    localStorage.setItem(_qsKey(email), JSON.stringify({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+      ...(name ? { name } : {}),
+    }));
+  } catch (_) {}
+}
+
+// Auto-save session on every sign-in and token refresh so quick switch stays current
+_supabase.auth.onAuthStateChange((event, session) => {
+  if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user?.email) {
+    _persistQsSession(session, session.user.email);
+  }
+});
+
+function saveQsName(email, name) {
+  if (!email || !name || !QS_EMAILS.includes(email)) return;
+  try {
+    const raw = localStorage.getItem(_qsKey(email));
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    data.name = name;
+    localStorage.setItem(_qsKey(email), JSON.stringify(data));
+  } catch (_) {}
+}
+
+function getQsName(email) {
+  try {
+    const raw = localStorage.getItem(_qsKey(email));
+    return raw ? (JSON.parse(raw).name || null) : null;
+  } catch (_) { return null; }
+}
+
+function hasQuickSwitchSession(email) {
+  try { return !!localStorage.getItem(_qsKey(email)); } catch (_) { return false; }
+}
+
+async function quickSwitch(targetEmail) {
+  const raw = localStorage.getItem(_qsKey(targetEmail));
+  if (!raw) throw new Error('No saved session for ' + targetEmail);
+  const { access_token, refresh_token } = JSON.parse(raw);
+  const { error } = await _supabase.auth.setSession({ access_token, refresh_token });
+  if (error) {
+    localStorage.removeItem(_qsKey(targetEmail)); // remove stale tokens
+    throw error;
+  }
+}
+
 // ─── AUTH ────────────────────────────────────────────────────────────────
 
 async function signIn(email, password) {
@@ -43,7 +103,25 @@ async function deleteAllData(userId) {
     _supabase.from('zane_schedules').delete().eq('user_id', userId),
     _supabase.from('zane_user_settings').delete().eq('user_id', userId),
     _supabase.from('zane_profiles').delete().eq('id', userId),
+    _supabase.from('zane_skips').delete().eq('user_id', userId),
   ]);
+}
+
+async function createSkip(userId, { id, date, dayId, dayName, skipReason }) {
+  const { error } = await _supabase.from('zane_skips').insert({
+    id, user_id: userId, date, day_id: dayId, day_name: dayName, skip_reason: skipReason,
+  });
+  if (error) throw error;
+}
+
+async function updateSkipReason(id, skipReason) {
+  const { error } = await _supabase.from('zane_skips').update({ skip_reason: skipReason }).eq('id', id);
+  if (error) throw error;
+}
+
+async function deleteSkip(id) {
+  const { error } = await _supabase.from('zane_skips').delete().eq('id', id);
+  if (error) throw error;
 }
 
 async function importFromBackup(backup, userId) {
@@ -109,13 +187,14 @@ async function setupNewUser(userId, name) {
 // ─── LOAD ────────────────────────────────────────────────────────────────
 
 async function loadFromSupabase(userId, _depth = 0) {
-  const [profileRes, exRes, schRes, sessRes, settRes] = await Promise.all([
+  const [profileRes, exRes, schRes, sessRes, settRes, skipsRes] = await Promise.all([
     _supabase.from('zane_profiles').select('id, name').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days').eq('user_id', userId),
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
+    _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
   ]);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
@@ -160,6 +239,10 @@ async function loadFromSupabase(userId, _depth = 0) {
       startedAt: s.started_at ?? null,
       ended: s.ended,
       entries: s.entries,
+    })),
+    skips: (skipsRes.data || []).map(s => ({
+      id: s.id, date: s.date, dayId: s.day_id, dayName: s.day_name,
+      skipReason: s.skip_reason, skippedAt: s.skipped_at,
     })),
     activeScheduleId: sett.active_schedule_id ?? null,
     cycleIndex: sett.cycle_index ?? 0,
@@ -455,12 +538,51 @@ function clearLocal(userId) {
   } catch (_) {}
 }
 
+let _realtimeChannel = null;
+
+function subscribeToChanges(userId, onSession, onExIdx, onSessionNav) {
+  const mapRow = row => ({
+    id: row.id,
+    scheduleId: row.schedule_id,
+    dayId: row.day_id,
+    dayName: row.day_name,
+    date: row.date,
+    startedAt: row.started_at ?? null,
+    ended: row.ended,
+    entries: row.entries,
+  });
+  _realtimeChannel = _supabase
+    .channel(`rt-${userId}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_sessions', filter: `user_id=eq.${userId}` }, p => onSession(mapRow(p.new)))
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'zane_sessions', filter: `user_id=eq.${userId}` }, p => onSession(mapRow(p.new)))
+    .on('broadcast', { event: 'ex_idx' }, ({ payload }) => onExIdx?.(payload))
+    .on('broadcast', { event: 'session_nav' }, ({ payload }) => onSessionNav?.(payload))
+    .subscribe();
+  return () => { _supabase.removeChannel(_realtimeChannel); _realtimeChannel = null; };
+}
+
+function broadcastExIdx(sessionId, exIdx) {
+  if (!_realtimeChannel) return;
+  try {
+    _realtimeChannel.send({ type: 'broadcast', event: 'ex_idx', payload: { sessionId, exIdx } });
+  } catch (e) {}
+}
+
+function broadcastSessionNav(action, sessionId) {
+  if (!_realtimeChannel) return;
+  try {
+    _realtimeChannel.send({ type: 'broadcast', event: 'session_nav', payload: { action, sessionId } });
+  } catch (e) {}
+}
+
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
+  QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
   signIn, signUp, signOut, deleteAllData, importFromBackup,
   loadFromSupabase, syncStore, seedStarter,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay, isWeekdayPlan,
-  cancelPushover,
+  cancelPushover, createSkip, updateSkipReason, deleteSkip,
+  subscribeToChanges, broadcastExIdx, broadcastSessionNav,
 };

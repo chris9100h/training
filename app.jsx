@@ -2,6 +2,16 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useCallback: useCallbackA } = React;
 
+function useIsPad() {
+  const [isPad, setIsPad] = useStateA(() => window.innerWidth >= 768);
+  useEffectA(() => {
+    const handler = () => setIsPad(window.innerWidth >= 768);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+  return isPad;
+}
+
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -127,6 +137,7 @@ function ErrorScreen({ onRetry }) {
 }
 
 function App() {
+  const isPad = useIsPad();
   const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error'
   const [store, setStore]         = useStateA(null);
   const [userId, setUserId]       = useStateA(null);
@@ -141,6 +152,13 @@ function App() {
   const pendingStore              = useRefA(null);  // latest state awaiting sync
   const syncing                   = useRefA(false); // true while a sync is in flight
   const localDirty                = useRefA(false); // true if user changed store after cache load
+  const pendingTrainNav           = useRefA(null);  // sessionId to navigate to once its data arrives
+
+  useEffectA(() => {
+    if (store?.user?.email && store?.user?.name) {
+      LB.saveQsName(store.user.email, store.user.name);
+    }
+  }, [store?.user?.email, store?.user?.name]);
 
   useEffectA(() => {
     const color = store?.settings?.accentColor;
@@ -371,6 +389,65 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Real-time session sync across devices.
+  // When another device writes to zane_sessions, apply the update locally.
+  // For the active session: update DB fields (entries, ended) but keep local
+  // UI state (currentExIdx, restStart) so the training screen isn't disrupted.
+  useEffectA(() => {
+    if (!userId) return;
+    return LB.subscribeToChanges(
+      userId,
+      (session) => {
+        setStore(s => {
+          if (!s) return s;
+          const idx = s.sessions.findIndex(x => x.id === session.id);
+          if (idx === -1) {
+            // New session — navigate if we were waiting for it
+            if (pendingTrainNav.current === session.id) {
+              pendingTrainNav.current = null;
+              setRoute({ name: 'train', sessionId: session.id });
+            }
+            return { ...s, sessions: [...s.sessions, session] };
+          }
+          const existing = s.sessions[idx];
+          const sessions = [...s.sessions];
+          sessions[idx] = { ...existing, entries: session.entries, ended: session.ended, startedAt: session.startedAt };
+          // Session finished remotely — clear inProgress and go to summary
+          if (session.ended && s.inProgress === session.id) {
+            setRoute({ name: 'session', sessionId: session.id });
+            return { ...s, sessions, inProgress: null };
+          }
+          return { ...s, sessions };
+        });
+      },
+      ({ sessionId, exIdx }) => {
+        setStore(s => {
+          if (!s) return s;
+          const idx = s.sessions.findIndex(x => x.id === sessionId);
+          if (idx === -1) return s;
+          const existing = s.sessions[idx];
+          if (existing.currentExIdx === exIdx) return s;
+          const sessions = [...s.sessions];
+          sessions[idx] = { ...existing, currentExIdx: exIdx };
+          return { ...s, sessions };
+        });
+      },
+      ({ action, sessionId }) => {
+        if (action === 'start') {
+          // Mark session as pending navigation; actual nav fires when postgres_changes INSERT arrives
+          pendingTrainNav.current = sessionId;
+          setStore(s => (s && !s.inProgress) ? { ...s, inProgress: sessionId } : s);
+        } else if (action === 'cancel') {
+          pendingTrainNav.current = null;
+          setStore(s => s?.inProgress !== sessionId ? s : {
+            ...s, inProgress: null, sessions: s.sessions.filter(x => x.id !== sessionId),
+          });
+          setRoute({ name: 'home' });
+        }
+      },
+    );
+  }, [userId]);
+
   // Sync to Supabase + save to localStorage on every store change.
   // A failed sync leaves syncBase unchanged so the pending diff is retried later.
   useEffectA(() => {
@@ -442,6 +519,20 @@ function App() {
     case 'settings':      screen = <window.Screens.SettingsScreen {...props} />; break;
     case 'spectator':     screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
     default:              screen = <window.Screens.HomeScreen {...props} />; break;
+  }
+
+  if (isPad && showTab) {
+    return (
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <TabBar active={route.name} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} />
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
+            {screen}
+          </ErrorBoundary>
+        </div>
+        {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
+      </div>
+    );
   }
 
   return (

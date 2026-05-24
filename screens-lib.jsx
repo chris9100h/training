@@ -1955,13 +1955,14 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
 function SettingsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateL(store.user?.name || '');
-  const [restOpen, setRestOpen] = useStateL(false);
-  const [tempoOpen, setTempoOpen] = useStateL(false);
   const [appearanceOpen, setAppearanceOpen] = useStateL(false);
-  const [pushOpen, setPushOpen] = useStateL(false);
   const [dataOpen, setDataOpen] = useStateL(false);
   const [activeUsersOpen, setActiveUsersOpen] = useStateL(false);
+  const [accountOpen, setAccountOpen] = useStateL(false);
+  const [trainingOpen, setTrainingOpen] = useStateL(false);
   const [activeSessions, setActiveSessions] = useStateL([]);
+  const [qsSwitching, setQsSwitching] = useStateL(false);
+  const [qsOpen, setQsOpen] = useStateL(false);
   const [activeGrants, setActiveGrants] = useStateL([]);
   const [newGrantEmail, setNewGrantEmail] = useStateL('');
   const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateL(
@@ -2145,12 +2146,18 @@ function SettingsScreen({ store, setStore, go, userId }) {
     await LB.signOut();
   };
 
+  const chevron = (open) => (
+    <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', flexShrink: 0 }}>
+      <path d="M2 1l5 5-5 5"/>
+    </svg>
+  );
+
   return (
     <Screen>
       <TopBar title="Settings" onBack={() => go({ name: 'home' })} />
       <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-        {/* Account */}
+        {/* Nickname */}
         <Frame style={{ padding: '14px 16px' }}>
           <span className="label">Nickname</span>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
@@ -2299,42 +2306,84 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </Frame>
         )}
 
-        {/* Rest Settings */}
-        <Frame style={{ padding: '14px 16px' }}>
-          <button onClick={() => setRestOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
-            <span className="label" style={{ marginBottom: 0 }}>Rest settings</span>
-            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: restOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-              <path d="M2 1l5 5-5 5"/>
-            </svg>
-          </button>
-          {restOpen && (
-            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {[
-                ['Default', 'restDefault', 120],
-                ['Big',     'restBig',     180],
-                ['Medium',  'restMedium',  120],
-                ['Small',   'restSmall',   90],
-              ].map(([label, key, def]) => (
-                <div key={key}>
-                  <div className="micro" style={{ marginBottom: 6 }}>{label.toUpperCase()}</div>
-                  <Stepper
-                    value={store.settings?.[key] || def}
-                    step={15} min={0} suffix="s"
-                    onChange={(v) => setStore(s => ({ ...s, settings: { ...s.settings, [key]: v } }))}
-                  />
+        <Hairline style={{ margin: '4px 0' }} />
+
+        {/* Account */}
+        {(() => {
+          const currentEmail = store.user?.email || '';
+          const otherEmail = LB.QS_EMAILS.find(e => e !== currentEmail);
+          const isQsUser = LB.QS_EMAILS.includes(currentEmail) && !!otherEmail;
+          const hasSession = isQsUser ? LB.hasQuickSwitchSession(otherEmail) : false;
+          const currentName = store.user?.name || currentEmail.split('@')[0];
+          const otherName = isQsUser ? (LB.getQsName(otherEmail) || otherEmail.split('@')[0]) : '';
+          return (
+            <Frame style={{ padding: '14px 16px' }}>
+              <button onClick={() => setAccountOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
+                <span className="label" style={{ marginBottom: 0 }}>Account</span>
+                {chevron(accountOpen)}
+              </button>
+              {accountOpen && (
+                <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {isQsUser && (<>
+                    <div className="micro">QUICK SWITCH</div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <div style={{ flex: 1, background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.10), rgba(var(--accent-rgb),0.04))`, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 10, padding: '10px 12px' }}>
+                        <div className="micro-gold" style={{ marginBottom: 5 }}>Active</div>
+                        <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: UI.ink, lineHeight: 1.1 }}>{currentName}</div>
+                      </div>
+                      <button disabled={qsSwitching} onClick={async () => {
+                        if (hasSession) {
+                          setQsSwitching(true);
+                          try { await LB.quickSwitch(otherEmail); window.location.reload(); }
+                          catch (e) { setQsSwitching(false); console.error('Quick switch failed', e); }
+                        } else {
+                          const ok = await confirm(`You'll be signed out so ${otherName} can log in. Their session will be saved for future quick switches.`, { title: 'Set up quick switch?', ok: 'Sign out', cancel: 'Cancel' });
+                          if (ok) await LB.signOut();
+                        }
+                      }} style={{ flex: 1, background: hasSession ? 'rgba(236,228,208,0.02)' : 'transparent', border: `0.5px solid ${hasSession ? UI.hair : UI.hairStrong}`, borderRadius: 10, padding: '10px 12px', textAlign: 'left', cursor: qsSwitching ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent', opacity: qsSwitching ? 0.5 : 1 }}>
+                        <div className="micro" style={{ marginBottom: 5, color: hasSession ? UI.inkFaint : 'rgba(200,116,105,0.7)' }}>{qsSwitching ? 'Switching…' : (hasSession ? 'Tap to switch' : 'Log in first')}</div>
+                        <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: hasSession ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1 }}>{otherName}</div>
+                      </button>
+                    </div>
+                    <Hairline style={{ margin: '2px 0' }} />
+                  </>)}
+                  <div className="micro">PUSH NOTIFICATIONS</div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span className="micro" style={{ color: UI.inkSoft }}>Enabled</span>
+                    <div onClick={togglePush} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', background: pushEnabled ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${pushEnabled ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>
+                      <div style={{ position: 'absolute', top: 3, left: pushEnabled ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: pushEnabled ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
+                    </div>
+                  </div>
+                  {store.settings?.pushoverUserKey && (
+                    <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'left' }}>
+                      Change user key
+                    </button>
+                  )}
+                  {pushEnabled && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <Btn kind="ghost" onClick={() => testPushover(0)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>Now</Btn>
+                        <Btn kind="ghost" onClick={() => testPushover(10)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>10s</Btn>
+                        <Btn kind="ghost" onClick={() => testPushover(30)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>30s</Btn>
+                  </div>
+                  {pushStatus && (
+                    <div className="micro" style={{ color: pushStatus.startsWith('✓') ? UI.gold : UI.inkSoft, textAlign: 'center' }}>
+                      {pushStatus}
+                    </div>
+                  )}
                 </div>
-              ))}
+              )}
             </div>
           )}
         </Frame>
+          );
+        })()}
 
         {/* Appearance */}
         <Frame style={{ padding: '14px 16px' }}>
           <button onClick={() => setAppearanceOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
             <span className="label" style={{ marginBottom: 0 }}>Appearance</span>
-            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: appearanceOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-              <path d="M2 1l5 5-5 5"/>
-            </svg>
+            {chevron(appearanceOpen)}
           </button>
           {appearanceOpen && (
             <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -2349,8 +2398,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
                         localStorage.setItem('logbook-accent-color', key);
                         setStore(s => ({ ...s, settings: { ...s.settings, accentColor: key } }));
                       }} title={c.label} style={{
-                        width: 28, height: 28, borderRadius: '50%',
-                        background: c.hex,
+                        width: 28, height: 28, borderRadius: '50%', background: c.hex,
                         border: active ? `2.5px solid ${UI.ink}` : '2.5px solid transparent',
                         boxShadow: active ? `0 0 0 1px ${c.hex}` : 'none',
                         cursor: 'pointer', padding: 0, flexShrink: 0,
@@ -2365,20 +2413,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   <span className="label" style={{ marginBottom: 0 }}>Week view in cycle mode</span>
                   <div className="micro" style={{ marginTop: 4, maxWidth: 220 }}>Show Mon–Sun instead of cycle days in the date strip</div>
                 </div>
-                <div
-                  onClick={() => {
-                    const next = !cycleWeekView;
-                    setCycleWeekView(next);
-                    localStorage.setItem('logbook-cycle-week-view', String(next));
-                    setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: next } }));
-                  }}
-                  style={{
-                    width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0,
-                    background: cycleWeekView ? 'var(--accent)' : UI.bgInset,
-                    border: `0.5px solid ${cycleWeekView ? UI.goldSoft : UI.hairStrong}`,
-                    position: 'relative', transition: 'background 0.2s',
-                  }}
-                >
+                <div onClick={() => { const next = !cycleWeekView; setCycleWeekView(next); localStorage.setItem('logbook-cycle-week-view', String(next)); setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: next } })); }} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: cycleWeekView ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${cycleWeekView ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>
                   <div style={{ position: 'absolute', top: 3, left: cycleWeekView ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: cycleWeekView ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
                 </div>
               </div>
@@ -2387,20 +2422,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   <span className="label" style={{ marginBottom: 0 }}>Pure black background</span>
                   <div className="micro" style={{ marginTop: 4, maxWidth: 220 }}>Use OLED black instead of dark gray</div>
                 </div>
-                <div
-                  onClick={() => {
-                    const next = darkMode === 'black' ? 'dark' : 'black';
-                    setDarkMode(next);
-                    localStorage.setItem('logbook-dark-mode', next);
-                    setStore(s => ({ ...s, settings: { ...s.settings, darkMode: next } }));
-                  }}
-                  style={{
-                    width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0,
-                    background: darkMode === 'black' ? 'var(--accent)' : UI.bgInset,
-                    border: `0.5px solid ${darkMode === 'black' ? UI.goldSoft : UI.hairStrong}`,
-                    position: 'relative', transition: 'background 0.2s',
-                  }}
-                >
+                <div onClick={() => { const next = darkMode === 'black' ? 'dark' : 'black'; setDarkMode(next); localStorage.setItem('logbook-dark-mode', next); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: next } })); }} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: darkMode === 'black' ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${darkMode === 'black' ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>
                   <div style={{ position: 'absolute', top: 3, left: darkMode === 'black' ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: darkMode === 'black' ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
                 </div>
               </div>
@@ -2408,30 +2430,49 @@ function SettingsScreen({ store, setStore, go, userId }) {
           )}
         </Frame>
 
-        {/* Rep tempo */}
+        {/* Data */}
         <Frame style={{ padding: '14px 16px' }}>
-          <button onClick={() => setTempoOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
-            <span className="label" style={{ marginBottom: 0 }}>Rep tempo</span>
-            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: tempoOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-              <path d="M2 1l5 5-5 5"/>
-            </svg>
+          <button onClick={() => setDataOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
+            <span className="label" style={{ marginBottom: 0 }}>Data</span>
+            {chevron(dataOpen)}
           </button>
-          {tempoOpen && (
+          {dataOpen && (
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => exportData()} style={{ fontSize: 12 }}>Export data (JSON)</Btn>
+              <Btn kind="ghost" onClick={importData} disabled={importing} style={{ fontSize: 12 }}>{importing ? 'Importing…' : 'Import data (JSON)'}</Btn>
+              <Hairline style={{ margin: '4px 0' }} />
+              <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', opacity: 0.7, fontSize: 12 }}>Delete all data</Btn>
+            </div>
+          )}
+        </Frame>
+
+        {/* Training */}
+        <Frame style={{ padding: '14px 16px' }}>
+          <button onClick={() => setTrainingOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
+            <span className="label" style={{ marginBottom: 0 }}>Training</span>
+            {chevron(trainingOpen)}
+          </button>
+          {trainingOpen && (
             <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="micro">REST TIMERS</div>
+              {[
+                ['Default', 'restDefault', 120],
+                ['Big',     'restBig',     180],
+                ['Medium',  'restMedium',  120],
+                ['Small',   'restSmall',   90],
+              ].map(([label, key, def]) => (
+                <div key={key}>
+                  <div className="micro" style={{ marginBottom: 6 }}>{label.toUpperCase()}</div>
+                  <Stepper value={store.settings?.[key] || def} step={15} min={0} suffix="s"
+                    onChange={(v) => setStore(s => ({ ...s, settings: { ...s.settings, [key]: v } }))} />
+                </div>
+              ))}
+              <Hairline style={{ margin: '2px 0' }} />
+              <div className="micro">REP TEMPO</div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span className="micro" style={{ color: UI.inkSoft }}>Enabled</span>
-                <div onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, tempoEnabled: !s.settings?.tempoEnabled } }))} style={{
-                  width: 44, height: 26, borderRadius: 13, cursor: 'pointer',
-                  background: store.settings?.tempoEnabled ? 'var(--accent)' : UI.bgInset,
-                  border: `0.5px solid ${store.settings?.tempoEnabled ? UI.goldSoft : UI.hairStrong}`,
-                  position: 'relative', transition: 'background 0.2s',
-                }}>
-                  <div style={{
-                    position: 'absolute', top: 3, left: store.settings?.tempoEnabled ? 21 : 3,
-                    width: 18, height: 18, borderRadius: 9,
-                    background: store.settings?.tempoEnabled ? '#0a0805' : UI.inkFaint,
-                    transition: 'left 0.2s',
-                  }} />
+                <div onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, tempoEnabled: !s.settings?.tempoEnabled } }))} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', background: store.settings?.tempoEnabled ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${store.settings?.tempoEnabled ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>
+                  <div style={{ position: 'absolute', top: 3, left: store.settings?.tempoEnabled ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: store.settings?.tempoEnabled ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
                 </div>
               </div>
               {store.settings?.tempoEnabled && (<>
@@ -2453,81 +2494,15 @@ function SettingsScreen({ store, setStore, go, userId }) {
           )}
         </Frame>
 
-        {/* Push notifications */}
-        <Frame style={{ padding: '14px 16px' }}>
-          <button onClick={() => setPushOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
-            <span className="label" style={{ marginBottom: 0 }}>Push notifications</span>
-            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: pushOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-              <path d="M2 1l5 5-5 5"/>
-            </svg>
-          </button>
-          {pushOpen && (
-            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span className="micro" style={{ color: UI.inkSoft }}>Enabled</span>
-                <div onClick={togglePush} style={{
-                  width: 44, height: 26, borderRadius: 13, cursor: 'pointer',
-                  background: pushEnabled ? 'var(--accent)' : UI.bgInset,
-                  border: `0.5px solid ${pushEnabled ? UI.goldSoft : UI.hairStrong}`,
-                  position: 'relative', transition: 'background 0.2s',
-                }}>
-                  <div style={{
-                    position: 'absolute', top: 3, left: pushEnabled ? 21 : 3,
-                    width: 18, height: 18, borderRadius: 9,
-                    background: pushEnabled ? '#0a0805' : UI.inkFaint,
-                    transition: 'left 0.2s',
-                  }} />
-                </div>
-              </div>
-              {store.settings?.pushoverUserKey && (
-                <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'left' }}>
-                  Change user key
-                </button>
-              )}
-              {pushEnabled && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <Btn kind="ghost" onClick={() => testPushover(0)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>Now</Btn>
-                    <Btn kind="ghost" onClick={() => testPushover(10)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>10s</Btn>
-                    <Btn kind="ghost" onClick={() => testPushover(30)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>30s</Btn>
-                  </div>
-                  {pushStatus && (
-                    <div className="micro" style={{ color: pushStatus.startsWith('✓') ? UI.gold : UI.inkSoft, textAlign: 'center' }}>
-                      {pushStatus}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </Frame>
-
-        <Frame style={{ padding: '14px 16px' }}>
-          <button onClick={() => setDataOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0 }}>
-            <span className="label" style={{ marginBottom: 0 }}>Backup &amp; Restore</span>
-            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: dataOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-              <path d="M2 1l5 5-5 5"/>
-            </svg>
-          </button>
-          {dataOpen && (
-            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <Btn kind="ghost" onClick={() => exportData()} style={{ fontSize: 12 }}>Export data (JSON)</Btn>
-              <Btn kind="ghost" onClick={importData} disabled={importing} style={{ fontSize: 12 }}>{importing ? 'Importing…' : 'Import data (JSON)'}</Btn>
-            </div>
-          )}
-        </Frame>
         <Btn kind="ghost" onClick={async () => {
           if ('caches' in window) {
             const keys = await caches.keys();
             await Promise.all(keys.map(k => caches.delete(k)));
           }
           window.location.reload(true);
-        }} style={{ fontSize: 12 }}>Clear app cache & reload</Btn>
+        }} style={{ fontSize: 12 }}>Clear app cache &amp; reload</Btn>
         <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', fontSize: 12 }}>
           Sign out
-        </Btn>
-        <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', opacity: 0.6, fontSize: 12 }}>
-          Delete all data
         </Btn>
         <div className="micro" style={{ textAlign: 'center', marginTop: 8 }}>
           Zane · {swVersion || '…'} · Data in Supabase
