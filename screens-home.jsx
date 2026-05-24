@@ -626,7 +626,8 @@ function HomeScreen({ store, setStore, go, userId }) {
             }
             const dateKey = d.date.toISOString().slice(0, 10);
             const isPast = !d.isToday && d.date < new Date();
-            const isMissed = !r && isPast && !isCompleted && !skipsMap.has(dateKey);
+            const isBeforeCycleStart = !weekdayMode && cycleWeekView && d.daysFromStart != null && d.daysFromStart < 0;
+            const isMissed = !r && isPast && !isCompleted && !skipsMap.has(dateKey) && !isBeforeCycleStart;
             const isSkipped = !r && isPast && !isCompleted && skipsMap.has(dateKey);
             return (
               <div key={d.id ?? i}
