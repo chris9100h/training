@@ -2486,16 +2486,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   <Stepper value={store.settings?.tempoConcentric ?? 1} step={1} min={1} max={10} suffix="s"
                     onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoConcentric: v } }))} />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span className="micro" style={{ color: UI.inkSoft }}>Voice counting</span>
-                  <div onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, tempoVoice: !s.settings?.tempoVoice } }))} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', background: store.settings?.tempoVoice ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${store.settings?.tempoVoice ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>
-                    <div style={{ position: 'absolute', top: 3, left: store.settings?.tempoVoice ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: store.settings?.tempoVoice ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
-                  </div>
-                </div>
                 <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
-                  {store.settings?.tempoVoice
-                    ? 'Counts "one / two / three …" during eccentric · "go" during concentric'
-                    : 'N beeps per beat during eccentric · high beep during concentric'}
+                  Low beep every second during eccentric · High beep every second during concentric
                 </div>
               </>)}
             </div>
