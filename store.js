@@ -19,7 +19,15 @@ function _qsKey(email) { return `zane-qs-${email}`; }
 function _persistQsSession(session, email) {
   if (!email || !session?.access_token || !session?.refresh_token) return;
   if (!QS_EMAILS.includes(email)) return;
-  try { localStorage.setItem(_qsKey(email), JSON.stringify({ access_token: session.access_token, refresh_token: session.refresh_token })); } catch (_) {}
+  try {
+    const existing = localStorage.getItem(_qsKey(email));
+    const name = existing ? (JSON.parse(existing).name || null) : null;
+    localStorage.setItem(_qsKey(email), JSON.stringify({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+      ...(name ? { name } : {}),
+    }));
+  } catch (_) {}
 }
 
 // Auto-save session on every sign-in and token refresh so quick switch stays current
