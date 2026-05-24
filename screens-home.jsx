@@ -394,14 +394,21 @@ function HomeScreen({ store, setStore, go, userId }) {
     return m;
   }, [store.skips]);
 
+  const selectedDateSkip = useMemo(() => {
+    if (isViewingToday || isFutureSlot) return null;
+    return skipsMap.get(sessionDate.toISOString().slice(0, 10)) ?? null;
+  }, [isViewingToday, isFutureSlot, skipsMap, sessionDate]);
+
   const recentBannerDay = useMemo(() => {
     if (!sch) return null;
     const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
     const sessionDates = new Set(store.sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
-    for (let daysAgo = 1; daysAgo <= 7; daysAgo++) {
+    for (let daysAgo = 1; daysAgo <= 30; daysAgo++) {
       const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
       const dateKey = d.toISOString().slice(0, 10);
       if (sessionDates.has(dateKey)) continue;
+      const sk = skipsMap.get(dateKey);
+      if (sk?.skipReason === '—') continue; // auto-archived, not for banner
       let trainingDay = null;
       if (weekdayMode) {
         const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
@@ -414,7 +421,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         if (dayData?.items?.length > 0) trainingDay = dayData;
       }
       if (!trainingDay) continue;
-      return { date: d, dateKey, dayName: trainingDay.name, dayId: trainingDay.id, daysAgo, skip: skipsMap.get(dateKey) || null, dayData: trainingDay };
+      return { date: d, dateKey, dayName: trainingDay.name, dayId: trainingDay.id, daysAgo, skip: sk || null, dayData: trainingDay };
     }
     return null;
   }, [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
@@ -625,8 +632,8 @@ function HomeScreen({ store, setStore, go, userId }) {
                 onClick={() => (weekdayMode || cycleWeekView) ? setSelectedWd(i) : setSelectedSlot(i)}
                 style={{
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
-                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(200,116,105,0.08)' : 'transparent',
-                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(200,116,105,0.4)' : d.isToday ? UI.hairStrong : UI.hair}`,
+                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(200,116,105,0.08)' : isSkipped ? 'rgba(160,160,160,0.07)' : 'transparent',
+                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(200,116,105,0.4)' : isSkipped ? 'rgba(160,160,160,0.3)' : d.isToday ? UI.hairStrong : UI.hair}`,
                   borderRadius: 8, cursor: 'pointer',
                   minHeight: 56,
                 }}>
@@ -747,7 +754,23 @@ function HomeScreen({ store, setStore, go, userId }) {
                 </div>
               </Frame>
             ) : (
-              <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', width: '100%' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
+                {selectedDateSkip && (
+                  <Frame style={{ padding: '12px 16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ width: 28, height: 28, borderRadius: '50%', background: UI.bgInset, boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <span style={{ color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>—</span>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div className="micro" style={{ marginBottom: 2, color: UI.inkFaint }}>ARCHIVED</div>
+                        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+                          {selectedDateSkip.skipReason === '—' ? 'Not logged in time' : selectedDateSkip.skipReason}
+                        </div>
+                      </div>
+                    </div>
+                  </Frame>
+                )}
+                <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
                 <button onClick={startSession} disabled={!!store.inProgress} style={{
                   opacity: store.inProgress ? 0.35 : 1,
                   flex: 1, minHeight: 90, borderRadius: 18, border: 'none', cursor: 'pointer',
@@ -775,6 +798,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                     <span className="micro" style={{ color: UI.inkFaint }}>SKIP</span>
                   </button>
                 )}
+                </div>
               </div>
             )}
           </div>

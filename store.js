@@ -284,9 +284,10 @@ async function autoArchiveMissedDays(userId, state) {
   const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
   const sessionDates = new Set(state.sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
   const skipDates = new Set(state.skips.map(s => s.date));
-  const toCreate = [];
 
-  for (let daysAgo = 8; daysAgo <= 90; daysAgo++) {
+  // Collect all missed training days from most recent to oldest
+  const missed = [];
+  for (let daysAgo = 1; daysAgo <= 365; daysAgo++) {
     const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
     const dateKey = d.toISOString().slice(0, 10);
     if (sessionDates.has(dateKey) || skipDates.has(dateKey)) continue;
@@ -302,10 +303,13 @@ async function autoArchiveMissedDays(userId, state) {
       if ((dayData?.items || []).length > 0) trainingDay = dayData;
     }
     if (!trainingDay) continue;
-    toCreate.push({ date: dateKey, dayId: trainingDay.id, dayName: trainingDay.name });
+    missed.push({ date: dateKey, dayId: trainingDay.id, dayName: trainingDay.name });
   }
 
-  if (!toCreate.length) return;
+  // Keep the most recent missed day in the banner — archive everything else
+  if (missed.length <= 1) return;
+  const toCreate = missed.slice(1);
+
   const nowISO = new Date().toISOString();
   const rows = toCreate.map(({ date, dayId, dayName }) => ({
     id: uid(), user_id: userId, date, day_id: dayId, day_name: dayName,
