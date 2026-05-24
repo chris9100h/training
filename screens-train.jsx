@@ -334,6 +334,30 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       }
     }
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
+
+    if (store.settings?.smartProgression && updatedSets.every(s => s.done || s.skipped)) {
+      const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
+      const increment = catCfg.increment ?? null;
+      if (increment) {
+        const targetRepsTop = (entry.plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+        const doneSets = updatedSets.filter(s => s.done && !s.skipped && s.kg != null);
+        const allHitTop = doneSets.length > 0 && doneSets.every(s => {
+          const reps = s.repsL != null ? Math.min(s.repsL ?? 0, s.repsR ?? 0) : (s.reps ?? 0);
+          return reps >= targetRepsTop;
+        });
+        if (allHitTop) {
+          const refKg = doneSets[0].kg;
+          const newKg = Math.round((refKg + increment) * 100) / 100;
+          const nextKg = catCfg.maxKg ? Math.min(newKg, catCfg.maxKg) : newKg;
+          if (nextKg > refKg) {
+            setTimeout(() => {
+              setProgressionUnlocked({ exName: entry.name, currentKg: refKg, nextKg });
+              setTimeout(() => setProgressionUnlocked(null), 4000);
+            }, 800);
+          }
+        }
+      }
+    }
     const group = entry.supersetGroup;
     if (group) {
       const newDoneCount = updatedSets.filter(s => s.done).length;
@@ -594,6 +618,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [flashSet, setFlashSet] = useStateT(null);
   const [improvedSet, setImprovedSet] = useStateT(false);
   const [regressionSet, setRegressionSet] = useStateT(false);
+  const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
   const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(false);
   const [confirmEl, confirm] = useConfirm();
@@ -908,6 +933,28 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
             <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(200,116,105,0.9), 0 0 70px rgba(200,116,105,0.5)' }}>↓</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.danger, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(200,116,105,1), 0 0 40px rgba(200,116,105,0.8), 0 0 80px rgba(200,116,105,0.4)' }}>REGRESSION</span>
           </div>
+        </div>
+      )}
+
+      {/* Progression unlocked overlay */}
+      {progressionUnlocked && (
+        <div onClick={() => setProgressionUnlocked(null)} style={{
+          position: 'fixed', inset: 0, zIndex: 160,
+          background: 'radial-gradient(ellipse at center, rgba(201,169,97,0.18) 0%, rgba(10,8,5,0.88) 70%)',
+          animation: 'improvedFade 4s ease forwards',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 8,
+        }}>
+          <div style={{ animation: 'improvedBorderPulse 0.8s ease-in-out infinite', position: 'absolute', inset: 0 }} />
+          <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8)' }}>PROGRESSION UNLOCKED</span>
+          <span style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontStyle: 'italic', fontWeight: 400, marginTop: 4 }}>You've earned the next load.</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+            <span className="num" style={{ fontSize: 22, color: UI.inkSoft }}>{progressionUnlocked.currentKg}kg</span>
+            <span style={{ color: UI.gold, fontSize: 20, lineHeight: 1 }}>→</span>
+            <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(201,169,97,0.8)' }}>{progressionUnlocked.nextKg}kg</span>
+          </div>
+          <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, letterSpacing: '0.12em' }}>{progressionUnlocked.exName}</span>
         </div>
       )}
 
