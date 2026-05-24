@@ -107,6 +107,41 @@ function HomeScreen({ store, setStore, go, userId }) {
     }
   }, []); // eslint-disable-line
 
+  // Auto-archive missed training days older than the 7-day banner window
+  useEffect(() => {
+    if (!sch || !userId) return;
+    const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
+    const sessionDates = new Set(store.sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
+    const skipDates = new Set(store.skips.map(s => s.date));
+    const toCreate = [];
+    for (let daysAgo = 8; daysAgo <= 90; daysAgo++) {
+      const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
+      const dateKey = d.toISOString().slice(0, 10);
+      if (sessionDates.has(dateKey) || skipDates.has(dateKey)) continue;
+      let trainingDay = null;
+      if (weekdayMode) {
+        const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+        trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
+      } else if (store.cycleStartDate) {
+        const start = new Date(store.cycleStartDate + 'T12:00:00');
+        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+        if (n >= 0) {
+          const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
+          const dayData = sch.days[idx];
+          if (dayData?.items?.length > 0) trainingDay = dayData;
+        }
+      }
+      if (!trainingDay) continue;
+      toCreate.push({ date: dateKey, dayId: trainingDay.id, dayName: trainingDay.name });
+    }
+    if (!toCreate.length) return;
+    const newSkips = toCreate.map(({ date, dayId, dayName }) => ({
+      id: LB.uid(), date, dayId, dayName, skipReason: '—', skippedAt: new Date().toISOString(),
+    }));
+    newSkips.forEach(skip => LB.createSkip(userId, skip).catch(() => {}));
+    setStore(s => ({ ...s, skips: [...s.skips, ...newSkips] }));
+  }, [store.sessions.length, store.skips.length, sch?.id, store.cycleStartDate, userId]); // eslint-disable-line
+
   const todayN = useMemo(() => {
     if (weekdayMode || !store.cycleStartDate) return store.cycleIndex || 0;
     const today = new Date(); today.setHours(12, 0, 0, 0);
