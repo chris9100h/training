@@ -1987,6 +1987,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [activeUsersOpen, setActiveUsersOpen] = useStateL(false);
   const [accountOpen, setAccountOpen] = useStateL(false);
   const [trainingOpen, setTrainingOpen] = useStateL(false);
+  const [progConfigOpen, setProgConfigOpen] = React.useState(false);
   const [activeSessions, setActiveSessions] = useStateL([]);
   const [qsSwitching, setQsSwitching] = useStateL(false);
   const [qsOpen, setQsOpen] = useStateL(false);
@@ -2517,9 +2518,79 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   Low beep every second during eccentric · High beep every second during concentric
                 </div>
               </>)}
+              <Hairline style={{ margin: '2px 0' }} />
+              <div className="micro">SMART PROGRESSION</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span className="micro" style={{ color: UI.inkSoft }}>Enabled</span>
+                <div onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, smartProgression: !s.settings?.smartProgression } }))} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', background: store.settings?.smartProgression ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${store.settings?.smartProgression ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>
+                  <div style={{ position: 'absolute', top: 3, left: store.settings?.smartProgression ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: store.settings?.smartProgression ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
+                </div>
+              </div>
+              {store.settings?.smartProgression && (<>
+                <div>
+                  <div className="micro" style={{ marginBottom: 6 }}>REP RANGE TOP (+reps above target)</div>
+                  <Stepper value={store.settings?.progressionRangeTop ?? 4} step={1} min={1} max={10} suffix=" reps"
+                    onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, progressionRangeTop: v } }))} />
+                </div>
+                <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
+                  If target is 8 reps and range top is +4, weight increases only when all sets reach 12 reps.
+                </div>
+                <button onClick={() => setProgConfigOpen(true)} style={{ padding: '8px 14px', borderRadius: 10, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, color: UI.inkSoft, fontSize: 11, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'left' }}>
+                  Configure exercises →
+                </button>
+              </>)}
             </div>
           )}
         </Frame>
+
+        {/* Smart Progression exercise config modal */}
+        {(() => {
+          const scheduledExIds = [...new Set((store.schedules || []).flatMap(sch =>
+            (sch.days || []).flatMap(d => (d.items || []).map(it => it.exId))
+          ))];
+          const scheduledExercises = scheduledExIds
+            .map(id => (store.exercises || []).find(e => e.id === id))
+            .filter(Boolean)
+            .sort((a, b) => a.name.localeCompare(b.name));
+          return (
+            <Sheet open={progConfigOpen} onClose={() => setProgConfigOpen(false)} title="Exercise increments">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, padding: '0 4px 8px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                  <span className="micro" style={{ color: UI.inkFaint }}>Exercise</span>
+                  <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>Increment</span>
+                  <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>Max kg</span>
+                </div>
+                {scheduledExercises.length === 0 && (
+                  <div className="micro" style={{ color: UI.inkFaint, padding: '16px 4px' }}>No exercises in any schedule yet.</div>
+                )}
+                {scheduledExercises.map(ex => (
+                  <div key={ex.id} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, alignItems: 'center', padding: '10px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                    <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{ex.name}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: UI.bgInset, borderRadius: 8, padding: '6px 8px' }}>
+                      <NumInput
+                        value={ex.prog_increment ?? null}
+                        placeholder="—"
+                        onChange={v => setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === ex.id ? { ...e, prog_increment: v } : e) }))}
+                        style={{ fontSize: 13, width: '100%' }}
+                      />
+                      <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>kg</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: UI.bgInset, borderRadius: 8, padding: '6px 8px' }}>
+                      <NumInput
+                        value={ex.prog_max_kg ?? null}
+                        placeholder="—"
+                        onChange={v => setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === ex.id ? { ...e, prog_max_kg: v } : e) }))}
+                        style={{ fontSize: 13, width: '100%' }}
+                      />
+                      <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>kg</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <Btn onClick={() => setProgConfigOpen(false)}>Done</Btn>
+            </Sheet>
+          );
+        })()}
 
         <Btn kind="ghost" onClick={async () => {
           if ('caches' in window) {

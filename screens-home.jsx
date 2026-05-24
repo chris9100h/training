@@ -426,8 +426,14 @@ function HomeScreen({ store, setStore, go, userId }) {
       const ex = LB.findExercise(store, it.exId);
       const last = LB.lastSessionForExercise(store, it.exId, activeDay.id);
       const isUnilateral = ex?.unilateral || false;
+      const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps);
       const seedSets = Array.from({ length: it.sets }).map((_, i) => {
         const prev = last?.entry?.sets?.[i];
+        if (suggestion) {
+          return isUnilateral
+            ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false }
+            : { kg: suggestion.kg, reps: suggestion.reps, done: false };
+        }
         return isUnilateral
           ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
           : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
@@ -801,8 +807,12 @@ function HomeScreen({ store, setStore, go, userId }) {
                   const ex = LB.findExercise(store, it.exId);
                   const last = LB.lastSessionForExercise(store, it.exId, recentBannerDay.dayId);
                   const isUni = ex?.unilateral || false;
+                  const suggestion = LB.progressionSuggestion(store, it.exId, recentBannerDay.dayId, it.reps);
                   const seedSets = Array.from({ length: it.sets }).map((_, idx) => {
                     const prev = last?.entry?.sets?.[idx];
+                    if (suggestion) {
+                      return isUni ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false } : { kg: suggestion.kg, reps: suggestion.reps, done: false };
+                    }
                     return isUni ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false } : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
                   });
                   return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
