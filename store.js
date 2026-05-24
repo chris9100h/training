@@ -95,7 +95,25 @@ async function deleteAllData(userId) {
     _supabase.from('zane_schedules').delete().eq('user_id', userId),
     _supabase.from('zane_user_settings').delete().eq('user_id', userId),
     _supabase.from('zane_profiles').delete().eq('id', userId),
+    _supabase.from('zane_skips').delete().eq('user_id', userId),
   ]);
+}
+
+async function createSkip(userId, { id, date, dayId, dayName, skipReason }) {
+  const { error } = await _supabase.from('zane_skips').insert({
+    id, user_id: userId, date, day_id: dayId, day_name: dayName, skip_reason: skipReason,
+  });
+  if (error) throw error;
+}
+
+async function updateSkipReason(id, skipReason) {
+  const { error } = await _supabase.from('zane_skips').update({ skip_reason: skipReason }).eq('id', id);
+  if (error) throw error;
+}
+
+async function deleteSkip(id) {
+  const { error } = await _supabase.from('zane_skips').delete().eq('id', id);
+  if (error) throw error;
 }
 
 async function importFromBackup(backup, userId) {
@@ -161,13 +179,14 @@ async function setupNewUser(userId, name) {
 // ─── LOAD ────────────────────────────────────────────────────────────────
 
 async function loadFromSupabase(userId, _depth = 0) {
-  const [profileRes, exRes, schRes, sessRes, settRes] = await Promise.all([
+  const [profileRes, exRes, schRes, sessRes, settRes, skipsRes] = await Promise.all([
     _supabase.from('zane_profiles').select('id, name').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days').eq('user_id', userId),
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
+    _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
   ]);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
@@ -212,6 +231,10 @@ async function loadFromSupabase(userId, _depth = 0) {
       startedAt: s.started_at ?? null,
       ended: s.ended,
       entries: s.entries,
+    })),
+    skips: (skipsRes.data || []).map(s => ({
+      id: s.id, date: s.date, dayId: s.day_id, dayName: s.day_name,
+      skipReason: s.skip_reason, skippedAt: s.skipped_at,
     })),
     activeScheduleId: sett.active_schedule_id ?? null,
     cycleIndex: sett.cycle_index ?? 0,
@@ -515,5 +538,5 @@ window.LB = {
   loadFromSupabase, syncStore, seedStarter,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, findExercise, lastSessionForExercise, todaysDay, nextDay, isWeekdayPlan,
-  cancelPushover,
+  cancelPushover, createSkip, updateSkipReason, deleteSkip,
 };

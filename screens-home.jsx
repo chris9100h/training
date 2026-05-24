@@ -5,6 +5,8 @@
 
 const { useState, useEffect, useMemo, useRef } = React;
 
+const SKIP_REASONS = ['Tired', 'Sick', 'Stress', 'Forgot', 'Rest day', 'No particular reason'];
+
 // ─── LOGIN ────────────────────────────────────────────────────────────
 function LoginScreen() {
   const [email, setEmail]       = useState('');
@@ -116,6 +118,7 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedWd, setSelectedWd] = useState(todayWd);
+  const [skipReasonModal, setSkipReasonModal] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(dayIdx);
 
   const minOffset = (() => {
@@ -372,6 +375,39 @@ function HomeScreen({ store, setStore, go, userId }) {
     return completedCyclePos?.has(pos) ?? false;
   }, [isActiveRest, weekdayMode, cycleWeekView, sessionDate, completedDateKeys, completedCyclePos, week, selectedWd, currentCycleNum, weekOffset, dayCount, selectedSlot]);
 
+  const skipsMap = useMemo(() => {
+    const m = new Map();
+    (store.skips || []).forEach(s => m.set(s.date.slice(0, 10), s));
+    return m;
+  }, [store.skips]);
+
+  const recentBannerDay = useMemo(() => {
+    if (!sch) return null;
+    const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
+    const sessionDates = new Set(store.sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
+    for (let daysAgo = 1; daysAgo <= 7; daysAgo++) {
+      const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
+      const dateKey = d.toISOString().slice(0, 10);
+      if (sessionDates.has(dateKey)) continue;
+      let trainingDay = null;
+      if (weekdayMode) {
+        const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+        trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
+      } else if (store.cycleStartDate) {
+        const start = new Date(store.cycleStartDate + 'T12:00:00');
+        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+        if (n >= 0) {
+          const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
+          const dayData = sch.days[idx];
+          if (dayData?.items?.length > 0) trainingDay = dayData;
+        }
+      }
+      if (!trainingDay) continue;
+      return { date: d, dateKey, dayName: trainingDay.name, dayId: trainingDay.id, daysAgo, skip: skipsMap.get(dateKey) || null, dayData: trainingDay };
+    }
+    return null;
+  }, [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
+
   const startSession = () => {
     if (!activeDay || isActiveRest) return;
     const entries = activeDay.items.map(it => {
@@ -561,13 +597,17 @@ function HomeScreen({ store, setStore, go, userId }) {
                 isCompleted = completedCyclePos?.has(pos) ?? false;
               }
             }
+            const dateKey = d.date.toISOString().slice(0, 10);
+            const isPast = !d.isToday && d.date < new Date();
+            const isMissed = !r && isPast && !isCompleted && !skipsMap.has(dateKey);
+            const isSkipped = !r && isPast && !isCompleted && skipsMap.has(dateKey);
             return (
               <div key={d.id ?? i}
                 onClick={() => (weekdayMode || cycleWeekView) ? setSelectedWd(i) : setSelectedSlot(i)}
                 style={{
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
-                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : 'transparent',
-                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : d.isToday ? UI.hairStrong : UI.hair}`,
+                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(200,116,105,0.08)' : 'transparent',
+                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(200,116,105,0.4)' : d.isToday ? UI.hairStrong : UI.hair}`,
                   borderRadius: 8, cursor: 'pointer',
                   minHeight: 56,
                 }}>
@@ -581,7 +621,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                     </>
                   ) : slotLabel}
                 </div>
-                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: r ? UI.inkFaint : isSelected ? UI.gold : UI.ink, letterSpacing: '0.06em' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: r ? UI.inkFaint : isSelected ? UI.gold : isMissed ? UI.danger : isSkipped ? UI.inkFaint : UI.ink, letterSpacing: '0.06em' }}>
                   {r ? '—' : d.name.slice(0, 4)}
                 </div>
                 <div style={{ height: 12, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -590,6 +630,8 @@ function HomeScreen({ store, setStore, go, userId }) {
                       <path d="M2 6l2.5 2.5L10 3"/>
                     </svg>
                   )}
+                  {isMissed && !isSelected && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.danger }} />}
+                  {isSkipped && !isSelected && <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1 }}>—</span>}
                   {isSelected && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold }} />}
                 </div>
               </div>
@@ -702,7 +744,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                   <i className="fa-solid fa-dumbbell" style={{ fontSize: 22, color: 'rgba(10,8,5,0.55)' }} />
                 </button>
                 {!weekdayMode && isViewingToday && (
-                  <button onClick={async () => { if (await confirm('The current day will be skipped.', { title: 'Skip day?', ok: 'Skip' })) skipRest(); }} style={{
+                  <button onClick={() => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
                     flex: 1, minHeight: 90, borderRadius: 18, cursor: 'pointer',
                     background: 'transparent',
                     border: `0.5px solid ${UI.hairStrong}`,
@@ -718,6 +760,56 @@ function HomeScreen({ store, setStore, go, userId }) {
             )}
           </div>
         )}
+
+        {/* Missed / skipped banner */}
+        {recentBannerDay && !store.inProgress && (() => {
+          const { dateKey, dayName: bDayName, daysAgo, skip, dayData } = recentBannerDay;
+          const dateLabel = daysAgo === 1 ? 'YESTERDAY' : `${daysAgo}D AGO`;
+          if (skip) {
+            return (
+              <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 12 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="micro" style={{ marginBottom: 3 }}>{bDayName} · {dateLabel}</div>
+                  <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 999, padding: '2px 8px', display: 'inline-block' }}>
+                    {skip.skipReason}
+                  </span>
+                </div>
+                <button onClick={() => setSkipReasonModal({ mode: 'edit', skipId: skip.id, currentReason: skip.skipReason, data: { dateKey, dayId: skip.dayId, dayName: bDayName } })} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+                <button onClick={() => { LB.deleteSkip(skip.id).catch(() => {}); setStore(s => ({ ...s, skips: (s.skips || []).filter(x => x.id !== skip.id) })); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 18, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
+              </div>
+            );
+          }
+          return (
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'rgba(200,116,105,0.05)', border: `0.5px solid rgba(200,116,105,0.2)`, borderRadius: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>{bDayName} · {dateLabel}</div>
+                <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Not logged</div>
+              </div>
+              <button onClick={() => {
+                const entries = (dayData?.items || []).map(it => {
+                  const ex = LB.findExercise(store, it.exId);
+                  const last = LB.lastSessionForExercise(store, it.exId, recentBannerDay.dayId);
+                  const isUni = ex?.unilateral || false;
+                  const seedSets = Array.from({ length: it.sets }).map((_, idx) => {
+                    const prev = last?.entry?.sets?.[idx];
+                    return isUni ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false } : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
+                  });
+                  return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+                });
+                const session = { id: LB.uid(), scheduleId: sch.id, dayId: recentBannerDay.dayId, dayName: bDayName, date: recentBannerDay.date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
+                setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+                go({ name: 'train', sessionId: session.id });
+              }} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                Log
+              </button>
+              <button onClick={() => setSkipReasonModal({ mode: 'dismiss', data: { dateKey, dayId: recentBannerDay.dayId, dayName: bDayName } })} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid rgba(200,116,105,0.25)`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: 'rgba(200,116,105,0.7)', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                Dismiss
+              </button>
+            </div>
+          );
+        })()}
 
         {/* last session strip */}
         {lastSession && (
@@ -740,6 +832,39 @@ function HomeScreen({ store, setStore, go, userId }) {
           </Frame>
         )}
       </div>
+      {skipReasonModal && (
+        <div onClick={() => setSkipReasonModal(null)} style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 440, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: '20px 20px 0 0', padding: '24px 22px calc(env(safe-area-inset-bottom,0px) + 28px)' }}>
+            <div className="label" style={{ marginBottom: 2 }}>{skipReasonModal.mode === 'edit' ? 'Edit reason' : 'Why did you skip?'}</div>
+            <div className="micro" style={{ marginBottom: 18, color: UI.inkFaint }}>{skipReasonModal.data?.dayName}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {SKIP_REASONS.map(reason => {
+                const isActive = skipReasonModal.currentReason === reason;
+                return (
+                  <button key={reason} onClick={() => {
+                    const { mode, skipId, data } = skipReasonModal;
+                    if (mode === 'edit') {
+                      LB.updateSkipReason(skipId, reason).catch(() => {});
+                      setStore(s => ({ ...s, skips: (s.skips || []).map(x => x.id === skipId ? { ...x, skipReason: reason } : x) }));
+                    } else {
+                      const id = LB.uid();
+                      LB.createSkip(userId, { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason }).catch(() => {});
+                      setStore(s => ({ ...s, skips: [...(s.skips || []), { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason, skippedAt: new Date().toISOString() }] }));
+                      if (mode === 'skip') skipRest();
+                    }
+                    setSkipReasonModal(null);
+                  }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 10, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                    {reason}
+                  </button>
+                );
+              })}
+            </div>
+            <button onClick={() => setSkipReasonModal(null)} style={{ marginTop: 14, width: '100%', background: 'none', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 10, padding: '12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.inkFaint, cursor: 'pointer' }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       {confirmEl}
     </Screen>
   );
