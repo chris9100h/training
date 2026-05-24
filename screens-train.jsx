@@ -1203,6 +1203,28 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
             }}>{allDone ? '✓ All' : 'All ✓'}</button>
           </div>
 
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
+            gap: 8, alignItems: 'baseline',
+            padding: '0 4px 6px',
+            borderBottom: `0.5px solid ${UI.hair}`,
+            marginBottom: 2,
+          }}>
+            <div />
+            <span className="micro" style={{ color: UI.inkFaint }}>Last time</span>
+            <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>kg</span>
+            {isUnilateral ? (
+              <>
+                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>L</span>
+                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>R</span>
+              </>
+            ) : (
+              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>Reps</span>
+            )}
+            <div /><div />
+          </div>
+
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {entry.sets.map((s, i) => {
               const prevSet = last?.entry?.sets?.[i];
