@@ -3,7 +3,7 @@
 const { useState: useStateL, useMemo: useMemoL, useRef: useRefL, useEffect: useEffectL } = React;
 
 // Persists library filter state across navigation (survives remounts)
-const _lib = { tab: 'recent', q: '', filterTags: [], filterRestCats: [], filterUnilateral: null, filterPlan: null, filtersOpen: false };
+const _lib = { tab: 'recent', q: '', filterTags: [], filterRestCats: [], filterUnilateral: null, filterPlan: null, filterEquipment: [], filtersOpen: false };
 
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go }) {
@@ -21,6 +21,8 @@ function LibraryScreen({ store, setStore, go }) {
   const toggleUni = (v) => { const n = filterUnilateral === v ? null : v; _lib.filterUnilateral = n; setFilterUnilateral(n); };
   const [filterPlan, setFilterPlan] = useStateL(_lib.filterPlan);
   const togglePlan = (v) => { const n = filterPlan === v ? null : v; _lib.filterPlan = n; setFilterPlan(n); };
+  const [filterEquipment, setFilterEquipment] = useStateL(_lib.filterEquipment);
+  const toggleEquipment = (v) => setFilterEquipment(t => { const n = t.includes(v) ? t.filter(x => x !== v) : [...t, v]; _lib.filterEquipment = n; return n; });
   const [filtersOpen, setFiltersOpen] = useStateL(_lib.filtersOpen);
   useEffectL(() => { _lib.filtersOpen = filtersOpen; }, [filtersOpen]);
 
@@ -88,10 +90,13 @@ function LibraryScreen({ store, setStore, go }) {
           (e.category && filterRestCats.includes(e.category));
         const matchUnilateral = filterUnilateral === null || !!e.unilateral === filterUnilateral;
         const matchPlan = filterPlan === null || (filterPlan === 'in' ? planExIds.has(e.id) : !planExIds.has(e.id));
-        return matchSearch && matchTags && matchRest && matchUnilateral && matchPlan;
+        const matchEquipment = filterEquipment.length === 0 ||
+          (filterEquipment.includes('none') && !e.equipment) ||
+          (e.equipment && filterEquipment.includes(e.equipment));
+        return matchSearch && matchTags && matchRest && matchUnilateral && matchPlan && matchEquipment;
       })
       .sort((a,b) => a.name.localeCompare(b.name));
-  }, [store.exercises, q, filterTags, filterRestCats, filterUnilateral, filterPlan, planExIds]);
+  }, [store.exercises, q, filterTags, filterRestCats, filterUnilateral, filterPlan, filterEquipment, planExIds]);
 
   const topBarRight = selecting ? (
     <button onClick={exitSelect} style={{ background: 'none', border: 'none', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}>
@@ -137,7 +142,7 @@ function LibraryScreen({ store, setStore, go }) {
 
       <div style={{ padding: '18px 22px', paddingBottom: selecting ? 80 : 22, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {tab === 'all' && (() => {
-          const activeCount = filterTags.length + filterRestCats.length + (filterUnilateral !== null ? 1 : 0) + (filterPlan !== null ? 1 : 0);
+          const activeCount = filterTags.length + filterRestCats.length + filterEquipment.length + (filterUnilateral !== null ? 1 : 0) + (filterPlan !== null ? 1 : 0);
           return (
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -190,6 +195,7 @@ function LibraryScreen({ store, setStore, go }) {
                   {ex.tags?.map(t => <Pill key={t}>{t}</Pill>)}
                   {ex.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
                   {ex.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
+                  {ex.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill> : <Pill style={{ color: 'rgba(200,116,105,0.5)', borderColor: 'rgba(200,116,105,0.2)', fontSize: 8 }}>No equipment</Pill>}
                   {planExIds.has(ex.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
@@ -221,6 +227,7 @@ function LibraryScreen({ store, setStore, go }) {
                   {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
                   {e.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{e.category.charAt(0).toUpperCase() + e.category.slice(1)}</Pill>}
                   {e.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
+                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(200,116,105,0.5)', borderColor: 'rgba(200,116,105,0.2)', fontSize: 8 }}>No equipment</Pill>}
                   {planExIds.has(e.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
@@ -303,6 +310,17 @@ function LibraryScreen({ store, setStore, go }) {
             </div>
             <div>
               <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                <span className="micro" style={{ color: UI.gold }}>EQUIPMENT</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <Pill gold={filterEquipment.includes('none')} onClick={() => toggleEquipment('none')} style={{ cursor: 'pointer' }}>No equipment set</Pill>
+                {EQUIPMENT_TYPES.map(({ key, label }) => (
+                  <Pill key={key} gold={filterEquipment.includes(key)} onClick={() => toggleEquipment(key)} style={{ cursor: 'pointer' }}>{label}</Pill>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
                 <span className="micro" style={{ color: UI.gold }}>PLAN</span>
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
@@ -324,15 +342,24 @@ function LibraryScreen({ store, setStore, go }) {
 
 const EXERCISE_SIZES = [['big','Big'],['medium','Medium'],['small','Small']];
 
+const EQUIPMENT_TYPES = [
+  { key: 'barbell_dual',   label: 'Dual plates' },
+  { key: 'barbell_single', label: 'Single plate' },
+  { key: 'cable',          label: 'Cable' },
+  { key: 'machine',        label: 'Machine' },
+  { key: 'dumbbell',       label: 'Dumbbell' },
+];
+
 function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
   const [name, setName] = useStateL(initialName);
   const [selectedTags, setSelectedTags] = useStateL([]);
   const [category, setCategory] = useStateL(null);
   const [unilateral, setUnilateral] = useStateL(false);
+  const [equipment, setEquipment] = useStateL('barbell_dual');
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral, note: '' };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral, equipment: equipment || null, note: '' };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -361,6 +388,14 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
           </div>
         </div>
         <div>
+          <span className="label">Equipment</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+            {EQUIPMENT_TYPES.map(({ key, label }) => (
+              <Pill key={key} gold={equipment === key} onClick={() => setEquipment(key)} style={{ cursor: 'pointer' }}>{label}</Pill>
+            ))}
+          </div>
+        </div>
+        <div>
           <span className="label">Movement type</span>
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
             <Pill gold={unilateral} onClick={() => setUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
@@ -383,14 +418,15 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
   const [editTags, setEditTags] = useStateL([]);
   const [editCategory, setEditCategory] = useStateL(null);
   const [editUnilateral, setEditUnilateral] = useStateL(false);
+  const [editEquipment, setEditEquipment] = useStateL(null);
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditUnilateral(!!ex.unilateral); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditUnilateral(!!ex.unilateral); setEditEquipment(ex.equipment || null); setEditMode(true); };
   const cancelEdit = () => setEditMode(false);
   const saveEdit = () => {
     if (!editName.trim()) return;
-    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral } : e) }));
+    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral, equipment: editEquipment || null } : e) }));
     setEditMode(false);
   };
   const toggleEditTag = (m) => setEditTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
@@ -479,6 +515,14 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
               </div>
             </div>
             <div>
+              <span className="label">Equipment</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                {EQUIPMENT_TYPES.map(({ key, label }) => (
+                  <Pill key={key} gold={editEquipment === key} onClick={() => setEditEquipment(k => k === key ? null : key)} style={{ cursor: 'pointer' }}>{label}</Pill>
+                ))}
+              </div>
+            </div>
+            <div>
               <span className="label">Movement type</span>
               <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                 <Pill gold={editUnilateral} onClick={() => setEditUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
@@ -491,6 +535,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
             {ex.category && <Pill gold>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
             {ex.unilateral && <Pill gold>Unilateral</Pill>}
             {(ex.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
+            {ex.equipment && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill>}
             {!ex.category && !ex.unilateral && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
           </div>
         )}
@@ -2543,54 +2588,43 @@ function SettingsScreen({ store, setStore, go, userId }) {
           )}
         </Frame>
 
-        {/* Smart Progression exercise config modal */}
-        {(() => {
-          const scheduledExIds = [...new Set((store.schedules || []).flatMap(sch =>
-            (sch.days || []).flatMap(d => (d.items || []).map(it => it.exId))
-          ))];
-          const scheduledExercises = scheduledExIds
-            .map(id => (store.exercises || []).find(e => e.id === id))
-            .filter(Boolean)
-            .sort((a, b) => a.name.localeCompare(b.name));
-          return (
-            <Sheet open={progConfigOpen} onClose={() => setProgConfigOpen(false)} title="Exercise increments">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 16 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, padding: '0 4px 8px', borderBottom: `0.5px solid ${UI.hair}` }}>
-                  <span className="micro" style={{ color: UI.inkFaint }}>Exercise</span>
-                  <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>Increment</span>
-                  <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>Max kg</span>
-                </div>
-                {scheduledExercises.length === 0 && (
-                  <div className="micro" style={{ color: UI.inkFaint, padding: '16px 4px' }}>No exercises in any schedule yet.</div>
-                )}
-                {scheduledExercises.map(ex => (
-                  <div key={ex.id} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, alignItems: 'center', padding: '10px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
-                    <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{ex.name}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: UI.bgInset, borderRadius: 8, padding: '6px 8px' }}>
-                      <NumInput
-                        value={ex.prog_increment ?? null}
-                        placeholder="—"
-                        onChange={v => setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === ex.id ? { ...e, prog_increment: v } : e) }))}
-                        style={{ fontSize: 13, width: '100%' }}
-                      />
-                      <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>kg</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: UI.bgInset, borderRadius: 8, padding: '6px 8px' }}>
-                      <NumInput
-                        value={ex.prog_max_kg ?? null}
-                        placeholder="—"
-                        onChange={v => setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === ex.id ? { ...e, prog_max_kg: v } : e) }))}
-                        style={{ fontSize: 13, width: '100%' }}
-                      />
-                      <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>kg</span>
-                    </div>
+        {/* Equipment config sheet — increment + max per category */}
+        <Sheet open={progConfigOpen} onClose={() => setProgConfigOpen(false)} title="Equipment increments">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, padding: '0 4px 8px', borderBottom: `0.5px solid ${UI.hair}` }}>
+              <span className="micro" style={{ color: UI.inkFaint }}>Equipment</span>
+              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>Increment</span>
+              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>Max kg</span>
+            </div>
+            {EQUIPMENT_TYPES.map(({ key, label }) => {
+              const cfg = store.settings?.equipmentConfig?.[key] ?? {};
+              const setField = (field, val) => setStore(s => ({
+                ...s,
+                settings: {
+                  ...s.settings,
+                  equipmentConfig: { ...s.settings?.equipmentConfig, [key]: { ...(s.settings?.equipmentConfig?.[key] ?? {}), [field]: val } },
+                },
+              }));
+              return (
+                <div key={key} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, alignItems: 'center', padding: '10px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                  <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{label}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: UI.bgInset, borderRadius: 8, padding: '6px 8px' }}>
+                    <NumInput value={cfg.increment ?? null} placeholder="—" onChange={v => setField('increment', v)} style={{ fontSize: 13, width: '100%' }} />
+                    <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>kg</span>
                   </div>
-                ))}
-              </div>
-              <Btn onClick={() => setProgConfigOpen(false)}>Done</Btn>
-            </Sheet>
-          );
-        })()}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: UI.bgInset, borderRadius: 8, padding: '6px 8px' }}>
+                    <NumInput value={cfg.maxKg ?? null} placeholder="—" onChange={v => setField('maxKg', v)} style={{ fontSize: 13, width: '100%' }} />
+                    <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>kg</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 16 }}>
+            Set equipment categories on exercises in the Library. Individual overrides can be set per exercise.
+          </div>
+          <Btn onClick={() => setProgConfigOpen(false)}>Done</Btn>
+        </Sheet>
 
         <Btn kind="ghost" onClick={async () => {
           if ('caches' in window) {

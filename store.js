@@ -189,7 +189,7 @@ async function setupNewUser(userId, name) {
 async function loadFromSupabase(userId, _depth = 0) {
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes] = await Promise.all([
     _supabase.from('zane_profiles').select('id, name').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, prog_increment, prog_max_kg').eq('user_id', userId),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, prog_increment, prog_max_kg, equipment').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days').eq('user_id', userId),
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries, duration_minutes')
       .eq('user_id', userId).order('date', { ascending: false }),
@@ -268,6 +268,7 @@ async function loadFromSupabase(userId, _depth = 0) {
         tempoConcentric: sett.tempo_concentric ?? 1,
         smartProgression: sett.smart_progression ?? false,
         progressionRangeTop: sett.progression_range_top ?? 4,
+        equipmentConfig: sett.equipment_config ?? {},
       },
   };
 }
@@ -293,7 +294,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, prog_increment: e.prog_increment ?? null, prog_max_kg: e.prog_max_kg ?? null, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, prog_increment: e.prog_increment ?? null, prog_max_kg: e.prog_max_kg ?? null, equipment: e.equipment ?? null, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -342,7 +343,8 @@ async function syncStore(prev, next, userId) {
     prev.settings?.tempoEccentric     !== next.settings?.tempoEccentric     ||
     prev.settings?.tempoConcentric    !== next.settings?.tempoConcentric    ||
     prev.settings?.smartProgression   !== next.settings?.smartProgression   ||
-    prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop;
+    prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop ||
+    JSON.stringify(prev.settings?.equipmentConfig) !== JSON.stringify(next.settings?.equipmentConfig);
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
@@ -367,6 +369,7 @@ async function syncStore(prev, next, userId) {
       tempo_concentric: next.settings?.tempoConcentric ?? 1,
       smart_progression: next.settings?.smartProgression ?? false,
       progression_range_top: next.settings?.progressionRangeTop ?? 4,
+      equipment_config: next.settings?.equipmentConfig ?? {},
       in_progress_session_id: next.inProgress ?? null,
     }));
   }
@@ -585,17 +588,18 @@ function broadcastSessionNav(action, sessionId) {
 }
 
 // Returns { kg, reps } suggestion when all last sets hit top of rep range, null otherwise.
-// reps=null in the result means "keep last session reps" (no progression triggered).
 function progressionSuggestion(store, exId, dayId, plannedReps) {
   if (!store.settings?.smartProgression) return null;
   const ex = findExercise(store, exId);
-  if (!ex?.prog_increment) return null;
+  const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
+  const increment = ex?.prog_increment ?? catCfg.increment ?? null;
+  const maxKg = ex?.prog_max_kg ?? catCfg.maxKg ?? null;
+  if (!increment) return null;
+
   const last = lastSessionForExercise(store, exId, dayId);
   if (!last) return null;
 
-  const rangeTop = (store.settings?.progressionRangeTop ?? 4);
-  const targetRepsTop = (plannedReps ?? 0) + rangeTop;
-
+  const targetRepsTop = (plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
   const doneSets = (last.entry.sets || []).filter(s => !s.skipped && s.kg != null);
   if (!doneSets.length) return null;
 
@@ -606,8 +610,8 @@ function progressionSuggestion(store, exId, dayId, plannedReps) {
   if (!allHitTop) return null;
 
   const refKg = doneSets[0].kg;
-  const newKg = Math.round((refKg + ex.prog_increment) * 100) / 100;
-  const cappedKg = ex.prog_max_kg ? Math.min(newKg, ex.prog_max_kg) : newKg;
+  const newKg = Math.round((refKg + increment) * 100) / 100;
+  const cappedKg = maxKg ? Math.min(newKg, maxKg) : newKg;
   if (cappedKg <= refKg) return null;
 
   return { kg: cappedKg, reps: plannedReps ?? null };
