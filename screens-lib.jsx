@@ -1866,8 +1866,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
 
       {/* Progress footer — only shown when historical avg is available */}
       {(() => {
-        const totalSetsDone  = entries.reduce((s, e) => s + (e.sets?.filter(x => x.done || x.skipped).length || 0), 0);
-        const totalSetsTotal = entries.reduce((s, e) => s + (e.sets?.length || 0), 0);
+        const totalSetsDone  = entries.reduce((s, e) => s + (e.sets?.filter(x => x.done).length || 0), 0);
+        const totalSetsTotal = entries.reduce((s, e) => s + (e.sets?.filter(x => !x.skipped).length || 0), 0);
         const blended = calcBlended(session?.started_at, session?.avg_duration_seconds, session?.avg_sets_total, totalSetsDone, totalSetsTotal, now);
         if (!blended) return null;
         const { remainingMin: remMin } = blended;

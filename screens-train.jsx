@@ -642,7 +642,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
             : (new Date(s.ended) - new Date(s.started_at)) / 1000;
           return sum + sec;
         }, 0) / valid.length;
-        const avgSetsTotal = valid.reduce((sum, s) => sum + (s.entries || []).reduce((t, e) => t + (e.sets?.length || 0), 0), 0) / valid.length;
+        const avgSetsTotal = valid.reduce((sum, s) => sum + (s.entries || []).reduce((t, e) => t + (e.sets?.filter(st => st.done).length || 0), 0), 0) / valid.length;
         setAvgStats({ avgDurSec, avgSetsTotal });
       });
   }, [session?.id]);
@@ -959,8 +959,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
       {/* Pace bar — only when historical avg is available */}
       {avgStats && (() => {
-        const totalSetsDone  = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done || x.skipped).length || 0), 0);
-        const totalSetsTotal = session.entries.reduce((s, e) => s + (e.sets?.length || 0), 0);
+        const totalSetsDone  = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done).length || 0), 0);
+        const totalSetsTotal = session.entries.reduce((s, e) => s + (e.sets?.filter(x => !x.skipped).length || 0), 0);
         const avgDurSec = avgStats.avgDurSec;
         const avgSetsTotal = avgStats.avgSetsTotal;
         if (!avgDurSec || !session.startedAt) return null;
