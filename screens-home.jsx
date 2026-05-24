@@ -434,6 +434,11 @@ function HomeScreen({ store, setStore, go, userId }) {
             ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false }
             : { kg: suggestion.kg, reps: suggestion.reps, done: false };
         }
+        if (store.settings?.smartProgression && prev) {
+          return isUnilateral
+            ? { kg: prev.kg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
+            : { kg: prev.kg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
+        }
         return isUnilateral
           ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
           : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
@@ -812,6 +817,9 @@ function HomeScreen({ store, setStore, go, userId }) {
                     const prev = last?.entry?.sets?.[idx];
                     if (suggestion) {
                       return isUni ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false } : { kg: suggestion.kg, reps: suggestion.reps, done: false };
+                    }
+                    if (store.settings?.smartProgression && prev) {
+                      return isUni ? { kg: prev.kg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false } : { kg: prev.kg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
                     }
                     return isUni ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false } : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
                   });
