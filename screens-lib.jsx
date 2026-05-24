@@ -1530,7 +1530,7 @@ function calcBlended(startedAt, avgDurSec, avgSetsTotal, setsDone, setsTotal, no
   if (!histPace || setsTotal === 0) {
     remainingSec = Math.max(0, avgDurSec - elapsed);
   } else if (!currPace) {
-    remainingSec = histPace * remainingSets;
+    remainingSec = Math.max(0, avgDurSec - elapsed);
   } else {
     const w = Math.min(setsDone / 8, 0.7);
     remainingSec = Math.max(0, (w * currPace + (1 - w) * histPace) * remainingSets);

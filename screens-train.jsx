@@ -972,7 +972,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         if (!histPace || totalSetsTotal === 0) {
           remainingSec = Math.max(0, avgDurSec - elapsedSec);
         } else if (!currPace) {
-          remainingSec = histPace * remainingSets;
+          remainingSec = Math.max(0, avgDurSec - elapsedSec);
         } else {
           const w = Math.min(totalSetsDone / 8, 0.7);
           remainingSec = Math.max(0, (w * currPace + (1 - w) * histPace) * remainingSets);
