@@ -1,0 +1,1 @@
+-- intentionally empty: merged into 0023_exercise_equipment.sql

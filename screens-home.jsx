@@ -107,6 +107,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     }
   }, []); // eslint-disable-line
 
+
   const todayN = useMemo(() => {
     if (weekdayMode || !store.cycleStartDate) return store.cycleIndex || 0;
     const today = new Date(); today.setHours(12, 0, 0, 0);
@@ -393,29 +394,36 @@ function HomeScreen({ store, setStore, go, userId }) {
     return m;
   }, [store.skips]);
 
+  const selectedDateSkip = useMemo(() => {
+    if (isViewingToday || isFutureSlot) return null;
+    return skipsMap.get(sessionDate.toISOString().slice(0, 10)) ?? null;
+  }, [isViewingToday, isFutureSlot, skipsMap, sessionDate]);
+
   const recentBannerDay = useMemo(() => {
     if (!sch) return null;
     const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
     const sessionDates = new Set(store.sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
-    for (let daysAgo = 1; daysAgo <= 7; daysAgo++) {
+    for (let daysAgo = 1; daysAgo <= 30; daysAgo++) {
       const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
       const dateKey = d.toISOString().slice(0, 10);
       if (sessionDates.has(dateKey)) continue;
+      const sk = skipsMap.get(dateKey);
+      if (sk) continue; // already actioned — edit via calendar card
       let trainingDay = null;
       if (weekdayMode) {
+        if (store.weekPlanStartDate && dateKey < store.weekPlanStartDate) continue;
         const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
         trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
       } else if (store.cycleStartDate) {
         const start = new Date(store.cycleStartDate + 'T12:00:00');
         const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-        if (n >= 0) {
-          const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
-          const dayData = sch.days[idx];
-          if (dayData?.items?.length > 0) trainingDay = dayData;
-        }
+        if (n < 0) continue;
+        const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
+        const dayData = sch.days[idx];
+        if (dayData?.items?.length > 0) trainingDay = dayData;
       }
       if (!trainingDay) continue;
-      return { date: d, dateKey, dayName: trainingDay.name, dayId: trainingDay.id, daysAgo, skip: skipsMap.get(dateKey) || null, dayData: trainingDay };
+      return { date: d, dateKey, dayName: trainingDay.name, dayId: trainingDay.id, daysAgo, skip: sk || null, dayData: trainingDay };
     }
     return null;
   }, [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
@@ -426,8 +434,19 @@ function HomeScreen({ store, setStore, go, userId }) {
       const ex = LB.findExercise(store, it.exId);
       const last = LB.lastSessionForExercise(store, it.exId, activeDay.id);
       const isUnilateral = ex?.unilateral || false;
+      const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps);
       const seedSets = Array.from({ length: it.sets }).map((_, i) => {
         const prev = last?.entry?.sets?.[i];
+        if (suggestion) {
+          return isUnilateral
+            ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false }
+            : { kg: suggestion.kg, reps: suggestion.reps, done: false };
+        }
+        if (store.settings?.smartProgression && prev) {
+          return isUnilateral
+            ? { kg: prev.kg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
+            : { kg: prev.kg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
+        }
         return isUnilateral
           ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
           : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
@@ -608,15 +627,18 @@ function HomeScreen({ store, setStore, go, userId }) {
             }
             const dateKey = d.date.toISOString().slice(0, 10);
             const isPast = !d.isToday && d.date < new Date();
-            const isMissed = !r && isPast && !isCompleted && !skipsMap.has(dateKey);
+            const isBeforePlanStart = weekdayMode
+              ? (store.weekPlanStartDate ? d.date < new Date(store.weekPlanStartDate + 'T12:00:00') : false)
+              : (store.cycleStartDate ? d.date < new Date(store.cycleStartDate + 'T12:00:00') : false);
+            const isMissed = !r && isPast && !isCompleted && !skipsMap.has(dateKey) && !isBeforePlanStart;
             const isSkipped = !r && isPast && !isCompleted && skipsMap.has(dateKey);
             return (
               <div key={d.id ?? i}
                 onClick={() => (weekdayMode || cycleWeekView) ? setSelectedWd(i) : setSelectedSlot(i)}
                 style={{
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
-                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(200,116,105,0.08)' : 'transparent',
-                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(200,116,105,0.4)' : d.isToday ? UI.hairStrong : UI.hair}`,
+                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(200,116,105,0.08)' : isSkipped ? 'rgba(160,160,160,0.07)' : 'transparent',
+                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(200,116,105,0.4)' : isSkipped ? 'rgba(160,160,160,0.3)' : d.isToday ? UI.hairStrong : UI.hair}`,
                   borderRadius: 8, cursor: 'pointer',
                   minHeight: 56,
                 }}>
@@ -737,33 +759,56 @@ function HomeScreen({ store, setStore, go, userId }) {
                 </div>
               </Frame>
             ) : (
-              <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', width: '100%' }}>
-                <button onClick={startSession} disabled={!!store.inProgress} style={{
-                  opacity: store.inProgress ? 0.35 : 1,
-                  flex: 1, minHeight: 90, borderRadius: 18, border: 'none', cursor: 'pointer',
-                  background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-                  boxShadow: '0 16px 50px rgba(var(--accent-rgb),0.35), 0 0 0 0.5px rgba(var(--accent-rgb),0.6), inset 0 1px 0 rgba(255,240,200,0.4)',
-                  animation: 'pulseGold 3.5s ease-out infinite',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
-                  WebkitTapHighlightColor: 'transparent',
-                }}>
-                  <span style={{ color: 'rgba(10,8,5,0.75)', letterSpacing: '0.18em', fontWeight: 700, fontSize: 15, fontFamily: UI.fontUi }}>
-                    {isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION'}
-                  </span>
-                  <i className="fa-solid fa-dumbbell" style={{ fontSize: 22, color: 'rgba(10,8,5,0.55)' }} />
-                </button>
-                {!weekdayMode && isViewingToday && (
-                  <button onClick={() => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
-                    flex: 1, minHeight: 90, borderRadius: 18, cursor: 'pointer',
-                    background: 'transparent',
-                    border: `0.5px solid ${UI.hairStrong}`,
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
-                    WebkitTapHighlightColor: 'transparent',
-                  }}>
-                    <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.22em', fontWeight: 600 }}>DAY</span>
-                    <span style={{ fontSize: 24, color: UI.inkSoft, fontFamily: UI.fontDisplay, fontStyle: 'italic', lineHeight: 1 }}>→</span>
-                    <span className="micro" style={{ color: UI.inkFaint }}>SKIP</span>
-                  </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
+                {selectedDateSkip && (
+                  <Frame style={{ padding: '12px 16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ width: 28, height: 28, borderRadius: '50%', background: UI.bgInset, boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <span style={{ color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>—</span>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div className="micro" style={{ marginBottom: 2, color: UI.inkFaint }}>ARCHIVED</div>
+                        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+                          {selectedDateSkip.skipReason === '—' ? 'Not logged in time · delete to log' : selectedDateSkip.skipReason}
+                        </div>
+                      </div>
+                      <button onClick={() => setSkipReasonModal({ mode: 'edit', skipId: selectedDateSkip.id, currentReason: selectedDateSkip.skipReason, data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                      </button>
+                      <button onClick={() => { LB.deleteSkip(selectedDateSkip.id).catch(() => {}); setStore(s => ({ ...s, skips: (s.skips || []).filter(x => x.id !== selectedDateSkip.id) })); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 18, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
+                    </div>
+                  </Frame>
+                )}
+                {!selectedDateSkip && (
+                  <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
+                    <button onClick={startSession} disabled={!!store.inProgress} style={{
+                      opacity: store.inProgress ? 0.35 : 1,
+                      flex: 1, minHeight: 90, borderRadius: 18, border: 'none', cursor: 'pointer',
+                      background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+                      boxShadow: '0 16px 50px rgba(var(--accent-rgb),0.35), 0 0 0 0.5px rgba(var(--accent-rgb),0.6), inset 0 1px 0 rgba(255,240,200,0.4)',
+                      animation: 'pulseGold 3.5s ease-out infinite',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <span style={{ color: 'rgba(10,8,5,0.75)', letterSpacing: '0.18em', fontWeight: 700, fontSize: 15, fontFamily: UI.fontUi }}>
+                        {isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION'}
+                      </span>
+                      <i className="fa-solid fa-dumbbell" style={{ fontSize: 22, color: 'rgba(10,8,5,0.55)' }} />
+                    </button>
+                    {!weekdayMode && isViewingToday && (
+                      <button onClick={() => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
+                        flex: 1, minHeight: 90, borderRadius: 18, cursor: 'pointer',
+                        background: 'transparent',
+                        border: `0.5px solid ${UI.hairStrong}`,
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
+                        WebkitTapHighlightColor: 'transparent',
+                      }}>
+                        <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.22em', fontWeight: 600 }}>DAY</span>
+                        <span style={{ fontSize: 24, color: UI.inkSoft, fontFamily: UI.fontDisplay, fontStyle: 'italic', lineHeight: 1 }}>→</span>
+                        <span className="micro" style={{ color: UI.inkFaint }}>SKIP</span>
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -801,8 +846,15 @@ function HomeScreen({ store, setStore, go, userId }) {
                   const ex = LB.findExercise(store, it.exId);
                   const last = LB.lastSessionForExercise(store, it.exId, recentBannerDay.dayId);
                   const isUni = ex?.unilateral || false;
+                  const suggestion = LB.progressionSuggestion(store, it.exId, recentBannerDay.dayId, it.reps);
                   const seedSets = Array.from({ length: it.sets }).map((_, idx) => {
                     const prev = last?.entry?.sets?.[idx];
+                    if (suggestion) {
+                      return isUni ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false } : { kg: suggestion.kg, reps: suggestion.reps, done: false };
+                    }
+                    if (store.settings?.smartProgression && prev) {
+                      return isUni ? { kg: prev.kg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false } : { kg: prev.kg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
+                    }
                     return isUni ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false } : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
                   });
                   return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };

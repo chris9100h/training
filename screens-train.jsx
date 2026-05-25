@@ -282,6 +282,11 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const exercise = entry ? LB.findExercise(store, entry.exId) : null;
   const last = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayId) : null;
   const isUnilateral = !!exercise?.unilateral;
+  const progressionTarget = (() => {
+    if (!store.settings?.smartProgression) return null;
+    const target = (entry?.plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+    return target > 0 ? target : null;
+  })();
 
   const updateSession = (fn) => {
     setStore(s => ({
@@ -323,17 +328,51 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     setFlashSet(setIdx);
     setTimeout(() => setFlashSet(null), 1400);
     const prevSet = last?.entry?.sets?.[setIdx];
-    if (isImprovement(entry.sets[setIdx], prevSet)) {
-      setImprovedSet(true);
-      setTimeout(() => setImprovedSet(false), 2500);
-    } else {
-      const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, last?.entry?.sets?.[k]));
-      if (!anyImprovementBefore && isDecline(entry.sets[setIdx], prevSet)) {
-        setRegressionSet(true);
-        setTimeout(() => setRegressionSet(false), 2500);
+    const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
+
+    const progressionResult = (() => {
+      if (!store.settings?.smartProgression) return null;
+      if (!updatedSets.every(s => s.done || s.skipped)) return null;
+      const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
+      const increment = catCfg.increment ?? null;
+      if (!increment) return null;
+      const targetRepsTop = (entry.plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+      const doneSets = updatedSets.filter(s => s.done && !s.skipped && s.kg != null);
+      if (!doneSets.length) return null;
+      const allHitTop = doneSets.every(s => {
+        const reps = s.repsL != null ? Math.min(s.repsL ?? 0, s.repsR ?? 0) : (s.reps ?? 0);
+        return reps >= targetRepsTop;
+      });
+      if (!allHitTop) return null;
+      const refKg = doneSets[0].kg;
+      const newKg = Math.round((refKg + increment) * 100) / 100;
+      const nextKg = catCfg.maxKg ? Math.min(newKg, catCfg.maxKg) : newKg;
+      return nextKg > refKg ? { exName: entry.name, currentKg: refKg, nextKg } : null;
+    })();
+
+    if (!progressionResult) {
+      if (isImprovement(entry.sets[setIdx], prevSet)) {
+        setImprovedSet(true);
+        setTimeout(() => setImprovedSet(false), 2500);
+      } else {
+        const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, last?.entry?.sets?.[k]));
+        if (!anyImprovementBefore && isDecline(entry.sets[setIdx], prevSet)) {
+          setRegressionSet(true);
+          setTimeout(() => setRegressionSet(false), 2500);
+        }
       }
     }
-    const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
+
+    if (progressionResult) {
+      pendingNavRef.current = true;
+      setTimeout(() => {
+        setProgressionUnlocked(progressionResult);
+        setTimeout(() => {
+          setProgressionUnlocked(null);
+          if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); }
+        }, 4000);
+      }, 800);
+    }
     const group = entry.supersetGroup;
     if (group) {
       const newDoneCount = updatedSets.filter(s => s.done).length;
@@ -363,7 +402,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     } else {
       persistRestStart(Date.now(), restDef);
       if (updatedSets.every(st => st.done)) {
-        setTimeout(() => navigate(1), 600);
+        if (!progressionResult) setTimeout(() => navigate(1), 600);
       }
     }
   };
@@ -594,6 +633,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [flashSet, setFlashSet] = useStateT(null);
   const [improvedSet, setImprovedSet] = useStateT(false);
   const [regressionSet, setRegressionSet] = useStateT(false);
+  const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
   const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(false);
   const [confirmEl, confirm] = useConfirm();
@@ -614,6 +654,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [kbRaw, setKbRaw] = useStateT('');
   const [kbFresh, setKbFresh] = useStateT(false);
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
+  const pendingNavRef = useRefT(false);
 
   useEffectT(() => { setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
   useEffectT(() => { if (userId && sessionId) LB.broadcastExIdx(sessionId, exIdx); }, [exIdx]);
@@ -866,7 +907,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       {improvedSet && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
-          background: 'radial-gradient(ellipse at center, rgba(201,169,97,0.07) 0%, transparent 70%)',
+          background: 'rgb(8,6,3)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
         }}>
@@ -891,7 +932,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       {regressionSet && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
-          background: 'radial-gradient(ellipse at center, rgba(200,116,105,0.07) 0%, transparent 70%)',
+          background: 'rgb(8,6,3)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
         }}>
@@ -908,6 +949,28 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
             <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(200,116,105,0.9), 0 0 70px rgba(200,116,105,0.5)' }}>↓</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.danger, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(200,116,105,1), 0 0 40px rgba(200,116,105,0.8), 0 0 80px rgba(200,116,105,0.4)' }}>REGRESSION</span>
           </div>
+        </div>
+      )}
+
+      {/* Progression unlocked overlay */}
+      {progressionUnlocked && (
+        <div onClick={() => { setProgressionUnlocked(null); if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); } }} style={{
+          position: 'fixed', inset: 0, zIndex: 160,
+          background: 'rgb(8,6,3)',
+          animation: 'improvedFade 4s ease forwards',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 8,
+        }}>
+          <div style={{ animation: 'improvedBorderPulse 0.8s ease-in-out infinite', position: 'absolute', inset: 0 }} />
+          <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8)' }}>PROGRESSION UNLOCKED</span>
+          <span style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontStyle: 'italic', fontWeight: 400, marginTop: 4 }}>You've earned the next load.</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+            <span className="num" style={{ fontSize: 22, color: UI.inkSoft }}>{progressionUnlocked.currentKg}kg</span>
+            <span style={{ color: UI.gold, fontSize: 20, lineHeight: 1 }}>→</span>
+            <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(201,169,97,0.8)' }}>{progressionUnlocked.nextKg}kg</span>
+          </div>
+          <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, letterSpacing: '0.12em' }}>{progressionUnlocked.exName}</span>
         </div>
       )}
 
@@ -1085,13 +1148,18 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         ) : heroSet && (
           <BracketFrame gold padding={0}>
             <div style={{ padding: '12px 6px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '0 18px', marginBottom: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0 18px', marginBottom: 8 }}>
                 <span className="micro-gold">SET {String(currentSetNum).padStart(2, '0')} / {String(entry.sets.length).padStart(2, '0')}</span>
-                {prevHeroSet && prevHeroSet.kg ? (
-                  <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>
-                    LAST TIME <span style={{ color: UI.inkSoft }}>{prevHeroSet.kg}kg × {(prevHeroSet.repsL != null || prevHeroSet.repsR != null) ? `L${prevHeroSet.repsL ?? '?'}/R${prevHeroSet.repsR ?? '?'}` : prevHeroSet.reps}</span>
-                  </span>
-                ) : <span />}
+                <div style={{ textAlign: 'right' }}>
+                  {prevHeroSet && prevHeroSet.kg ? (
+                    <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>
+                      LAST TIME <span style={{ color: UI.inkSoft }}>{prevHeroSet.kg}kg × {(prevHeroSet.repsL != null || prevHeroSet.repsR != null) ? `L${prevHeroSet.repsL ?? '?'}/R${prevHeroSet.repsR ?? '?'}` : prevHeroSet.reps}</span>
+                    </span>
+                  ) : null}
+                  {progressionTarget && (
+                    <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>≥{progressionTarget} reps · next weight</div>
+                  )}
+                </div>
               </div>
 
               {/* HUGE inputs */}
@@ -1201,6 +1269,28 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               cursor: anyMissingData && !allDone ? 'default' : 'pointer',
               opacity: anyMissingData && !allDone ? 0.3 : 1,
             }}>{allDone ? '✓ All' : 'All ✓'}</button>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
+            gap: 8, alignItems: 'baseline',
+            padding: '0 4px 6px',
+            borderBottom: `0.5px solid ${UI.hair}`,
+            marginBottom: 2,
+          }}>
+            <div />
+            <span className="micro" style={{ color: UI.inkFaint }}>Last time</span>
+            <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>kg</span>
+            {isUnilateral ? (
+              <>
+                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>L</span>
+                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>R</span>
+              </>
+            ) : (
+              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{store.settings?.smartProgression ? 'Reps (min)' : 'Reps'}</span>
+            )}
+            <div /><div />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
