@@ -35,18 +35,25 @@ function DebugPanel() {
     <button style={btnStyle} onClick={() => setOpen(true)}>DBG</button>
   );
 
+  const copyLog = () => {
+    const text = [...window._dbg].reverse().map((e, idx, arr) => {
+      const prev = arr[idx + 1];
+      const delta = prev ? `+${e.t - prev.t}ms` : '      ';
+      return `${delta.padStart(8)}  ${e.msg}`;
+    }).join('\n');
+    navigator.clipboard?.writeText(text).catch(() => {});
+  };
+
+  const toolbarStyle = { background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 4, color: '#888', fontSize: 10, padding: '4px 8px', cursor: 'pointer' };
+
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9991,
       background: 'rgba(8,6,3,0.96)', display: 'flex', flexDirection: 'column',
       fontFamily: 'monospace', fontSize: 11,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 12px 8px', borderBottom: '0.5px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
-        <span style={{ color: '#c9a961', fontWeight: 700, flex: 1 }}>DEBUG LOG</span>
-        <button onClick={() => { window._dbg = []; setEntries([]); }} style={{ background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 4, color: '#888', fontSize: 10, padding: '2px 6px', cursor: 'pointer' }}>CLEAR</button>
-        <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: '#888', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
+      {/* Scrollable log — fills top space, safe area inset respected via padding-bottom */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 0 6px' }}>
         {entries.length === 0 && <div style={{ color: '#444', padding: '12px 12px', fontSize: 12 }}>— no entries —</div>}
         {entries.map((e, idx) => {
           const prev = entries[idx + 1];
@@ -59,6 +66,13 @@ function DebugPanel() {
             </div>
           );
         })}
+      </div>
+      {/* Toolbar at bottom — well clear of iOS status bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: `10px 12px calc(env(safe-area-inset-bottom, 0px) + 12px)`, borderTop: '0.5px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
+        <span style={{ color: '#c9a961', fontWeight: 700, flex: 1, fontSize: 10 }}>DEBUG LOG</span>
+        <button onClick={copyLog} style={toolbarStyle}>COPY</button>
+        <button onClick={() => { window._dbg = []; setEntries([]); }} style={toolbarStyle}>CLEAR</button>
+        <button onClick={() => setOpen(false)} style={{ ...toolbarStyle, fontSize: 16, padding: '2px 8px', border: 'none' }}>×</button>
       </div>
     </div>
   );
