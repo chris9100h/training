@@ -768,6 +768,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
       const next = Math.max(0, Math.round((cur + dir * 1.25) * 100) / 100);
       const newRaw = String(next).replace('.', ',');
+      kbRawRef.current = newRaw;
       setKbRaw(newRaw);
       updateSession(sess => ({
         ...sess,
@@ -1247,6 +1248,15 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               {/* Big confirm button */}
               <div style={{ marginTop: 12, padding: '0 18px' }}>
                 <button
+                  onPointerDown={e => {
+                    e.stopPropagation();
+                    const kb = kbFieldRef.current;
+                    if (kb && kb.setIdx === currentSetIdx && kb.field !== 'kg') {
+                      kbApply(kbRawRef.current, kb.field, currentSetIdx);
+                    }
+                    kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+                    setKbField(null); setKbRaw(''); setKbFresh(false);
+                  }}
                   onClick={() => completeSet(currentSetIdx)}
                   disabled={heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)}
                   style={{
@@ -1361,7 +1371,17 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                     <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder="—" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
                   )}
 
-                  <button onClick={() => s.skipped ? updateSet(i, { skipped: false }) : s.done ? updateSet(i, { done: false }) : completeSet(i)}
+                  <button
+                    onPointerDown={e => {
+                      e.stopPropagation();
+                      const kb = kbFieldRef.current;
+                      if (kb && kb.setIdx === i && kb.field !== 'kg') {
+                        kbApply(kbRawRef.current, kb.field, i);
+                      }
+                      kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+                      setKbField(null); setKbRaw(''); setKbFresh(false);
+                    }}
+                    onClick={() => s.skipped ? updateSet(i, { skipped: false }) : s.done ? updateSet(i, { done: false }) : completeSet(i)}
                     disabled={!s.done && !s.skipped && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps))}
                     style={{
                       width: 26, height: 26, borderRadius: 5, border: 'none', cursor: 'pointer',
