@@ -300,8 +300,10 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   const act = { ...base, background: 'var(--bg-inset)', color: 'var(--ink-soft)', fontSize: 13, fontFamily: '"Inter", sans-serif' };
 
   return (
-    <div data-keyboard onPointerDown={e => { e.preventDefault(); e.stopPropagation(); }} style={{
-      position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
+    <div data-keyboard
+      onPointerDown={e => { e.preventDefault(); e.stopPropagation(); }}
+      onTouchStart={e => { e.preventDefault(); e.stopPropagation(); }}
+      style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
       background: 'var(--bg)', borderTop: `0.5px solid var(--hair)`,
       padding: `5px 8px calc(env(safe-area-inset-bottom, 0px) + 5px)`,
     }}>
@@ -415,6 +417,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     _log(`completeSet(${setIdx}) kb=${kb?.field ?? 'none'} raw='${rawRef}'`);
     kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
     setKbField(null); setKbRaw(''); setKbFresh(false);
+    armKbShield();
     recentCompleteRef.current[setIdx] = Date.now();
     lastCompleteRef.current = Date.now();
     _log(`completeSet(${setIdx}) → lastCompleteRef stamped`);
@@ -772,6 +775,16 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const kbFieldRef = useRefT(null);
   const kbRawRef = useRefT('');
   const kbFreshRef = useRefT(false);
+  const [kbShield, setKbShield] = useStateT(false);
+  const kbShieldTimerRef = useRefT(null);
+  // After keyboard dismissal (completeSet or ⌄), briefly keep a touch-blocking
+  // shield at the keyboard's screen position so iOS ghost clicks (fired 200-300ms
+  // after the touch that closed the keyboard) don't land on revealed content.
+  const armKbShield = () => {
+    setKbShield(true);
+    clearTimeout(kbShieldTimerRef.current);
+    kbShieldTimerRef.current = setTimeout(() => setKbShield(false), 400);
+  };
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
   const pendingNavRef = useRefT(false);
   // Records when a set was last completed via the checkbox; used to ignore
@@ -1826,6 +1839,15 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
       {confirmEl}
 
+      {/* Post-dismiss shield: blocks ghost clicks that land on revealed content
+          after the keyboard disappears (iOS fires a synthetic click ~300ms after
+          the touch that closed the keyboard). Stays for 400ms after dismissal. */}
+      {kbShield && !kbField && (
+        <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: 260, zIndex: 96, touchAction: 'none' }}
+             onPointerDown={e => e.preventDefault()}
+             onTouchStart={e => e.preventDefault()} />
+      )}
+
       <CustomKeyboard
         visible={!!kbField}
         field={kbField?.field}
@@ -1834,7 +1856,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         onBackspace={kbBackspace}
         onAdjust={kbAdjust}
         onConfirm={kbConfirm}
-        onDismiss={() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); }}
+        onDismiss={() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); armKbShield(); }}
         onPlateCalc={() => setPlateCalcOpen(true)}
       />
 
