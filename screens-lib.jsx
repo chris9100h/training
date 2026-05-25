@@ -2553,12 +2553,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
               {store.settings?.tempoEnabled && (<>
                 <div>
                   <div className="micro" style={{ marginBottom: 6 }}>ECCENTRIC (DOWN)</div>
-                  <Stepper value={store.settings?.tempoEccentric ?? 4} step={1} min={1} max={10} suffix="s"
+                  <Stepper value={store.settings?.tempoEccentric ?? 4} step={0.5} min={0.5} max={10} suffix="s"
                     onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoEccentric: v } }))} />
                 </div>
                 <div>
                   <div className="micro" style={{ marginBottom: 6 }}>CONCENTRIC (UP)</div>
-                  <Stepper value={store.settings?.tempoConcentric ?? 1} step={1} min={1} max={10} suffix="s"
+                  <Stepper value={store.settings?.tempoConcentric ?? 1} step={0.5} min={0.5} max={10} suffix="s"
                     onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoConcentric: v } }))} />
                 </div>
                 <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>

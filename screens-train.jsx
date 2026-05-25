@@ -614,13 +614,15 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     playBeep('ecc', 1);
     tempoTimerRef.current = setInterval(() => {
       const { phase, tick } = tempoStateRef.current;
-      const phaseLen = phase === 'ecc' ? eccSecs : conSecs;
+      const phaseHalfTicks = (phase === 'ecc' ? eccSecs : conSecs) * 2;
       let newTick = tick + 1;
       let newPhase = phase;
-      if (newTick >= phaseLen) { newPhase = phase === 'ecc' ? 'con' : 'ecc'; newTick = 0; }
+      if (newTick >= phaseHalfTicks) { newPhase = phase === 'ecc' ? 'con' : 'ecc'; newTick = 0; }
       tempoStateRef.current = { phase: newPhase, tick: newTick };
-      playBeep(newPhase, newPhase === 'ecc' ? newTick + 1 : 1);
-    }, 1000);
+      if (newPhase !== phase || newTick % 2 === 0) {
+        playBeep(newPhase, newPhase === 'ecc' ? newTick / 2 + 1 : 1);
+      }
+    }, 500);
   };
 
   const finish = () => {
