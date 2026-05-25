@@ -721,19 +721,10 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       });
   }, [session?.id]);
 
-  useEffectT(() => {
-    if (!kbField) return;
-    const dismiss = (e) => {
-      if (e.target.closest('[data-keyboard]')) return;
-      // Completion buttons (row checkbox, hero confirm) read kbFieldRef directly.
-      // Never dismiss on these taps — stopPropagation alone is not reliable on iOS Safari.
-      if (e.target.closest('[data-complete-btn]')) return;
-      kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-      setKbField(null); setKbRaw(''); setKbFresh(false);
-    };
-    document.addEventListener('pointerdown', dismiss);
-    return () => document.removeEventListener('pointerdown', dismiss);
-  }, [!!kbField]);
+  // No document-level dismiss: the auto-dismiss fired during digit presses (iOS
+  // multi-touch / accidental palm) and cleared kbFieldRef synchronously, causing
+  // kbTypeChar to return early on the next digit and "swallowing" it. The keyboard
+  // now stays open until the user taps ⌄ explicitly or navigates away.
 
   const activateKb = (setIdx, field) => {
     const s = (store.sessions.find(x => x.id === sessionId)?.entries[exIdx]?.sets[setIdx]);
@@ -1412,8 +1403,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                     onClick={() => {
                       if (s.skipped) { updateSet(i, { skipped: false }); return; }
                       if (s.done) {
-                        // Ignore ghost-clicks that arrive shortly after completion
-                        if (Date.now() - (recentCompleteRef.current[i] || 0) < 500) return;
+                        // Ignore ghost-clicks / accidental double-taps within 1s of completion
+                        if (Date.now() - (recentCompleteRef.current[i] || 0) < 1000) return;
                         updateSet(i, { done: false });
                         return;
                       }
@@ -1718,7 +1709,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         onBackspace={kbBackspace}
         onAdjust={kbAdjust}
         onConfirm={kbConfirm}
-        onDismiss={() => { setKbField(null); setKbRaw(''); }}
+        onDismiss={() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); }}
         onPlateCalc={() => setPlateCalcOpen(true)}
       />
 
