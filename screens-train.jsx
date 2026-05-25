@@ -581,7 +581,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
       const ctx = audioCtxRef.current;
       if (ctx.state === 'suspended') ctx.resume();
-      const freq = phase === 'ecc' ? 440 : 880;
+      const freq = phase === 'ecc' ? 220 : 880;
       const beepDur = 0.07;
       const gap = 0.06;
       const startAt = scheduledTime ?? ctx.currentTime;
