@@ -2562,7 +2562,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
                     onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoConcentric: v } }))} />
                 </div>
                 <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
-                  Low beep every second during eccentric · High beep every second during concentric
+                  Beeps subdivide each phase evenly · count increases each beat
                 </div>
               </>)}
               <Hairline style={{ margin: '2px 0' }} />
