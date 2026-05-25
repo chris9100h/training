@@ -2052,6 +2052,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [cycleWeekView, setCycleWeekView] = useStateL(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateL(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
+  const [debugPanel, setDebugPanel] = useStateL(() => localStorage.getItem('logbook-debug-panel') === 'true');
 
   useEffectL(() => {
     let mounted = true;
@@ -2637,6 +2638,14 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <Btn onClick={() => setProgDisclaimer(false)}>Got it</Btn>
         </Sheet>
 
+        {isAdmin && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderTop: `0.5px solid ${UI.hair}` }}>
+            <span style={{ fontSize: 13, color: UI.inkSoft }}>Debug panel</span>
+            <div onClick={() => { const next = !debugPanel; setDebugPanel(next); localStorage.setItem('logbook-debug-panel', String(next)); }} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: debugPanel ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${debugPanel ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>
+              <div style={{ position: 'absolute', top: 3, left: debugPanel ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: debugPanel ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
+            </div>
+          </div>
+        )}
         <Btn kind="ghost" onClick={async () => {
           if ('caches' in window) {
             const keys = await caches.keys();

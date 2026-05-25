@@ -1868,7 +1868,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           : (session.entries[exIdx]?.sets[kbField?.setIdx]?.kg ?? null)}
       />
 
-      <DebugPanel />
+      {localStorage.getItem('logbook-debug-panel') === 'true' && <DebugPanel />}
     </Screen>
   );
 }
