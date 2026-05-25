@@ -1526,8 +1526,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                         const globalDelta = now - (lastCompleteRef.current || 0);
                         const rowDelta = now - (recentCompleteRef.current[i] || 0);
                         _log(`row${i} uncheck? globalΔ=${globalDelta}ms rowΔ=${rowDelta}ms`);
-                        if (globalDelta < 600) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
-                        if (rowDelta < 1000) { _log(`row${i} BLOCKED by row guard (${rowDelta}ms)`); return; }
+                        if (globalDelta < 2000) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
+                        if (rowDelta < 3000) { _log(`row${i} BLOCKED by row guard (${rowDelta}ms)`); return; }
                         _log(`row${i} UNCHECK → updateSet done:false`);
                         updateSet(i, { done: false });
                         return;
