@@ -725,6 +725,9 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     if (!kbField) return;
     const dismiss = (e) => {
       if (e.target.closest('[data-keyboard]')) return;
+      // Completion buttons (row checkbox, hero confirm) read kbFieldRef directly.
+      // Never dismiss on these taps — stopPropagation alone is not reliable on iOS Safari.
+      if (e.target.closest('[data-complete-btn]')) return;
       kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
       setKbField(null); setKbRaw(''); setKbFresh(false);
     };
@@ -1284,6 +1287,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               {/* Big confirm button */}
               <div style={{ marginTop: 12, padding: '0 18px' }}>
                 <button
+                  data-complete-btn
                   onPointerDown={e => { e.stopPropagation(); }}
                   onClick={() => {
                     if (currentSetIdx < 0) return;
@@ -1403,6 +1407,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                   )}
 
                   <button
+                    data-complete-btn
                     onPointerDown={e => { e.stopPropagation(); }}
                     onClick={() => {
                       if (s.skipped) { updateSet(i, { skipped: false }); return; }
