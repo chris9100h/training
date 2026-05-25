@@ -226,7 +226,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   const act = { ...base, background: 'var(--bg-inset)', color: 'var(--ink-soft)', fontSize: 13, fontFamily: '"Inter", sans-serif' };
 
   return (
-    <div onPointerDown={e => e.stopPropagation()} style={{
+    <div data-keyboard onPointerDown={e => e.stopPropagation()} style={{
       position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
       background: 'var(--bg)', borderTop: `0.5px solid var(--hair)`,
       padding: `5px 8px calc(env(safe-area-inset-bottom, 0px) + 5px)`,
@@ -718,7 +718,11 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
   useEffectT(() => {
     if (!kbField) return;
-    const dismiss = () => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); };
+    const dismiss = (e) => {
+      if (e.target.closest('[data-keyboard]')) return;
+      kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+      setKbField(null); setKbRaw(''); setKbFresh(false);
+    };
     document.addEventListener('pointerdown', dismiss);
     return () => document.removeEventListener('pointerdown', dismiss);
   }, [!!kbField]);
@@ -1273,8 +1277,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               {/* Big confirm button */}
               <div style={{ marginTop: 12, padding: '0 18px' }}>
                 <button
-                  onPointerDown={e => { e.stopPropagation(); }}
-                  onClick={() => completeSet(currentSetIdx)}
+                  onPointerDown={e => { e.preventDefault(); e.stopPropagation(); completeSet(currentSetIdx); }}
+                  onClick={() => {}}
                   disabled={heroSet.kg == null || (kbField?.setIdx !== currentSetIdx && (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps))}
                   style={{
                     width: '100%', minHeight: 44,
@@ -1389,8 +1393,15 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                   )}
 
                   <button
-                    onPointerDown={e => { e.stopPropagation(); }}
-                    onClick={() => s.skipped ? updateSet(i, { skipped: false }) : s.done ? updateSet(i, { done: false }) : completeSet(i)}
+                    onPointerDown={e => {
+                      if (s.done || s.skipped || s.kg == null) return;
+                      e.preventDefault(); e.stopPropagation();
+                      completeSet(i);
+                    }}
+                    onClick={() => {
+                      if (s.skipped) { updateSet(i, { skipped: false }); return; }
+                      if (s.done) { updateSet(i, { done: false }); return; }
+                    }}
                     disabled={!s.done && !s.skipped && (s.kg == null || (kbField?.setIdx !== i && (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)))}
                     style={{
                       width: 26, height: 26, borderRadius: 5, border: 'none', cursor: 'pointer',
