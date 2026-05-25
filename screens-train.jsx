@@ -10,7 +10,7 @@ window._dbg = window._dbg || [];
 const _log = (msg) => {
   const entry = { t: Date.now(), msg };
   window._dbg.push(entry);
-  if (window._dbg.length > 200) window._dbg.shift();
+  if (window._dbg.length > 1000) window._dbg.shift();
 };
 
 function DebugPanel() {
@@ -310,7 +310,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(-1); }}>↓</button>
         <button style={act} onClick={onPlateCalc}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(1); }}>↑</button>
-        <button onClick={onConfirm} style={{ ...base, gridColumn: 4, gridRow: '1 / span 4', background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', fontSize: 20, fontWeight: 700, borderColor: 'var(--accent-deep)' }}>✓</button>
+        <button onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onConfirm(); }} style={{ ...base, gridColumn: 4, gridRow: '1 / span 4', background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', fontSize: 20, fontWeight: 700, borderColor: 'var(--accent-deep)' }}>✓</button>
 
         {/* Row 2: 1 2 3 */}
         {[1,2,3].map(n => <button key={n} style={base} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onType(String(n)); }}>{n}</button>)}
