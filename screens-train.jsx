@@ -300,7 +300,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   const act = { ...base, background: 'var(--bg-inset)', color: 'var(--ink-soft)', fontSize: 13, fontFamily: '"Inter", sans-serif' };
 
   return (
-    <div data-keyboard onPointerDown={e => e.stopPropagation()} style={{
+    <div data-keyboard onPointerDown={e => { e.preventDefault(); e.stopPropagation(); }} style={{
       position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
       background: 'var(--bg)', borderTop: `0.5px solid var(--hair)`,
       padding: `5px 8px calc(env(safe-area-inset-bottom, 0px) + 5px)`,
