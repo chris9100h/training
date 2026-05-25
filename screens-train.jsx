@@ -5,6 +5,80 @@
 
 const { useState: useStateT, useEffect: useEffectT, useRef: useRefT } = React;
 
+// ── Debug log ────────────────────────────────────────────────────────────────
+window._dbg = window._dbg || [];
+const _log = (msg) => {
+  const entry = { t: Date.now(), msg };
+  window._dbg.push(entry);
+  if (window._dbg.length > 1000) window._dbg.shift();
+};
+
+function DebugPanel() {
+  const [open, setOpen] = useStateT(false);
+  const [entries, setEntries] = useStateT([]);
+  useEffectT(() => {
+    if (!open) return;
+    const refresh = () => setEntries([...window._dbg].reverse());
+    refresh();
+    const id = setInterval(refresh, 400);
+    return () => clearInterval(id);
+  }, [open]);
+
+  const btnStyle = {
+    position: 'fixed', bottom: 260, right: 8, zIndex: 9990,
+    background: 'rgba(201,169,97,0.15)', border: '0.5px solid rgba(201,169,97,0.4)',
+    borderRadius: 6, color: '#c9a961', fontSize: 10, fontFamily: 'monospace',
+    padding: '3px 6px', cursor: 'pointer', letterSpacing: '0.05em',
+  };
+
+  if (!open) return (
+    <button style={btnStyle} onClick={() => setOpen(true)}>DBG</button>
+  );
+
+  const copyLog = () => {
+    const text = [...window._dbg].reverse().map((e, idx, arr) => {
+      const prev = arr[idx + 1];
+      const delta = prev ? `+${e.t - prev.t}ms` : '      ';
+      return `${delta.padStart(8)}  ${e.msg}`;
+    }).join('\n');
+    navigator.clipboard?.writeText(text).catch(() => {});
+  };
+
+  const toolbarStyle = { background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 4, color: '#888', fontSize: 10, padding: '4px 8px', cursor: 'pointer' };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9991,
+      background: 'rgba(8,6,3,0.96)', display: 'flex', flexDirection: 'column',
+      fontFamily: 'monospace', fontSize: 11,
+    }}>
+      {/* Scrollable log — fills top space, safe area inset respected via padding-bottom */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 0 6px' }}>
+        {entries.length === 0 && <div style={{ color: '#444', padding: '12px 12px', fontSize: 12 }}>— no entries —</div>}
+        {entries.map((e, idx) => {
+          const prev = entries[idx + 1];
+          const delta = prev ? e.t - prev.t : 0;
+          const color = e.msg.includes('BLOCK') ? '#e87' : e.msg.includes('UNCHECK') ? '#f96' : e.msg.includes('complete') ? '#c9a961' : e.msg.includes('NULL') ? '#f55' : '#9db';
+          return (
+            <div key={idx} style={{ padding: '3px 10px', borderBottom: '0.5px solid rgba(255,255,255,0.04)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
+              <span style={{ color: '#444', flexShrink: 0, width: 52, textAlign: 'right' }}>{prev ? `+${delta}ms` : '      '}</span>
+              <span style={{ color }}>{e.msg}</span>
+            </div>
+          );
+        })}
+      </div>
+      {/* Toolbar at bottom — well clear of iOS status bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: `10px 12px calc(env(safe-area-inset-bottom, 0px) + 12px)`, borderTop: '0.5px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
+        <span style={{ color: '#c9a961', fontWeight: 700, flex: 1, fontSize: 10 }}>DEBUG LOG</span>
+        <button onClick={copyLog} style={toolbarStyle}>COPY</button>
+        <button onClick={() => { window._dbg = []; setEntries([]); }} style={toolbarStyle}>CLEAR</button>
+        <button onClick={() => setOpen(false)} style={{ ...toolbarStyle, fontSize: 16, padding: '2px 8px', border: 'none' }}>×</button>
+      </div>
+    </div>
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }) {
   const fmt = v => v != null ? String(v).replace('.', ',') : '';
   const [raw, setRaw] = useStateT(() => fmt(value));
@@ -226,29 +300,31 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   const act = { ...base, background: 'var(--bg-inset)', color: 'var(--ink-soft)', fontSize: 13, fontFamily: '"Inter", sans-serif' };
 
   return (
-    <div onPointerDown={e => e.stopPropagation()} style={{
-      position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
+    <div data-keyboard
+      onPointerDown={e => { e.preventDefault(); e.stopPropagation(); }}
+      onTouchStart={e => { e.preventDefault(); e.stopPropagation(); }}
+      style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
       background: 'var(--bg)', borderTop: `0.5px solid var(--hair)`,
       padding: `5px 8px calc(env(safe-area-inset-bottom, 0px) + 5px)`,
     }}>
       <div style={{ maxWidth: 480, margin: '0 auto', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gridTemplateRows: `repeat(5, ${H}px)`, gap: 4 }}>
         {/* Row 1: ↓ 🏋 ↑ | ✓ (spans rows 1-4) */}
-        <button style={act} onClick={() => onAdjust(-1)}>↓</button>
+        <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(-1); }}>↓</button>
         <button style={act} onClick={onPlateCalc}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>
-        <button style={act} onClick={() => onAdjust(1)}>↑</button>
-        <button onClick={onConfirm} style={{ ...base, gridColumn: 4, gridRow: '1 / span 4', background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', fontSize: 20, fontWeight: 700, borderColor: 'var(--accent-deep)' }}>✓</button>
+        <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(1); }}>↑</button>
+        <button onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onConfirm(); }} style={{ ...base, gridColumn: 4, gridRow: '1 / span 4', background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', fontSize: 20, fontWeight: 700, borderColor: 'var(--accent-deep)' }}>✓</button>
 
         {/* Row 2: 1 2 3 */}
-        {[1,2,3].map(n => <button key={n} style={base} onClick={() => onType(String(n))}>{n}</button>)}
+        {[1,2,3].map(n => <button key={n} style={base} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onType(String(n)); }}>{n}</button>)}
         {/* Row 3: 4 5 6 */}
-        {[4,5,6].map(n => <button key={n} style={base} onClick={() => onType(String(n))}>{n}</button>)}
+        {[4,5,6].map(n => <button key={n} style={base} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onType(String(n)); }}>{n}</button>)}
         {/* Row 4: 7 8 9 */}
-        {[7,8,9].map(n => <button key={n} style={base} onClick={() => onType(String(n))}>{n}</button>)}
+        {[7,8,9].map(n => <button key={n} style={base} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onType(String(n)); }}>{n}</button>)}
 
         {/* Row 5: , 0 ⌫ | ⌄ */}
-        <button style={{ ...base, color: isKg ? 'var(--ink)' : 'var(--ink-faint)' }} onClick={() => isKg && onType(',')}>{isKg ? ',' : ''}</button>
-        <button style={base} onClick={() => onType('0')}>0</button>
-        <button style={act} onClick={onBackspace}>⌫</button>
+        <button style={{ ...base, color: isKg ? 'var(--ink)' : 'var(--ink-faint)' }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (isKg) onType(','); }}>{isKg ? ',' : ''}</button>
+        <button style={base} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onType('0'); }}>0</button>
+        <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onBackspace(); }}>⌫</button>
         <button style={act} onClick={onDismiss}>⌄</button>
       </div>
     </div>
@@ -289,13 +365,26 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   })();
 
   const updateSession = (fn) => {
-    setStore(s => ({
-      ...s,
-      sessions: s.sessions.map(x => x.id === session.id ? fn(x) : x),
-    }));
+    setStore(s => {
+      const prev = s.sessions.find(x => x.id === session.id);
+      const next = fn(prev);
+      // Detect any set flipping done:true → done:false and log the call stack
+      if (prev && next) {
+        next.entries?.forEach((en, ei) => {
+          en.sets?.forEach((st, si) => {
+            if (st.done === false && prev.entries?.[ei]?.sets?.[si]?.done === true) {
+              const stack = new Error().stack?.split('\n').slice(2, 5).join(' | ') ?? '';
+              _log(`⚠ DONE→FALSE: ex${ei} set${si} | ${stack}`);
+            }
+          });
+        });
+      }
+      return { ...s, sessions: s.sessions.map(x => x.id === session.id ? next : x) };
+    });
   };
 
   const updateSet = (setIdx, patch) => {
+    if ('done' in patch) _log(`updateSet(${setIdx}, done=${patch.done})`);
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
@@ -323,8 +412,38 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   const completeSet = (setIdx) => {
+    const kb = kbFieldRef.current;
+    const rawRef = kbRawRef.current;
+    _log(`completeSet(${setIdx}) kb=${kb?.field ?? 'none'} raw='${rawRef}'`);
+    kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+    setKbField(null); setKbRaw(''); setKbFresh(false);
+    armKbShield();
+    recentCompleteRef.current[setIdx] = Date.now();
+    lastCompleteRef.current = Date.now();
+    _log(`completeSet(${setIdx}) → lastCompleteRef stamped`);
+
     stopTempo();
-    updateSet(setIdx, { done: true });
+    // Build the done patch inside the functional updater so we can read the
+    // latest queued session state and take the max of ref value vs. session
+    // value. This wins regardless of which kbApply calls have flushed yet.
+    updateSession(sess => {
+      const currSet = sess.entries[exIdx]?.sets[setIdx];
+      if (!currSet) return sess;
+      const patch = { done: true };
+      if (kb && kb.setIdx === setIdx && kb.field !== 'kg') {
+        const fromRef = parseInt(rawRef, 10);
+        const fromSess = currSet[kb.field] || 0;
+        const best = Math.max(isNaN(fromRef) ? 0 : fromRef, fromSess);
+        if (best > 0) patch[kb.field] = best;
+      }
+      return {
+        ...sess,
+        entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+          ...en,
+          sets: en.sets.map((st, si) => si !== setIdx ? st : { ...st, ...patch }),
+        }),
+      };
+    });
     setFlashSet(setIdx);
     setTimeout(() => setFlashSet(null), 1400);
     const prevSet = last?.entry?.sets?.[setIdx];
@@ -653,11 +772,49 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
   const [kbRaw, setKbRaw] = useStateT('');
   const [kbFresh, setKbFresh] = useStateT(false);
+  const kbFieldRef = useRefT(null);
+  const kbRawRef = useRefT('');
+  const kbFreshRef = useRefT(false);
+  const [kbShield, setKbShield] = useStateT(false);
+  const kbShieldTimerRef = useRefT(null);
+  // After keyboard dismissal (completeSet or ⌄), briefly keep a touch-blocking
+  // shield at the keyboard's screen position so iOS ghost clicks (fired 200-300ms
+  // after the touch that closed the keyboard) don't land on revealed content.
+  const armKbShield = () => {
+    setKbShield(true);
+    clearTimeout(kbShieldTimerRef.current);
+    kbShieldTimerRef.current = setTimeout(() => setKbShield(false), 400);
+  };
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
   const pendingNavRef = useRefT(false);
+  // Records when a set was last completed via the checkbox; used to ignore
+  // iOS ghost-clicks that fire 200-400ms after completion and would otherwise
+  // re-enter the onClick handler with s.done=true and undo the completion.
+  const recentCompleteRef = useRefT({});
+  // Global timestamp of the most-recent completion across all sets — catches
+  // ghost-clicks that land on a *different* row than the one just completed
+  // (e.g. the keyboard ✓ is over an older row at the time iOS fires the ghost).
+  const lastCompleteRef = useRefT(0);
 
-  useEffectT(() => { setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
+  useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
   useEffectT(() => { if (userId && sessionId) LB.broadcastExIdx(sessionId, exIdx); }, [exIdx]);
+
+  // Log ALL document pointer/click events — captures ghost-clicks and shows where they land.
+  useEffectT(() => {
+    const onPD = e => {
+      const isKb = !!e.target.closest('[data-keyboard]');
+      const isComplete = !!e.target.closest('[data-complete-btn]');
+      _log(`[DOM] pointerdown type=${e.pointerType} isPrimary=${e.isPrimary} kb=${isKb} completebtn=${isComplete} tag=${e.target.tagName}`);
+    };
+    const onClick = e => {
+      const isKb = !!e.target.closest('[data-keyboard]');
+      const isComplete = !!e.target.closest('[data-complete-btn]');
+      _log(`[DOM] click isTrusted=${e.isTrusted} kb=${isKb} completebtn=${isComplete} tag=${e.target.tagName}`);
+    };
+    document.addEventListener('pointerdown', onPD, true);
+    document.addEventListener('click', onClick, true);
+    return () => { document.removeEventListener('pointerdown', onPD, true); document.removeEventListener('click', onClick, true); };
+  }, []);
 
   useEffectT(() => {
     if (!session?.dayId || !session?.id || !userId) return;
@@ -688,18 +845,20 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       });
   }, [session?.id]);
 
-  useEffectT(() => {
-    if (!kbField) return;
-    const dismiss = () => { setKbField(null); setKbRaw(''); setKbFresh(false); };
-    document.addEventListener('pointerdown', dismiss);
-    return () => document.removeEventListener('pointerdown', dismiss);
-  }, [!!kbField]);
+  // No document-level dismiss: the auto-dismiss fired during digit presses (iOS
+  // multi-touch / accidental palm) and cleared kbFieldRef synchronously, causing
+  // kbTypeChar to return early on the next digit and "swallowing" it. The keyboard
+  // now stays open until the user taps ⌄ explicitly or navigates away.
 
   const activateKb = (setIdx, field) => {
+    _log(`activateKb(set${setIdx} ${field})`);
     const s = (store.sessions.find(x => x.id === sessionId)?.entries[exIdx]?.sets[setIdx]);
     const val = field === 'kg'
       ? (s?.kg != null ? String(s.kg).replace('.', ',') : '')
       : (s?.[field] != null ? String(s[field]) : '');
+    kbFieldRef.current = { setIdx, field };
+    kbRawRef.current = val;
+    kbFreshRef.current = true;
     setKbField({ setIdx, field });
     setKbRaw(val);
     setKbFresh(true);
@@ -710,6 +869,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   const kbApply = (newRaw, field, setIdx) => {
+    _log(`kbApply(set${setIdx} ${field} '${newRaw}')`);
     if (field === 'kg') {
       const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
       if (newRaw === '' || !isNaN(num)) {
@@ -732,32 +892,38 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   const kbTypeChar = (char) => {
-    if (!kbField) return;
-    const { setIdx, field } = kbField;
-    const base = kbFresh ? '' : kbRaw;
+    if (!kbFieldRef.current) { _log(`TYPE '${char}' → NULL kbField (swallowed!)`); return; }
+    const { setIdx, field } = kbFieldRef.current;
+    const base = kbFreshRef.current ? '' : kbRawRef.current;
     if (char === ',' && (field !== 'kg' || base.includes(','))) return;
     const newRaw = base + char;
+    kbRawRef.current = newRaw;
+    kbFreshRef.current = false;
     setKbRaw(newRaw);
     setKbFresh(false);
+    _log(`TYPE '${char}' → '${newRaw}' (set${setIdx} ${field})`);
     kbApply(newRaw, field, setIdx);
   };
 
   const kbBackspace = () => {
-    if (!kbField) return;
-    const { setIdx, field } = kbField;
-    const newRaw = kbFresh ? '' : kbRaw.slice(0, -1);
+    if (!kbFieldRef.current) return;
+    const { setIdx, field } = kbFieldRef.current;
+    const newRaw = kbFreshRef.current ? '' : kbRawRef.current.slice(0, -1);
+    kbRawRef.current = newRaw;
+    kbFreshRef.current = false;
     setKbRaw(newRaw);
     setKbFresh(false);
     kbApply(newRaw, field, setIdx);
   };
 
   const kbAdjust = (dir) => {
-    if (!kbField) return;
-    const { setIdx, field } = kbField;
+    if (!kbFieldRef.current) return;
+    const { setIdx, field } = kbFieldRef.current;
     if (field === 'kg') {
-      const cur = parseFloat(kbRaw.replace(',', '.')) || 0;
+      const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
       const next = Math.max(0, Math.round((cur + dir * 1.25) * 100) / 100);
       const newRaw = String(next).replace('.', ',');
+      kbRawRef.current = newRaw;
       setKbRaw(newRaw);
       updateSession(sess => ({
         ...sess,
@@ -771,24 +937,27 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         }),
       }));
     } else {
-      const cur = parseInt(kbRaw, 10) || 0;
+      const cur = parseInt(kbRawRef.current, 10) || 0;
       const next = Math.max(0, cur + dir);
+      kbRawRef.current = String(next);
       setKbRaw(String(next));
       updateSet(setIdx, { [field]: next, done: false });
     }
   };
 
   const kbConfirm = () => {
-    if (!kbField) return;
-    const { setIdx, field } = kbField;
+    if (!kbFieldRef.current) { _log('kbConfirm: NULL kbField (ignored)'); return; }
+    const { setIdx, field } = kbFieldRef.current;
+    _log(`kbConfirm: set${setIdx} field=${field} raw='${kbRawRef.current}'`);
+    kbApply(kbRawRef.current, field, setIdx);
     if (field === 'kg') {
+      _log(`kbConfirm: kg→${isUnilateral ? 'repsL' : 'reps'}`);
       activateKb(setIdx, isUnilateral ? 'repsL' : 'reps');
     } else if (field === 'repsL') {
+      _log('kbConfirm: repsL→repsR');
       activateKb(setIdx, 'repsR');
     } else {
-      setKbField(null);
-      setKbRaw('');
-      setKbFresh(false);
+      _log(`kbConfirm: ${field}→completeSet(${setIdx})`);
       completeSet(setIdx);
       const nextIdx = entry.sets.findIndex((s, i) => i > setIdx && !s.done);
       if (nextIdx !== -1) setTimeout(() => activateKb(nextIdx, 'kg'), 350);
@@ -904,6 +1073,11 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />
       )}
       {/* Improvement overlay */}
+      {/* Block keyboard and content interaction while any overlay is visible */}
+      {(improvedSet || regressionSet || !!progressionUnlocked) && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} />
+      )}
+
       {improvedSet && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
@@ -1235,8 +1409,13 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               {/* Big confirm button */}
               <div style={{ marginTop: 12, padding: '0 18px' }}>
                 <button
-                  onClick={() => completeSet(currentSetIdx)}
-                  disabled={heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)}
+                  data-complete-btn
+                  onPointerDown={e => { e.stopPropagation(); }}
+                  onClick={() => {
+                    if (currentSetIdx < 0) return;
+                    completeSet(currentSetIdx);
+                  }}
+                  disabled={heroSet.kg == null || (kbField?.setIdx !== currentSetIdx && (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps))}
                   style={{
                     width: '100%', minHeight: 44,
                     background: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
@@ -1349,8 +1528,28 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                     <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder="—" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
                   )}
 
-                  <button onClick={() => s.skipped ? updateSet(i, { skipped: false }) : s.done ? updateSet(i, { done: false }) : completeSet(i)}
-                    disabled={!s.done && !s.skipped && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps))}
+                  <button
+                    data-complete-btn
+                    onPointerDown={e => { _log(`row${i} pointerdown done=${s.done}`); e.stopPropagation(); }}
+                    onClick={() => {
+                      const now = Date.now();
+                      _log(`row${i} click done=${s.done} skipped=${s.skipped}`);
+                      if (s.skipped) { updateSet(i, { skipped: false }); return; }
+                      if (s.done) {
+                        const globalDelta = now - (lastCompleteRef.current || 0);
+                        const rowDelta = now - (recentCompleteRef.current[i] || 0);
+                        _log(`row${i} uncheck? globalΔ=${globalDelta}ms rowΔ=${rowDelta}ms`);
+                        if (globalDelta < 2000) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
+                        if (rowDelta < 3000) { _log(`row${i} BLOCKED by row guard (${rowDelta}ms)`); return; }
+                        _log(`row${i} UNCHECK → updateSet done:false`);
+                        updateSet(i, { done: false });
+                        return;
+                      }
+                      if (s.kg == null) return;
+                      _log(`row${i} → completeSet`);
+                      completeSet(i);
+                    }}
+                    disabled={!s.done && !s.skipped && (s.kg == null || (kbField?.setIdx !== i && (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)))}
                     style={{
                       width: 26, height: 26, borderRadius: 5, border: 'none', cursor: 'pointer',
                       background: s.done ? UI.gold : 'transparent',
@@ -1640,6 +1839,15 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
       {confirmEl}
 
+      {/* Post-dismiss shield: blocks ghost clicks that land on revealed content
+          after the keyboard disappears (iOS fires a synthetic click ~300ms after
+          the touch that closed the keyboard). Stays for 400ms after dismissal. */}
+      {kbShield && !kbField && (
+        <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: 260, zIndex: 96, touchAction: 'none' }}
+             onPointerDown={e => e.preventDefault()}
+             onTouchStart={e => e.preventDefault()} />
+      )}
+
       <CustomKeyboard
         visible={!!kbField}
         field={kbField?.field}
@@ -1648,7 +1856,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         onBackspace={kbBackspace}
         onAdjust={kbAdjust}
         onConfirm={kbConfirm}
-        onDismiss={() => { setKbField(null); setKbRaw(''); }}
+        onDismiss={() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); armKbShield(); }}
         onPlateCalc={() => setPlateCalcOpen(true)}
       />
 
@@ -1659,6 +1867,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           ? (parseFloat(kbRaw.replace(',', '.')) || null)
           : (session.entries[exIdx]?.sets[kbField?.setIdx]?.kg ?? null)}
       />
+
+      {localStorage.getItem('logbook-debug-panel') === 'true' && <DebugPanel />}
     </Screen>
   );
 }

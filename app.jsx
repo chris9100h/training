@@ -337,7 +337,7 @@ function App() {
               user: cur.user?.name ? { ...fresh.user, name: cur.user.name } : fresh.user,
               inProgress: activeExists ? inProgressId : null,
               sessions: [...localOnly, ...sessions],
-              exercises: [...localOnlyExercises, ...fresh.exercises.map(e => curExMap.get(e.id) || e)],
+              exercises: [...localOnlyExercises, ...fresh.exercises],
               schedules: [...localOnlySchedules, ...fresh.schedules],
             };
           }
@@ -412,7 +412,26 @@ function App() {
           }
           const existing = s.sessions[idx];
           const sessions = [...s.sessions];
-          sessions[idx] = { ...existing, entries: session.entries, ended: session.ended, startedAt: session.startedAt };
+          // Merge entries: don't let a stale server write uncheck a locally-completed set.
+          // kbApply writes done:false to Supabase on every keystroke; if the realtime event
+          // from that write arrives after completeSet has already set done:true locally,
+          // it would silently revert the checkbox without going through updateSession.
+          const mergedEntries = (session.entries || []).map((serverEntry, ei) => {
+            const localEntry = existing.entries?.[ei];
+            if (!localEntry) return serverEntry;
+            return {
+              ...serverEntry,
+              sets: (serverEntry.sets || []).map((serverSet, si) => {
+                const localSet = localEntry.sets?.[si];
+                if (localSet?.done === true && serverSet.done === false) {
+                  if (window._dbg) window._dbg.push({ t: Date.now(), msg: `⚠ RT ex${ei} set${si}: server done=false blocked (local=true)` });
+                  return localSet;
+                }
+                return serverSet;
+              }),
+            };
+          });
+          sessions[idx] = { ...existing, entries: mergedEntries, ended: session.ended, startedAt: session.startedAt };
           // Session finished remotely — clear inProgress and go to summary
           if (session.ended && s.inProgress === session.id) {
             setRoute({ name: 'session', sessionId: session.id });
