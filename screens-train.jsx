@@ -323,21 +323,33 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   const completeSet = (setIdx) => {
-    // Atomically commit any pending keyboard value for this set's reps field.
-    // Reading refs here (not state) guarantees the latest typed value even if
-    // React hasn't re-rendered yet after the last kbApply call.
     const kb = kbFieldRef.current;
-    const raw = kbRawRef.current;
-    const repsPatch = {};
-    if (kb && kb.setIdx === setIdx && kb.field !== 'kg') {
-      const num = parseInt(raw, 10);
-      if (!isNaN(num) && num > 0) repsPatch[kb.field] = num;
-    }
+    const rawRef = kbRawRef.current;
     kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
     setKbField(null); setKbRaw(''); setKbFresh(false);
 
     stopTempo();
-    updateSet(setIdx, { done: true, ...repsPatch });
+    // Build the done patch inside the functional updater so we can read the
+    // latest queued session state and take the max of ref value vs. session
+    // value. This wins regardless of which kbApply calls have flushed yet.
+    updateSession(sess => {
+      const currSet = sess.entries[exIdx]?.sets[setIdx];
+      if (!currSet) return sess;
+      const patch = { done: true };
+      if (kb && kb.setIdx === setIdx && kb.field !== 'kg') {
+        const fromRef = parseInt(rawRef, 10);
+        const fromSess = currSet[kb.field] || 0;
+        const best = Math.max(isNaN(fromRef) ? 0 : fromRef, fromSess);
+        if (best > 0) patch[kb.field] = best;
+      }
+      return {
+        ...sess,
+        entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+          ...en,
+          sets: en.sets.map((st, si) => si !== setIdx ? st : { ...st, ...patch }),
+        }),
+      };
+    });
     setFlashSet(setIdx);
     setTimeout(() => setFlashSet(null), 1400);
     const prevSet = last?.entry?.sets?.[setIdx];
