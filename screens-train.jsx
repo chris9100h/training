@@ -328,6 +328,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
     setKbField(null); setKbRaw(''); setKbFresh(false);
     recentCompleteRef.current[setIdx] = Date.now();
+    lastCompleteRef.current = Date.now();
 
     stopTempo();
     // Build the done patch inside the functional updater so we can read the
@@ -688,6 +689,10 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   // iOS ghost-clicks that fire 200-400ms after completion and would otherwise
   // re-enter the onClick handler with s.done=true and undo the completion.
   const recentCompleteRef = useRefT({});
+  // Global timestamp of the most-recent completion across all sets — catches
+  // ghost-clicks that land on a *different* row than the one just completed
+  // (e.g. the keyboard ✓ is over an older row at the time iOS fires the ghost).
+  const lastCompleteRef = useRefT(0);
 
   useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
   useEffectT(() => { if (userId && sessionId) LB.broadcastExIdx(sessionId, exIdx); }, [exIdx]);
@@ -947,6 +952,11 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />
       )}
       {/* Improvement overlay */}
+      {/* Block keyboard and content interaction while any overlay is visible */}
+      {(improvedSet || regressionSet || !!progressionUnlocked) && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} />
+      )}
+
       {improvedSet && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
@@ -1403,7 +1413,10 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                     onClick={() => {
                       if (s.skipped) { updateSet(i, { skipped: false }); return; }
                       if (s.done) {
-                        // Ignore ghost-clicks / accidental double-taps within 1s of completion
+                        // Block unchecking if ANY set was completed in the last 600ms — covers
+                        // ghost-clicks that land on a different row than the one just completed.
+                        if (Date.now() - (lastCompleteRef.current || 0) < 600) return;
+                        // Also block per-row within 1s for slower double-taps on the same row.
                         if (Date.now() - (recentCompleteRef.current[i] || 0) < 1000) return;
                         updateSet(i, { done: false });
                         return;
