@@ -5,6 +5,66 @@
 
 const { useState: useStateT, useEffect: useEffectT, useRef: useRefT } = React;
 
+// ── Debug log ────────────────────────────────────────────────────────────────
+window._dbg = window._dbg || [];
+const _log = (msg) => {
+  const entry = { t: Date.now(), msg };
+  window._dbg.push(entry);
+  if (window._dbg.length > 200) window._dbg.shift();
+};
+
+function DebugPanel() {
+  const [open, setOpen] = useStateT(false);
+  const [entries, setEntries] = useStateT([]);
+  useEffectT(() => {
+    if (!open) return;
+    const refresh = () => setEntries([...window._dbg].reverse());
+    refresh();
+    const id = setInterval(refresh, 400);
+    return () => clearInterval(id);
+  }, [open]);
+
+  const btnStyle = {
+    position: 'fixed', bottom: 260, right: 8, zIndex: 9990,
+    background: 'rgba(201,169,97,0.15)', border: '0.5px solid rgba(201,169,97,0.4)',
+    borderRadius: 6, color: '#c9a961', fontSize: 10, fontFamily: 'monospace',
+    padding: '3px 6px', cursor: 'pointer', letterSpacing: '0.05em',
+  };
+
+  if (!open) return (
+    <button style={btnStyle} onClick={() => setOpen(true)}>DBG</button>
+  );
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9991,
+      background: 'rgba(8,6,3,0.96)', display: 'flex', flexDirection: 'column',
+      fontFamily: 'monospace', fontSize: 11,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 12px 8px', borderBottom: '0.5px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
+        <span style={{ color: '#c9a961', fontWeight: 700, flex: 1 }}>DEBUG LOG</span>
+        <button onClick={() => { window._dbg = []; setEntries([]); }} style={{ background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 4, color: '#888', fontSize: 10, padding: '2px 6px', cursor: 'pointer' }}>CLEAR</button>
+        <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: '#888', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
+        {entries.length === 0 && <div style={{ color: '#444', padding: '12px 12px', fontSize: 12 }}>— no entries —</div>}
+        {entries.map((e, idx) => {
+          const prev = entries[idx + 1];
+          const delta = prev ? e.t - prev.t : 0;
+          const color = e.msg.includes('BLOCK') ? '#e87' : e.msg.includes('UNCHECK') ? '#f96' : e.msg.includes('complete') ? '#c9a961' : e.msg.includes('NULL') ? '#f55' : '#9db';
+          return (
+            <div key={idx} style={{ padding: '3px 10px', borderBottom: '0.5px solid rgba(255,255,255,0.04)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
+              <span style={{ color: '#444', flexShrink: 0, width: 52, textAlign: 'right' }}>{prev ? `+${delta}ms` : '      '}</span>
+              <span style={{ color }}>{e.msg}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }) {
   const fmt = v => v != null ? String(v).replace('.', ',') : '';
   const [raw, setRaw] = useStateT(() => fmt(value));
@@ -325,10 +385,12 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const completeSet = (setIdx) => {
     const kb = kbFieldRef.current;
     const rawRef = kbRawRef.current;
+    _log(`completeSet(${setIdx}) kb=${kb?.field ?? 'none'} raw='${rawRef}'`);
     kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
     setKbField(null); setKbRaw(''); setKbFresh(false);
     recentCompleteRef.current[setIdx] = Date.now();
     lastCompleteRef.current = Date.now();
+    _log(`completeSet(${setIdx}) → lastCompleteRef stamped`);
 
     stopTempo();
     // Build the done patch inside the functional updater so we can read the
@@ -697,6 +759,16 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
   useEffectT(() => { if (userId && sessionId) LB.broadcastExIdx(sessionId, exIdx); }, [exIdx]);
 
+  // Log ALL pointer/click events that hit a [data-complete-btn] — captures ghost-clicks
+  // that bypass React handlers and lets us see exact timing.
+  useEffectT(() => {
+    const onPD = e => { if (e.target.closest('[data-complete-btn]')) _log(`[DOM] pointerdown on complete-btn type=${e.pointerType} isPrimary=${e.isPrimary}`); };
+    const onClick = e => { if (e.target.closest('[data-complete-btn]')) _log(`[DOM] click on complete-btn isTrusted=${e.isTrusted}`); };
+    document.addEventListener('pointerdown', onPD, true);
+    document.addEventListener('click', onClick, true);
+    return () => { document.removeEventListener('pointerdown', onPD, true); document.removeEventListener('click', onClick, true); };
+  }, []);
+
   useEffectT(() => {
     if (!session?.dayId || !session?.id || !userId) return;
     LB.supabase
@@ -771,7 +843,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   const kbTypeChar = (char) => {
-    if (!kbFieldRef.current) return;
+    if (!kbFieldRef.current) { _log(`TYPE '${char}' → NULL kbField (swallowed!)`); return; }
     const { setIdx, field } = kbFieldRef.current;
     const base = kbFreshRef.current ? '' : kbRawRef.current;
     if (char === ',' && (field !== 'kg' || base.includes(','))) return;
@@ -780,6 +852,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     kbFreshRef.current = false;
     setKbRaw(newRaw);
     setKbFresh(false);
+    _log(`TYPE '${char}' → '${newRaw}' (set${setIdx} ${field})`);
     kbApply(newRaw, field, setIdx);
   };
 
@@ -824,19 +897,18 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   const kbConfirm = () => {
-    if (!kbFieldRef.current) return;
+    if (!kbFieldRef.current) { _log('kbConfirm: NULL kbField (ignored)'); return; }
     const { setIdx, field } = kbFieldRef.current;
-    // Defensively re-commit the current keyboard value before transitioning.
-    // If the kbApply from the last typed digit got delayed/lost by React batching,
-    // this guarantees the value is in the session queue.
+    _log(`kbConfirm: set${setIdx} field=${field} raw='${kbRawRef.current}'`);
     kbApply(kbRawRef.current, field, setIdx);
     if (field === 'kg') {
+      _log(`kbConfirm: kg→${isUnilateral ? 'repsL' : 'reps'}`);
       activateKb(setIdx, isUnilateral ? 'repsL' : 'reps');
     } else if (field === 'repsL') {
+      _log('kbConfirm: repsL→repsR');
       activateKb(setIdx, 'repsR');
     } else {
-      // Do NOT clear refs here. completeSet reads them and applies via Math.max
-      // safety net, then clears them itself.
+      _log(`kbConfirm: ${field}→completeSet(${setIdx})`);
       completeSet(setIdx);
       const nextIdx = entry.sets.findIndex((s, i) => i > setIdx && !s.done);
       if (nextIdx !== -1) setTimeout(() => activateKb(nextIdx, 'kg'), 350);
@@ -1409,19 +1481,23 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
                   <button
                     data-complete-btn
-                    onPointerDown={e => { e.stopPropagation(); }}
+                    onPointerDown={e => { _log(`row${i} pointerdown done=${s.done}`); e.stopPropagation(); }}
                     onClick={() => {
+                      const now = Date.now();
+                      _log(`row${i} click done=${s.done} skipped=${s.skipped}`);
                       if (s.skipped) { updateSet(i, { skipped: false }); return; }
                       if (s.done) {
-                        // Block unchecking if ANY set was completed in the last 600ms — covers
-                        // ghost-clicks that land on a different row than the one just completed.
-                        if (Date.now() - (lastCompleteRef.current || 0) < 600) return;
-                        // Also block per-row within 1s for slower double-taps on the same row.
-                        if (Date.now() - (recentCompleteRef.current[i] || 0) < 1000) return;
+                        const globalDelta = now - (lastCompleteRef.current || 0);
+                        const rowDelta = now - (recentCompleteRef.current[i] || 0);
+                        _log(`row${i} uncheck? globalΔ=${globalDelta}ms rowΔ=${rowDelta}ms`);
+                        if (globalDelta < 600) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
+                        if (rowDelta < 1000) { _log(`row${i} BLOCKED by row guard (${rowDelta}ms)`); return; }
+                        _log(`row${i} UNCHECK → updateSet done:false`);
                         updateSet(i, { done: false });
                         return;
                       }
                       if (s.kg == null) return;
+                      _log(`row${i} → completeSet`);
                       completeSet(i);
                     }}
                     disabled={!s.done && !s.skipped && (s.kg == null || (kbField?.setIdx !== i && (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)))}
@@ -1733,6 +1809,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           ? (parseFloat(kbRaw.replace(',', '.')) || null)
           : (session.entries[exIdx]?.sets[kbField?.setIdx]?.kg ?? null)}
       />
+
+      <DebugPanel />
     </Screen>
   );
 }
