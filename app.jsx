@@ -337,7 +337,7 @@ function App() {
               user: cur.user?.name ? { ...fresh.user, name: cur.user.name } : fresh.user,
               inProgress: activeExists ? inProgressId : null,
               sessions: [...localOnly, ...sessions],
-              exercises: [...localOnlyExercises, ...fresh.exercises.map(e => curExMap.get(e.id) || e)],
+              exercises: [...localOnlyExercises, ...fresh.exercises],
               schedules: [...localOnlySchedules, ...fresh.schedules],
             };
           }
