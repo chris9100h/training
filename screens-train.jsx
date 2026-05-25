@@ -323,8 +323,21 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   const completeSet = (setIdx) => {
+    // Atomically commit any pending keyboard value for this set's reps field.
+    // Reading refs here (not state) guarantees the latest typed value even if
+    // React hasn't re-rendered yet after the last kbApply call.
+    const kb = kbFieldRef.current;
+    const raw = kbRawRef.current;
+    const repsPatch = {};
+    if (kb && kb.setIdx === setIdx && kb.field !== 'kg') {
+      const num = parseInt(raw, 10);
+      if (!isNaN(num) && num > 0) repsPatch[kb.field] = num;
+    }
+    kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+    setKbField(null); setKbRaw(''); setKbFresh(false);
+
     stopTempo();
-    updateSet(setIdx, { done: true });
+    updateSet(setIdx, { done: true, ...repsPatch });
     setFlashSet(setIdx);
     setTimeout(() => setFlashSet(null), 1400);
     const prevSet = last?.entry?.sets?.[setIdx];
@@ -1248,17 +1261,9 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               {/* Big confirm button */}
               <div style={{ marginTop: 12, padding: '0 18px' }}>
                 <button
-                  onPointerDown={e => {
-                    e.stopPropagation();
-                    const kb = kbFieldRef.current;
-                    if (kb && kb.setIdx === currentSetIdx && kb.field !== 'kg') {
-                      kbApply(kbRawRef.current, kb.field, currentSetIdx);
-                    }
-                    kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-                    setKbField(null); setKbRaw(''); setKbFresh(false);
-                  }}
+                  onPointerDown={e => { e.stopPropagation(); }}
                   onClick={() => completeSet(currentSetIdx)}
-                  disabled={heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)}
+                  disabled={heroSet.kg == null || (kbField?.setIdx !== currentSetIdx && (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps))}
                   style={{
                     width: '100%', minHeight: 44,
                     background: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
@@ -1372,17 +1377,9 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                   )}
 
                   <button
-                    onPointerDown={e => {
-                      e.stopPropagation();
-                      const kb = kbFieldRef.current;
-                      if (kb && kb.setIdx === i && kb.field !== 'kg') {
-                        kbApply(kbRawRef.current, kb.field, i);
-                      }
-                      kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-                      setKbField(null); setKbRaw(''); setKbFresh(false);
-                    }}
+                    onPointerDown={e => { e.stopPropagation(); }}
                     onClick={() => s.skipped ? updateSet(i, { skipped: false }) : s.done ? updateSet(i, { done: false }) : completeSet(i)}
-                    disabled={!s.done && !s.skipped && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps))}
+                    disabled={!s.done && !s.skipped && (s.kg == null || (kbField?.setIdx !== i && (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)))}
                     style={{
                       width: 26, height: 26, borderRadius: 5, border: 'none', cursor: 'pointer',
                       background: s.done ? UI.gold : 'transparent',
