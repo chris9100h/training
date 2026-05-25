@@ -422,7 +422,6 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     lastCompleteRef.current = Date.now();
     _log(`completeSet(${setIdx}) → lastCompleteRef stamped`);
 
-    stopTempo();
     // Build the done patch inside the functional updater so we can read the
     // latest queued session state and take the max of ref value vs. session
     // value. This wins regardless of which kbApply calls have flushed yet.
@@ -801,7 +800,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   // (e.g. the keyboard ✓ is over an older row at the time iOS fires the ghost).
   const lastCompleteRef = useRefT(0);
 
-  useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
+  useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); }, [exIdx, sessionId]);
+  useEffectT(() => () => stopTempo(), []);
   useEffectT(() => { if (userId && sessionId) LB.broadcastExIdx(sessionId, exIdx); }, [exIdx]);
 
   // Log ALL document pointer/click events — captures ghost-clicks and shows where they land.
