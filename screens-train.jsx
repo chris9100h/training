@@ -327,6 +327,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     const rawRef = kbRawRef.current;
     kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
     setKbField(null); setKbRaw(''); setKbFresh(false);
+    recentCompleteRef.current[setIdx] = Date.now();
 
     stopTempo();
     // Build the done patch inside the functional updater so we can read the
@@ -683,6 +684,10 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const kbFreshRef = useRefT(false);
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
   const pendingNavRef = useRefT(false);
+  // Records when a set was last completed via the checkbox; used to ignore
+  // iOS ghost-clicks that fire 200-400ms after completion and would otherwise
+  // re-enter the onClick handler with s.done=true and undo the completion.
+  const recentCompleteRef = useRefT({});
 
   useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
   useEffectT(() => { if (userId && sessionId) LB.broadcastExIdx(sessionId, exIdx); }, [exIdx]);
@@ -822,15 +827,17 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const kbConfirm = () => {
     if (!kbFieldRef.current) return;
     const { setIdx, field } = kbFieldRef.current;
+    // Defensively re-commit the current keyboard value before transitioning.
+    // If the kbApply from the last typed digit got delayed/lost by React batching,
+    // this guarantees the value is in the session queue.
+    kbApply(kbRawRef.current, field, setIdx);
     if (field === 'kg') {
       activateKb(setIdx, isUnilateral ? 'repsL' : 'reps');
     } else if (field === 'repsL') {
       activateKb(setIdx, 'repsR');
     } else {
-      kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-      setKbField(null);
-      setKbRaw('');
-      setKbFresh(false);
+      // Do NOT clear refs here. completeSet reads them and applies via Math.max
+      // safety net, then clears them itself.
       completeSet(setIdx);
       const nextIdx = entry.sets.findIndex((s, i) => i > setIdx && !s.done);
       if (nextIdx !== -1) setTimeout(() => activateKb(nextIdx, 'kg'), 350);
@@ -1277,8 +1284,11 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               {/* Big confirm button */}
               <div style={{ marginTop: 12, padding: '0 18px' }}>
                 <button
-                  onPointerDown={e => { e.preventDefault(); e.stopPropagation(); completeSet(currentSetIdx); }}
-                  onClick={() => {}}
+                  onPointerDown={e => { e.stopPropagation(); }}
+                  onClick={() => {
+                    if (currentSetIdx < 0) return;
+                    completeSet(currentSetIdx);
+                  }}
                   disabled={heroSet.kg == null || (kbField?.setIdx !== currentSetIdx && (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps))}
                   style={{
                     width: '100%', minHeight: 44,
@@ -1393,14 +1403,17 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                   )}
 
                   <button
-                    onPointerDown={e => {
-                      if (s.done || s.skipped || s.kg == null) return;
-                      e.preventDefault(); e.stopPropagation();
-                      completeSet(i);
-                    }}
+                    onPointerDown={e => { e.stopPropagation(); }}
                     onClick={() => {
                       if (s.skipped) { updateSet(i, { skipped: false }); return; }
-                      if (s.done) { updateSet(i, { done: false }); return; }
+                      if (s.done) {
+                        // Ignore ghost-clicks that arrive shortly after completion
+                        if (Date.now() - (recentCompleteRef.current[i] || 0) < 500) return;
+                        updateSet(i, { done: false });
+                        return;
+                      }
+                      if (s.kg == null) return;
+                      completeSet(i);
                     }}
                     disabled={!s.done && !s.skipped && (s.kg == null || (kbField?.setIdx !== i && (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)))}
                     style={{
