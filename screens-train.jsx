@@ -653,10 +653,13 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
   const [kbRaw, setKbRaw] = useStateT('');
   const [kbFresh, setKbFresh] = useStateT(false);
+  const kbFieldRef = useRefT(null);
+  const kbRawRef = useRefT('');
+  const kbFreshRef = useRefT(false);
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
   const pendingNavRef = useRefT(false);
 
-  useEffectT(() => { setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
+  useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
   useEffectT(() => { if (userId && sessionId) LB.broadcastExIdx(sessionId, exIdx); }, [exIdx]);
 
   useEffectT(() => {
@@ -690,7 +693,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
   useEffectT(() => {
     if (!kbField) return;
-    const dismiss = () => { setKbField(null); setKbRaw(''); setKbFresh(false); };
+    const dismiss = () => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); };
     document.addEventListener('pointerdown', dismiss);
     return () => document.removeEventListener('pointerdown', dismiss);
   }, [!!kbField]);
@@ -700,6 +703,9 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     const val = field === 'kg'
       ? (s?.kg != null ? String(s.kg).replace('.', ',') : '')
       : (s?.[field] != null ? String(s[field]) : '');
+    kbFieldRef.current = { setIdx, field };
+    kbRawRef.current = val;
+    kbFreshRef.current = true;
     setKbField({ setIdx, field });
     setKbRaw(val);
     setKbFresh(true);
@@ -732,30 +738,34 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   const kbTypeChar = (char) => {
-    if (!kbField) return;
-    const { setIdx, field } = kbField;
-    const base = kbFresh ? '' : kbRaw;
+    if (!kbFieldRef.current) return;
+    const { setIdx, field } = kbFieldRef.current;
+    const base = kbFreshRef.current ? '' : kbRawRef.current;
     if (char === ',' && (field !== 'kg' || base.includes(','))) return;
     const newRaw = base + char;
+    kbRawRef.current = newRaw;
+    kbFreshRef.current = false;
     setKbRaw(newRaw);
     setKbFresh(false);
     kbApply(newRaw, field, setIdx);
   };
 
   const kbBackspace = () => {
-    if (!kbField) return;
-    const { setIdx, field } = kbField;
-    const newRaw = kbFresh ? '' : kbRaw.slice(0, -1);
+    if (!kbFieldRef.current) return;
+    const { setIdx, field } = kbFieldRef.current;
+    const newRaw = kbFreshRef.current ? '' : kbRawRef.current.slice(0, -1);
+    kbRawRef.current = newRaw;
+    kbFreshRef.current = false;
     setKbRaw(newRaw);
     setKbFresh(false);
     kbApply(newRaw, field, setIdx);
   };
 
   const kbAdjust = (dir) => {
-    if (!kbField) return;
-    const { setIdx, field } = kbField;
+    if (!kbFieldRef.current) return;
+    const { setIdx, field } = kbFieldRef.current;
     if (field === 'kg') {
-      const cur = parseFloat(kbRaw.replace(',', '.')) || 0;
+      const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
       const next = Math.max(0, Math.round((cur + dir * 1.25) * 100) / 100);
       const newRaw = String(next).replace('.', ',');
       setKbRaw(newRaw);
@@ -771,21 +781,23 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         }),
       }));
     } else {
-      const cur = parseInt(kbRaw, 10) || 0;
+      const cur = parseInt(kbRawRef.current, 10) || 0;
       const next = Math.max(0, cur + dir);
+      kbRawRef.current = String(next);
       setKbRaw(String(next));
       updateSet(setIdx, { [field]: next, done: false });
     }
   };
 
   const kbConfirm = () => {
-    if (!kbField) return;
-    const { setIdx, field } = kbField;
+    if (!kbFieldRef.current) return;
+    const { setIdx, field } = kbFieldRef.current;
     if (field === 'kg') {
       activateKb(setIdx, isUnilateral ? 'repsL' : 'reps');
     } else if (field === 'repsL') {
       activateKb(setIdx, 'repsR');
     } else {
+      kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
       setKbField(null);
       setKbRaw('');
       setKbFresh(false);
