@@ -233,22 +233,22 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
     }}>
       <div style={{ maxWidth: 480, margin: '0 auto', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gridTemplateRows: `repeat(5, ${H}px)`, gap: 4 }}>
         {/* Row 1: ↓ 🏋 ↑ | ✓ (spans rows 1-4) */}
-        <button style={act} onClick={() => onAdjust(-1)}>↓</button>
+        <button style={act} onPointerDown={e => { e.preventDefault(); onAdjust(-1); }}>↓</button>
         <button style={act} onClick={onPlateCalc}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>
-        <button style={act} onClick={() => onAdjust(1)}>↑</button>
+        <button style={act} onPointerDown={e => { e.preventDefault(); onAdjust(1); }}>↑</button>
         <button onClick={onConfirm} style={{ ...base, gridColumn: 4, gridRow: '1 / span 4', background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', fontSize: 20, fontWeight: 700, borderColor: 'var(--accent-deep)' }}>✓</button>
 
         {/* Row 2: 1 2 3 */}
-        {[1,2,3].map(n => <button key={n} style={base} onClick={() => onType(String(n))}>{n}</button>)}
+        {[1,2,3].map(n => <button key={n} style={base} onPointerDown={e => { e.preventDefault(); onType(String(n)); }}>{n}</button>)}
         {/* Row 3: 4 5 6 */}
-        {[4,5,6].map(n => <button key={n} style={base} onClick={() => onType(String(n))}>{n}</button>)}
+        {[4,5,6].map(n => <button key={n} style={base} onPointerDown={e => { e.preventDefault(); onType(String(n)); }}>{n}</button>)}
         {/* Row 4: 7 8 9 */}
-        {[7,8,9].map(n => <button key={n} style={base} onClick={() => onType(String(n))}>{n}</button>)}
+        {[7,8,9].map(n => <button key={n} style={base} onPointerDown={e => { e.preventDefault(); onType(String(n)); }}>{n}</button>)}
 
         {/* Row 5: , 0 ⌫ | ⌄ */}
-        <button style={{ ...base, color: isKg ? 'var(--ink)' : 'var(--ink-faint)' }} onClick={() => isKg && onType(',')}>{isKg ? ',' : ''}</button>
-        <button style={base} onClick={() => onType('0')}>0</button>
-        <button style={act} onClick={onBackspace}>⌫</button>
+        <button style={{ ...base, color: isKg ? 'var(--ink)' : 'var(--ink-faint)' }} onPointerDown={e => { e.preventDefault(); if (isKg) onType(','); }}>{isKg ? ',' : ''}</button>
+        <button style={base} onPointerDown={e => { e.preventDefault(); onType('0'); }}>0</button>
+        <button style={act} onPointerDown={e => { e.preventDefault(); onBackspace(); }}>⌫</button>
         <button style={act} onClick={onDismiss}>⌄</button>
       </div>
     </div>
