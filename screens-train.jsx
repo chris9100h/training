@@ -363,13 +363,26 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   })();
 
   const updateSession = (fn) => {
-    setStore(s => ({
-      ...s,
-      sessions: s.sessions.map(x => x.id === session.id ? fn(x) : x),
-    }));
+    setStore(s => {
+      const prev = s.sessions.find(x => x.id === session.id);
+      const next = fn(prev);
+      // Detect any set flipping done:true → done:false and log the call stack
+      if (prev && next) {
+        next.entries?.forEach((en, ei) => {
+          en.sets?.forEach((st, si) => {
+            if (st.done === false && prev.entries?.[ei]?.sets?.[si]?.done === true) {
+              const stack = new Error().stack?.split('\n').slice(2, 5).join(' | ') ?? '';
+              _log(`⚠ DONE→FALSE: ex${ei} set${si} | ${stack}`);
+            }
+          });
+        });
+      }
+      return { ...s, sessions: s.sessions.map(x => x.id === session.id ? next : x) };
+    });
   };
 
   const updateSet = (setIdx, patch) => {
+    if ('done' in patch) _log(`updateSet(${setIdx}, done=${patch.done})`);
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
@@ -773,11 +786,18 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
   useEffectT(() => { if (userId && sessionId) LB.broadcastExIdx(sessionId, exIdx); }, [exIdx]);
 
-  // Log ALL pointer/click events that hit a [data-complete-btn] — captures ghost-clicks
-  // that bypass React handlers and lets us see exact timing.
+  // Log ALL document pointer/click events — captures ghost-clicks and shows where they land.
   useEffectT(() => {
-    const onPD = e => { if (e.target.closest('[data-complete-btn]')) _log(`[DOM] pointerdown on complete-btn type=${e.pointerType} isPrimary=${e.isPrimary}`); };
-    const onClick = e => { if (e.target.closest('[data-complete-btn]')) _log(`[DOM] click on complete-btn isTrusted=${e.isTrusted}`); };
+    const onPD = e => {
+      const isKb = !!e.target.closest('[data-keyboard]');
+      const isComplete = !!e.target.closest('[data-complete-btn]');
+      _log(`[DOM] pointerdown type=${e.pointerType} isPrimary=${e.isPrimary} kb=${isKb} completebtn=${isComplete} tag=${e.target.tagName}`);
+    };
+    const onClick = e => {
+      const isKb = !!e.target.closest('[data-keyboard]');
+      const isComplete = !!e.target.closest('[data-complete-btn]');
+      _log(`[DOM] click isTrusted=${e.isTrusted} kb=${isKb} completebtn=${isComplete} tag=${e.target.tagName}`);
+    };
     document.addEventListener('pointerdown', onPD, true);
     document.addEventListener('click', onClick, true);
     return () => { document.removeEventListener('pointerdown', onPD, true); document.removeEventListener('click', onClick, true); };
@@ -818,6 +838,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   // now stays open until the user taps ⌄ explicitly or navigates away.
 
   const activateKb = (setIdx, field) => {
+    _log(`activateKb(set${setIdx} ${field})`);
     const s = (store.sessions.find(x => x.id === sessionId)?.entries[exIdx]?.sets[setIdx]);
     const val = field === 'kg'
       ? (s?.kg != null ? String(s.kg).replace('.', ',') : '')
@@ -835,6 +856,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   const kbApply = (newRaw, field, setIdx) => {
+    _log(`kbApply(set${setIdx} ${field} '${newRaw}')`);
     if (field === 'kg') {
       const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
       if (newRaw === '' || !isNaN(num)) {
