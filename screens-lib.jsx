@@ -2530,18 +2530,20 @@ function SettingsScreen({ store, setStore, go, userId }) {
           {trainingOpen && (
             <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div className="micro">REST TIMERS</div>
-              {[
-                ['Default', 'restDefault', 120],
-                ['Big',     'restBig',     180],
-                ['Medium',  'restMedium',  120],
-                ['Small',   'restSmall',   90],
-              ].map(([label, key, def]) => (
-                <div key={key}>
-                  <div className="micro" style={{ marginBottom: 6 }}>{label.toUpperCase()}</div>
-                  <Stepper value={store.settings?.[key] || def} step={15} min={0} suffix="s"
-                    onChange={(v) => setStore(s => ({ ...s, settings: { ...s.settings, [key]: v } }))} />
-                </div>
-              ))}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                {[
+                  ['Default', 'restDefault', 120],
+                  ['Big',     'restBig',     180],
+                  ['Medium',  'restMedium',  120],
+                  ['Small',   'restSmall',   90],
+                ].map(([label, key, def]) => (
+                  <div key={key}>
+                    <div className="micro" style={{ marginBottom: 6 }}>{label.toUpperCase()}</div>
+                    <Stepper value={store.settings?.[key] || def} step={15} min={0} suffix="s"
+                      onChange={(v) => setStore(s => ({ ...s, settings: { ...s.settings, [key]: v } }))} />
+                  </div>
+                ))}
+              </div>
               <Hairline style={{ margin: '2px 0' }} />
               <div className="micro">REP TEMPO</div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -2551,15 +2553,17 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 </div>
               </div>
               {store.settings?.tempoEnabled && (<>
-                <div>
-                  <div className="micro" style={{ marginBottom: 6 }}>ECCENTRIC (DOWN)</div>
-                  <Stepper value={store.settings?.tempoEccentric ?? 4} step={0.5} min={0.5} max={10} suffix="s"
-                    onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoEccentric: v } }))} />
-                </div>
-                <div>
-                  <div className="micro" style={{ marginBottom: 6 }}>CONCENTRIC (UP)</div>
-                  <Stepper value={store.settings?.tempoConcentric ?? 1} step={0.5} min={0.5} max={10} suffix="s"
-                    onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoConcentric: v } }))} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div>
+                    <div className="micro" style={{ marginBottom: 6 }}>ECCENTRIC (DOWN)</div>
+                    <Stepper value={store.settings?.tempoEccentric ?? 4} step={0.5} min={0.5} max={10} suffix="s"
+                      onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoEccentric: v } }))} />
+                  </div>
+                  <div>
+                    <div className="micro" style={{ marginBottom: 6 }}>CONCENTRIC (UP)</div>
+                    <Stepper value={store.settings?.tempoConcentric ?? 1} step={0.5} min={0.5} max={10} suffix="s"
+                      onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoConcentric: v } }))} />
+                  </div>
                 </div>
                 <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
                   Beeps subdivide each phase evenly · count increases each beat
