@@ -563,6 +563,12 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     updateSession(sess => ({ ...sess, currentExIdx: newIdx }));
   };
 
+  const skipSet = () => {
+    const idx = entry.sets.findIndex(s => !s.done && !s.skipped);
+    if (idx < 0) return;
+    updateSet(idx, { skipped: true });
+  };
+
   const skipExercise = () => {
     updateSession(sess => ({
       ...sess,
@@ -1658,16 +1664,17 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
-        {exIdx === session.entries.length - 1 && !allDone ? (<>
-          <Btn onClick={skipExercise} style={{ flex: 1 }}>
-            {completed === 0 ? 'Skip exercise' : 'Skip remaining'}
+        {allDone ? (
+          <Btn onClick={() => navigate(1)} style={{ flex: 1 }}>
+            {exIdx === session.entries.length - 1 ? 'Finish →' : 'Next exercise →'}
           </Btn>
-          <Btn onClick={() => navigate(1)} style={{ flex: 1 }}>Finish →</Btn>
-        </>) : (
-          <Btn onClick={allDone ? () => navigate(1) : skipExercise} style={{ flex: 1 }}>
-            {allDone ? (exIdx === session.entries.length - 1 ? 'Finish →' : 'Next exercise →') : completed === 0 ? 'Skip exercise' : 'Skip remaining'}
-          </Btn>
-        )}
+        ) : (<>
+          <Btn onClick={skipSet} style={{ flex: 1 }}>Skip set</Btn>
+          <Btn onClick={skipExercise} style={{ flex: 1 }}>Skip exercise</Btn>
+          {exIdx === session.entries.length - 1 && (
+            <Btn onClick={() => navigate(1)} style={{ flex: 1 }}>Finish →</Btn>
+          )}
+        </>)}
       </div>
 
       {/* finish confirmation */}
