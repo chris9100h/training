@@ -2538,7 +2538,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   ['Small',   'restSmall',   90],
                 ].map(([label, key, def]) => (
                   <div key={key}>
-                    <div className="micro" style={{ marginBottom: 6 }}>{label.toUpperCase()}</div>
+                    <div className="micro" style={{ marginBottom: 6, textAlign: 'center' }}>{label.toUpperCase()}</div>
                     <Stepper value={store.settings?.[key] || def} step={15} min={0} suffix="s"
                       onChange={(v) => setStore(s => ({ ...s, settings: { ...s.settings, [key]: v } }))} />
                   </div>
@@ -2555,12 +2555,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
               {store.settings?.tempoEnabled && (<>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div>
-                    <div className="micro" style={{ marginBottom: 6 }}>ECCENTRIC (DOWN)</div>
+                    <div className="micro" style={{ marginBottom: 6, textAlign: 'center' }}>ECCENTRIC (DOWN)</div>
                     <Stepper value={store.settings?.tempoEccentric ?? 4} step={0.5} min={0.5} max={10} suffix="s"
                       onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoEccentric: v } }))} />
                   </div>
                   <div>
-                    <div className="micro" style={{ marginBottom: 6 }}>CONCENTRIC (UP)</div>
+                    <div className="micro" style={{ marginBottom: 6, textAlign: 'center' }}>CONCENTRIC (UP)</div>
                     <Stepper value={store.settings?.tempoConcentric ?? 1} step={0.5} min={0.5} max={10} suffix="s"
                       onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoConcentric: v } }))} />
                   </div>
