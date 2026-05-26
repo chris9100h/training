@@ -2545,7 +2545,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 ))}
               </div>
               <Hairline style={{ margin: '2px 0' }} />
-              <div className="micro">REP TEMPO</div>
+              <div className="micro">PACEGUARD</div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span className="micro" style={{ color: UI.inkSoft }}>Enabled</span>
                 <div onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, tempoEnabled: !s.settings?.tempoEnabled } }))} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', background: store.settings?.tempoEnabled ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${store.settings?.tempoEnabled ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>

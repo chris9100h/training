@@ -1600,7 +1600,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                 color: tempoActive ? 'var(--accent)' : UI.inkFaint,
                 fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
               }}>
-                {tempoActive ? 'Stop' : 'Tempo'}
+                {tempoActive ? 'Stop' : 'Paceguard'}
               </button>
             )}
             <div style={{ flex: 1 }} />
