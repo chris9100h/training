@@ -567,6 +567,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     const idx = entry.sets.findIndex(s => !s.done && !s.skipped);
     if (idx < 0) return;
     updateSet(idx, { skipped: true });
+    const willBeAllDone = entry.sets.every((s, i) => i === idx || s.done || s.skipped);
+    if (willBeAllDone) navigate(1);
   };
 
   const skipExercise = () => {
