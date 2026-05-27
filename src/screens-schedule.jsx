@@ -1,6 +1,6 @@
 /* Schedules — list, detail, edit, create */
 
-const { useState: useStateS, useMemo: useMemoS, useRef: useRefS } = React;
+const { useState: useStateS, useMemo: useMemoS } = React;
 
 const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','BACK','REST'];
 

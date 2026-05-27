@@ -48,9 +48,7 @@ function LoginScreen() {
 
       {/* Centered block: logo + title + form */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
-        <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain' }} />
-        <div style={{ textAlign: 'center', marginTop: 0, marginBottom: 28 }}>
-        </div>
+        <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain', marginBottom: 28 }} />
         <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
           <Field label="Email">
             <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus />
@@ -487,7 +485,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         <TopBar
           title={<span>Hey, <em style={{ fontFamily: UI.fontDisplay, fontStyle: 'italic', fontWeight: 300, color: UI.gold }}>{store.user.name}</em></span>}
           sub={new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
-          right={<button onClick={() => go({ name: 'settings' })} style={{ ...btnIcon, fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: '50%', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
+          right={<button onClick={() => go({ name: 'settings' })} style={{ background: 'transparent', border: 'none', padding: 4, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: '50%', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
         />
         <div style={{ padding: 22 }}>
           {hasPlans ? (

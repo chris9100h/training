@@ -783,7 +783,6 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [swapOpen, setSwapOpen] = useStateT(false);
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
-  const tempoStateRef = useRefT({ phase: 'ecc', tick: 0 });
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }

@@ -675,7 +675,7 @@ window.LB = {
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
   signIn, signUp, signOut, deleteAllData, importFromBackup,
-  loadFromSupabase, syncStore, seedStarter,
+  loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
