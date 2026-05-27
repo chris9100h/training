@@ -1,16 +1,16 @@
-const CACHE = 'zane-v1.690';
+const CACHE = 'zane-v1.691';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 const ASSETS = [
   '/training/',
   '/training/index.html',
-  '/training/store.js',
-  '/training/supabase.js',
-  '/training/ui.jsx',
-  '/training/screens-home.jsx',
-  '/training/screens-schedule.jsx',
-  '/training/screens-train.jsx',
-  '/training/screens-lib.jsx',
-  '/training/app.jsx',
+  '/training/src/store.js',
+  '/training/src/supabase.js',
+  '/training/src/ui.jsx',
+  '/training/src/screens-home.jsx',
+  '/training/src/screens-schedule.jsx',
+  '/training/src/screens-train.jsx',
+  '/training/src/screens-lib.jsx',
+  '/training/src/app.jsx',
   '/training/icons/icon-192.png',
   '/training/icons/icon-512.png',
 ];

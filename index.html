@@ -210,14 +210,14 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>
-<script src="supabase.js"></script>
-<script src="store.js"></script>
-<script type="text/babel" src="ui.jsx"></script>
-<script type="text/babel" src="screens-home.jsx"></script>
-<script type="text/babel" src="screens-schedule.jsx"></script>
-<script type="text/babel" src="screens-train.jsx"></script>
-<script type="text/babel" src="screens-lib.jsx"></script>
-<script type="text/babel" src="app.jsx"></script>
+<script src="src/supabase.js"></script>
+<script src="src/store.js"></script>
+<script type="text/babel" src="src/ui.jsx"></script>
+<script type="text/babel" src="src/screens-home.jsx"></script>
+<script type="text/babel" src="src/screens-schedule.jsx"></script>
+<script type="text/babel" src="src/screens-train.jsx"></script>
+<script type="text/babel" src="src/screens-lib.jsx"></script>
+<script type="text/babel" src="src/app.jsx"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

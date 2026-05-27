@@ -16,10 +16,14 @@
 - **Babel Standalone** — JSX funktioniert, TypeScript nicht. Syntaxfehler crashen die gesamte App ohne hilfreiche Fehlermeldung.
 - **Dateistruktur:**
   - `index.html` — CSS-Variablen, globale Styles, Animationen, Skripte
-  - `ui.jsx` — gemeinsame UI-Komponenten (UI-Objekt, Screen, TopBar, TabBar, Btn, Card, …)
-  - `app.jsx` — Root-Komponente, Auth, Routing, Store-Sync
-  - `screens-home.jsx`, `screens-schedule.jsx`, `screens-train.jsx`, `screens-lib.jsx` — einzelne Screens
-  - `store.js` — Supabase-Lesen/Schreiben, Auth-Funktionen
+  - `sw.js` — Service Worker
+  - `manifest.json` — PWA-Manifest
+  - `src/ui.jsx` — gemeinsame UI-Komponenten (UI-Objekt, Screen, TopBar, TabBar, Btn, Card, …)
+  - `src/app.jsx` — Root-Komponente, Auth, Routing, Store-Sync
+  - `src/screens-home.jsx`, `src/screens-schedule.jsx`, `src/screens-train.jsx`, `src/screens-lib.jsx` — einzelne Screens
+  - `src/store.js` — Supabase-Lesen/Schreiben, Auth-Funktionen
+  - `src/supabase.js` — Supabase JS Client (vendored)
+  - `supabase/` — Migrationen, Edge Functions, Schema
 
 ## Screens & Navigation
 
