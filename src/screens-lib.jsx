@@ -561,7 +561,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
         )}
       </div>
 
-      <div style={{ padding: '18px 22px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {!editMode && <div style={{ padding: '18px 22px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
         {/* Stats — SubDials */}
         <div style={{ display: 'flex', justifyContent: 'space-around', padding: '6px 0' }}>
@@ -652,7 +652,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
             {history.length === 0 && <Empty title="Never trained" />}
           </div>
         </div>
-      </div>
+      </div>}
       {confirmEl}
     </Screen>
   );
@@ -670,7 +670,7 @@ function ProgressChart({ points }) {
   });
   const path = xy.map(([x,y], i) => `${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   return (
-    <div style={{ padding: '10px 0' }}>
+    <div style={{ padding: '10px 0', maxWidth: 380 }}>
       <div className="micro" style={{ marginBottom: 8, color: UI.inkFaint }}>EST. 1RM · HISTORY</div>
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
         <path d={path} fill="none" stroke={UI.gold} strokeWidth="1" opacity="0.6" />
