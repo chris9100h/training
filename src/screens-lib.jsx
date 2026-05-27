@@ -520,27 +520,15 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
         right={
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             {editMode ? (
-              <>
-                {!autoEdit && (
-                  <Btn kind="ghost" onClick={cancelEdit}
-                    style={{ minHeight: 32, padding: '5px 14px', fontSize: 11 }}>
-                    Cancel
-                  </Btn>
-                )}
-                <Btn kind="ghost" onClick={saveEdit}
-                  style={{ color: UI.gold, borderColor: UI.goldSoft, minHeight: 32, padding: '5px 14px', fontSize: 11 }}>
-                  {autoEdit ? (editQueue.length > 0 ? 'Save & Next' : 'Save') : 'Save'}
-                </Btn>
-                {autoEdit && (
-                  <button onClick={() => go(back || { name: 'lib' })} style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    width: 30, height: 30, borderRadius: '50%',
-                    boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
-                    color: UI.inkSoft, fontSize: 16, lineHeight: 1,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}>×</button>
-                )}
-              </>
+              autoEdit && (
+                <button onClick={() => go(back || { name: 'lib' })} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  width: 30, height: 30, borderRadius: '50%',
+                  boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
+                  color: UI.inkSoft, fontSize: 16, lineHeight: 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>×</button>
+              )
             ) : (
               <>
                 <button onClick={startEdit} style={{
@@ -618,7 +606,14 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
                   : 'Uses planned reps from each schedule day'}
               </div>
             </div>
-            <Btn kind="ghost" onClick={cancelEdit} style={{ fontSize: 11 }}>Cancel</Btn>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <Btn kind="ghost" onClick={cancelEdit} style={{ flex: 1 }}>
+                {autoEdit ? 'Skip' : 'Cancel'}
+              </Btn>
+              <Btn kind="ghost" onClick={saveEdit} style={{ flex: 1, color: UI.gold, borderColor: UI.goldSoft }}>
+                {autoEdit ? (editQueue.length > 0 ? 'Save & Next' : 'Save') : 'Save'}
+              </Btn>
+            </div>
           </div>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
