@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS public.zane_user_settings (
   tempo_concentric       numeric DEFAULT 1,
   smart_progression      boolean DEFAULT false,
   progression_range_top  integer DEFAULT 4,
-  equipment_config       jsonb
+  equipment_config       jsonb,
+  custom_day_types       text[] NOT NULL DEFAULT '{}'
 );
 
 -- Pushover cancellation token — no RLS, never exposed to clients directly.

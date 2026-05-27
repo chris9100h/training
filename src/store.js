@@ -160,6 +160,7 @@ async function importFromBackup(backup, userId) {
       cycle_week_view: sett.cycleWeekView ?? false,
       accent_color: sett.accentColor ?? 'copper',
       dark_mode: sett.darkMode ?? 'dark',
+      custom_day_types: backup.customDayTypes ?? [],
     }),
   ].filter(Boolean));
 }
@@ -251,7 +252,7 @@ async function loadFromSupabase(userId, _depth = 0) {
     weekPlanStartDate: sett.week_plan_start_date ?? null,
     lastAdvancedDate: sett.last_advanced_date ?? null,
     inProgress: sett.in_progress_session_id ?? null,
-    customDayTypes: [],
+    customDayTypes: sett.custom_day_types ?? [],
     settings: {
         unit: sett.unit || 'kg',
         restDefault: sett.rest_default || 120,
@@ -396,7 +397,8 @@ async function syncStore(prev, next, userId) {
     prev.settings?.tempoConcentric    !== next.settings?.tempoConcentric    ||
     prev.settings?.smartProgression   !== next.settings?.smartProgression   ||
     prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop ||
-    JSON.stringify(prev.settings?.equipmentConfig) !== JSON.stringify(next.settings?.equipmentConfig);
+    JSON.stringify(prev.settings?.equipmentConfig) !== JSON.stringify(next.settings?.equipmentConfig) ||
+    JSON.stringify(prev.customDayTypes) !== JSON.stringify(next.customDayTypes);
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
@@ -422,6 +424,7 @@ async function syncStore(prev, next, userId) {
       smart_progression: next.settings?.smartProgression ?? false,
       progression_range_top: next.settings?.progressionRangeTop ?? 4,
       equipment_config: next.settings?.equipmentConfig ?? {},
+      custom_day_types: next.customDayTypes ?? [],
       in_progress_session_id: next.inProgress ?? null,
     }));
   }
