@@ -872,9 +872,9 @@ function HomeScreen({ store, setStore, go, userId }) {
           </Frame>
         )}
       </div>
-      {skipReasonModal && (
-        <div onClick={() => setSkipReasonModal(null)} style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-          <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 440, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: '20px 20px 0 0', padding: '24px 22px calc(env(safe-area-inset-bottom,0px) + 28px)' }}>
+      <Sheet open={!!skipReasonModal} onClose={() => setSkipReasonModal(null)}>
+        {skipReasonModal && (
+          <>
             <div style={{ fontSize: 22, fontWeight: 700, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase', textAlign: 'center', color: UI.ink, marginBottom: 4 }}>{skipReasonModal.mode === 'edit' ? 'Edit Reason' : 'Why Did You Skip?'}</div>
             <div className="micro" style={{ marginBottom: 18, color: UI.inkFaint, textAlign: 'center' }}>{skipReasonModal.data?.dayName}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -899,12 +899,10 @@ function HomeScreen({ store, setStore, go, userId }) {
                 );
               })}
             </div>
-            <button onClick={() => setSkipReasonModal(null)} style={{ marginTop: 14, width: '100%', background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)', boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.3), inset 0 1px 0 rgba(255,240,200,0.3)', border: 'none', borderRadius: 14, padding: '16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'rgba(10,8,5,0.85)', letterSpacing: '0.14em', textTransform: 'uppercase', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+            <Btn onClick={() => setSkipReasonModal(null)} style={{ marginTop: 14, width: '100%' }}>Cancel</Btn>
+          </>
+        )}
+      </Sheet>
       {confirmEl}
     </Screen>
   );
