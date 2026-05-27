@@ -14,9 +14,10 @@ CREATE TABLE IF NOT EXISTS public.zane_exercises (
   name       text NOT NULL DEFAULT '',
   tags       text[] NOT NULL DEFAULT '{}',
   note       text NOT NULL DEFAULT '',
-  category   text,
-  unilateral boolean NOT NULL DEFAULT false,
-  equipment  text
+  category         text,
+  unilateral       boolean NOT NULL DEFAULT false,
+  equipment        text,
+  progression_reps integer
 );
 
 CREATE TABLE IF NOT EXISTS public.zane_schedules (

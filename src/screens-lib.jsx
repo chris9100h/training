@@ -419,14 +419,15 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
   const [editCategory, setEditCategory] = useStateL(null);
   const [editUnilateral, setEditUnilateral] = useStateL(false);
   const [editEquipment, setEditEquipment] = useStateL(null);
+  const [editProgressionReps, setEditProgressionReps] = useStateL(null);
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditUnilateral(!!ex.unilateral); setEditEquipment(ex.equipment || null); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditUnilateral(!!ex.unilateral); setEditEquipment(ex.equipment || null); setEditProgressionReps(ex.progression_reps ?? null); setEditMode(true); };
   const cancelEdit = () => setEditMode(false);
   const saveEdit = () => {
     if (!editName.trim()) return;
-    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral, equipment: editEquipment || null } : e) }));
+    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral, equipment: editEquipment || null, progression_reps: editProgressionReps ?? null } : e) }));
     setEditMode(false);
   };
   const toggleEditTag = (m) => setEditTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
@@ -526,6 +527,24 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
               <span className="label">Movement type</span>
               <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                 <Pill gold={editUnilateral} onClick={() => setEditUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
+              </div>
+            </div>
+            <div>
+              <span className="label">Progression rep target</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                {editProgressionReps == null ? (
+                  <Pill onClick={() => setEditProgressionReps(12)} style={{ cursor: 'pointer' }}>+ Set global target</Pill>
+                ) : (
+                  <>
+                    <Stepper value={editProgressionReps} onChange={v => setEditProgressionReps(Math.max(1, Math.round(v)))} step={1} min={1} />
+                    <button onClick={() => setEditProgressionReps(null)} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 11, cursor: 'pointer', letterSpacing: '0.05em' }}>Clear</button>
+                  </>
+                )}
+              </div>
+              <div className="micro" style={{ marginTop: 6, color: UI.inkFaint }}>
+                {editProgressionReps == null
+                  ? 'Uses planned reps from each schedule day'
+                  : 'Overrides schedule — individual days can still override this'}
               </div>
             </div>
             <Btn kind="ghost" onClick={cancelEdit} style={{ fontSize: 11 }}>Cancel</Btn>

@@ -360,7 +360,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const isUnilateral = !!exercise?.unilateral;
   const progressionTarget = (() => {
     if (!store.settings?.smartProgression) return null;
-    const target = (entry?.plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+    const base = entry?.progressionRepsOverride ?? exercise?.progression_reps ?? entry?.plannedReps ?? 0;
+    const target = base + (store.settings?.progressionRangeTop ?? 4);
     return target > 0 ? target : null;
   })();
 
@@ -454,7 +455,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? null;
       if (!increment) return null;
-      const targetRepsTop = (entry.plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+      const effectiveProgressionReps = entry.progressionRepsOverride ?? exercise?.progression_reps ?? entry.plannedReps;
+      const targetRepsTop = (effectiveProgressionReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
       const doneSets = updatedSets.filter(s => s.done && !s.skipped && s.kg != null);
       if (!doneSets.length) return null;
       const allHitTop = doneSets.every(s => {
