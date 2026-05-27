@@ -531,20 +531,21 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
             </div>
             <div>
               <span className="label">Progression rep target</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-                {editProgressionReps == null ? (
-                  <Pill onClick={() => setEditProgressionReps(12)} style={{ cursor: 'pointer' }}>+ Set global target</Pill>
-                ) : (
-                  <>
-                    <Stepper value={editProgressionReps} onChange={v => setEditProgressionReps(Math.max(1, Math.round(v)))} step={1} min={1} />
-                    <button onClick={() => setEditProgressionReps(null)} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 11, cursor: 'pointer', letterSpacing: '0.05em' }}>Clear</button>
-                  </>
-                )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
+                <Pill
+                  gold={editProgressionReps != null}
+                  onClick={() => setEditProgressionReps(v => v == null ? 12 : null)}
+                  style={{ cursor: 'pointer' }}
+                >{editProgressionReps != null ? 'On' : 'Off'}</Pill>
+                {editProgressionReps != null
+                  ? <Stepper value={editProgressionReps} onChange={v => setEditProgressionReps(Math.max(1, Math.round(v)))} step={1} min={1} />
+                  : <span style={{ color: UI.inkFaint, fontSize: 13 }}>—</span>
+                }
               </div>
               <div className="micro" style={{ marginTop: 6, color: UI.inkFaint }}>
-                {editProgressionReps == null
-                  ? 'Uses planned reps from each schedule day'
-                  : 'Overrides schedule — individual days can still override this'}
+                {editProgressionReps != null
+                  ? 'Overrides schedule — individual days can still override this'
+                  : 'Uses planned reps from each schedule day'}
               </div>
             </div>
             <Btn kind="ghost" onClick={cancelEdit} style={{ fontSize: 11 }}>Cancel</Btn>
