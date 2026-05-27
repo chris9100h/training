@@ -2693,3 +2693,4 @@ function SettingsScreen({ store, setStore, go, userId }) {
 }
 
 Object.assign(window.Screens, { LibraryScreen, ExerciseCreator, ExerciseDetailScreen, HistoryScreen, SessionDetailScreen, SettingsScreen, SpectatorScreen });
+window.EQUIPMENT_TYPES = EQUIPMENT_TYPES;

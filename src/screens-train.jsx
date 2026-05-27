@@ -1321,7 +1321,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           {(exercise?.category || exercise?.equipment || (exercise?.tags || []).length > 0) && (
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               {exercise?.category && <Pill gold>{exercise.category}</Pill>}
-              {exercise?.equipment && <Pill>{exercise.equipment}</Pill>}
+              {exercise?.equipment && <Pill>{(window.EQUIPMENT_TYPES||[]).find(t=>t.key===exercise.equipment)?.label ?? exercise.equipment}</Pill>}
               {(exercise?.tags || []).map(t => <Pill key={t}>{t}</Pill>)}
             </div>
           )}
