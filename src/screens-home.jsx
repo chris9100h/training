@@ -434,7 +434,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       const ex = LB.findExercise(store, it.exId);
       const last = LB.lastSessionForExercise(store, it.exId, activeDay.id);
       const isUnilateral = ex?.unilateral || false;
-      const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps, it.progressionRepsOverride ?? null);
+      const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps);
       const seedSets = Array.from({ length: it.sets }).map((_, i) => {
         const prev = last?.entry?.sets?.[i];
         if (suggestion) {
@@ -454,7 +454,6 @@ function HomeScreen({ store, setStore, go, userId }) {
       return {
         exId: it.exId, name: ex?.name || '?',
         plannedSets: it.sets, plannedReps: it.reps,
-        progressionRepsOverride: it.progressionRepsOverride ?? null,
         sets: seedSets, note: '',
         supersetGroup: it.supersetGroup || null,
       };
@@ -855,7 +854,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                   const ex = LB.findExercise(store, it.exId);
                   const last = LB.lastSessionForExercise(store, it.exId, recentBannerDay.dayId);
                   const isUni = ex?.unilateral || false;
-                  const suggestion = LB.progressionSuggestion(store, it.exId, recentBannerDay.dayId, it.reps, it.progressionRepsOverride ?? null);
+                  const suggestion = LB.progressionSuggestion(store, it.exId, recentBannerDay.dayId, it.reps);
                   const seedSets = Array.from({ length: it.sets }).map((_, idx) => {
                     const prev = last?.entry?.sets?.[idx];
                     if (suggestion) {
@@ -866,7 +865,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                     }
                     return isUni ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false } : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
                   });
-                  return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, progressionRepsOverride: it.progressionRepsOverride ?? null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+                  return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
                 });
                 const session = { id: LB.uid(), scheduleId: sch.id, dayId: recentBannerDay.dayId, dayName: bDayName, date: recentBannerDay.date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
                 setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));

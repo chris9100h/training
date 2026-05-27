@@ -640,8 +640,7 @@ function broadcastSessionNav(action, sessionId) {
 }
 
 // Returns { kg, reps } suggestion when all last sets hit top of rep range, null otherwise.
-// progressionRepsOverride: per-schedule-item override (null = inherit from exercise/planned).
-function progressionSuggestion(store, exId, dayId, plannedReps, progressionRepsOverride = null) {
+function progressionSuggestion(store, exId, dayId, plannedReps) {
   if (!store.settings?.smartProgression) return null;
   const ex = findExercise(store, exId);
   const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
@@ -652,9 +651,7 @@ function progressionSuggestion(store, exId, dayId, plannedReps, progressionRepsO
   const last = lastSessionForExercise(store, exId, dayId);
   if (!last) return null;
 
-  // Override hierarchy: schedule-item override → library default → planned reps from schedule
-  const effectivePlannedReps = progressionRepsOverride ?? ex?.progression_reps ?? plannedReps;
-  const targetRepsTop = (effectivePlannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+  const targetRepsTop = (plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
   const doneSets = (last.entry.sets || []).filter(s => !s.skipped && s.kg != null);
   if (!doneSets.length) return null;
 
@@ -669,7 +666,7 @@ function progressionSuggestion(store, exId, dayId, plannedReps, progressionRepsO
   const cappedKg = maxKg ? Math.min(newKg, maxKg) : newKg;
   if (cappedKg <= refKg) return null;
 
-  return { kg: cappedKg, reps: effectivePlannedReps ?? null };
+  return { kg: cappedKg, reps: plannedReps ?? null };
 }
 
 window.LB = {

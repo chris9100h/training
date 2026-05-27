@@ -562,14 +562,10 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy }) {
 }
 
 // ─── Day editor (exercises within a day) ─────────────────────────────
-function ExerciseItemEditor({ item, exName, exerciseProgressionReps, onClose, onSave }) {
+function ExerciseItemEditor({ item, exName, onClose, onSave }) {
   const [sets, setSets] = useStateS(item.sets);
   const [reps, setReps] = useStateS(item.reps);
   const [note, setNote] = useStateS(item.note || '');
-  const [progressionRepsOverride, setProgressionRepsOverride] = useStateS(item.progressionRepsOverride ?? null);
-
-  const libraryDefault = exerciseProgressionReps ?? null;
-  const effectiveBase = progressionRepsOverride ?? libraryDefault ?? reps;
 
   return (
     <Sheet open={true} onClose={onClose} title={exName}>
@@ -587,33 +583,10 @@ function ExerciseItemEditor({ item, exName, exerciseProgressionReps, onClose, on
           </div>
         </div>
       </div>
-      <div style={{ marginBottom: 20 }}>
-        <span className="label" style={{ display: 'block', marginBottom: 8 }}>Progression rep target</span>
-        {progressionRepsOverride == null ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 13, color: UI.inkSoft }}>
-              {libraryDefault != null ? `From library: ${libraryDefault}` : `From reps: ${reps}`}
-            </span>
-            <Pill onClick={() => setProgressionRepsOverride(effectiveBase)} style={{ cursor: 'pointer' }}>Override</Pill>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Stepper value={progressionRepsOverride} onChange={v => setProgressionRepsOverride(Math.max(1, Math.round(v)))} step={1} min={1} />
-            <button onClick={() => setProgressionRepsOverride(null)} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 11, cursor: 'pointer', letterSpacing: '0.05em' }}>Reset</button>
-          </div>
-        )}
-        <div className="micro" style={{ marginTop: 6, color: UI.inkFaint }}>
-          {progressionRepsOverride != null
-            ? 'This day overrides the library setting'
-            : libraryDefault != null
-              ? 'Inheriting from library — tap Override to set day-specific target'
-              : 'No library target set — using planned reps'}
-        </div>
-      </div>
       <Field label="Note (optional)">
         <TextInput value={note} onChange={setNote} placeholder="e.g. cable pos 4, slow eccentric…" />
       </Field>
-      <Btn onClick={() => onSave({ sets, reps, note, progressionRepsOverride })} style={{ width: '100%', marginTop: 20 }}>Apply</Btn>
+      <Btn onClick={() => onSave({ sets, reps, note })} style={{ width: '100%', marginTop: 20 }}>Apply</Btn>
     </Sheet>
   );
 }
@@ -758,7 +731,6 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
         <ExerciseItemEditor
           item={draft.items[editingItem]}
           exName={LB.findExercise(store, draft.items[editingItem]?.exId)?.name || '—'}
-          exerciseProgressionReps={LB.findExercise(store, draft.items[editingItem]?.exId)?.progression_reps ?? null}
           onClose={() => setEditingItem(null)}
           onSave={(patch) => { updateItem(editingItem, patch); setEditingItem(null); }}
         />
