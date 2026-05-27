@@ -739,8 +739,12 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       };
       flash();
       // audio: two beeps + higher tone (blocked by iOS silent switch, but nice to have)
+      // Reuse the shared AudioContext created during a prior user gesture — creating
+      // a new one here (timer tick, no gesture) causes iOS to suspend it immediately
+      // and resume() silently fails, so the sound never plays.
       try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+        const ctx = audioCtxRef.current;
         const play = () => {
           const beep = (t, freq, dur) => {
             const osc = ctx.createOscillator();
@@ -754,7 +758,6 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           beep(ctx.currentTime,        880, 0.14);
           beep(ctx.currentTime + 0.18, 880, 0.14);
           beep(ctx.currentTime + 0.36, 1320, 0.28);
-          setTimeout(() => ctx.close(), 1200);
         };
         ctx.state === 'suspended' ? ctx.resume().then(play) : play();
       } catch (_) {}
