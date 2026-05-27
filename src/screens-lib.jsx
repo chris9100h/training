@@ -450,6 +450,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
   const [editCategory, setEditCategory] = useStateL(autoEdit ? (ex.category || null) : null);
   const [editUnilateral, setEditUnilateral] = useStateL(autoEdit ? !!ex.unilateral : false);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
+  const [editProgressionReps, setEditProgressionReps] = useStateL(autoEdit ? (ex.progression_reps ?? null) : null);
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
 
@@ -462,11 +463,11 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
     }
   };
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditUnilateral(!!ex.unilateral); setEditEquipment(ex.equipment || null); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditUnilateral(!!ex.unilateral); setEditEquipment(ex.equipment || null); setEditProgressionReps(ex.progression_reps ?? null); setEditMode(true); };
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
-    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral, equipment: editEquipment || null } : e) }));
+    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral, equipment: editEquipment || null, progression_reps: editProgressionReps ?? null } : e) }));
     setEditMode(false);
     if (autoEdit) advanceQueue();
   };
@@ -584,6 +585,18 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
               <span className="label">Movement type</span>
               <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                 <Pill gold={editUnilateral} onClick={() => setEditUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
+              </div>
+            </div>
+            <div>
+              <span className="label">Progression rep target</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                <Pill gold={editProgressionReps != null} onClick={() => setEditProgressionReps(v => v == null ? 12 : null)} style={{ cursor: 'pointer' }}>
+                  {editProgressionReps != null ? 'On' : 'Off'}
+                </Pill>
+                {editProgressionReps != null
+                  ? <Stepper value={editProgressionReps} onChange={v => setEditProgressionReps(Math.max(1, Math.round(v)))} step={1} min={1} />
+                  : <span style={{ color: UI.inkFaint, fontSize: 13 }}>Uses planned reps per day</span>
+                }
               </div>
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
