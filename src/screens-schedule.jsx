@@ -610,7 +610,9 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   });
   const removeItem = (idx) => setDraft(d => ({ ...d, items: d.items.filter((_, i) => i !== idx) }));
   const addExercise = (exId) => {
-    setDraft(d => ({ ...d, items: [...d.items, { exId, sets: 3, reps: 8 }] }));
+    const ex = LB.findExercise(store, exId);
+    const defaultReps = ex?.progression_reps ?? 8;
+    setDraft(d => ({ ...d, items: [...d.items, { exId, sets: 3, reps: defaultReps }] }));
     setAddingEx(false);
   };
   const moveItem = (idx, dir) => {
