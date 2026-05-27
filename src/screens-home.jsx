@@ -82,6 +82,113 @@ function LoginScreen() {
   );
 }
 
+// ─── Sub-components used by HomeScreen ────────────────────────────────
+
+function SkipReasonSheet({ modal, onClose, setStore, userId }) {
+  return (
+    <Sheet open={!!modal} onClose={onClose}>
+      {modal && (
+        <>
+          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase', textAlign: 'center', color: UI.ink, marginBottom: 4 }}>{modal.mode === 'edit' ? 'Edit Reason' : 'Why Did You Skip?'}</div>
+          <div className="micro" style={{ marginBottom: 18, color: UI.inkFaint, textAlign: 'center' }}>{modal.data?.dayName}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {SKIP_REASONS.map(reason => {
+              const isActive = modal.currentReason === reason;
+              return (
+                <button key={reason} onClick={() => {
+                  const { mode, skipId, data } = modal;
+                  if (mode === 'edit') {
+                    LB.updateSkipReason(skipId, reason).catch(() => {});
+                    setStore(s => ({ ...s, skips: (s.skips || []).map(x => x.id === skipId ? { ...x, skipReason: reason } : x) }));
+                  } else {
+                    const id = LB.uid();
+                    LB.createSkip(userId, { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason }).catch(() => {});
+                    setStore(s => ({ ...s, skips: [...(s.skips || []), { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason, skippedAt: new Date().toISOString() }] }));
+                  }
+                  onClose();
+                }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 10, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                  {reason}
+                </button>
+              );
+            })}
+          </div>
+          <Btn onClick={onClose} style={{ marginTop: 14, width: '100%' }}>Cancel</Btn>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+function LastSessionStrip({ session, onClick }) {
+  return (
+    <Frame onClick={onClick} style={{ flexShrink: 0, padding: '12px 16px', cursor: 'pointer' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="micro" style={{ marginBottom: 3 }}>LAST SESSION</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span className="display" style={{ fontSize: 18, color: UI.ink, lineHeight: 1 }}>{session.dayName}</span>
+            <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
+              {LB.parseDate(session.date).toLocaleDateString('en-US', { day:'2-digit', month:'short' }).toUpperCase()}
+            </span>
+            <span className="num" style={{ color: UI.gold, fontSize: 11 }}>
+              {LB.totalVolume(session).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>kg</span>
+            </span>
+          </div>
+        </div>
+        <ChevronRight />
+      </div>
+    </Frame>
+  );
+}
+
+function RecentBannerDay({ banner, store, setStore, go, sch, onOpenSkipSheet }) {
+  const { dateKey, dayName, daysAgo, skip, dayData, date, dayId } = banner;
+  const dateLabel = daysAgo === 1 ? 'YESTERDAY' : `${daysAgo}D AGO`;
+  if (skip) {
+    return (
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="micro" style={{ marginBottom: 3 }}>{dayName} · {dateLabel}</div>
+          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 999, padding: '2px 8px', display: 'inline-block' }}>
+            {skip.skipReason}
+          </span>
+        </div>
+        <button onClick={() => onOpenSkipSheet({ mode: 'edit', skipId: skip.id, currentReason: skip.skipReason, data: { dateKey, dayId: skip.dayId, dayName } })} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <button onClick={() => { LB.deleteSkip(skip.id).catch(() => {}); setStore(s => ({ ...s, skips: (s.skips || []).filter(x => x.id !== skip.id) })); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 18, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
+      </div>
+    );
+  }
+  return (
+    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.05)', border: `0.5px solid rgba(var(--danger-rgb),0.2)`, borderRadius: 12 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>{dayName} · {dateLabel}</div>
+        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Not logged</div>
+      </div>
+      <button onClick={() => {
+        const entries = (dayData?.items || []).map(it => {
+          const ex = LB.findExercise(store, it.exId);
+          const last = LB.lastSessionForExercise(store, it.exId, dayId);
+          const isUni = ex?.unilateral || false;
+          const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps);
+          const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
+          return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+        });
+        const session = { id: LB.uid(), scheduleId: sch.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
+        setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+        LB.broadcastSessionNav('start', session.id);
+        go({ name: 'train', sessionId: session.id });
+      }} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+        Log
+      </button>
+      <button onClick={() => onOpenSkipSheet({ mode: 'dismiss', data: { dateKey, dayId, dayName } })} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid rgba(var(--danger-rgb),0.25)`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: 'rgba(var(--danger-rgb),0.7)', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
 // ─── HOME ─────────────────────────────────────────────────────────────
 function HomeScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
@@ -803,106 +910,25 @@ function HomeScreen({ store, setStore, go, userId }) {
         )}
 
         {/* Missed / skipped banner */}
-        {recentBannerDay && !store.inProgress && (() => {
-          const { dateKey, dayName: bDayName, daysAgo, skip, dayData } = recentBannerDay;
-          const dateLabel = daysAgo === 1 ? 'YESTERDAY' : `${daysAgo}D AGO`;
-          if (skip) {
-            return (
-              <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 12 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="micro" style={{ marginBottom: 3 }}>{bDayName} · {dateLabel}</div>
-                  <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 999, padding: '2px 8px', display: 'inline-block' }}>
-                    {skip.skipReason}
-                  </span>
-                </div>
-                <button onClick={() => setSkipReasonModal({ mode: 'edit', skipId: skip.id, currentReason: skip.skipReason, data: { dateKey, dayId: skip.dayId, dayName: bDayName } })} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                </button>
-                <button onClick={() => { LB.deleteSkip(skip.id).catch(() => {}); setStore(s => ({ ...s, skips: (s.skips || []).filter(x => x.id !== skip.id) })); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 18, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
-              </div>
-            );
-          }
-          return (
-            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.05)', border: `0.5px solid rgba(var(--danger-rgb),0.2)`, borderRadius: 12 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>{bDayName} · {dateLabel}</div>
-                <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Not logged</div>
-              </div>
-              <button onClick={() => {
-                const entries = (dayData?.items || []).map(it => {
-                  const ex = LB.findExercise(store, it.exId);
-                  const last = LB.lastSessionForExercise(store, it.exId, recentBannerDay.dayId);
-                  const isUni = ex?.unilateral || false;
-                  const suggestion = LB.progressionSuggestion(store, it.exId, recentBannerDay.dayId, it.reps);
-                  const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
-                  return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
-                });
-                const session = { id: LB.uid(), scheduleId: sch.id, dayId: recentBannerDay.dayId, dayName: bDayName, date: recentBannerDay.date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
-                setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
-                LB.broadcastSessionNav('start', session.id);
-                go({ name: 'train', sessionId: session.id });
-              }} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-                Log
-              </button>
-              <button onClick={() => setSkipReasonModal({ mode: 'dismiss', data: { dateKey, dayId: recentBannerDay.dayId, dayName: bDayName } })} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid rgba(var(--danger-rgb),0.25)`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: 'rgba(var(--danger-rgb),0.7)', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-                Dismiss
-              </button>
-            </div>
-          );
-        })()}
+        {recentBannerDay && !store.inProgress && (
+          <RecentBannerDay
+            banner={recentBannerDay}
+            store={store} setStore={setStore} go={go} sch={sch}
+            onOpenSkipSheet={setSkipReasonModal}
+          />
+        )}
 
         {/* last session strip */}
         {lastSession && (
-          <Frame onClick={() => go({ name: 'session', sessionId: lastSession.id })} style={{ flexShrink: 0, padding: '12px 16px', cursor: 'pointer' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="micro" style={{ marginBottom: 3 }}>LAST SESSION</div>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <span className="display" style={{ fontSize: 18, color: UI.ink, lineHeight: 1 }}>{lastSession.dayName}</span>
-                  <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
-                    {LB.parseDate(lastSession.date).toLocaleDateString('en-US', { day:'2-digit', month:'short' }).toUpperCase()}
-                  </span>
-                  <span className="num" style={{ color: UI.gold, fontSize: 11 }}>
-                    {LB.totalVolume(lastSession).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>kg</span>
-                  </span>
-                </div>
-              </div>
-              <ChevronRight />
-            </div>
-          </Frame>
+          <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id })} />
         )}
       </div>
-      <Sheet open={!!skipReasonModal} onClose={() => setSkipReasonModal(null)}>
-        {skipReasonModal && (
-          <>
-            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase', textAlign: 'center', color: UI.ink, marginBottom: 4 }}>{skipReasonModal.mode === 'edit' ? 'Edit Reason' : 'Why Did You Skip?'}</div>
-            <div className="micro" style={{ marginBottom: 18, color: UI.inkFaint, textAlign: 'center' }}>{skipReasonModal.data?.dayName}</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {SKIP_REASONS.map(reason => {
-                const isActive = skipReasonModal.currentReason === reason;
-                return (
-                  <button key={reason} onClick={() => {
-                    const { mode, skipId, data } = skipReasonModal;
-                    if (mode === 'edit') {
-                      LB.updateSkipReason(skipId, reason).catch(() => {});
-                      setStore(s => ({ ...s, skips: (s.skips || []).map(x => x.id === skipId ? { ...x, skipReason: reason } : x) }));
-                    } else {
-                      const id = LB.uid();
-                      LB.createSkip(userId, { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason }).catch(() => {});
-                      setStore(s => ({ ...s, skips: [...(s.skips || []), { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason, skippedAt: new Date().toISOString() }] }));
-                      // 'skip' just records the skip; the cycle advances with calendar days automatically
-                    }
-                    setSkipReasonModal(null);
-                  }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 10, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                    {reason}
-                  </button>
-                );
-              })}
-            </div>
-            <Btn onClick={() => setSkipReasonModal(null)} style={{ marginTop: 14, width: '100%' }}>Cancel</Btn>
-          </>
-        )}
-      </Sheet>
+      <SkipReasonSheet
+        modal={skipReasonModal}
+        onClose={() => setSkipReasonModal(null)}
+        setStore={setStore}
+        userId={userId}
+      />
       {confirmEl}
     </Screen>
   );
