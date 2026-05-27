@@ -518,28 +518,45 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
         sub={autoEdit && editQueueTotal > 1 ? `${queuePos} / ${editQueueTotal}` : undefined}
         onBack={() => { if (editMode) cancelEdit(); else go(back || { name: 'lib' }); }}
         right={
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <button onClick={editMode ? saveEdit : startEdit} style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: UI.gold, fontSize: 11, fontFamily: UI.fontUi, padding: '4px 8px',
-              letterSpacing: '0.1em', textTransform: 'uppercase',
-            }}>{editMode ? (autoEdit ? (editQueue.length > 0 ? 'Save & Next' : 'Save') : 'Save') : 'Edit'}</button>
-            {autoEdit && (
-              <button onClick={() => go(back || { name: 'lib' })} style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                width: 30, height: 30, borderRadius: '50%',
-                boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
-                color: UI.inkSoft, fontSize: 16, lineHeight: 1,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>×</button>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {editMode ? (
+              <>
+                {!autoEdit && (
+                  <Btn kind="ghost" onClick={cancelEdit}
+                    style={{ minHeight: 32, padding: '5px 14px', fontSize: 11 }}>
+                    Cancel
+                  </Btn>
+                )}
+                <Btn kind="ghost" onClick={saveEdit}
+                  style={{ color: UI.gold, borderColor: UI.goldSoft, minHeight: 32, padding: '5px 14px', fontSize: 11 }}>
+                  {autoEdit ? (editQueue.length > 0 ? 'Save & Next' : 'Save') : 'Save'}
+                </Btn>
+                {autoEdit && (
+                  <button onClick={() => go(back || { name: 'lib' })} style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    width: 30, height: 30, borderRadius: '50%',
+                    boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
+                    color: UI.inkSoft, fontSize: 16, lineHeight: 1,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>×</button>
+                )}
+              </>
+            ) : (
+              <>
+                <button onClick={startEdit} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: UI.gold, fontSize: 11, fontFamily: UI.fontUi, padding: '4px 8px',
+                  letterSpacing: '0.1em', textTransform: 'uppercase',
+                }}>Edit</button>
+                <button onClick={deleteExercise} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  width: 30, height: 30, borderRadius: '50%',
+                  boxShadow: `inset 0 0 0 0.5px rgba(200,116,105,0.3)`,
+                  color: UI.danger, fontSize: 16, lineHeight: 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>×</button>
+              </>
             )}
-            {!editMode && !autoEdit && <button onClick={deleteExercise} style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              width: 30, height: 30, borderRadius: '50%',
-              boxShadow: `inset 0 0 0 0.5px rgba(200,116,105,0.3)`,
-              color: UI.danger, fontSize: 16, lineHeight: 1,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>×</button>}
           </div>
         }
       />
