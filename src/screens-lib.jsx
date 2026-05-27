@@ -69,7 +69,7 @@ function LibraryScreen({ store, setStore, go }) {
       });
     });
     const e1rm = (entry) => entry
-      ? Math.max(0, ...(entry.sets || []).filter(s => s.kg && s.reps).map(s => s.kg * (1 + s.reps / 30)), 0)
+      ? Math.max(0, ...(entry.sets || []).filter(s => s.kg && s.reps).map(s => LB.e1rm(s.kg, s.reps)), 0)
       : 0;
     return store.exercises
       .filter(e => seenFirst.has(e.id))
@@ -516,8 +516,8 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
 
   const e1rmForSet = (s) => {
     if (s.kg == null) return 0;
-    if (s.repsL != null || s.repsR != null) return s.kg * (1 + Math.max(s.repsL || 0, s.repsR || 0) / 30);
-    return s.reps ? s.kg * (1 + s.reps / 30) : 0;
+    if (s.repsL != null || s.repsR != null) return LB.e1rm(s.kg, Math.max(s.repsL || 0, s.repsR || 0));
+    return s.reps ? LB.e1rm(s.kg, s.reps) : 0;
   };
 
   const points = history.map(h => {
@@ -705,7 +705,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
                       <span className="num" style={{ fontSize: 10, color: isPR ? UI.gold : UI.inkFaint, letterSpacing: '0.05em' }}>
-                        {new Date(h.session.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'2-digit' })}
+                        {LB.parseDate(h.session.date).toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'2-digit' })}
                       </span>
                       {isPR && (
                         <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.gold, background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 5px' }}>PR</span>
@@ -778,13 +778,13 @@ function StatsTab({ store, sessions, go }) {
   const cycleLen = sch?.days?.length || 1;
   const cycleWindowStart = (() => {
     if (!isCycleMode) return null;
-    const start = new Date(store.cycleStartDate + 'T12:00:00');
+    const start = LB.parseDate(store.cycleStartDate);
     const n = Math.round((today.getTime() - start.getTime()) / 86400000);
     const idxInCycle = ((n % cycleLen) + cycleLen) % cycleLen;
     const d = new Date(today); d.setDate(today.getDate() - idxInCycle);
     return d;
   })();
-  const currentCycleNum = isCycleMode ? Math.floor(Math.round((today.getTime() - new Date(store.cycleStartDate + 'T12:00:00').getTime()) / 86400000) / cycleLen) : 0;
+  const currentCycleNum = isCycleMode ? Math.floor(Math.round((today.getTime() - LB.parseDate(store.cycleStartDate).getTime()) / 86400000) / cycleLen) : 0;
 
   const [cycleViewOffset, setCycleViewOffset] = useStateL(0);
   const selectedCycleStart = isCycleMode && cycleWindowStart ? (() => {
@@ -797,19 +797,19 @@ function StatsTab({ store, sessions, go }) {
 
   // Sessions in the selected training period (cycle or calendar week)
   const thisPeriodSessions = useMemoL(() => sessions.filter(s => {
-    const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+    const d = LB.parseDate(s.date);
     if (isCycleMode) return selectedCycleStart && selectedCycleEnd && d >= selectedCycleStart && d <= selectedCycleEnd;
     return d >= monday && d <= sunday;
   }), [sessions, isCycleMode, selectedCycleStart, selectedCycleEnd]);
 
   // Calendar-week sessions — used for consistency card ("This Week")
   const thisWeekSessions = useMemoL(() => sessions.filter(s => {
-    const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+    const d = LB.parseDate(s.date);
     return d >= monday && d <= sunday;
   }), [sessions]);
 
   const thisMonthSessions = useMemoL(() => sessions.filter(s => {
-    const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+    const d = LB.parseDate(s.date);
     return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
   }), [sessions]);
 
@@ -834,8 +834,8 @@ function StatsTab({ store, sessions, go }) {
       const wMon = new Date(monday); wMon.setDate(monday.getDate() - w * 7);
       const wSun = new Date(wMon); wSun.setDate(wMon.getDate() + 6);
       const vol = sessions
-        .filter(s => { const d = new Date(s.date.slice(0,10)+'T12:00:00'); return d >= wMon && d <= wSun; })
-        .reduce((sum, s) => sum + totalVolume(s), 0);
+        .filter(s => { const d = LB.parseDate(s.date); return d >= wMon && d <= wSun; })
+        .reduce((sum, s) => sum + LB.totalVolume(s), 0);
       const label = wMon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       weeks.push({ label, vol });
     }
@@ -843,7 +843,7 @@ function StatsTab({ store, sessions, go }) {
   }, [sessions]);
 
   // All-time stats
-  const totalVol = sessions.reduce((sum, s) => sum + totalVolume(s), 0);
+  const totalVol = sessions.reduce((sum, s) => sum + LB.totalVolume(s), 0);
   const totalSets = sessions.reduce((sum, s) => sum + s.entries.reduce((c, e) => c + e.sets.filter(st => st.done).length, 0), 0);
   const totalReps = sessions.reduce((sum, s) => sum + s.entries.reduce((c, e) => c + e.sets.filter(st => st.done).reduce((r, st) => r + (+st.reps || 0), 0), 0), 0);
   const avgVol = sessions.length ? Math.round(totalVol / sessions.length) : 0;
@@ -856,7 +856,7 @@ function StatsTab({ store, sessions, go }) {
   const maxDuration = durations.length ? Math.max(...durations) : 0;
 
   // Best session by volume
-  const bestSession = sessions.length ? sessions.reduce((best, s) => totalVolume(s) > totalVolume(best) ? s : best, sessions[0]) : null;
+  const bestSession = sessions.length ? sessions.reduce((best, s) => LB.totalVolume(s) > LB.totalVolume(best) ? s : best, sessions[0]) : null;
 
   // Streaks — rest days are transparent, only missed training days break the streak
   const sessionDateSet = new Set(sessions.map(s => s.date.slice(0, 10)));
@@ -870,14 +870,14 @@ function StatsTab({ store, sessions, go }) {
       return day ? day.items.length > 0 : false;
     }
     if (!store.cycleStartDate) return true;
-    const start = new Date(store.cycleStartDate + 'T12:00:00');
+    const start = LB.parseDate(store.cycleStartDate);
     const n = Math.round((date.getTime() - start.getTime()) / 86400000);
     if (n < 0) return false; // before plan start → streak-neutral
     const day = sch.days[((n % sch.days.length) + sch.days.length) % sch.days.length];
     return day ? day.items.length > 0 : false;
   };
 
-  const planStart = store.cycleStartDate ? new Date(store.cycleStartDate + 'T12:00:00') : null;
+  const planStart = store.cycleStartDate ? LB.parseDate(store.cycleStartDate) : null;
 
   let currentStreak = 0;
   for (let i = 0; i <= 730; i++) {
@@ -892,7 +892,7 @@ function StatsTab({ store, sessions, go }) {
 
   let longestStreak = 0, ls = 0;
   if (sessions.length > 0) {
-    const earliest = planStart ?? new Date(sessions[sessions.length - 1].date.slice(0, 10) + 'T12:00:00');
+    const earliest = planStart ?? LB.parseDate(sessions[sessions.length - 1].date);
     const dayCount = Math.round((today.getTime() - earliest.getTime()) / 86400000) + 1;
     for (let i = 0; i < dayCount; i++) {
       const d = new Date(earliest); d.setDate(earliest.getDate() + i); d.setHours(12, 0, 0, 0);
@@ -909,17 +909,17 @@ function StatsTab({ store, sessions, go }) {
     : `${totalTrainingMins}m`;
 
   const thisYearSessions = useMemoL(() => sessions.filter(s => {
-    return new Date(s.date.slice(0, 10) + 'T12:00:00').getFullYear() === today.getFullYear();
+    return LB.parseDate(s.date).getFullYear() === today.getFullYear();
   }), [sessions]);
 
   const avgSessionsPerWeek = useMemoL(() => {
     const relevant = planStart
-      ? sessions.filter(s => new Date(s.date.slice(0, 10) + 'T12:00:00') >= planStart)
+      ? sessions.filter(s => LB.parseDate(s.date) >= planStart)
       : sessions;
     if (!relevant.length) return '0.0';
     const oldest = relevant.reduce((min, s) =>
       s.date.slice(0, 10) < min ? s.date.slice(0, 10) : min, relevant[0].date.slice(0, 10));
-    const anchor = planStart ?? new Date(oldest + 'T12:00:00');
+    const anchor = planStart ?? LB.parseDate(oldest);
     // Monday of the anchor week
     const anchorDay = anchor.getDay() === 0 ? 6 : anchor.getDay() - 1;
     const anchorMonday = new Date(anchor); anchorMonday.setDate(anchor.getDate() - anchorDay); anchorMonday.setHours(0,0,0,0);
@@ -1034,14 +1034,14 @@ function StatsTab({ store, sessions, go }) {
               <div>
                 <div className="display" style={{ fontSize: 18, color: UI.ink }}>{bestSession.dayName}</div>
                 <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>
-                  {new Date(bestSession.date.slice(0,10)+'T12:00:00').toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()}
+                  {LB.parseDate(bestSession.date).toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()}
                 </div>
                 <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>
                   {bestSession.entries.length} exercises · {bestSession.entries.reduce((sum, e) => sum + e.sets.filter(st => st.done).length, 0)} sets
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div className="num" style={{ fontSize: 22, color: UI.gold }}>{Math.round(totalVolume(bestSession)).toLocaleString('en-US')}</div>
+                <div className="num" style={{ fontSize: 22, color: UI.gold }}>{Math.round(LB.totalVolume(bestSession)).toLocaleString('en-US')}</div>
                 <div className="micro" style={{ color: UI.inkFaint }}>kg</div>
               </div>
             </div>
@@ -1114,7 +1114,7 @@ function HistoryScreen({ store, go, initialTab }) {
             const monday = new Date(now); monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
             const lastMonday = new Date(monday); lastMonday.setDate(monday.getDate() - 7);
             const getGroup = (dateStr) => {
-              const d = new Date(dateStr.slice(0,10) + 'T12:00:00');
+              const d = LB.parseDate(dateStr);
               if (d >= monday) return 'THIS WEEK';
               if (d >= lastMonday) return 'LAST WEEK';
               return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
@@ -1137,8 +1137,8 @@ function HistoryScreen({ store, go, initialTab }) {
               }
               const s = item.session;
               const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
-              const vol = totalVolume(s);
-              const date = new Date(s.date.slice(0,10) + 'T12:00:00');
+              const vol = LB.totalVolume(s);
+              const date = LB.parseDate(s.date);
               const days = Math.round((Date.now() - date) / 86400000);
               const isToday = days === 0;
               return (
@@ -1179,13 +1179,9 @@ function HistoryScreen({ store, go, initialTab }) {
 
 // ─── SET COMPARISON HELPERS ──────────────────────────────────────────
 // Shared by SessionDetailScreen, ComparisonScreen, and the LAST TIME card.
-function effReps(st) {
-  if (st.repsL != null || st.repsR != null) return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
-  return st.reps;
-}
 function isImprovement(curr, prev) {
   if (!prev || !curr || !curr.done || curr.skipped || curr.kg == null || prev.kg == null) return false;
-  const rA = effReps(curr); const rB = effReps(prev);
+  const rA = LB.effReps(curr); const rB = LB.effReps(prev);
   if (rA == null || rB == null) return false;
   return (curr.kg > prev.kg && rA >= rB - 2) || (curr.kg >= prev.kg && rA > rB);
 }
@@ -1193,7 +1189,7 @@ function isDecline(curr, prev) {
   if (!prev || !curr || curr.skipped) return false;
   if (prev.skipped) return false; // prev was already skipped, no baseline to decline from
   if (!curr.done || curr.kg == null || prev.kg == null) return false;
-  const rA = effReps(curr); const rB = effReps(prev);
+  const rA = LB.effReps(curr); const rB = LB.effReps(prev);
   if (rA == null || rB == null) return false;
   return curr.kg < prev.kg || (curr.kg === prev.kg && rA < rB);
 }
@@ -1206,7 +1202,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const captureRef = useRefL(null);
   const s = store.sessions.find(x => x.id === sessionId);
   if (!s) { go({ name: 'hist' }); return null; }
-  const vol = totalVolume(s);
+  const vol = LB.totalVolume(s);
   const duration = s.durationMinutes != null
     ? s.durationMinutes
     : (s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null);
@@ -1229,7 +1225,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const prevSameDay = store.sessions
     .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
-  const volDelta = prevSameDay != null ? vol - totalVolume(prevSameDay) : null;
+  const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay) : null;
 
   const exIsUnilateral = (exId) => !!store.exercises.find(x => x.id === exId)?.unilateral;
   const prReps = (st, exId) => exIsUnilateral(exId)
@@ -1309,7 +1305,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   return (
     <Screen>
       <ScreenHead
-        ref_={new Date(s.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
+        ref_={LB.parseDate(s.date).toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
         title={s.dayName}
         onBack={() => go(justFinished ? { name: 'home' } : (back || { name: 'hist' }))}
         right={
@@ -1344,7 +1340,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
               <div>
                 <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 4 }}>
-                  {new Date(s.date.slice(0,10) + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
+                  {LB.parseDate(s.date).toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
                 </div>
                 <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
               </div>

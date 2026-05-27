@@ -297,7 +297,7 @@ async function autoArchiveMissedDays(userId, state) {
       const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
       trainingDay = activeSch.days.find(day => day.weekday === wd && (day.items || []).length > 0) || null;
     } else {
-      const start = new Date(state.cycleStartDate + 'T12:00:00');
+      const start = parseDate(state.cycleStartDate);
       const n = Math.round((d.getTime() - start.getTime()) / 86400000);
       if (n < 0) continue;
       const idx = ((n % activeSch.days.length) + activeSch.days.length) % activeSch.days.length;
@@ -506,6 +506,57 @@ function findExercise(state, exId) {
   return state.exercises.find(e => e.id === exId);
 }
 
+// Parse a stored ISO date string ('YYYY-MM-DD' or full ISO) as noon local time —
+// avoids the DST/midnight TZ shifts that break "same calendar day" lookups.
+function parseDate(s) {
+  if (!s) return null;
+  return new Date(s.slice(0, 10) + 'T12:00:00');
+}
+
+// Effective reps for a set — for unilateral sets, the weaker side is the bottleneck.
+function effReps(st) {
+  if (st.repsL != null || st.repsR != null) {
+    return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
+  }
+  return st.reps;
+}
+
+// Epley-style estimated 1RM.
+function e1rm(kg, reps) {
+  return kg * (1 + reps / 30);
+}
+
+// Total volume (kg) of all completed sets in a session.
+function totalVolume(session) {
+  return (session.entries || []).reduce((sum, ex) =>
+    sum + (ex.sets || []).filter(st => st.done).reduce((s, st) => {
+      const reps = effReps(st) ?? 0;
+      return s + (+st.kg || 0) * reps;
+    }, 0), 0
+  );
+}
+
+// Compute the seed-sets array when starting/logging a session for a planned item.
+// Honors smart-progression suggestions and falls back to last-session values.
+function buildSeedSets(it, last, suggestion, isUni, smartProgression) {
+  return Array.from({ length: it.sets }).map((_, i) => {
+    const prev = last?.entry?.sets?.[i];
+    if (suggestion) {
+      return isUni
+        ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false }
+        : { kg: suggestion.kg, reps: suggestion.reps, done: false };
+    }
+    if (smartProgression && prev) {
+      return isUni
+        ? { kg: prev.kg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
+        : { kg: prev.kg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
+    }
+    return isUni
+      ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
+      : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
+  });
+}
+
 function lastSessionForExercise(state, exId, dayId = null) {
   const sessions = state.sessions
     .filter(s => s.ended && (dayId == null || s.dayId === dayId))
@@ -535,7 +586,7 @@ function todaysDay(state) {
   let idx;
   if (state.cycleStartDate) {
     const today = new Date(); today.setHours(12, 0, 0, 0);
-    const start = new Date(state.cycleStartDate + 'T12:00:00');
+    const start = parseDate(state.cycleStartDate);
     const n = Math.round((today.getTime() - start.getTime()) / 86400000);
     idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
   } else {
@@ -550,7 +601,7 @@ function nextDay(state) {
   let curIdx;
   if (state.cycleStartDate) {
     const today = new Date(); today.setHours(12, 0, 0, 0);
-    const start = new Date(state.cycleStartDate + 'T12:00:00');
+    const start = parseDate(state.cycleStartDate);
     const n = Math.round((today.getTime() - start.getTime()) / 86400000);
     curIdx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
   } else {
@@ -656,10 +707,7 @@ function progressionSuggestion(store, exId, dayId, plannedReps) {
   const doneSets = (last.entry.sets || []).filter(s => !s.skipped && s.kg != null);
   if (!doneSets.length) return null;
 
-  const allHitTop = doneSets.every(s => {
-    const reps = s.repsL != null ? Math.min(s.repsL ?? 0, s.repsR ?? 0) : (s.reps ?? 0);
-    return reps >= targetRepsTop;
-  });
+  const allHitTop = doneSets.every(s => (effReps(s) ?? 0) >= targetRepsTop);
   if (!allHitTop) return null;
 
   const refKg = doneSets[0].kg;
@@ -677,7 +725,8 @@ window.LB = {
   signIn, signUp, signOut, deleteAllData, importFromBackup,
   loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan,
+  uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan,
+  effReps, e1rm, totalVolume, buildSeedSets,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,
 };

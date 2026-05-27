@@ -109,7 +109,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const todayN = useMemo(() => {
     if (weekdayMode || !store.cycleStartDate) return store.cycleIndex || 0;
     const today = new Date(); today.setHours(12, 0, 0, 0);
-    const start = new Date(store.cycleStartDate + 'T12:00:00');
+    const start = LB.parseDate(store.cycleStartDate);
     return Math.max(0, Math.round((today.getTime() - start.getTime()) / 86400000));
   }, [store.cycleStartDate, store.cycleIndex, weekdayMode]);
 
@@ -125,7 +125,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       if (store.weekPlanStartDate) {
         const now = new Date(); now.setHours(12, 0, 0, 0);
         const currentMondayMs = now.getTime() - todayWd * 86400000;
-        const start = new Date(store.weekPlanStartDate + 'T12:00:00');
+        const start = LB.parseDate(store.weekPlanStartDate);
         const planMondayMs = start.getTime() - ((start.getDay() + 6) % 7) * 86400000;
         const week0MondayMs = planMondayMs - 7 * 86400000;
         return Math.round((week0MondayMs - currentMondayMs) / (7 * 86400000));
@@ -135,7 +135,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (cycleWeekView && store.cycleStartDate && dayCount > 0) {
       const now = new Date(); now.setHours(12, 0, 0, 0);
       const currentMondayMs = now.getTime() - todayWd * 86400000;
-      const cycle0StartMs = new Date(store.cycleStartDate + 'T12:00:00').getTime() - dayCount * 86400000;
+      const cycle0StartMs = LB.parseDate(store.cycleStartDate).getTime() - dayCount * 86400000;
       const cycle0Wd = (new Date(cycle0StartMs).getDay() + 6) % 7;
       const cycle0MondayMs = cycle0StartMs - cycle0Wd * 86400000;
       return Math.round((cycle0MondayMs - currentMondayMs) / (7 * 86400000));
@@ -176,7 +176,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       });
     }
     if (cycleWeekView && store.cycleStartDate && dayCount > 0) {
-      const start = new Date(store.cycleStartDate + 'T12:00:00');
+      const start = LB.parseDate(store.cycleStartDate);
       const monday = new Date(); monday.setHours(12, 0, 0, 0);
       monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
       return Array.from({ length: 7 }).map((_, i) => {
@@ -234,7 +234,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       if (store.weekPlanStartDate) {
         const monday = new Date(); monday.setHours(12, 0, 0, 0);
         monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
-        const start = new Date(store.weekPlanStartDate + 'T12:00:00');
+        const start = LB.parseDate(store.weekPlanStartDate);
         const startMonday = new Date(start);
         startMonday.setDate(start.getDate() - ((start.getDay() + 6) % 7));
         startMonday.setHours(12, 0, 0, 0);
@@ -248,7 +248,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (cycleWeekView && store.cycleStartDate && dayCount > 0) {
       const monday = new Date(); monday.setHours(12, 0, 0, 0);
       monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
-      const start = new Date(store.cycleStartDate + 'T12:00:00');
+      const start = LB.parseDate(store.cycleStartDate);
       const dfs = Math.round((monday - start) / 86400000);
       return `CYCLE ${Math.floor(dfs / dayCount) + 1}`;
     }
@@ -299,13 +299,9 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const { improvementCount, regressionCount } = useMemo(() => {
     if (!doneSession) return { improvementCount: 0, regressionCount: 0 };
-    const effReps = (st) => {
-      if (st.repsL != null || st.repsR != null) return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
-      return st.reps;
-    };
     const cmp = (st, prevSet, better) => {
       if (!prevSet || !st.done || st.kg == null || prevSet.kg == null) return false;
-      const repsA = effReps(st); const repsB = effReps(prevSet);
+      const repsA = LB.effReps(st); const repsB = LB.effReps(prevSet);
       if (repsA == null || repsB == null) return false;
       return better
         ? (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB)
@@ -331,9 +327,9 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (weekdayMode || !sch) return null;
     const set = new Set();
     if (store.cycleStartDate) {
-      const start = new Date(store.cycleStartDate + 'T12:00:00');
+      const start = LB.parseDate(store.cycleStartDate);
       store.sessions.filter(s => s.ended).forEach(s => {
-        const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+        const d = LB.parseDate(s.date);
         set.add(Math.round((d - start) / 86400000));
       });
     } else {
@@ -346,7 +342,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (!weekdayMode) return null;
     const set = new Set();
     store.sessions.filter(s => s.ended).forEach(s => {
-      const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+      const d = LB.parseDate(s.date);
       set.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
     });
     return set;
@@ -354,7 +350,7 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const cycleBarSegments = useMemo(() => {
     if (!cycleWeekView || weekdayMode || !store.cycleStartDate || !sch || dayCount === 0) return null;
-    const start = new Date(store.cycleStartDate + 'T12:00:00');
+    const start = LB.parseDate(store.cycleStartDate);
     const monday = new Date(); monday.setHours(12, 0, 0, 0);
     monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
     const cycleNums = Array.from({ length: 7 }).map((_, i) => {
@@ -413,7 +409,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
         trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
       } else if (store.cycleStartDate) {
-        const start = new Date(store.cycleStartDate + 'T12:00:00');
+        const start = LB.parseDate(store.cycleStartDate);
         const n = Math.round((d.getTime() - start.getTime()) / 86400000);
         if (n < 0) continue;
         const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
@@ -433,22 +429,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       const last = LB.lastSessionForExercise(store, it.exId, activeDay.id);
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps);
-      const seedSets = Array.from({ length: it.sets }).map((_, i) => {
-        const prev = last?.entry?.sets?.[i];
-        if (suggestion) {
-          return isUnilateral
-            ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false }
-            : { kg: suggestion.kg, reps: suggestion.reps, done: false };
-        }
-        if (store.settings?.smartProgression && prev) {
-          return isUnilateral
-            ? { kg: prev.kg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
-            : { kg: prev.kg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
-        }
-        return isUnilateral
-          ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
-          : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
-      });
+      const seedSets = LB.buildSeedSets(it, last, suggestion, isUnilateral, !!store.settings?.smartProgression);
       return {
         exId: it.exId, name: ex?.name || '?',
         plannedSets: it.sets, plannedReps: it.reps,
@@ -626,8 +607,8 @@ function HomeScreen({ store, setStore, go, userId }) {
             const dateKey = d.date.toISOString().slice(0, 10);
             const isPast = !d.isToday && d.date < new Date();
             const isBeforePlanStart = weekdayMode
-              ? (store.weekPlanStartDate ? d.date < new Date(store.weekPlanStartDate + 'T12:00:00') : false)
-              : (store.cycleStartDate ? d.date < new Date(store.cycleStartDate + 'T12:00:00') : false);
+              ? (store.weekPlanStartDate ? d.date < LB.parseDate(store.weekPlanStartDate) : false)
+              : (store.cycleStartDate ? d.date < LB.parseDate(store.cycleStartDate) : false);
             const isMissed = !r && isPast && !isCompleted && !skipsMap.has(dateKey) && !isBeforePlanStart;
             const isSkipped = !r && isPast && !isCompleted && skipsMap.has(dateKey);
             return (
@@ -853,16 +834,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                   const last = LB.lastSessionForExercise(store, it.exId, recentBannerDay.dayId);
                   const isUni = ex?.unilateral || false;
                   const suggestion = LB.progressionSuggestion(store, it.exId, recentBannerDay.dayId, it.reps);
-                  const seedSets = Array.from({ length: it.sets }).map((_, idx) => {
-                    const prev = last?.entry?.sets?.[idx];
-                    if (suggestion) {
-                      return isUni ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false } : { kg: suggestion.kg, reps: suggestion.reps, done: false };
-                    }
-                    if (store.settings?.smartProgression && prev) {
-                      return isUni ? { kg: prev.kg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false } : { kg: prev.kg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
-                    }
-                    return isUni ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false } : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
-                  });
+                  const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
                   return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
                 });
                 const session = { id: LB.uid(), scheduleId: sch.id, dayId: recentBannerDay.dayId, dayName: bDayName, date: recentBannerDay.date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
@@ -888,10 +860,10 @@ function HomeScreen({ store, setStore, go, userId }) {
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                   <span className="display" style={{ fontSize: 18, color: UI.ink, lineHeight: 1 }}>{lastSession.dayName}</span>
                   <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
-                    {new Date(lastSession.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { day:'2-digit', month:'short' }).toUpperCase()}
+                    {LB.parseDate(lastSession.date).toLocaleDateString('en-US', { day:'2-digit', month:'short' }).toUpperCase()}
                   </span>
                   <span className="num" style={{ color: UI.gold, fontSize: 11 }}>
-                    {totalVolume(lastSession).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>kg</span>
+                    {LB.totalVolume(lastSession).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>kg</span>
                   </span>
                 </div>
               </div>
@@ -938,17 +910,5 @@ function HomeScreen({ store, setStore, go, userId }) {
   );
 }
 
-function totalVolume(session) {
-  return session.entries.reduce((sum, ex) =>
-    sum + (ex.sets || []).filter(st => st.done).reduce((s, st) => {
-      const reps = (st.repsL != null || st.repsR != null)
-        ? Math.min(st.repsL ?? 0, st.repsR ?? 0)
-        : (+st.reps || 0);
-      return s + (+st.kg || 0) * reps;
-    }, 0), 0
-  );
-}
-
 window.Screens = window.Screens || {};
 Object.assign(window.Screens, { LoginScreen, HomeScreen });
-window.totalVolume = totalVolume;

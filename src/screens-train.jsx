@@ -394,20 +394,16 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     }));
   };
 
-  const effReps = (st) => {
-    if (st.repsL != null || st.repsR != null) return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
-    return st.reps;
-  };
   const isImprovement = (st, prevSet) => {
     if (!prevSet || st.kg == null || prevSet.kg == null) return false;
-    const repsA = effReps(st); const repsB = effReps(prevSet);
+    const repsA = LB.effReps(st); const repsB = LB.effReps(prevSet);
     if (repsA == null || repsB == null) return false;
     return (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB);
   };
   const isDecline = (st, prevSet) => {
     if (!prevSet || !st || st.skipped || prevSet.skipped) return false;
     if (st.kg == null || prevSet.kg == null) return false;
-    const rA = effReps(st); const rB = effReps(prevSet);
+    const rA = LB.effReps(st); const rB = LB.effReps(prevSet);
     if (rA == null || rB == null) return false;
     return st.kg < prevSet.kg || (st.kg === prevSet.kg && rA < rB);
   };
@@ -1714,7 +1710,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
             <span>Volume</span>
             <span className="num" style={{ color: UI.gold }}>
-              {Math.round(totalVolume(session)).toLocaleString('en-US')} kg
+              {Math.round(LB.totalVolume(session)).toLocaleString('en-US')} kg
             </span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
