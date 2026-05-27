@@ -252,16 +252,22 @@ function LibraryScreen({ store, setStore, go }) {
       </div>
 
       {selecting && (
-        <div style={{
-          position: 'fixed', bottom: 'calc(76px + env(safe-area-inset-bottom, 8px))',
-          left: '50%', transform: 'translateX(-50%)',
-          width: '100%', maxWidth: 440,
-          padding: '12px 22px',
-          background: 'rgba(var(--bg-rgb),0.92)', borderTop: `0.5px solid ${UI.hair}`,
-          backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          zIndex: 15,
-        }}>
+        <div style={(() => {
+          const sidebar = window.innerWidth >= 768;
+          return {
+            position: 'fixed',
+            bottom: sidebar ? 'calc(env(safe-area-inset-bottom, 0px) + 8px)' : 'calc(76px + env(safe-area-inset-bottom, 8px))',
+            left: sidebar ? 220 : '50%',
+            transform: sidebar ? 'none' : 'translateX(-50%)',
+            width: sidebar ? 'calc(100% - 220px)' : '100%',
+            maxWidth: sidebar ? 'none' : 440,
+            padding: '12px 22px',
+            background: 'rgba(var(--bg-rgb),0.92)', borderTop: `0.5px solid ${UI.hair}`,
+            backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            zIndex: 15,
+          };
+        })()}>
           <span className="micro" style={{ color: UI.inkSoft }}>
             {selected.size === 0 ? 'Tap exercises to select' : `${selected.size} selected`}
           </span>
