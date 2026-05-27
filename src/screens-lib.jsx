@@ -106,10 +106,20 @@ function LibraryScreen({ store, setStore, go }) {
       .sort((a,b) => a.name.localeCompare(b.name));
   }, [store.exercises, q, filterTags, filterRestCats, filterUnilateral, filterPlan, filterEquipment, planExIds]);
 
+  const allFilteredSelected = filtered.length > 0 && filtered.every(e => selected.has(e.id));
+  const selectAll = () => setSelected(new Set(filtered.map(e => e.id)));
+  const deselectAll = () => setSelected(new Set());
+
   const topBarRight = selecting ? (
-    <button onClick={exitSelect} style={{ background: 'none', border: 'none', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}>
-      Cancel
-    </button>
+    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+      <button onClick={allFilteredSelected ? deselectAll : selectAll} style={{
+        background: 'none', border: 'none', color: UI.gold, fontFamily: UI.fontUi, fontSize: 11,
+        letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px',
+      }}>{allFilteredSelected ? 'None' : 'All'}</button>
+      <button onClick={exitSelect} style={{ background: 'none', border: 'none', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}>
+        Cancel
+      </button>
+    </div>
   ) : (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
       {store.exercises.length > 0 && (
@@ -514,7 +524,16 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
               color: UI.gold, fontSize: 11, fontFamily: UI.fontUi, padding: '4px 8px',
               letterSpacing: '0.1em', textTransform: 'uppercase',
             }}>{editMode ? (autoEdit ? (editQueue.length > 0 ? 'Save & Next' : 'Save') : 'Save') : 'Edit'}</button>
-            {!editMode && <button onClick={deleteExercise} style={{
+            {autoEdit && (
+              <button onClick={() => go(back || { name: 'lib' })} style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                width: 30, height: 30, borderRadius: '50%',
+                boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
+                color: UI.inkSoft, fontSize: 16, lineHeight: 1,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>×</button>
+            )}
+            {!editMode && !autoEdit && <button onClick={deleteExercise} style={{
               background: 'none', border: 'none', cursor: 'pointer',
               width: 30, height: 30, borderRadius: '50%',
               boxShadow: `inset 0 0 0 0.5px rgba(200,116,105,0.3)`,
