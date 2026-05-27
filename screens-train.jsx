@@ -422,7 +422,6 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     lastCompleteRef.current = Date.now();
     _log(`completeSet(${setIdx}) → lastCompleteRef stamped`);
 
-    stopTempo();
     // Build the done patch inside the functional updater so we can read the
     // latest queued session state and take the max of ref value vs. session
     // value. This wins regardless of which kbApply calls have flushed yet.
@@ -564,6 +563,14 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     updateSession(sess => ({ ...sess, currentExIdx: newIdx }));
   };
 
+  const skipSet = () => {
+    const idx = entry.sets.findIndex(s => !s.done && !s.skipped);
+    if (idx < 0) return;
+    updateSet(idx, { skipped: true });
+    const willBeAllDone = entry.sets.every((s, i) => i === idx || s.done || s.skipped);
+    if (willBeAllDone) navigate(1);
+  };
+
   const skipExercise = () => {
     updateSession(sess => ({
       ...sess,
@@ -576,14 +583,15 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
   const cancelPushover = () => LB.cancelPushover(store.settings, userId);
 
-  const playBeep = (phase, count = 1) => {
+  const playBeep = (phase, count = 1, scheduledTime = null) => {
     try {
       if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
       const ctx = audioCtxRef.current;
       if (ctx.state === 'suspended') ctx.resume();
-      const freq = phase === 'ecc' ? 440 : 880;
-      const dur = 0.07;
+      const freq = phase === 'ecc' ? 330 : 880;
+      const beepDur = 0.07;
       const gap = 0.06;
+      const startAt = scheduledTime ?? ctx.currentTime;
       for (let i = 0; i < count; i++) {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -591,36 +599,40 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         gain.connect(ctx.destination);
         osc.type = 'sine';
         osc.frequency.value = freq;
-        const t = ctx.currentTime + i * (dur + gap);
+        const t = startAt + i * (beepDur + gap);
         gain.gain.setValueAtTime(0.9, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + beepDur);
         osc.start(t);
-        osc.stop(t + dur);
+        osc.stop(t + beepDur);
       }
     } catch (e) {}
   };
 
   const stopTempo = () => {
-    if (tempoTimerRef.current) { clearInterval(tempoTimerRef.current); tempoTimerRef.current = null; }
+    if (tempoTimerRef.current) { clearTimeout(tempoTimerRef.current); tempoTimerRef.current = null; }
     setTempoActive(false);
   };
 
   const startTempo = () => {
     stopTempo();
+    setTempoActive(true);
     const eccSecs = store.settings?.tempoEccentric ?? 4;
     const conSecs = store.settings?.tempoConcentric ?? 1;
-    tempoStateRef.current = { phase: 'ecc', tick: 0 };
-    setTempoActive(true);
-    playBeep('ecc', 1);
-    tempoTimerRef.current = setInterval(() => {
-      const { phase, tick } = tempoStateRef.current;
-      const phaseLen = phase === 'ecc' ? eccSecs : conSecs;
-      let newTick = tick + 1;
-      let newPhase = phase;
-      if (newTick >= phaseLen) { newPhase = phase === 'ecc' ? 'con' : 'ecc'; newTick = 0; }
-      tempoStateRef.current = { phase: newPhase, tick: newTick };
-      playBeep(newPhase, newPhase === 'ecc' ? newTick + 1 : 1);
-    }, 1000);
+    if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = audioCtxRef.current;
+    if (ctx.state === 'suspended') ctx.resume();
+    const runPhase = (phase, phaseStart) => {
+      const phaseDur = phase === 'ecc' ? eccSecs : conSecs;
+      const n = Math.max(1, Math.floor(phaseDur));
+      const beatInterval = phaseDur / n;
+      for (let i = 0; i < n; i++) {
+        playBeep(phase, i + 1, phaseStart + i * beatInterval);
+      }
+      const nextStart = phaseStart + phaseDur;
+      const delay = Math.max(0, (nextStart - ctx.currentTime) * 1000);
+      tempoTimerRef.current = setTimeout(() => runPhase(phase === 'ecc' ? 'con' : 'ecc', nextStart), delay);
+    };
+    runPhase('ecc', ctx.currentTime);
   };
 
   const finish = () => {
@@ -796,7 +808,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   // (e.g. the keyboard ✓ is over an older row at the time iOS fires the ghost).
   const lastCompleteRef = useRefT(0);
 
-  useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); stopTempo(); }, [exIdx, sessionId]);
+  useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); }, [exIdx, sessionId]);
+  useEffectT(() => () => stopTempo(), []);
   useEffectT(() => { if (userId && sessionId) LB.broadcastExIdx(sessionId, exIdx); }, [exIdx]);
 
   // Log ALL document pointer/click events — captures ghost-clicks and shows where they land.
@@ -1595,7 +1608,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                 color: tempoActive ? 'var(--accent)' : UI.inkFaint,
                 fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
               }}>
-                {tempoActive ? 'Stop' : 'Tempo'}
+                {tempoActive ? 'Stop' : 'Paceguard'}
               </button>
             )}
             <div style={{ flex: 1 }} />
@@ -1653,9 +1666,17 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
-        <Btn onClick={allDone ? () => navigate(1) : skipExercise} style={{ flex: 1 }}>
-          {exIdx === session.entries.length - 1 ? 'Finish →' : allDone ? 'Next exercise →' : completed === 0 ? 'Skip exercise' : 'Skip remaining'}
-        </Btn>
+        {allDone ? (
+          <Btn onClick={() => navigate(1)} style={{ flex: 1 }}>
+            {exIdx === session.entries.length - 1 ? 'Finish →' : 'Next exercise →'}
+          </Btn>
+        ) : (<>
+          <Btn onClick={skipSet} style={{ flex: 1 }}>Skip set</Btn>
+          <Btn onClick={skipExercise} style={{ flex: 1 }}>Skip exercise</Btn>
+          {exIdx === session.entries.length - 1 && (
+            <Btn onClick={() => navigate(1)} style={{ flex: 1 }}>Finish →</Btn>
+          )}
+        </>)}
       </div>
 
       {/* finish confirmation */}
