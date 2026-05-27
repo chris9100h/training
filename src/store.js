@@ -539,6 +539,45 @@ function totalVolume(session) {
   );
 }
 
+// Index of the latest exercise whose entry has at least one completed set —
+// used by the Spectator screen to highlight the active row when no
+// currentExIdx broadcast has arrived yet.
+function inferCurrentExIdx(entries) {
+  if (!entries?.length) return 0;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].sets?.some(s => s.done)) return i;
+  }
+  return 0;
+}
+
+// Blended remaining-time estimate for a live session — used by Spectator
+// and the Active Users overview in Settings.
+// Early in the session, historical pace dominates; as more sets land,
+// the current-session pace gradually takes over.
+function calcBlended(startedAt, avgDurSec, avgSetsTotal, setsDone, setsTotal, nowMs) {
+  if (!avgDurSec || !startedAt) return null;
+  const elapsed = (nowMs - new Date(startedAt).getTime()) / 1000;
+  const remainingSets = Math.max(0, setsTotal - setsDone);
+  const histPace = avgSetsTotal > 0 ? avgDurSec / avgSetsTotal : null;
+  const currPace = setsDone >= 2 ? elapsed / setsDone : null;
+
+  let remainingSec;
+  if (!histPace || setsTotal === 0) {
+    remainingSec = Math.max(0, avgDurSec - elapsed);
+  } else if (!currPace) {
+    remainingSec = Math.max(0, avgDurSec - elapsed);
+  } else {
+    const w = Math.min(setsDone / 8, 0.7);
+    remainingSec = Math.max(0, (w * currPace + (1 - w) * histPace) * remainingSets);
+  }
+
+  const progress = setsTotal > 0
+    ? setsDone / setsTotal
+    : Math.min(1, Math.max(0, elapsed / (elapsed + remainingSec || 1)));
+
+  return { remainingMin: Math.round(remainingSec / 60), progress };
+}
+
 // Compute the seed-sets array when starting/logging a session for a planned item.
 // Honors smart-progression suggestions and falls back to last-session values.
 function buildSeedSets(it, last, suggestion, isUni, smartProgression) {
@@ -729,7 +768,7 @@ window.LB = {
   loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan,
-  effReps, e1rm, totalVolume, buildSeedSets,
+  effReps, e1rm, totalVolume, buildSeedSets, inferCurrentExIdx, calcBlended,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,
 };

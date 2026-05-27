@@ -568,7 +568,8 @@ function App() {
 
 function tryMount() {
   if (window.LB && window.Screens?.LoginScreen && window.Screens?.HomeScreen &&
-      window.Screens?.LibraryScreen && window.Screens?.TrainingScreen) {
+      window.Screens?.LibraryScreen && window.Screens?.TrainingScreen &&
+      window.Screens?.SettingsScreen) {
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   } else {
     setTimeout(tryMount, 50);
