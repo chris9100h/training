@@ -47,6 +47,14 @@ function LibraryScreen({ store, setStore, go }) {
     exitSelect();
   };
 
+  const editSelected = () => {
+    const ordered = filtered.filter(e => selected.has(e.id)).map(e => e.id);
+    if (ordered.length === 0) return;
+    exitSelect();
+    const [first, ...rest] = ordered;
+    go({ name: 'exercise', exId: first, editQueue: rest, editQueueTotal: ordered.length, autoEdit: true });
+  };
+
   const recent = useMemoL(() => {
     const sortedSessions = [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''));
     const lastTwo = new Map();
@@ -98,10 +106,20 @@ function LibraryScreen({ store, setStore, go }) {
       .sort((a,b) => a.name.localeCompare(b.name));
   }, [store.exercises, q, filterTags, filterRestCats, filterUnilateral, filterPlan, filterEquipment, planExIds]);
 
+  const allFilteredSelected = filtered.length > 0 && filtered.every(e => selected.has(e.id));
+  const selectAll = () => setSelected(new Set(filtered.map(e => e.id)));
+  const deselectAll = () => setSelected(new Set());
+
   const topBarRight = selecting ? (
-    <button onClick={exitSelect} style={{ background: 'none', border: 'none', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}>
-      Cancel
-    </button>
+    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+      <button onClick={allFilteredSelected ? deselectAll : selectAll} style={{
+        background: 'none', border: 'none', color: UI.gold, fontFamily: UI.fontUi, fontSize: 11,
+        letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px',
+      }}>{allFilteredSelected ? 'None' : 'All'}</button>
+      <button onClick={exitSelect} style={{ background: 'none', border: 'none', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}>
+        Cancel
+      </button>
+    </div>
   ) : (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
       {store.exercises.length > 0 && (
@@ -252,24 +270,37 @@ function LibraryScreen({ store, setStore, go }) {
       </div>
 
       {selecting && (
-        <div style={{
-          position: 'fixed', bottom: 'calc(76px + env(safe-area-inset-bottom, 8px))',
-          left: '50%', transform: 'translateX(-50%)',
-          width: '100%', maxWidth: 440,
-          padding: '12px 22px',
-          background: 'rgba(var(--bg-rgb),0.92)', borderTop: `0.5px solid ${UI.hair}`,
-          backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          zIndex: 15,
-        }}>
+        <div style={(() => {
+          const sidebar = window.innerWidth >= 768;
+          return {
+            position: 'fixed',
+            bottom: sidebar ? 'calc(env(safe-area-inset-bottom, 0px) + 8px)' : 'calc(76px + env(safe-area-inset-bottom, 8px))',
+            left: sidebar ? 220 : '50%',
+            transform: sidebar ? 'none' : 'translateX(-50%)',
+            width: sidebar ? 'calc(100% - 220px)' : '100%',
+            maxWidth: sidebar ? 'none' : 440,
+            padding: '12px 22px',
+            background: 'rgba(var(--bg-rgb),0.92)', borderTop: `0.5px solid ${UI.hair}`,
+            backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            zIndex: 15,
+          };
+        })()}>
           <span className="micro" style={{ color: UI.inkSoft }}>
             {selected.size === 0 ? 'Tap exercises to select' : `${selected.size} selected`}
           </span>
-          <Btn kind="ghost" onClick={deleteSelected}
-            disabled={selected.size === 0}
-            style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
-            Delete
-          </Btn>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn kind="ghost" onClick={editSelected}
+              disabled={selected.size === 0}
+              style={{ color: UI.gold, borderColor: UI.goldSoft, opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
+              Edit
+            </Btn>
+            <Btn kind="ghost" onClick={deleteSelected}
+              disabled={selected.size === 0}
+              style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
+              Delete
+            </Btn>
+          </div>
         </div>
       )}
 
@@ -356,10 +387,11 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
   const [category, setCategory] = useStateL(null);
   const [unilateral, setUnilateral] = useStateL(false);
   const [equipment, setEquipment] = useStateL('barbell_dual');
+  const [progressionReps, setProgressionReps] = useStateL(null);
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral, equipment: equipment || null, note: '' };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral, equipment: equipment || null, note: '', progression_reps: progressionReps ?? null };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -401,6 +433,18 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
             <Pill gold={unilateral} onClick={() => setUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
           </div>
         </div>
+        <div>
+          <span className="label">Rep target</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+            <Pill gold={progressionReps != null} onClick={() => setProgressionReps(v => v == null ? 12 : null)} style={{ cursor: 'pointer' }}>
+              {progressionReps != null ? 'On' : 'Off'}
+            </Pill>
+            {progressionReps != null
+              ? <Stepper value={progressionReps} onChange={v => setProgressionReps(Math.max(1, Math.round(v)))} step={1} min={1} />
+              : <span style={{ color: UI.inkFaint, fontSize: 13 }}>Uses planned reps per day</span>
+            }
+          </div>
+        </div>
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Create</Btn>
       </div>
     </Sheet>
@@ -408,26 +452,47 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
 }
 
 // ─── EXERCISE DETAIL ─────────────────────────────────────────────────
-function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
+function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [], editQueueTotal = 0, autoEdit = false }) {
   const ex = LB.findExercise(store, exId);
   if (!ex) { go(back || { name: 'lib' }); return null; }
 
   const [confirmEl, confirm] = useConfirm();
-  const [editMode, setEditMode] = useStateL(false);
-  const [editName, setEditName] = useStateL('');
-  const [editTags, setEditTags] = useStateL([]);
-  const [editCategory, setEditCategory] = useStateL(null);
-  const [editUnilateral, setEditUnilateral] = useStateL(false);
-  const [editEquipment, setEditEquipment] = useStateL(null);
+  const [editMode, setEditMode] = useStateL(autoEdit);
+  const [editName, setEditName] = useStateL(autoEdit ? ex.name : '');
+  const [editTags, setEditTags] = useStateL(autoEdit ? [...(ex.tags || [])] : []);
+  const [editCategory, setEditCategory] = useStateL(autoEdit ? (ex.category || null) : null);
+  const [editUnilateral, setEditUnilateral] = useStateL(autoEdit ? !!ex.unilateral : false);
+  const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
+  const [editProgressionReps, setEditProgressionReps] = useStateL(autoEdit ? (ex.progression_reps ?? null) : null);
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditUnilateral(!!ex.unilateral); setEditEquipment(ex.equipment || null); setEditMode(true); };
-  const cancelEdit = () => setEditMode(false);
+  const advanceQueue = () => {
+    if (editQueue.length > 0) {
+      const [next, ...rest] = editQueue;
+      go({ name: 'exercise', exId: next, editQueue: rest, editQueueTotal, autoEdit: true });
+    } else {
+      go(back || { name: 'lib' });
+    }
+  };
+
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditUnilateral(!!ex.unilateral); setEditEquipment(ex.equipment || null); setEditProgressionReps(ex.progression_reps ?? null); setEditMode(true); };
+  const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
-    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral, equipment: editEquipment || null } : e) }));
+    const newProgressionReps = editProgressionReps ?? null;
+    const repsChanged = newProgressionReps !== (ex.progression_reps ?? null);
+    setStore(s => {
+      const exercises = s.exercises.map(e => e.id === exId
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral, equipment: editEquipment || null, progression_reps: newProgressionReps }
+        : e);
+      const schedules = (repsChanged && newProgressionReps != null)
+        ? s.schedules.map(sch => ({ ...sch, days: sch.days.map(day => ({ ...day, items: (day.items || []).map(it => it.exId === exId ? { ...it, reps: newProgressionReps } : it) })) }))
+        : s.schedules;
+      return { ...s, exercises, schedules };
+    });
     setEditMode(false);
+    if (autoEdit) advanceQueue();
   };
   const toggleEditTag = (m) => setEditTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
 
@@ -466,26 +531,43 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
     (h.entry.sets || []).filter(s => s.kg != null && s.reps).reduce((sum, s) => sum + s.kg * s.reps, 0)
   )) : 0;
 
+  const queuePos = editQueueTotal > 0 ? editQueueTotal - editQueue.length : 0;
+
   return (
     <Screen>
       <ScreenHead
         ref_="EXERCISE"
         title={editMode ? editName || ex.name : ex.name}
+        sub={autoEdit && editQueueTotal > 1 ? `${queuePos} / ${editQueueTotal}` : undefined}
         onBack={() => { if (editMode) cancelEdit(); else go(back || { name: 'lib' }); }}
         right={
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <button onClick={editMode ? saveEdit : startEdit} style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: UI.gold, fontSize: 11, fontFamily: UI.fontUi, padding: '4px 8px',
-              letterSpacing: '0.1em', textTransform: 'uppercase',
-            }}>{editMode ? 'Save' : 'Edit'}</button>
-            {!editMode && <button onClick={deleteExercise} style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              width: 30, height: 30, borderRadius: '50%',
-              boxShadow: `inset 0 0 0 0.5px rgba(200,116,105,0.3)`,
-              color: UI.danger, fontSize: 16, lineHeight: 1,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>×</button>}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {editMode ? (
+              autoEdit && (
+                <button onClick={() => go(back || { name: 'lib' })} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  width: 30, height: 30, borderRadius: '50%',
+                  boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
+                  color: UI.inkSoft, fontSize: 16, lineHeight: 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>×</button>
+              )
+            ) : (
+              <>
+                <button onClick={startEdit} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: UI.gold, fontSize: 11, fontFamily: UI.fontUi, padding: '4px 8px',
+                  letterSpacing: '0.1em', textTransform: 'uppercase',
+                }}>Edit</button>
+                <button onClick={deleteExercise} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  width: 30, height: 30, borderRadius: '50%',
+                  boxShadow: `inset 0 0 0 0.5px rgba(200,116,105,0.3)`,
+                  color: UI.danger, fontSize: 16, lineHeight: 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>×</button>
+              </>
+            )}
           </div>
         }
       />
@@ -528,7 +610,26 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
                 <Pill gold={editUnilateral} onClick={() => setEditUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
               </div>
             </div>
-            <Btn kind="ghost" onClick={cancelEdit} style={{ fontSize: 11 }}>Cancel</Btn>
+            <div>
+              <span className="label">Rep target</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                <Pill gold={editProgressionReps != null} onClick={() => setEditProgressionReps(v => v == null ? 12 : null)} style={{ cursor: 'pointer' }}>
+                  {editProgressionReps != null ? 'On' : 'Off'}
+                </Pill>
+                {editProgressionReps != null
+                  ? <Stepper value={editProgressionReps} onChange={v => setEditProgressionReps(Math.max(1, Math.round(v)))} step={1} min={1} />
+                  : <span style={{ color: UI.inkFaint, fontSize: 13 }}>Uses planned reps per day</span>
+                }
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <Btn kind="ghost" onClick={cancelEdit} style={{ flex: 1 }}>
+                {autoEdit ? 'Skip' : 'Cancel'}
+              </Btn>
+              <Btn onClick={saveEdit} style={{ flex: 1 }}>
+                {autoEdit ? (editQueue.length > 0 ? 'Save & Next' : 'Save') : 'Save'}
+              </Btn>
+            </div>
           </div>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -541,7 +642,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
         )}
       </div>
 
-      <div style={{ padding: '18px 22px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {!editMode && <div style={{ padding: '18px 22px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
         {/* Stats — SubDials */}
         <div style={{ display: 'flex', justifyContent: 'space-around', padding: '6px 0' }}>
@@ -632,7 +733,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
             {history.length === 0 && <Empty title="Never trained" />}
           </div>
         </div>
-      </div>
+      </div>}
       {confirmEl}
     </Screen>
   );
@@ -650,7 +751,7 @@ function ProgressChart({ points }) {
   });
   const path = xy.map(([x,y], i) => `${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   return (
-    <div style={{ padding: '10px 0' }}>
+    <div style={{ padding: '10px 0', maxWidth: 380 }}>
       <div className="micro" style={{ marginBottom: 8, color: UI.inkFaint }}>EST. 1RM · HISTORY</div>
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
         <path d={path} fill="none" stroke={UI.gold} strokeWidth="1" opacity="0.6" />
@@ -2693,3 +2794,4 @@ function SettingsScreen({ store, setStore, go, userId }) {
 }
 
 Object.assign(window.Screens, { LibraryScreen, ExerciseCreator, ExerciseDetailScreen, HistoryScreen, SessionDetailScreen, SettingsScreen, SpectatorScreen });
+window.EQUIPMENT_TYPES = EQUIPMENT_TYPES;

@@ -566,6 +566,7 @@ function ExerciseItemEditor({ item, exName, onClose, onSave }) {
   const [sets, setSets] = useStateS(item.sets);
   const [reps, setReps] = useStateS(item.reps);
   const [note, setNote] = useStateS(item.note || '');
+
   return (
     <Sheet open={true} onClose={onClose} title={exName}>
       <div style={{ display: 'flex', gap: 24, justifyContent: 'center', marginBottom: 24 }}>
@@ -583,11 +584,7 @@ function ExerciseItemEditor({ item, exName, onClose, onSave }) {
         </div>
       </div>
       <Field label="Note (optional)">
-        <TextInput
-          value={note}
-          onChange={setNote}
-          placeholder="e.g. cable pos 4, slow eccentric…"
-        />
+        <TextInput value={note} onChange={setNote} placeholder="e.g. cable pos 4, slow eccentric…" />
       </Field>
       <Btn onClick={() => onSave({ sets, reps, note })} style={{ width: '100%', marginTop: 20 }}>Apply</Btn>
     </Sheet>
@@ -613,7 +610,9 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   });
   const removeItem = (idx) => setDraft(d => ({ ...d, items: d.items.filter((_, i) => i !== idx) }));
   const addExercise = (exId) => {
-    setDraft(d => ({ ...d, items: [...d.items, { exId, sets: 3, reps: 8 }] }));
+    const ex = LB.findExercise(store, exId);
+    const defaultReps = ex?.progression_reps ?? 8;
+    setDraft(d => ({ ...d, items: [...d.items, { exId, sets: 3, reps: defaultReps }] }));
     setAddingEx(false);
   };
   const moveItem = (idx, dir) => {

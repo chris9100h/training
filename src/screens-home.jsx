@@ -743,7 +743,15 @@ function HomeScreen({ store, setStore, go, userId }) {
                   <div style={{ flex: 1 }}>
                     <div className="micro-gold" style={{ marginBottom: 2 }}>WORKOUT COMPLETE</div>
                     <div style={{ fontSize: 13, color: UI.inkSoft, display: 'flex', alignItems: 'center', gap: 10 }}>
-                      {improvementCount === 0 && regressionCount === 0 ? 'Well done.' : (
+                      {doneSession?.ended && (() => {
+                        const d = new Date(doneSession.ended);
+                        const dd = d.getDate().toString().padStart(2,'0');
+                        const mm = (d.getMonth()+1).toString().padStart(2,'0');
+                        const hh = d.getHours().toString().padStart(2,'0');
+                        const min = d.getMinutes().toString().padStart(2,'0');
+                        return <span style={{ color: UI.inkFaint }} className="num">{dd}.{mm}.{d.getFullYear()} {hh}:{min}</span>;
+                      })()}
+                      {improvementCount === 0 && regressionCount === 0 ? null : (
                         <>
                           {improvementCount > 0 && (
                             <span style={{ color: '#7bc47b', fontWeight: 600 }}>↑ {improvementCount}</span>

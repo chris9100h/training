@@ -130,7 +130,7 @@ async function importFromBackup(backup, userId) {
   await Promise.all([
     backup.user?.name && _supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name }),
     backup.exercises?.length && _supabase.from('zane_exercises').upsert(
-      backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, user_id: userId }))
+      backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, user_id: userId }))
     ),
     backup.schedules?.length && _supabase.from('zane_schedules').upsert(
       backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
@@ -189,7 +189,7 @@ async function setupNewUser(userId, name) {
 async function loadFromSupabase(userId, _depth = 0) {
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes] = await Promise.all([
     _supabase.from('zane_profiles').select('id, name').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment').eq('user_id', userId),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days').eq('user_id', userId),
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries, duration_minutes')
       .eq('user_id', userId).order('date', { ascending: false }),
@@ -346,7 +346,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -651,7 +651,8 @@ function progressionSuggestion(store, exId, dayId, plannedReps) {
   const last = lastSessionForExercise(store, exId, dayId);
   if (!last) return null;
 
-  const targetRepsTop = (plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+  const baseReps = ex?.progression_reps ?? plannedReps;
+  const targetRepsTop = (baseReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
   const doneSets = (last.entry.sets || []).filter(s => !s.skipped && s.kg != null);
   if (!doneSets.length) return null;
 
@@ -666,7 +667,7 @@ function progressionSuggestion(store, exId, dayId, plannedReps) {
   const cappedKg = maxKg ? Math.min(newKg, maxKg) : newKg;
   if (cappedKg <= refKg) return null;
 
-  return { kg: cappedKg, reps: plannedReps ?? null };
+  return { kg: cappedKg, reps: baseReps ?? null };
 }
 
 window.LB = {

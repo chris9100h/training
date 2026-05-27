@@ -360,7 +360,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const isUnilateral = !!exercise?.unilateral;
   const progressionTarget = (() => {
     if (!store.settings?.smartProgression) return null;
-    const target = (entry?.plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+    const base = (exercise?.progression_reps ?? entry?.plannedReps) ?? 0;
+    const target = base + (store.settings?.progressionRangeTop ?? 4);
     return target > 0 ? target : null;
   })();
 
@@ -454,7 +455,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? null;
       if (!increment) return null;
-      const targetRepsTop = (entry.plannedReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+      const baseReps = exercise?.progression_reps ?? entry.plannedReps;
+      const targetRepsTop = (baseReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
       const doneSets = updatedSets.filter(s => s.done && !s.skipped && s.kg != null);
       if (!doneSets.length) return null;
       const allHitTop = doneSets.every(s => {
@@ -739,8 +741,12 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       };
       flash();
       // audio: two beeps + higher tone (blocked by iOS silent switch, but nice to have)
+      // Reuse the shared AudioContext created during a prior user gesture — creating
+      // a new one here (timer tick, no gesture) causes iOS to suspend it immediately
+      // and resume() silently fails, so the sound never plays.
       try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+        const ctx = audioCtxRef.current;
         const play = () => {
           const beep = (t, freq, dur) => {
             const osc = ctx.createOscillator();
@@ -754,7 +760,6 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           beep(ctx.currentTime,        880, 0.14);
           beep(ctx.currentTime + 0.18, 880, 0.14);
           beep(ctx.currentTime + 0.36, 1320, 0.28);
-          setTimeout(() => ctx.close(), 1200);
         };
         ctx.state === 'suspended' ? ctx.resume().then(play) : play();
       } catch (_) {}
@@ -1315,8 +1320,10 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           }}>
             {entry.name}
           </div>
-          {(exercise?.tags || []).length > 0 && (
+          {(exercise?.category || exercise?.equipment || (exercise?.tags || []).length > 0) && (
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+              {exercise?.category && <Pill gold>{exercise.category}</Pill>}
+              {exercise?.equipment && <Pill>{(window.EQUIPMENT_TYPES||[]).find(t=>t.key===exercise.equipment)?.label ?? exercise.equipment}</Pill>}
               {(exercise?.tags || []).map(t => <Pill key={t}>{t}</Pill>)}
             </div>
           )}
