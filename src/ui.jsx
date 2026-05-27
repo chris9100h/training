@@ -1,10 +1,9 @@
-/* Hi-fi UI primitives — Haute Horlogerie redesign
-   Preserves the original API (UI, Screen, TopBar, TabBar, Btn, Card, Label,
-   Input, Stepper, Pill, Sheet, Empty, ChevronRight, icons, useConfirm,
-   MUSCLES, btnPrimary/Ghost/Icon) so existing screens keep working — and
-   adds new primitives (Frame, BracketFrame, SubDial, CrownButton, Bezel,
-   ScreenHead, Hairline, TickRow, NumInput, Field, TextInput).
-*/
+/* Hi-fi UI primitives — Haute Horlogerie redesign.
+   Exposes: UI, Screen, TopBar, TabBar, Btn, Card, Label, Stepper, Pill,
+   Sheet, Empty, ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
+   btnPrimary/Ghost, useConfirm, MUSCLES, WEEKDAYS, WEEKDAYS_FULL,
+   Hairline, BracketFrame, Frame, SubDial, Bezel, ScreenHead,
+   NumInput, Field, TextInput. */
 
 const UI = {
   bg:       'var(--bg)',
