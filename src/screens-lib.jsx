@@ -598,7 +598,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
               </div>
             </div>
             <div>
-              <span className="label">Progression rep target</span>
+              <span className="label">Rep target</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
                 <Pill gold={editProgressionReps != null} onClick={() => setEditProgressionReps(v => v == null ? 12 : null)} style={{ cursor: 'pointer' }}>
                   {editProgressionReps != null ? 'On' : 'Off'}
