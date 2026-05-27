@@ -610,7 +610,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
               <Btn kind="ghost" onClick={cancelEdit} style={{ flex: 1 }}>
                 {autoEdit ? 'Skip' : 'Cancel'}
               </Btn>
-              <Btn kind="ghost" onClick={saveEdit} style={{ flex: 1, color: UI.gold, borderColor: UI.goldSoft }}>
+              <Btn onClick={saveEdit} style={{ flex: 1 }}>
                 {autoEdit ? (editQueue.length > 0 ? 'Save & Next' : 'Save') : 'Save'}
               </Btn>
             </div>
