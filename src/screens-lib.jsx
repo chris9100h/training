@@ -47,6 +47,14 @@ function LibraryScreen({ store, setStore, go }) {
     exitSelect();
   };
 
+  const editSelected = () => {
+    const ordered = filtered.filter(e => selected.has(e.id)).map(e => e.id);
+    if (ordered.length === 0) return;
+    exitSelect();
+    const [first, ...rest] = ordered;
+    go({ name: 'exercise', exId: first, editQueue: rest, editQueueTotal: ordered.length, autoEdit: true });
+  };
+
   const recent = useMemoL(() => {
     const sortedSessions = [...store.sessions].filter(s => s.ended).sort((a,b) => (b.ended||'').localeCompare(a.ended||''));
     const lastTwo = new Map();
@@ -271,11 +279,18 @@ function LibraryScreen({ store, setStore, go }) {
           <span className="micro" style={{ color: UI.inkSoft }}>
             {selected.size === 0 ? 'Tap exercises to select' : `${selected.size} selected`}
           </span>
-          <Btn kind="ghost" onClick={deleteSelected}
-            disabled={selected.size === 0}
-            style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
-            Delete
-          </Btn>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn kind="ghost" onClick={editSelected}
+              disabled={selected.size === 0}
+              style={{ color: UI.gold, borderColor: UI.goldSoft, opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
+              Edit
+            </Btn>
+            <Btn kind="ghost" onClick={deleteSelected}
+              disabled={selected.size === 0}
+              style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
+              Delete
+            </Btn>
+          </div>
         </div>
       )}
 
@@ -414,27 +429,37 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
 }
 
 // ─── EXERCISE DETAIL ─────────────────────────────────────────────────
-function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
+function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [], editQueueTotal = 0, autoEdit = false }) {
   const ex = LB.findExercise(store, exId);
   if (!ex) { go(back || { name: 'lib' }); return null; }
 
   const [confirmEl, confirm] = useConfirm();
-  const [editMode, setEditMode] = useStateL(false);
-  const [editName, setEditName] = useStateL('');
-  const [editTags, setEditTags] = useStateL([]);
-  const [editCategory, setEditCategory] = useStateL(null);
-  const [editUnilateral, setEditUnilateral] = useStateL(false);
-  const [editEquipment, setEditEquipment] = useStateL(null);
-  const [editProgressionReps, setEditProgressionReps] = useStateL(null);
+  const [editMode, setEditMode] = useStateL(autoEdit);
+  const [editName, setEditName] = useStateL(autoEdit ? ex.name : '');
+  const [editTags, setEditTags] = useStateL(autoEdit ? [...(ex.tags || [])] : []);
+  const [editCategory, setEditCategory] = useStateL(autoEdit ? (ex.category || null) : null);
+  const [editUnilateral, setEditUnilateral] = useStateL(autoEdit ? !!ex.unilateral : false);
+  const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
+  const [editProgressionReps, setEditProgressionReps] = useStateL(autoEdit ? (ex.progression_reps ?? null) : null);
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
 
+  const advanceQueue = () => {
+    if (editQueue.length > 0) {
+      const [next, ...rest] = editQueue;
+      go({ name: 'exercise', exId: next, editQueue: rest, editQueueTotal, autoEdit: true });
+    } else {
+      go(back || { name: 'lib' });
+    }
+  };
+
   const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditUnilateral(!!ex.unilateral); setEditEquipment(ex.equipment || null); setEditProgressionReps(ex.progression_reps ?? null); setEditMode(true); };
-  const cancelEdit = () => setEditMode(false);
+  const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
     setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral, equipment: editEquipment || null, progression_reps: editProgressionReps ?? null } : e) }));
     setEditMode(false);
+    if (autoEdit) advanceQueue();
   };
   const toggleEditTag = (m) => setEditTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
 
@@ -473,11 +498,14 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
     (h.entry.sets || []).filter(s => s.kg != null && s.reps).reduce((sum, s) => sum + s.kg * s.reps, 0)
   )) : 0;
 
+  const queuePos = editQueueTotal > 0 ? editQueueTotal - editQueue.length : 0;
+
   return (
     <Screen>
       <ScreenHead
         ref_="EXERCISE"
         title={editMode ? editName || ex.name : ex.name}
+        sub={autoEdit && editQueueTotal > 1 ? `${queuePos} / ${editQueueTotal}` : undefined}
         onBack={() => { if (editMode) cancelEdit(); else go(back || { name: 'lib' }); }}
         right={
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -485,7 +513,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back }) {
               background: 'none', border: 'none', cursor: 'pointer',
               color: UI.gold, fontSize: 11, fontFamily: UI.fontUi, padding: '4px 8px',
               letterSpacing: '0.1em', textTransform: 'uppercase',
-            }}>{editMode ? 'Save' : 'Edit'}</button>
+            }}>{editMode ? (autoEdit ? (editQueue.length > 0 ? 'Save & Next' : 'Save') : 'Save') : 'Edit'}</button>
             {!editMode && <button onClick={deleteExercise} style={{
               background: 'none', border: 'none', cursor: 'pointer',
               width: 30, height: 30, borderRadius: '50%',
