@@ -467,7 +467,17 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
-    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral, equipment: editEquipment || null, progression_reps: editProgressionReps ?? null } : e) }));
+    const newProgressionReps = editProgressionReps ?? null;
+    const repsChanged = newProgressionReps !== (ex.progression_reps ?? null);
+    setStore(s => {
+      const exercises = s.exercises.map(e => e.id === exId
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral, equipment: editEquipment || null, progression_reps: newProgressionReps }
+        : e);
+      const schedules = (repsChanged && newProgressionReps != null)
+        ? s.schedules.map(sch => ({ ...sch, days: sch.days.map(day => ({ ...day, items: (day.items || []).map(it => it.exId === exId ? { ...it, reps: newProgressionReps } : it) })) }))
+        : s.schedules;
+      return { ...s, exercises, schedules };
+    });
     setEditMode(false);
     if (autoEdit) advanceQueue();
   };
