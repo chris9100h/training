@@ -387,10 +387,11 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
   const [category, setCategory] = useStateL(null);
   const [unilateral, setUnilateral] = useStateL(false);
   const [equipment, setEquipment] = useStateL('barbell_dual');
+  const [progressionReps, setProgressionReps] = useStateL(null);
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral, equipment: equipment || null, note: '' };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral, equipment: equipment || null, note: '', progression_reps: progressionReps ?? null };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -430,6 +431,18 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
           <span className="label">Movement type</span>
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
             <Pill gold={unilateral} onClick={() => setUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
+          </div>
+        </div>
+        <div>
+          <span className="label">Rep target</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+            <Pill gold={progressionReps != null} onClick={() => setProgressionReps(v => v == null ? 12 : null)} style={{ cursor: 'pointer' }}>
+              {progressionReps != null ? 'On' : 'Off'}
+            </Pill>
+            {progressionReps != null
+              ? <Stepper value={progressionReps} onChange={v => setProgressionReps(Math.max(1, Math.round(v)))} step={1} min={1} />
+              : <span style={{ color: UI.inkFaint, fontSize: 13 }}>Uses planned reps per day</span>
+            }
           </div>
         </div>
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Create</Btn>
