@@ -213,7 +213,7 @@ function LibraryScreen({ store, setStore, go }) {
                   {ex.tags?.map(t => <Pill key={t}>{t}</Pill>)}
                   {ex.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
                   {ex.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
-                  {ex.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill> : <Pill style={{ color: 'rgba(200,116,105,0.5)', borderColor: 'rgba(200,116,105,0.2)', fontSize: 8 }}>No equipment</Pill>}
+                  {ex.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>No equipment</Pill>}
                   {planExIds.has(ex.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
@@ -237,7 +237,7 @@ function LibraryScreen({ store, setStore, go }) {
                 padding: '13px 0',
                 borderBottom: fi < filtered.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
                 cursor: 'pointer',
-                background: isSelected ? 'rgba(200,116,105,0.04)' : 'transparent',
+                background: isSelected ? 'rgba(var(--danger-rgb),0.04)' : 'transparent',
               }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="display" style={{ fontSize: 19, color: isSelected ? UI.danger : UI.ink, lineHeight: 1.1 }}>{e.name}</div>
@@ -245,7 +245,7 @@ function LibraryScreen({ store, setStore, go }) {
                   {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
                   {e.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{e.category.charAt(0).toUpperCase() + e.category.slice(1)}</Pill>}
                   {e.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
-                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(200,116,105,0.5)', borderColor: 'rgba(200,116,105,0.2)', fontSize: 8 }}>No equipment</Pill>}
+                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>No equipment</Pill>}
                   {planExIds.has(e.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
@@ -297,7 +297,7 @@ function LibraryScreen({ store, setStore, go }) {
             </Btn>
             <Btn kind="ghost" onClick={deleteSelected}
               disabled={selected.size === 0}
-              style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
+              style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
               Delete
             </Btn>
           </div>
@@ -562,7 +562,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
                 <button onClick={deleteExercise} style={{
                   background: 'none', border: 'none', cursor: 'pointer',
                   width: 30, height: 30, borderRadius: '50%',
-                  boxShadow: `inset 0 0 0 0.5px rgba(200,116,105,0.3)`,
+                  boxShadow: `inset 0 0 0 0.5px rgba(var(--danger-rgb),0.3)`,
                   color: UI.danger, fontSize: 16, lineHeight: 1,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>×</button>
@@ -1322,7 +1322,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             }}>Edit</button>
             <button onClick={deleteSession} style={{
               width: 28, height: 28, borderRadius: '50%',
-              boxShadow: `inset 0 0 0 0.5px rgba(200,116,105,0.25)`, background: 'transparent',
+              boxShadow: `inset 0 0 0 0.5px rgba(var(--danger-rgb),0.25)`, background: 'transparent',
               color: UI.danger, cursor: 'pointer', fontSize: 16, lineHeight: 1,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>×</button>
@@ -1458,13 +1458,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       return (
                         <span key={j} style={{
                           opacity: st.done ? 1 : 0.3,
-                          background: highlight ? UI.goldFaint : decline ? 'rgba(200,116,105,0.08)' : 'transparent',
-                          border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(200,116,105,0.35)' : UI.hair}`,
+                          background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent',
+                          border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
                           borderRadius: 6, padding: '3px 8px',
                           fontFamily: UI.fontNum, fontSize: 12,
-                          color: highlight ? UI.goldLight : decline ? 'rgba(200,116,105,0.85)' : UI.ink,
+                          color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,
                         }}>
-                          {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(200,116,105,0.6)' : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(200,116,105,0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
+                          {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
                         </span>
                       );
                     })}
@@ -2513,7 +2513,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
                           if (ok) await LB.signOut();
                         }
                       }} style={{ flex: 1, background: hasSession ? 'rgba(236,228,208,0.02)' : 'transparent', border: `0.5px solid ${hasSession ? UI.hair : UI.hairStrong}`, borderRadius: 10, padding: '10px 12px', textAlign: 'left', cursor: qsSwitching ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent', opacity: qsSwitching ? 0.5 : 1 }}>
-                        <div className="micro" style={{ marginBottom: 5, color: hasSession ? UI.inkFaint : 'rgba(200,116,105,0.7)' }}>{qsSwitching ? 'Switching…' : (hasSession ? 'Tap to switch' : 'Log in first')}</div>
+                        <div className="micro" style={{ marginBottom: 5, color: hasSession ? UI.inkFaint : 'rgba(var(--danger-rgb),0.7)' }}>{qsSwitching ? 'Switching…' : (hasSession ? 'Tap to switch' : 'Log in first')}</div>
                         <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: hasSession ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1 }}>{otherName}</div>
                       </button>
                     </div>
@@ -2613,7 +2613,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <Btn kind="ghost" onClick={() => exportData()} style={{ fontSize: 12 }}>Export data (JSON)</Btn>
               <Btn kind="ghost" onClick={importData} disabled={importing} style={{ fontSize: 12 }}>{importing ? 'Importing…' : 'Import data (JSON)'}</Btn>
               <Hairline style={{ margin: '4px 0' }} />
-              <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', opacity: 0.7, fontSize: 12 }}>Delete all data</Btn>
+              <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)', opacity: 0.7, fontSize: 12 }}>Delete all data</Btn>
             </div>
           )}
         </Frame>
@@ -2754,7 +2754,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           }
           window.location.reload(true);
         }} style={{ fontSize: 12 }}>Clear app cache &amp; reload</Btn>
-        <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', fontSize: 12 }}>
+        <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)', fontSize: 12 }}>
           Sign out
         </Btn>
         <div className="micro" style={{ textAlign: 'center', marginTop: 8 }}>
@@ -2772,7 +2772,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
             onChange={e => setPushKeyDraft(e.target.value)}
             placeholder="uXXXXXXXXXXXXXXXXXXXX"
             style={{
-              background: UI.bgInset, border: `0.5px solid ${pushKeyDraft && !pushKeyValid ? 'rgba(200,116,105,0.5)' : UI.hairStrong}`,
+              background: UI.bgInset, border: `0.5px solid ${pushKeyDraft && !pushKeyValid ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`,
               borderRadius: 10, padding: '10px 14px',
               fontFamily: UI.fontUi, fontSize: 13, color: UI.ink,
               outline: 'none', width: '100%', boxSizing: 'border-box',
@@ -2780,7 +2780,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
             autoCorrect="off" autoCapitalize="none" spellCheck={false}
           />
           {pushKeyDraft && !pushKeyValid && (
-            <div className="micro" style={{ color: 'rgba(200,116,105,0.85)' }}>Invalid key — must be 30 alphanumeric characters</div>
+            <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.85)' }}>Invalid key — must be 30 alphanumeric characters</div>
           )}
           <Btn onClick={confirmPushKey} disabled={!pushKeyValid}>Enable notifications</Btn>
         </div>

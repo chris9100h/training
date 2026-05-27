@@ -60,8 +60,8 @@ function LoginScreen() {
             <div style={{
               fontSize: 12, color: UI.danger,
               padding: '10px 14px',
-              background: 'rgba(200,116,105,0.06)',
-              border: `0.5px solid rgba(200,116,105,0.25)`,
+              background: 'rgba(var(--danger-rgb),0.06)',
+              border: `0.5px solid rgba(var(--danger-rgb),0.25)`,
               borderRadius: 10,
               fontFamily: UI.fontUi,
             }}>
@@ -616,8 +616,8 @@ function HomeScreen({ store, setStore, go, userId }) {
                 onClick={() => (weekdayMode || cycleWeekView) ? setSelectedWd(i) : setSelectedSlot(i)}
                 style={{
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
-                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(200,116,105,0.08)' : isSkipped ? 'rgba(160,160,160,0.07)' : 'transparent',
-                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(200,116,105,0.4)' : isSkipped ? 'rgba(160,160,160,0.3)' : d.isToday ? UI.hairStrong : UI.hair}`,
+                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isSkipped ? 'rgba(160,160,160,0.07)' : 'transparent',
+                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(var(--danger-rgb),0.4)' : isSkipped ? 'rgba(160,160,160,0.3)' : d.isToday ? UI.hairStrong : UI.hair}`,
                   borderRadius: 8, cursor: 'pointer',
                   minHeight: 56,
                 }}>
@@ -823,7 +823,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             );
           }
           return (
-            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'rgba(200,116,105,0.05)', border: `0.5px solid rgba(200,116,105,0.2)`, borderRadius: 12 }}>
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.05)', border: `0.5px solid rgba(var(--danger-rgb),0.2)`, borderRadius: 12 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>{bDayName} · {dateLabel}</div>
                 <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Not logged</div>
@@ -844,7 +844,7 @@ function HomeScreen({ store, setStore, go, userId }) {
               }} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                 Log
               </button>
-              <button onClick={() => setSkipReasonModal({ mode: 'dismiss', data: { dateKey, dayId: recentBannerDay.dayId, dayName: bDayName } })} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid rgba(200,116,105,0.25)`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: 'rgba(200,116,105,0.7)', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+              <button onClick={() => setSkipReasonModal({ mode: 'dismiss', data: { dateKey, dayId: recentBannerDay.dayId, dayName: bDayName } })} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid rgba(var(--danger-rgb),0.25)`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: 'rgba(var(--danger-rgb),0.7)', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                 Dismiss
               </button>
             </div>

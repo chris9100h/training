@@ -300,7 +300,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
                   </div>
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: hasOther ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1, marginBottom: 8 }}>{otherName}</div>
-                    <div className="micro" style={{ color: hasOther ? UI.inkFaint : 'rgba(200,116,105,0.7)' }}>
+                    <div className="micro" style={{ color: hasOther ? UI.inkFaint : 'rgba(var(--danger-rgb),0.7)' }}>
                       {hasOther ? 'Tap to switch' : 'Set up in Settings'}
                     </div>
                   </div>
@@ -595,7 +595,7 @@ function useConfirm() {
         <Btn kind="ghost" onClick={() => close(false)} style={{ flex: 1 }}>{state.cancel}</Btn>
         <Btn onClick={() => close(true)} style={{
           flex: 2,
-          ...(state.danger ? { background: UI.danger, borderColor: 'rgba(200,116,105,0.6)', boxShadow: '0 8px 24px rgba(200,116,105,0.25)' } : {}),
+          ...(state.danger ? { background: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.6)', boxShadow: '0 8px 24px rgba(var(--danger-rgb),0.25)' } : {}),
         }}>{state.ok}</Btn>
       </div>
     </Sheet>

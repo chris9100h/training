@@ -399,7 +399,7 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
           Custom day types can be created when adding.
         </div>
 
-        <Btn kind="ghost" onClick={deleteSch} style={{ marginTop: 4, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', fontSize: 12 }}>Delete plan</Btn>
+        <Btn kind="ghost" onClick={deleteSch} style={{ marginTop: 4, color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)', fontSize: 12 }}>Delete plan</Btn>
       </div>
 
       {pickingType && (
