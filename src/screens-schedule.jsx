@@ -136,17 +136,13 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
   const dayLabel = isWeekday ? WEEKDAYS_FULL[day.weekday] : `Day ${dayIdx + 1}`;
   const trainingDayCount = sch.days.filter(d => d.items.length).length;
 
-  const [confirmEl, confirm] = useConfirm();
-  const activate = async () => {
-    if (!await confirm(`"${sch.name}" will become your active plan and the cycle will reset.`, { title: 'Activate plan?', ok: 'Activate' })) return;
-    setStore(s => ({
-      ...s,
-      activeScheduleId: sch.id,
-      cycleIndex: 0,
-      cycleStartDate:    isWeekday ? s.cycleStartDate : LB.todayISO(),
-      weekPlanStartDate: isWeekday ? LB.todayISO()    : s.weekPlanStartDate,
-    }));
-  };
+  const activate = () => setStore(s => ({
+    ...s,
+    activeScheduleId: sch.id,
+    cycleIndex: 0,
+    cycleStartDate:    isWeekday ? s.cycleStartDate : LB.todayISO(),
+    weekPlanStartDate: isWeekday ? LB.todayISO()    : s.weekPlanStartDate,
+  }));
   const duplicate = () => {
     const copy = JSON.parse(JSON.stringify(sch));
     copy.id = LB.uid();
@@ -158,7 +154,6 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
 
   return (
     <Screen scroll={false}>
-      {confirmEl}
       <TopBar
         title={sch.name}
         sub={isWeekday
