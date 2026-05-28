@@ -289,46 +289,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </Frame>
         )}
 
-        {/* ─── Appearance ─── */}
-        <Frame style={{ padding: '12px 14px' }}>
-          <SecHead label="Appearance" open={appearanceOpen} onToggle={() => setAppearanceOpen(v => !v)} />
-          {appearanceOpen && (
-            <div style={{ marginTop: 14 }}>
-              <div className="micro" style={{ marginBottom: 10 }}>Accent color</div>
-              <div style={{ display: 'flex', gap: 10, marginBottom: 14, alignItems: 'flex-end' }}>
-                {Object.entries(window.ACCENT_PALETTE).map(([key, c]) => {
-                  const active = (store.settings?.accentColor ?? 'copper') === key;
-                  return (
-                    <button key={key} onClick={() => { window.applyAccentColor(key); localStorage.setItem('logbook-accent-color', key); setStore(s => ({ ...s, settings: { ...s.settings, accentColor: key } })); }}
-                      title={c.label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
-                      <div style={{ width: active ? 32 : 26, height: active ? 32 : 26, borderRadius: '50%', background: c.hex, border: active ? `2.5px solid ${UI.ink}` : '2px solid transparent', boxShadow: active ? `0 0 0 1.5px ${c.hex}` : 'none', transition: 'all 0.18s' }} />
-                      {active && <span style={{ fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 600, color: 'var(--accent)' }}>{c.label}</span>}
-                    </button>
-                  );
-                })}
-              </div>
-              <Row label="Week view in cycle mode" first>
-                <Toggle on={cycleWeekView} onToggle={() => { const n = !cycleWeekView; setCycleWeekView(n); localStorage.setItem('logbook-cycle-week-view', String(n)); setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: n } })); }} />
-              </Row>
-              <Row label="OLED black background">
-                <Toggle on={darkMode === 'black'} onToggle={() => { const n = darkMode === 'black' ? 'dark' : 'black'; setDarkMode(n); localStorage.setItem('logbook-dark-mode', n); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: n } })); }} />
-              </Row>
-            </div>
-          )}
-        </Frame>
-
-        {/* ─── Training ─── */}
-        <Frame style={{ padding: '12px 14px' }}>
-          <SecHead label="Training" open={trainingOpen} onToggle={() => setTrainingOpen(v => !v)} />
-          {trainingOpen && (
-            <div style={{ marginTop: 4 }}>
-              <NavRow label="Rest timers" hint={restHint} onTap={() => setRestSheet(true)} first />
-              <NavRow label="Paceguard" hint={paceguardHint} onTap={() => setPaceguardSheet(true)} />
-              <NavRow label="Smart progression" hint={progressionHint} onTap={() => setProgressionSheet(true)} />
-            </div>
-          )}
-        </Frame>
-
         {/* ─── Account ─── */}
         <Frame style={{ padding: '12px 14px' }}>
           <SecHead label="Account" open={accountOpen} onToggle={() => setAccountOpen(v => !v)} />
@@ -393,6 +353,46 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   })()}
                 </>
               )}
+            </div>
+          )}
+        </Frame>
+
+        {/* ─── Training ─── */}
+        <Frame style={{ padding: '12px 14px' }}>
+          <SecHead label="Training" open={trainingOpen} onToggle={() => setTrainingOpen(v => !v)} />
+          {trainingOpen && (
+            <div style={{ marginTop: 4 }}>
+              <NavRow label="Rest timers" hint={restHint} onTap={() => setRestSheet(true)} first />
+              <NavRow label="Paceguard" hint={paceguardHint} onTap={() => setPaceguardSheet(true)} />
+              <NavRow label="Smart progression" hint={progressionHint} onTap={() => setProgressionSheet(true)} />
+            </div>
+          )}
+        </Frame>
+
+        {/* ─── Appearance ─── */}
+        <Frame style={{ padding: '12px 14px' }}>
+          <SecHead label="Appearance" open={appearanceOpen} onToggle={() => setAppearanceOpen(v => !v)} />
+          {appearanceOpen && (
+            <div style={{ marginTop: 14 }}>
+              <div className="micro" style={{ marginBottom: 10 }}>Accent color</div>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 14, alignItems: 'flex-end' }}>
+                {Object.entries(window.ACCENT_PALETTE).map(([key, c]) => {
+                  const active = (store.settings?.accentColor ?? 'copper') === key;
+                  return (
+                    <button key={key} onClick={() => { window.applyAccentColor(key); localStorage.setItem('logbook-accent-color', key); setStore(s => ({ ...s, settings: { ...s.settings, accentColor: key } })); }}
+                      title={c.label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
+                      <div style={{ width: active ? 32 : 26, height: active ? 32 : 26, borderRadius: '50%', background: c.hex, border: active ? `2.5px solid ${UI.ink}` : '2px solid transparent', boxShadow: active ? `0 0 0 1.5px ${c.hex}` : 'none', transition: 'all 0.18s' }} />
+                      {active && <span style={{ fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 600, color: 'var(--accent)' }}>{c.label}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <Row label="Week view in cycle mode" first>
+                <Toggle on={cycleWeekView} onToggle={() => { const n = !cycleWeekView; setCycleWeekView(n); localStorage.setItem('logbook-cycle-week-view', String(n)); setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: n } })); }} />
+              </Row>
+              <Row label="OLED black background">
+                <Toggle on={darkMode === 'black'} onToggle={() => { const n = darkMode === 'black' ? 'dark' : 'black'; setDarkMode(n); localStorage.setItem('logbook-dark-mode', n); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: n } })); }} />
+              </Row>
             </div>
           )}
         </Frame>
