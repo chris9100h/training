@@ -60,10 +60,7 @@ async function sendReminders() {
   }
 }
 
-// Deno cron: check every minute
-Deno.cron('training-reminder', '* * * * *', sendReminders);
-
-// HTTP handler (required for Supabase Edge Functions)
+// Scheduled via pg_cron in the database (see migration 0028_reminder_cron.sql).
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   // Allow manual trigger via POST for testing
