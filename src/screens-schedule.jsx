@@ -171,7 +171,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
 
       {/* Plan-level actions — only when arriving from the plan list */}
       {fromPlan && (
-        <div style={{ flexShrink: 0, padding: '0 22px 10px', display: 'flex', gap: 8 }}>
+        <div style={{ flexShrink: 0, padding: '14px 22px 10px', display: 'flex', gap: 8 }}>
           {!isActivePlan && <Btn kind="ghost" onClick={activate} style={{ flex: 1, fontSize: 12 }}>Activate</Btn>}
           {isActivePlan && <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pill gold>active</Pill></div>}
           <Btn kind="ghost" onClick={duplicate} style={{ flex: 1, fontSize: 12 }}>Duplicate</Btn>
@@ -364,9 +364,11 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
 
         {isActive && !isWeekday && (
           <Field label="Cycle start date (Day 1)">
-            <input type="date" value={store.cycleStartDate || ''}
-              onChange={e => { if (e.target.value) setStore(s => ({ ...s, cycleStartDate: e.target.value })); }}
-              style={dateInputStyle} />
+            <div style={{ overflow: 'hidden', borderRadius: 8, width: '100%' }}>
+              <input type="date" value={store.cycleStartDate || ''}
+                onChange={e => { if (e.target.value) setStore(s => ({ ...s, cycleStartDate: e.target.value })); }}
+                style={dateInputStyle} />
+            </div>
             {store.cycleStartDate && draft.days.length > 0 && (() => {
               const t = new Date(); t.setHours(12, 0, 0, 0);
               const st = LB.parseDate(store.cycleStartDate);
@@ -377,9 +379,11 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
         )}
         {isActive && isWeekday && (
           <Field label="Week plan start date (Week 1)">
-            <input type="date" value={store.weekPlanStartDate || ''}
-              onChange={e => { if (e.target.value) setStore(s => ({ ...s, weekPlanStartDate: e.target.value })); }}
-              style={dateInputStyle} />
+            <div style={{ overflow: 'hidden', borderRadius: 8, width: '100%' }}>
+              <input type="date" value={store.weekPlanStartDate || ''}
+                onChange={e => { if (e.target.value) setStore(s => ({ ...s, weekPlanStartDate: e.target.value })); }}
+                style={dateInputStyle} />
+            </div>
             {store.weekPlanStartDate && (() => {
               const start = LB.parseDate(store.weekPlanStartDate);
               const today = new Date(); today.setHours(12, 0, 0, 0);
