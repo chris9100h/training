@@ -1,22 +1,18 @@
-/* Settings screen — appearance, training, data, account, admin */
+/* Settings screen — haute horlogerie */
 
 const { useState: useStateSet, useEffect: useEffectSet, useRef: useRefSet } = React;
 
-// ─── Module-level helpers (stable refs — no reconciliation churn) ─────
+// ─── Module-level helpers ─────────────────────────────────────────────
 
 const fmtSec = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-function SectionHeader({ label, open, onToggle }) {
+function SDiv({ label }) {
   return (
-    <button onClick={onToggle} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <div style={{ width: 2.5, height: 13, borderRadius: 999, flexShrink: 0, background: open ? 'var(--accent)' : UI.hairStrong, transition: 'background 0.2s' }} />
-        <span style={{ fontSize: 11, letterSpacing: '0.13em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 600, color: open ? 'var(--accent)' : UI.inkSoft, transition: 'color 0.2s' }}>{label}</span>
-      </div>
-      <svg width="7" height="11" viewBox="0 0 8 12" fill="none" stroke={open ? 'var(--accent)' : UI.inkFaint} strokeWidth="1.3" strokeLinecap="round" style={{ transition: 'transform 0.2s, stroke 0.2s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', flexShrink: 0 }}>
-        <path d="M2 1l5 5-5 5" />
-      </svg>
-    </button>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, margin: '32px 0 22px' }}>
+      <div style={{ width: 16, height: '0.5px', background: UI.hairStrong, flexShrink: 0 }} />
+      <span className="display-it" style={{ fontSize: 17, color: UI.inkFaint, whiteSpace: 'nowrap', lineHeight: 1 }}>{label}</span>
+      <div style={{ flex: 1, height: '0.5px', background: UI.hair }} />
+    </div>
   );
 }
 
@@ -28,47 +24,27 @@ function ToggleSwitch({ on, onToggle }) {
   );
 }
 
-function SettingRow({ label, first = false, children }) {
+function TRow({ label, sub, on, onToggle, control, last = false }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '11px 0', borderTop: first ? 'none' : `0.5px solid ${UI.hair}` }}>
-      <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
-      {children}
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '13px 0', borderBottom: last ? 'none' : `0.5px solid ${UI.hair}` }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</div>
+        {sub && <div className="micro" style={{ marginTop: 4 }}>{sub}</div>}
+      </div>
+      {control ?? <ToggleSwitch on={!!on} onToggle={onToggle} />}
     </div>
   );
 }
 
-function SecLabel({ children, style = {} }) {
-  return <div className="micro-gold" style={{ marginBottom: 10, ...style }}>{children}</div>;
-}
-
-function RestSlider({ storeKey, label, defaultVal, store, setStore }) {
-  const val = store.settings?.[storeKey] ?? defaultVal;
-  const pct = Math.min(100, (val / 600) * 100);
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, minWidth: 54, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</span>
-      <input
-        type="range" min={0} max={600} step={15} value={val}
-        onChange={e => setStore(s => ({ ...s, settings: { ...s.settings, [storeKey]: +e.target.value } }))}
-        className="settings-slider"
-        style={{ flex: 1, background: `linear-gradient(to right, var(--accent) ${pct}%, ${UI.hairStrong} ${pct}%)` }}
-      />
-      <span className="num" style={{ fontSize: 13, color: 'var(--accent)', minWidth: 34, textAlign: 'right' }}>{fmtSec(val)}</span>
-    </div>
-  );
+function SubHead({ children, style = {} }) {
+  return <div className="micro-gold" style={{ marginBottom: 14, marginTop: 4, ...style }}>{children}</div>;
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
 function SettingsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
-  const [appearanceOpen, setAppearanceOpen] = useStateSet(false);
-  const [dataOpen, setDataOpen] = useStateSet(false);
   const [activeUsersOpen, setActiveUsersOpen] = useStateSet(false);
-  const [accountOpen, setAccountOpen] = useStateSet(false);
-  const [trainingOpen, setTrainingOpen] = useStateSet(false);
-  const [progConfigOpen, setProgConfigOpen] = React.useState(false);
-  const [progDisclaimer, setProgDisclaimer] = React.useState(false);
   const [activeSessions, setActiveSessions] = useStateSet([]);
   const [qsSwitching, setQsSwitching] = useStateSet(false);
   const [activeGrants, setActiveGrants] = useStateSet([]);
@@ -80,16 +56,25 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [importing, setImporting] = useStateSet(false);
   const [swVersion, setSwVersion] = useStateSet('');
   const [pushStatus, setPushStatus] = useStateSet(null);
-  const [pushEnabled, setPushEnabled] = useStateSet(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
+  const [pushEnabled, setPushEnabled] = useStateSet(
+    () => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true'
+  );
   const [pushKeyDraft, setPushKeyDraft] = useStateSet('');
   const [pushKeyModalOpen, setPushKeyModalOpen] = useStateSet(false);
   const [testPickerOpen, setTestPickerOpen] = useStateSet(false);
   const [reminderEnabled, setReminderEnabled] = useStateSet(() => store.settings?.reminderEnabled ?? false);
   const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
-  const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
-  const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
+  const [cycleWeekView, setCycleWeekView] = useStateSet(
+    () => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true'
+  );
+  const [darkMode, setDarkMode] = useStateSet(
+    () => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark'
+  );
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
   const [debugPanel, setDebugPanel] = useStateSet(() => localStorage.getItem('logbook-debug-panel') === 'true');
+  const [progConfigOpen, setProgConfigOpen] = useStateSet(false);
+  const [progDisclaimer, setProgDisclaimer] = useStateSet(false);
+  const [timerEdit, setTimerEdit] = useStateSet(null);
 
   useEffectSet(() => {
     let mounted = true;
@@ -98,8 +83,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
         const val = !!data;
         localStorage.setItem('logbook-active-users-access', val);
         if (mounted) setHasActiveUsersAccess(val);
-      })
-      .catch(() => {});
+      }).catch(() => {});
     return () => { mounted = false; };
   }, []);
 
@@ -107,31 +91,15 @@ function SettingsScreen({ store, setStore, go, userId }) {
     if (!hasActiveUsersAccess) return;
     let mounted = true;
     const loadSessions = () => LB.supabase.rpc('get_active_sessions_overview')
-      .then(({ data }) => { if (mounted) setActiveSessions(data || []); })
-      .catch(() => {});
+      .then(({ data }) => { if (mounted) setActiveSessions(data || []); }).catch(() => {});
     const loadGrants = () => LB.supabase.rpc('get_active_users_grants')
-      .then(({ data }) => { if (mounted) setActiveGrants((data || []).map(r => r.email)); })
-      .catch(() => {});
+      .then(({ data }) => { if (mounted) setActiveGrants((data || []).map(r => r.email)); }).catch(() => {});
     loadSessions();
     if (isAdmin) loadGrants();
     const iv = setInterval(() => { loadSessions(); setNowS(Date.now()); }, 2000);
     return () => { mounted = false; clearInterval(iv); };
   }, [hasActiveUsersAccess, isAdmin]);
 
-  const addGrant = async () => {
-    const email = newGrantEmail.trim().toLowerCase();
-    if (!email.includes('@') || activeGrants.includes(email)) return;
-    await LB.supabase.rpc('set_active_users_grant', { p_email: email, p_granted: true });
-    setActiveGrants(g => [...g, email]);
-    setNewGrantEmail('');
-  };
-
-  const removeGrant = async (email) => {
-    await LB.supabase.rpc('set_active_users_grant', { p_email: email, p_granted: false });
-    setActiveGrants(g => g.filter(x => x !== email));
-  };
-
-  const pushStatusTimer = useRefSet(null);
   useEffectSet(() => {
     if (!('caches' in window)) return;
     caches.keys().then(keys => {
@@ -140,38 +108,41 @@ function SettingsScreen({ store, setStore, go, userId }) {
     });
   }, []);
 
+  const addGrant = async () => {
+    const email = newGrantEmail.trim().toLowerCase();
+    if (!email.includes('@') || activeGrants.includes(email)) return;
+    await LB.supabase.rpc('set_active_users_grant', { p_email: email, p_granted: true });
+    setActiveGrants(g => [...g, email]);
+    setNewGrantEmail('');
+  };
+  const removeGrant = async (email) => {
+    await LB.supabase.rpc('set_active_users_grant', { p_email: email, p_granted: false });
+    setActiveGrants(g => g.filter(x => x !== email));
+  };
+
+  const pushStatusTimer = useRefSet(null);
   const togglePush = () => {
     if (!pushEnabled) {
-      const existingKey = store.settings?.pushoverUserKey;
-      if (existingKey) {
-        setPushEnabled(true);
-        localStorage.setItem('logbook-push-enabled', 'true');
+      if (store.settings?.pushoverUserKey) {
+        setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true');
         setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } }));
-      } else {
-        setPushKeyDraft('');
-        setPushKeyModalOpen(true);
-      }
+      } else { setPushKeyDraft(''); setPushKeyModalOpen(true); }
     } else {
-      setPushEnabled(false);
-      localStorage.setItem('logbook-push-enabled', 'false');
+      setPushEnabled(false); localStorage.setItem('logbook-push-enabled', 'false');
       setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: false } }));
     }
   };
-
   const pushKeyValid = /^[a-zA-Z0-9]{30}$/.test(pushKeyDraft.trim());
-
   const confirmPushKey = () => {
-    const key = pushKeyDraft.trim();
     if (!pushKeyValid) return;
-    setPushEnabled(true);
-    localStorage.setItem('logbook-push-enabled', 'true');
+    const key = pushKeyDraft.trim();
+    setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true');
     setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true, pushoverUserKey: key } }));
     setPushKeyModalOpen(false);
   };
-
   const testPushover = async (delaySeconds = 0) => {
     clearTimeout(pushStatusTimer.current);
-    setPushStatus(delaySeconds > 0 ? `Sending… Lock screen now!` : 'Sending…');
+    setPushStatus(delaySeconds > 0 ? 'Sending… Lock screen now!' : 'Sending…');
     try {
       const res = await fetch(LB.PUSHOVER_URL, {
         method: 'POST',
@@ -193,37 +164,28 @@ function SettingsScreen({ store, setStore, go, userId }) {
   };
 
   const toggleReminder = () => {
-    const next = !reminderEnabled;
-    setReminderEnabled(next);
+    const next = !reminderEnabled; setReminderEnabled(next);
     setStore(s => ({ ...s, settings: { ...s.settings, reminderEnabled: next } }));
   };
-
   const updateReminderTime = (val) => {
     setReminderTime(val);
     setStore(s => ({ ...s, settings: { ...s.settings, reminderTime: val } }));
   };
-
   const saveNickname = () => {
     const trimmed = nickname.trim();
     if (!trimmed || trimmed === store.user?.name) return;
     setStore(s => ({ ...s, user: { ...s.user, name: trimmed } }));
   };
-
   const exportData = (filename) => {
     const blob = new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename || `zane-${LB.todayISO()}.json`;
-    a.click();
+    const a = document.createElement('a'); a.href = url; a.download = filename || `zane-${LB.todayISO()}.json`; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-
   const importData = () => {
-    const input = document.createElement('input');
-    input.type = 'file'; input.accept = '.json';
+    const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
     input.onchange = async (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+      const file = e.target.files?.[0]; if (!file) return;
       let backup;
       try { backup = JSON.parse(await file.text()); }
       catch (_) { await confirm('The selected file is not valid JSON.', { title: 'Invalid file', ok: 'OK' }); return; }
@@ -236,27 +198,18 @@ function SettingsScreen({ store, setStore, go, userId }) {
       if (!ok) return;
       exportData(`zane-before-import-${LB.todayISO()}.json`);
       setImporting(true);
-      try {
-        await LB.importFromBackup(backup, userId);
-        LB.clearLocal(userId);
-        window.location.reload();
-      } catch (err) {
-        setImporting(false);
-        await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' });
-      }
+      try { await LB.importFromBackup(backup, userId); LB.clearLocal(userId); window.location.reload(); }
+      catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
     };
     input.click();
   };
-
   const handleSignOut = async () => { await LB.signOut(); };
-
   const handleDeleteAll = async () => {
     if (!await confirm('This action cannot be undone.', { title: 'Delete all data?', ok: 'Delete all', danger: true })) return;
-    await LB.deleteAllData(userId);
-    await LB.signOut();
+    await LB.deleteAllData(userId); await LB.signOut();
   };
 
-  // QS variables
+  // QS
   const currentEmail = store.user?.email || '';
   const otherQsEmail = LB.QS_EMAILS.find(e => e !== currentEmail);
   const isQsUser = LB.QS_EMAILS.includes(currentEmail) && !!otherQsEmail;
@@ -264,338 +217,344 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const currentName = store.user?.name || currentEmail.split('@')[0];
   const otherName = isQsUser ? (LB.getQsName(otherQsEmail) || otherQsEmail.split('@')[0]) : '';
 
-  const accentBtn = { background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.25)', color: 'var(--accent)', padding: '5px 14px', borderRadius: 8, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent' };
+  const accentBtn = { background: 'rgba(var(--accent-rgb),0.10)', border: '0.5px solid rgba(var(--accent-rgb),0.25)', color: 'var(--accent)', padding: '6px 16px', borderRadius: 8, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' };
+
+  const REST_TIMERS = [
+    { key: 'restDefault', label: 'Default', short: 'DEF', def: 120 },
+    { key: 'restBig',     label: 'Big',     short: 'BIG', def: 180 },
+    { key: 'restMedium',  label: 'Medium',  short: 'MED', def: 120 },
+    { key: 'restSmall',   label: 'Small',   short: 'SML', def: 90  },
+  ];
 
   return (
     <Screen>
       <style>{`
-        .settings-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 3px; border-radius: 999px; cursor: pointer; outline: none; border: none; }
-        .settings-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); cursor: pointer; border: none; box-shadow: 0 2px 10px rgba(var(--accent-rgb),0.45); }
-        .settings-slider::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: var(--accent); cursor: pointer; border: none; }
+        .s-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 3px; border-radius: 999px; cursor: pointer; outline: none; border: none; display: block; }
+        .s-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 2px 12px rgba(var(--accent-rgb),0.5), 0 0 0 3px rgba(var(--accent-rgb),0.15); cursor: pointer; }
+        .s-slider::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); border: none; cursor: pointer; }
+        .s-dial { transition: opacity 0.15s; }
+        .s-dial:active { opacity: 0.7; }
       `}</style>
-      <TopBar title="Settings" onBack={() => go({ name: 'home' })} />
-      <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
 
-        {/* ─── User ─── */}
-        <Frame style={{ padding: '12px 14px' }}>
+      {/* ─── Header ─── */}
+      <ScreenHead
+        ref_="REF. ZANE"
+        sub={swVersion || '…'}
+        title="Settings"
+        onBack={() => go({ name: 'home' })}
+      />
+
+      <div style={{ padding: '0 22px 48px' }}>
+
+        {/* ─── Profile ─── */}
+        <div style={{ marginBottom: 6 }}>
+          <div className="micro" style={{ marginBottom: 10 }}>Name</div>
           <input
-            value={nickname} onChange={e => setNickname(e.target.value)}
-            onBlur={saveNickname} onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+            value={nickname}
+            onChange={e => setNickname(e.target.value)}
+            onBlur={saveNickname}
+            onKeyDown={e => e.key === 'Enter' && e.target.blur()}
             placeholder="Your name"
-            style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', color: UI.ink, fontFamily: UI.fontUi, fontSize: 15, fontWeight: 500, padding: 0, marginBottom: 3 }}
+            style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', fontFamily: UI.fontDisplay, fontSize: 28, color: UI.ink, fontWeight: 400, padding: '0 0 8px', letterSpacing: '-0.01em', borderBottom: `0.5px solid ${UI.hairStrong}`, boxSizing: 'border-box' }}
           />
-          <div className="micro">{store.user?.email || userId}</div>
-        </Frame>
+          <div className="micro" style={{ marginTop: 8 }}>{store.user?.email || userId}</div>
+        </div>
 
         {/* ─── Active users ─── */}
-        {hasActiveUsersAccess && (
-          <Frame style={{ padding: '12px 14px' }}>
-            {(() => {
-              const activeCount = activeSessions.filter(s => !s.is_finished).length;
-              return (
-                <button onClick={() => setActiveUsersOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                    <div style={{ width: 2.5, height: 13, borderRadius: 999, flexShrink: 0, background: activeUsersOpen ? 'var(--accent)' : UI.hairStrong, transition: 'background 0.2s' }} />
-                    <span style={{ fontSize: 11, letterSpacing: '0.13em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 600, color: activeUsersOpen ? 'var(--accent)' : UI.inkSoft, transition: 'color 0.2s' }}>Active users</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {activeCount > 0 && (
-                      <div style={{ background: 'var(--accent)', color: '#0a0805', borderRadius: 999, minWidth: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, fontFamily: UI.fontUi, padding: '0 5px' }}>
-                        {activeCount}
-                      </div>
-                    )}
-                    <svg width="7" height="11" viewBox="0 0 8 12" fill="none" stroke={activeUsersOpen ? 'var(--accent)' : UI.inkFaint} strokeWidth="1.3" strokeLinecap="round" style={{ transition: 'transform 0.2s, stroke 0.2s', transform: activeUsersOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-                      <path d="M2 1l5 5-5 5" />
-                    </svg>
-                  </div>
-                </button>
-              );
-            })()}
-            {activeUsersOpen && (
-              <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column' }}>
-                {(() => {
-                  const dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
-                  const visibleSessions = activeSessions.filter(s => !s.is_finished || !dismissed.includes(s.session_id));
-                  if (visibleSessions.length === 0) return (
-                    <div className="micro" style={{ color: UI.inkFaint, padding: '6px 0' }}>Nobody training right now.</div>
-                  );
-                  return visibleSessions.map((s, i) => {
-                    const isFinished = s.is_finished;
-                    if (isFinished) {
-                      const finishedMin = s.ended ? Math.round((nowS - new Date(s.ended).getTime()) / 60000) : null;
-                      const finishedStr = finishedMin != null ? (finishedMin < 60 ? `${finishedMin}m ago` : `${Math.round(finishedMin / 60)}h ago`) : 'done';
-                      return (
-                        <div key={s.session_id} onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name, sessionId: s.session_id })}
-                          style={{ display: 'grid', gridTemplateColumns: '14px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                          <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.inkFaint }} />
-                          <span style={{ fontSize: 14, color: UI.inkSoft, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
-                          <span className="display-it" style={{ fontSize: 14, color: UI.inkFaint, textAlign: 'center' }}>{s.day_name}</span>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+        {hasActiveUsersAccess && (() => {
+          const dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
+          const activeCount = activeSessions.filter(s => !s.is_finished).length;
+          const visibleSessions = activeSessions.filter(s => !s.is_finished || !dismissed.includes(s.session_id));
+          return (
+            <div style={{ margin: '24px 0 0' }}>
+              <button onClick={() => setActiveUsersOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', WebkitTapHighlightColor: 'transparent' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span className="micro-gold">Active users</span>
+                  {activeCount > 0 && <div style={{ background: 'var(--accent)', color: '#0a0805', borderRadius: 999, minWidth: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, fontFamily: UI.fontUi, padding: '0 5px' }}>{activeCount}</div>}
+                </div>
+                <svg width="7" height="11" viewBox="0 0 8 12" fill="none" stroke={activeUsersOpen ? 'var(--accent)' : UI.inkFaint} strokeWidth="1.3" strokeLinecap="round" style={{ transition: 'transform 0.2s', transform: activeUsersOpen ? 'rotate(90deg)' : 'rotate(0deg)', flexShrink: 0 }}>
+                  <path d="M2 1l5 5-5 5" />
+                </svg>
+              </button>
+              {activeUsersOpen && (
+                <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', paddingLeft: 2 }}>
+                  {visibleSessions.length === 0
+                    ? <div className="micro" style={{ color: UI.inkFaint, padding: '4px 0 8px' }}>Nobody training right now.</div>
+                    : visibleSessions.map((s, i) => {
+                      const isFinished = s.is_finished;
+                      if (isFinished) {
+                        const finishedMin = s.ended ? Math.round((nowS - new Date(s.ended).getTime()) / 60000) : null;
+                        const finishedStr = finishedMin != null ? (finishedMin < 60 ? `${finishedMin}m ago` : `${Math.round(finishedMin / 60)}h ago`) : 'done';
+                        return (
+                          <div key={s.session_id} onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name, sessionId: s.session_id })}
+                            style={{ display: 'grid', gridTemplateColumns: '12px 1fr 1fr auto', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                            <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.inkFaint }} />
+                            <span style={{ fontSize: 14, color: UI.inkSoft, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
+                            <span className="display-it" style={{ fontSize: 13, color: UI.inkFaint }}>{s.day_name}</span>
                             <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{finishedStr}</span>
-                            <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
                           </div>
-                        </div>
-                      );
-                    }
-                    const blended = LB.calcBlended(s.started_at, s.avg_duration_seconds, s.avg_sets_total, s.sets_done, s.sets_total, nowS);
-                    const remMin = blended?.remainingMin ?? null;
-                    const ratio = blended?.progress ?? null;
-                    const finishing = remMin === 0;
-                    return (
-                      <div key={s.session_id || i} onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name })}
-                        style={{ display: 'grid', gridTemplateColumns: '14px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: 'pulseDot 1.4s ease-in-out infinite' }} />
-                        <span style={{ fontSize: 14, color: UI.ink, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
-                        <span className="display-it" style={{ fontSize: 14, color: UI.inkSoft, textAlign: 'center' }}>{s.day_name}</span>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                        );
+                      }
+                      const blended = LB.calcBlended(s.started_at, s.avg_duration_seconds, s.avg_sets_total, s.sets_done, s.sets_total, nowS);
+                      const remMin = blended?.remainingMin ?? null;
+                      const ratio = blended?.progress ?? null;
+                      const finishing = remMin === 0;
+                      return (
+                        <div key={s.session_id || i} onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name })}
+                          style={{ display: 'grid', gridTemplateColumns: '12px 1fr 1fr auto', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                          <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', animation: 'pulseDot 1.4s ease-in-out infinite' }} />
+                          <span style={{ fontSize: 14, color: UI.ink, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
+                          <span className="display-it" style={{ fontSize: 13, color: UI.inkSoft }}>{s.day_name}</span>
                           {ratio !== null ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
                               <span className="num" style={{ fontSize: 11, color: finishing ? 'var(--accent-light)' : 'var(--accent)' }}>{finishing ? 'soon' : `~${remMin}m`}</span>
-                              <div style={{ width: 44, height: 2, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
-                                <div style={{ height: '100%', width: `${ratio * 100}%`, background: finishing ? 'var(--accent-light)' : 'var(--accent)', borderRadius: 999 }} />
+                              <div style={{ width: 40, height: 2, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
+                                <div style={{ height: '100%', width: `${ratio * 100}%`, background: 'var(--accent)', borderRadius: 999 }} />
                               </div>
                             </div>
-                          ) : (
-                            <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{s.sets_done}/{s.sets_total}</span>
-                          )}
-                          <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
+                          ) : <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{s.sets_done}/{s.sets_total}</span>}
                         </div>
+                      );
+                    })
+                  }
+                  {isAdmin && (
+                    <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+                      <SubHead>Access</SubHead>
+                      {activeGrants.length === 0 && <div className="micro" style={{ color: UI.inkGhost, marginBottom: 8 }}>No other users have access.</div>}
+                      {activeGrants.map(email => (
+                        <div key={email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+                          <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi }}>{email}</span>
+                          <button onClick={() => removeGrant(email)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.danger, fontSize: 18, lineHeight: 1, padding: '0 2px' }}>×</button>
+                        </div>
+                      ))}
+                      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                        <input value={newGrantEmail} onChange={e => setNewGrantEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && addGrant()} placeholder="email@example.com"
+                          style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '7px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }} />
+                        <button onClick={addGrant} disabled={!newGrantEmail.includes('@')} style={{ padding: '7px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: newGrantEmail.includes('@') ? UI.gold : UI.bgInset, color: newGrantEmail.includes('@') ? '#0a0805' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>Add</button>
                       </div>
-                    );
-                  });
-                })()}
-                {isAdmin && (
-                  <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
-                    <SecLabel>Access</SecLabel>
-                    {activeGrants.length === 0 && <div className="micro" style={{ color: UI.inkGhost, marginBottom: 8 }}>No other users have access yet.</div>}
-                    {activeGrants.map(email => (
-                      <div key={email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
-                        <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi }}>{email}</span>
-                        <button onClick={() => removeGrant(email)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.danger, fontSize: 16, lineHeight: 1, padding: '0 2px', fontFamily: UI.fontUi }}>×</button>
-                      </div>
-                    ))}
-                    <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
-                      <input value={newGrantEmail} onChange={e => setNewGrantEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && addGrant()} placeholder="email@example.com"
-                        style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '7px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }} />
-                      <button onClick={addGrant} disabled={!newGrantEmail.includes('@')} style={{ padding: '7px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: newGrantEmail.includes('@') ? UI.gold : UI.bgInset, color: newGrantEmail.includes('@') ? '#0a0805' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, transition: 'background 0.15s' }}>Add</button>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ══════════════════ LOOK ══════════════════ */}
+        <SDiv label="Look" />
+
+        {/* Accent palette */}
+        <SubHead>Accent color</SubHead>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-end', marginBottom: 22 }}>
+          {Object.entries(window.ACCENT_PALETTE).map(([key, c]) => {
+            const active = (store.settings?.accentColor ?? 'copper') === key;
+            return (
+              <button key={key}
+                onClick={() => { window.applyAccentColor(key); localStorage.setItem('logbook-accent-color', key); setStore(s => ({ ...s, settings: { ...s.settings, accentColor: key } })); }}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, background: 'none', border: 'none', cursor: 'pointer', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
+                <div style={{
+                  width: active ? 38 : 26, height: active ? 38 : 26, borderRadius: '50%',
+                  background: c.hex,
+                  border: active ? `2.5px solid ${UI.ink}` : '2px solid transparent',
+                  boxShadow: active ? `0 0 0 2px ${c.hex}, 0 6px 20px rgba(0,0,0,0.45)` : 'none',
+                  transition: 'all 0.2s cubic-bezier(0.34,1.56,0.64,1)',
+                }} />
+                <span style={{ fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 700, color: active ? 'var(--accent)' : 'transparent', transition: 'color 0.2s', lineHeight: 1 }}>{c.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Appearance toggles */}
+        <TRow label="Week view in cycle mode" sub="Show Mon–Sun instead of cycle days" on={cycleWeekView}
+          onToggle={() => { const n = !cycleWeekView; setCycleWeekView(n); localStorage.setItem('logbook-cycle-week-view', String(n)); setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: n } })); }} />
+        <TRow label="OLED black background" sub="Pure black instead of dark gray" last on={darkMode === 'black'}
+          onToggle={() => { const n = darkMode === 'black' ? 'dark' : 'black'; setDarkMode(n); localStorage.setItem('logbook-dark-mode', n); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: n } })); }} />
+
+        {/* ══════════════════ TRAINING ══════════════════ */}
+        <SDiv label="Training" />
+
+        {/* Rest timers — 4 SubDials */}
+        <SubHead>Rest timers</SubHead>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 28 }}>
+          {REST_TIMERS.map(({ key, label, short, def }) => {
+            const val = store.settings?.[key] ?? def;
+            return (
+              <div key={key} className="s-dial"
+                onClick={() => setTimerEdit({ key, label, def })}
+                style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, WebkitTapHighlightColor: 'transparent' }}>
+                <SubDial label={short} value={fmtSec(val)} size={76} gold />
               </div>
-            )}
-          </Frame>
+            );
+          })}
+        </div>
+
+        {/* Paceguard */}
+        <div style={{ paddingTop: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: store.settings?.tempoEnabled ? 16 : 0 }}>
+            <div>
+              <SubHead style={{ marginBottom: 3 }}>Paceguard</SubHead>
+              <div className="micro" style={{ color: UI.inkFaint }}>Controlled rep tempo</div>
+            </div>
+            <ToggleSwitch on={!!store.settings?.tempoEnabled} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, tempoEnabled: !s.settings?.tempoEnabled } }))} />
+          </div>
+          {store.settings?.tempoEnabled && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 4 }}>
+              <div>
+                <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>Eccentric (down)</div>
+                <Stepper value={store.settings?.tempoEccentric ?? 4} step={0.5} min={0.5} max={10} suffix="s" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoEccentric: v } }))} />
+              </div>
+              <div>
+                <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>Concentric (up)</div>
+                <Stepper value={store.settings?.tempoConcentric ?? 1} step={0.5} min={0.5} max={10} suffix="s" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoConcentric: v } }))} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Smart Progression */}
+        <div style={{ marginTop: 22, paddingTop: 22, borderTop: `0.5px solid ${UI.hair}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: store.settings?.smartProgression ? 16 : 0 }}>
+            <div>
+              <SubHead style={{ marginBottom: 3 }}>Smart Progression</SubHead>
+              <div className="micro" style={{ color: UI.inkFaint }}>Auto weight increase</div>
+            </div>
+            <ToggleSwitch on={!!store.settings?.smartProgression}
+              onToggle={() => { const t = !store.settings?.smartProgression; setStore(s => ({ ...s, settings: { ...s.settings, smartProgression: t } })); if (t) setProgDisclaimer(true); }} />
+          </div>
+          {store.settings?.smartProgression && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <div className="micro" style={{ marginBottom: 8 }}>Rep range top (+reps above target)</div>
+                <Stepper value={store.settings?.progressionRangeTop ?? 4} step={1} min={1} max={10} suffix=" reps" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, progressionRangeTop: v } }))} />
+              </div>
+              <Btn onClick={() => setProgConfigOpen(true)}>Configure exercises</Btn>
+            </div>
+          )}
+        </div>
+
+        {/* ══════════════════ ACCOUNT ══════════════════ */}
+        <SDiv label="Account" />
+
+        {/* Quick switch */}
+        {isQsUser && (
+          <div style={{ marginBottom: 24 }}>
+            <SubHead>Quick switch</SubHead>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ flex: 1, background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.10), rgba(var(--accent-rgb),0.03))`, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 12, padding: '12px 14px' }}>
+                <div className="micro-gold" style={{ marginBottom: 6 }}>Active</div>
+                <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, color: UI.ink, lineHeight: 1.1 }}>{currentName}</div>
+              </div>
+              <button disabled={qsSwitching} onClick={async () => {
+                if (hasQsSession) {
+                  setQsSwitching(true);
+                  try { await LB.quickSwitch(otherQsEmail); window.location.reload(); }
+                  catch (e) { setQsSwitching(false); console.error('Quick switch failed', e); }
+                } else {
+                  const ok = await confirm(`You'll be signed out so ${otherName} can log in.`, { title: 'Set up quick switch?', ok: 'Sign out' });
+                  if (ok) await LB.signOut();
+                }
+              }} style={{ flex: 1, background: 'transparent', border: `0.5px solid ${hasQsSession ? UI.hair : UI.hairStrong}`, borderRadius: 12, padding: '12px 14px', textAlign: 'left', cursor: qsSwitching ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent', opacity: qsSwitching ? 0.5 : 1 }}>
+                <div className="micro" style={{ marginBottom: 6, color: hasQsSession ? UI.inkFaint : 'rgba(var(--danger-rgb),0.7)' }}>{qsSwitching ? 'Switching…' : hasQsSession ? 'Tap to switch' : 'Log in first'}</div>
+                <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, color: hasQsSession ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1 }}>{otherName}</div>
+              </button>
+            </div>
+          </div>
         )}
 
-        {/* ─── Look ─── */}
-        <Frame style={{ padding: '12px 14px' }}>
-          <SectionHeader label="Look" open={appearanceOpen} onToggle={() => setAppearanceOpen(v => !v)} />
-          {appearanceOpen && (
-            <div style={{ marginTop: 14 }}>
-              <SecLabel>Accent Color</SecLabel>
-              <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                {Object.entries(window.ACCENT_PALETTE).map(([key, c]) => {
-                  const active = (store.settings?.accentColor ?? 'copper') === key;
-                  return (
-                    <button key={key} onClick={() => { window.applyAccentColor(key); localStorage.setItem('logbook-accent-color', key); setStore(s => ({ ...s, settings: { ...s.settings, accentColor: key } })); }}
-                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
-                      <div style={{ width: active ? 34 : 28, height: active ? 34 : 28, borderRadius: '50%', background: c.hex, border: active ? `2.5px solid ${UI.ink}` : '2.5px solid transparent', boxShadow: active ? `0 0 0 1.5px ${c.hex}, 0 4px 14px rgba(0,0,0,0.35)` : 'none', transition: 'all 0.18s' }} />
-                      {active && <span style={{ fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: UI.fontUi, color: 'var(--accent)', fontWeight: 600 }}>{c.label}</span>}
-                    </button>
-                  );
-                })}
-              </div>
-              <SettingRow label="Week view in cycle mode" first>
-                <ToggleSwitch on={cycleWeekView} onToggle={() => { const n = !cycleWeekView; setCycleWeekView(n); localStorage.setItem('logbook-cycle-week-view', String(n)); setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: n } })); }} />
-              </SettingRow>
-              <SettingRow label="OLED black background">
-                <ToggleSwitch on={darkMode === 'black'} onToggle={() => { const n = darkMode === 'black' ? 'dark' : 'black'; setDarkMode(n); localStorage.setItem('logbook-dark-mode', n); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: n } })); }} />
-              </SettingRow>
-            </div>
+        {/* Push notifications */}
+        <SubHead>Push notifications</SubHead>
+        <TRow label="Enabled" on={pushEnabled} onToggle={togglePush} />
+        {store.settings?.pushoverUserKey && (
+          <TRow label="User key" control={<button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={accentBtn}>Change</button>} />
+        )}
+        {pushEnabled && (
+          <TRow label="Test" last control={<button onClick={() => setTestPickerOpen(true)} style={accentBtn}>Send</button>} />
+        )}
+        {!pushEnabled && !store.settings?.pushoverUserKey && <div style={{ height: 4 }} />}
+        {pushStatus && <div className="micro" style={{ color: pushStatus.startsWith('✓') ? 'var(--accent)' : UI.inkSoft, textAlign: 'center', padding: '8px 0' }}>{pushStatus}</div>}
+
+        {/* Training reminder */}
+        <div style={{ marginTop: 22, paddingTop: 22, borderTop: `0.5px solid ${UI.hair}` }}>
+          <SubHead>Training reminder</SubHead>
+          <TRow label="Remind on training days" on={reminderEnabled} onToggle={toggleReminder} last={!reminderEnabled} />
+          {reminderEnabled && (
+            <>
+              <TRow label="Notify at" last={!store.nextReminderAt}
+                control={<input type="time" value={reminderTime} onChange={e => updateReminderTime(e.target.value)}
+                  style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '6px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: 'dark' }} />}
+              />
+              {store.nextReminderAt && (() => {
+                const dt = new Date(store.nextReminderAt);
+                const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
+                const tomorrowMid = new Date(todayMid); tomorrowMid.setDate(todayMid.getDate() + 1);
+                const remMid = new Date(dt); remMid.setHours(0, 0, 0, 0);
+                const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                const dateStr = remMid.getTime() === todayMid.getTime() ? 'Today'
+                  : remMid.getTime() === tomorrowMid.getTime() ? 'Tomorrow'
+                  : dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+                return <div className="micro" style={{ color: UI.inkFaint, textAlign: 'right', padding: '8px 0' }}>Next · {dateStr} · {timeStr}</div>;
+              })()}
+            </>
           )}
-        </Frame>
+        </div>
 
-        {/* ─── Training ─── */}
-        <Frame style={{ padding: '12px 14px' }}>
-          <SectionHeader label="Training" open={trainingOpen} onToggle={() => setTrainingOpen(v => !v)} />
-          {trainingOpen && (
-            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 0 }}>
+        {/* ══════════════════ DATA ══════════════════ */}
+        <SDiv label="Data" />
 
-              {/* Rest timers */}
-              <SecLabel>Rest Timers</SecLabel>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 18 }}>
-                {[['Default', 'restDefault', 120], ['Big', 'restBig', 180], ['Medium', 'restMedium', 120], ['Small', 'restSmall', 90]].map(([label, key, def]) => (
-                  <RestSlider key={key} label={label} storeKey={key} defaultVal={def} store={store} setStore={setStore} />
-                ))}
-              </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+          <Btn kind="ghost" onClick={() => exportData()} style={{ fontSize: 12 }}>Export JSON</Btn>
+          <Btn kind="ghost" onClick={importData} disabled={importing} style={{ fontSize: 12 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
+        </div>
+        <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 12 }}>Delete all data</Btn>
 
-              {/* Paceguard */}
-              <div style={{ paddingTop: 14, borderTop: `0.5px solid ${UI.hair}`, marginBottom: 0 }}>
-                <SecLabel>Paceguard</SecLabel>
-                <SettingRow label="Enabled" first>
-                  <ToggleSwitch on={!!store.settings?.tempoEnabled} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, tempoEnabled: !s.settings?.tempoEnabled } }))} />
-                </SettingRow>
-                {store.settings?.tempoEnabled && (
-                  <>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 14, marginBottom: 6 }}>
-                      <div>
-                        <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>Eccentric (down)</div>
-                        <Stepper value={store.settings?.tempoEccentric ?? 4} step={0.5} min={0.5} max={10} suffix="s" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoEccentric: v } }))} />
-                      </div>
-                      <div>
-                        <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>Concentric (up)</div>
-                        <Stepper value={store.settings?.tempoConcentric ?? 1} step={0.5} min={0.5} max={10} suffix="s" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoConcentric: v } }))} />
-                      </div>
-                    </div>
-                    <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 6, marginBottom: 4 }}>Beeps subdivide each phase evenly · count increases each beat</div>
-                  </>
-                )}
-              </div>
+        {/* ══════════════════ SYSTEM ══════════════════ */}
+        <SDiv label="System" />
 
-              {/* Smart Progression */}
-              <div style={{ paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
-                <SecLabel>Smart Progression</SecLabel>
-                <SettingRow label="Enabled" first>
-                  <ToggleSwitch on={!!store.settings?.smartProgression} onToggle={() => { const t = !store.settings?.smartProgression; setStore(s => ({ ...s, settings: { ...s.settings, smartProgression: t } })); if (t) setProgDisclaimer(true); }} />
-                </SettingRow>
-                {store.settings?.smartProgression && (
-                  <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div>
-                      <div className="micro" style={{ marginBottom: 8 }}>Rep range top (+reps above target)</div>
-                      <Stepper value={store.settings?.progressionRangeTop ?? 4} step={1} min={1} max={10} suffix=" reps" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, progressionRangeTop: v } }))} />
-                    </div>
-                    <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>If target is 8 reps and range top is +4, weight increases only when all sets reach 12 reps.</div>
-                    <Btn onClick={() => setProgConfigOpen(true)}>Configure exercises</Btn>
-                  </div>
-                )}
-              </div>
-
-            </div>
-          )}
-        </Frame>
-
-        {/* ─── Account ─── */}
-        <Frame style={{ padding: '12px 14px' }}>
-          <SectionHeader label="Account" open={accountOpen} onToggle={() => setAccountOpen(v => !v)} />
-          {accountOpen && (
-            <div style={{ marginTop: 14 }}>
-
-              {/* Quick switch */}
-              {isQsUser && (
-                <>
-                  <SecLabel>Quick Switch</SecLabel>
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                    <div style={{ flex: 1, background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.10), rgba(var(--accent-rgb),0.04))`, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 10, padding: '10px 12px' }}>
-                      <div className="micro-gold" style={{ marginBottom: 5 }}>Active</div>
-                      <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: UI.ink, lineHeight: 1.1 }}>{currentName}</div>
-                    </div>
-                    <button disabled={qsSwitching} onClick={async () => {
-                      if (hasQsSession) {
-                        setQsSwitching(true);
-                        try { await LB.quickSwitch(otherQsEmail); window.location.reload(); }
-                        catch (e) { setQsSwitching(false); console.error('Quick switch failed', e); }
-                      } else {
-                        const ok = await confirm(`You'll be signed out so ${otherName} can log in. Their session will be saved for future quick switches.`, { title: 'Set up quick switch?', ok: 'Sign out', cancel: 'Cancel' });
-                        if (ok) await LB.signOut();
-                      }
-                    }} style={{ flex: 1, background: hasQsSession ? 'rgba(236,228,208,0.02)' : 'transparent', border: `0.5px solid ${hasQsSession ? UI.hair : UI.hairStrong}`, borderRadius: 10, padding: '10px 12px', textAlign: 'left', cursor: qsSwitching ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent', opacity: qsSwitching ? 0.5 : 1 }}>
-                      <div className="micro" style={{ marginBottom: 5, color: hasQsSession ? UI.inkFaint : 'rgba(var(--danger-rgb),0.7)' }}>{qsSwitching ? 'Switching…' : (hasQsSession ? 'Tap to switch' : 'Log in first')}</div>
-                      <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: hasQsSession ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1 }}>{otherName}</div>
-                    </button>
-                  </div>
-                  <Hairline style={{ marginBottom: 14 }} />
-                </>
-              )}
-
-              {/* Push notifications */}
-              <SecLabel>Push Notifications</SecLabel>
-              <SettingRow label="Enabled" first>
-                <ToggleSwitch on={pushEnabled} onToggle={togglePush} />
-              </SettingRow>
-              {store.settings?.pushoverUserKey && (
-                <SettingRow label="User key">
-                  <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={accentBtn}>Change</button>
-                </SettingRow>
-              )}
-              {pushEnabled && (
-                <SettingRow label="Test notification">
-                  <button onClick={() => setTestPickerOpen(true)} style={accentBtn}>Send</button>
-                </SettingRow>
-              )}
-              {pushStatus && <div className="micro" style={{ color: pushStatus.startsWith('✓') ? 'var(--accent)' : UI.inkSoft, textAlign: 'center', padding: '4px 0' }}>{pushStatus}</div>}
-
-              {/* Training reminder */}
-              <div style={{ paddingTop: 14, borderTop: `0.5px solid ${UI.hair}`, marginTop: 4 }}>
-                <SecLabel>Training Reminder</SecLabel>
-                <SettingRow label="Remind on training days" first>
-                  <ToggleSwitch on={reminderEnabled} onToggle={toggleReminder} />
-                </SettingRow>
-                {reminderEnabled && (
-                  <>
-                    <SettingRow label="Time">
-                      <input type="time" value={reminderTime} onChange={e => updateReminderTime(e.target.value)}
-                        style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: 'dark' }} />
-                    </SettingRow>
-                    {store.nextReminderAt && (() => {
-                      const dt = new Date(store.nextReminderAt);
-                      const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
-                      const tomorrowMid = new Date(todayMid); tomorrowMid.setDate(todayMid.getDate() + 1);
-                      const remMid = new Date(dt); remMid.setHours(0, 0, 0, 0);
-                      const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-                      const dateStr = remMid.getTime() === todayMid.getTime() ? 'Today'
-                        : remMid.getTime() === tomorrowMid.getTime() ? 'Tomorrow'
-                        : dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-                      return <div className="micro" style={{ color: UI.inkFaint, textAlign: 'right', paddingTop: 6 }}>Next · {dateStr} · {timeStr}</div>;
-                    })()}
-                  </>
-                )}
-              </div>
-
-            </div>
-          )}
-        </Frame>
-
-        {/* ─── Data ─── */}
-        <Frame style={{ padding: '12px 14px' }}>
-          <SectionHeader label="Data" open={dataOpen} onToggle={() => setDataOpen(v => !v)} />
-          {dataOpen && (
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1, fontSize: 12 }}>Export JSON</Btn>
-                <Btn kind="ghost" onClick={importData} disabled={importing} style={{ flex: 1, fontSize: 12 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
-              </div>
-              <Hairline />
-              <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)', opacity: 0.7, fontSize: 12 }}>Delete all data</Btn>
-            </div>
-          )}
-        </Frame>
-
-        {/* ─── Admin ─── */}
         {isAdmin && (
-          <Frame style={{ padding: '12px 14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <span style={{ fontSize: 11, letterSpacing: '0.13em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 600, color: UI.inkFaint }}>Debug panel</span>
-              <ToggleSwitch on={debugPanel} onToggle={() => { const n = !debugPanel; setDebugPanel(n); localStorage.setItem('logbook-debug-panel', String(n)); }} />
-            </div>
-          </Frame>
+          <TRow label="Debug panel" last on={debugPanel} onToggle={() => { const n = !debugPanel; setDebugPanel(n); localStorage.setItem('logbook-debug-panel', String(n)); }} />
         )}
 
-        {/* ─── Footer ─── */}
-        <Btn kind="ghost" onClick={async () => {
-          if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); }
-          window.location.reload(true);
-        }} style={{ fontSize: 12 }}>Clear cache &amp; reload</Btn>
-        <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)', fontSize: 12 }}>Sign out</Btn>
-        <div className="micro" style={{ textAlign: 'center', marginTop: 4 }}>Zane · {swVersion || '…'} · Data in Supabase</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: isAdmin ? 16 : 0 }}>
+          <Btn kind="ghost" onClick={async () => {
+            if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); }
+            window.location.reload(true);
+          }} style={{ fontSize: 12 }}>Clear cache &amp; reload</Btn>
+          <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 12 }}>Sign out</Btn>
+        </div>
 
       </div>
 
       {confirmEl}
 
-      <Sheet open={testPickerOpen} onClose={() => setTestPickerOpen(false)} title="Send test notification">
+      {/* ─── Rest timer adjustment sheet ─── */}
+      <Sheet open={!!timerEdit} onClose={() => setTimerEdit(null)} title={timerEdit?.label ?? ''}>
+        {timerEdit && (() => {
+          const { key, def } = timerEdit;
+          const val = store.settings?.[key] ?? def;
+          const pct = Math.min(100, (val / 600) * 100);
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+              <div style={{ textAlign: 'center' }}>
+                <div className="num" style={{ fontSize: 80, color: 'var(--accent)', fontWeight: 300, lineHeight: 1, letterSpacing: '-0.03em' }}>{fmtSec(val)}</div>
+                <div className="micro" style={{ marginTop: 12, color: UI.inkFaint }}>0 seconds — 10 minutes</div>
+              </div>
+              <input type="range" min={0} max={600} step={15} value={val}
+                onChange={e => setStore(s => ({ ...s, settings: { ...s.settings, [key]: +e.target.value } }))}
+                className="s-slider"
+                style={{ background: `linear-gradient(to right, var(--accent) ${pct}%, ${UI.hairStrong} ${pct}%)` }}
+              />
+              <Btn onClick={() => setTimerEdit(null)}>Done</Btn>
+            </div>
+          );
+        })()}
+      </Sheet>
+
+      <Sheet open={testPickerOpen} onClose={() => setTestPickerOpen(false)} title="Test notification">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
-          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(0); }} style={{ fontSize: 13 }}>Now</Btn>
-          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(10); }} style={{ fontSize: 13 }}>In 10 seconds</Btn>
-          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(30); }} style={{ fontSize: 13 }}>In 30 seconds</Btn>
+          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(0); }}>Now</Btn>
+          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(10); }}>In 10 seconds</Btn>
+          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(30); }}>In 30 seconds</Btn>
         </div>
       </Sheet>
 
@@ -613,9 +572,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
       <Sheet open={progConfigOpen} onClose={() => setProgConfigOpen(false)} title="Equipment increments">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 20 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, padding: '0 4px 8px', borderBottom: `0.5px solid ${UI.hair}` }}>
-            <span className="micro" style={{ color: UI.inkFaint }}>Equipment</span>
-            <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>Increment</span>
-            <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>Max kg</span>
+            <span className="micro">Equipment</span>
+            <span className="micro" style={{ textAlign: 'center' }}>Increment</span>
+            <span className="micro" style={{ textAlign: 'center' }}>Max kg</span>
           </div>
           {(window.EQUIPMENT_TYPES || []).map(({ key, label }) => {
             const cfg = store.settings?.equipmentConfig?.[key] ?? {};
@@ -625,19 +584,17 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{label}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: UI.bgInset, borderRadius: 8, padding: '6px 8px' }}>
                   <NumInput value={cfg.increment ?? null} placeholder="—" onChange={v => setField('increment', v)} style={{ fontSize: 13, width: '100%' }} />
-                  <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>kg</span>
+                  <span className="micro" style={{ flexShrink: 0 }}>kg</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: UI.bgInset, borderRadius: 8, padding: '6px 8px' }}>
                   <NumInput value={cfg.maxKg ?? null} placeholder="—" onChange={v => setField('maxKg', v)} style={{ fontSize: 13, width: '100%' }} />
-                  <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>kg</span>
+                  <span className="micro" style={{ flexShrink: 0 }}>kg</span>
                 </div>
               </div>
             );
           })}
         </div>
-        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 16 }}>
-          Set equipment categories on exercises in the Library. Individual overrides can be set per exercise.
-        </div>
+        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 16 }}>Set equipment categories on exercises in the Library. Individual overrides can be set per exercise.</div>
         <Btn onClick={() => setProgConfigOpen(false)}>Done</Btn>
       </Sheet>
 
