@@ -31,7 +31,7 @@ function Toggle({ on, onToggle }) {
 function Row({ label, children, first = false }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '11px 0', borderTop: first ? 'none' : `0.5px solid ${UI.hair}` }}>
-      <span style={{ fontSize: 15, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
+      <span style={{ fontSize: 16, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
       {children}
     </div>
   );
@@ -40,9 +40,9 @@ function Row({ label, children, first = false }) {
 function NavRow({ label, hint, onTap, first = false }) {
   return (
     <button onClick={onTap} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', borderTop: first ? 'none' : `0.5px solid ${UI.hair}`, WebkitTapHighlightColor: 'transparent' }}>
-      <span style={{ fontSize: 15, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
+      <span style={{ fontSize: 16, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        {hint != null && <span style={{ fontSize: 16, color: UI.inkFaint, fontFamily: UI.fontUi }}>{hint}</span>}
+        {hint != null && <span style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi }}>{hint}</span>}
         <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
       </div>
     </button>
@@ -403,10 +403,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
           {dataOpen && (
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', gap: 8 }}>
-                <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1, fontSize: 16 }}>Export JSON</Btn>
-                <Btn kind="ghost" onClick={importData} disabled={importing} style={{ flex: 1, fontSize: 16 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
+                <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
+                <Btn kind="ghost" onClick={importData} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
               </div>
-              <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 16 }}>Delete all data</Btn>
+              <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Delete all data</Btn>
             </div>
           )}
         </Frame>
@@ -418,8 +418,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </Row>
         )}
 
-        <Btn kind="ghost" onClick={async () => { if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); } window.location.reload(true); }} style={{ fontSize: 16 }}>Clear cache &amp; reload</Btn>
-        <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 16 }}>Sign out</Btn>
+        <Btn kind="ghost" onClick={async () => { if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); } window.location.reload(true); }}>Clear cache &amp; reload</Btn>
+        <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Sign out</Btn>
         <div className="micro" style={{ textAlign: 'center', marginTop: 4 }}>Zane · {swVersion || '…'} · Data in Supabase</div>
 
       </div>
