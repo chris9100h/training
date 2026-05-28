@@ -1,10 +1,9 @@
-/* Hi-fi UI primitives — Haute Horlogerie redesign
-   Preserves the original API (UI, Screen, TopBar, TabBar, Btn, Card, Label,
-   Input, Stepper, Pill, Sheet, Empty, ChevronRight, icons, useConfirm,
-   MUSCLES, btnPrimary/Ghost/Icon) so existing screens keep working — and
-   adds new primitives (Frame, BracketFrame, SubDial, CrownButton, Bezel,
-   ScreenHead, Hairline, TickRow, NumInput, Field, TextInput).
-*/
+/* Hi-fi UI primitives — Haute Horlogerie redesign.
+   Exposes: UI, Screen, TopBar, TabBar, Btn, Card, Label, Stepper, Pill,
+   Sheet, Empty, ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
+   btnPrimary/Ghost, useConfirm, MUSCLES, WEEKDAYS, WEEKDAYS_FULL,
+   Hairline, BracketFrame, Frame, SubDial, Bezel, ScreenHead,
+   NumInput, Field, TextInput. */
 
 const UI = {
   bg:       'var(--bg)',
@@ -300,7 +299,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
                   </div>
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: hasOther ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1, marginBottom: 8 }}>{otherName}</div>
-                    <div className="micro" style={{ color: hasOther ? UI.inkFaint : 'rgba(200,116,105,0.7)' }}>
+                    <div className="micro" style={{ color: hasOther ? UI.inkFaint : 'rgba(var(--danger-rgb),0.7)' }}>
                       {hasOther ? 'Tap to switch' : 'Set up in Settings'}
                     </div>
                   </div>
@@ -413,14 +412,8 @@ const btnGhost = {
   WebkitTapHighlightColor: 'transparent',
 };
 
-const btnIcon = {
-  background: 'transparent', border: 'none',
-  color: UI.ink, padding: 4, cursor: 'pointer', fontSize: 18,
-  WebkitTapHighlightColor: 'transparent',
-};
-
 function Btn({ children, kind = 'primary', style = {}, ...rest }) {
-  const base = kind === 'primary' ? btnPrimary : kind === 'icon' ? btnIcon : btnGhost;
+  const base = kind === 'primary' ? btnPrimary : btnGhost;
   return <button style={{ ...base, ...style }} {...rest}>{children}</button>;
 }
 
@@ -454,42 +447,6 @@ function Label({ children, style = {} }) {
 const MUSCLES = ['Chest','Back','Shoulders','Biceps','Triceps','Abs','Quads','Hamstrings','Glutes','Calves','Forearms'];
 const WEEKDAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const WEEKDAYS_FULL = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-
-// ─── Input ──────────────────────────────────────────────────────────
-function Input({ label, value, onChange, type = 'text', placeholder, autoFocus, style = {}, suffix, uppercase }) {
-  const doUpper = uppercase !== undefined ? uppercase : type === 'text';
-  const [focused, setFocused] = React.useState(false);
-  return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 6, ...style }}>
-      {label && <Label>{label}</Label>}
-      <div style={{
-        display: 'flex', alignItems: 'baseline', gap: 6,
-        background: UI.bgInset,
-        border: `0.5px solid ${focused ? UI.goldSoft : UI.hair}`,
-        borderRadius: 10,
-        padding: '12px 14px',
-        boxShadow: focused ? `0 0 0 3px rgba(var(--accent-rgb),0.08)` : 'none',
-        transition: 'border-color 0.15s, box-shadow 0.15s',
-      }}>
-        <input
-          value={value ?? ''}
-          onChange={e => onChange(doUpper ? e.target.value.toUpperCase() : e.target.value)}
-          type={type} placeholder={placeholder} autoFocus={autoFocus}
-          inputMode={type === 'number' ? 'decimal' : undefined}
-          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-          style={{
-            flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
-            color: UI.ink, fontFamily: type === 'number' ? UI.fontNum : UI.fontUi,
-            fontSize: 16, padding: 0,
-            textTransform: doUpper ? 'uppercase' : 'none',
-            letterSpacing: doUpper ? '0.04em' : 'normal',
-          }}
-        />
-        {suffix && <span style={{ color: UI.inkFaint, fontSize: 12, fontFamily: UI.fontNum }}>{suffix}</span>}
-      </div>
-    </label>
-  );
-}
 
 // ─── Stepper ────────────────────────────────────────────────────────
 function Stepper({ value, onChange, step = 2.5, min = 0, suffix, big = false }) {
@@ -637,7 +594,7 @@ function useConfirm() {
         <Btn kind="ghost" onClick={() => close(false)} style={{ flex: 1 }}>{state.cancel}</Btn>
         <Btn onClick={() => close(true)} style={{
           flex: 2,
-          ...(state.danger ? { background: UI.danger, borderColor: 'rgba(200,116,105,0.6)', boxShadow: '0 8px 24px rgba(200,116,105,0.25)' } : {}),
+          ...(state.danger ? { background: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.6)', boxShadow: '0 8px 24px rgba(var(--danger-rgb),0.25)' } : {}),
         }}>{state.ok}</Btn>
       </div>
     </Sheet>
@@ -655,22 +612,6 @@ function Hairline({ vertical = false, color, style = {} }) {
     flexShrink: 0,
     ...style,
   }} />;
-}
-
-function TickRow({ count = 12, gold = false, style = {} }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', ...style }}>
-      {Array.from({ length: count }).map((_, i) => {
-        const major = i === 0 || i === count - 1 || (count >= 11 && i === Math.floor(count / 2));
-        return <div key={i} style={{
-          width: major ? 1 : 0.5,
-          height: major ? 8 : 4,
-          background: gold ? UI.gold : UI.hairStrong,
-          opacity: gold ? 0.8 : 1,
-        }} />;
-      })}
-    </div>
-  );
 }
 
 // Frame with corner brackets — watch-case aesthetic
@@ -725,29 +666,6 @@ function SubDial({ label, value, sub, size = 110, gold = false, style = {} }) {
       <span className="num" style={{ fontSize: String(value).length > 5 ? size * 0.17 : String(value).length > 3 ? size * 0.22 : size * 0.28, color: gold ? UI.gold : UI.ink, fontWeight: 500, lineHeight: 1 }}>{value}</span>
       {sub && <span className="micro" style={{ fontSize: Math.max(7, size * 0.08), lineHeight: 1 }}>{sub}</span>}
     </div>
-  );
-}
-
-// Big gold "Crown" button — primary CTA, concentric like a watch crown
-function CrownButton({ children, onClick, size = 180, disabled, style = {} }) {
-  return (
-    <button onClick={onClick} disabled={disabled} style={{
-      width: size, height: size, borderRadius: '50%',
-      border: 'none', cursor: disabled ? 'default' : 'pointer',
-      background: `radial-gradient(circle at 50% 35%, var(--accent-light) 0%, var(--accent) 35%, var(--accent-deep) 100%)`,
-      color: '#0a0805', position: 'relative',
-      boxShadow: '0 20px 60px rgba(var(--accent-rgb),0.30), 0 0 0 0.5px rgba(var(--accent-rgb),0.6), inset 0 1px 0 rgba(255,240,200,0.4), inset 0 -8px 24px rgba(0,0,0,0.25)',
-      opacity: disabled ? 0.3 : 1,
-      animation: disabled ? 'none' : 'pulseGold 3.5s ease-out infinite',
-      WebkitTapHighlightColor: 'transparent',
-      ...style,
-    }}>
-      <div style={{ position: 'absolute', inset: 8, borderRadius: '50%', boxShadow: 'inset 0 0 0 0.5px rgba(0,0,0,0.18)', pointerEvents: 'none' }} />
-      <div style={{ position: 'absolute', inset: 16, borderRadius: '50%', boxShadow: 'inset 0 0 0 0.5px rgba(0,0,0,0.12)', pointerEvents: 'none' }} />
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-        {children}
-      </div>
-    </button>
   );
 }
 
@@ -854,10 +772,10 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus }) {
 }
 
 Object.assign(window, {
-  UI, Screen, TopBar, TabBar, Btn, Card, Label, Input, Stepper, Pill, Sheet, Empty,
+  UI, Screen, TopBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty,
   ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
-  btnPrimary, btnGhost, btnIcon, useConfirm,
+  btnPrimary, btnGhost, useConfirm,
   MUSCLES, WEEKDAYS, WEEKDAYS_FULL,
   // new primitives
-  Hairline, TickRow, BracketFrame, Frame, SubDial, CrownButton, Bezel, ScreenHead, NumInput, Field, TextInput,
+  Hairline, BracketFrame, Frame, SubDial, Bezel, ScreenHead, NumInput, Field, TextInput,
 });

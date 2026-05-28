@@ -1,6 +1,6 @@
 /* Schedules — list, detail, edit, create */
 
-const { useState: useStateS, useMemo: useMemoS, useRef: useRefS } = React;
+const { useState: useStateS, useMemo: useMemoS } = React;
 
 const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','BACK','REST'];
 
@@ -96,7 +96,7 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
 
   const activeCycleDayIdx = sch.id === store.activeScheduleId && !LB.isWeekdayPlan(sch)
     ? (store.cycleStartDate
-        ? (() => { const t = new Date(); t.setHours(12,0,0,0); const st = new Date(store.cycleStartDate+'T12:00:00'); return ((Math.round((t-st)/86400000) % sch.days.length) + sch.days.length) % sch.days.length; })()
+        ? (() => { const t = new Date(); t.setHours(12,0,0,0); const st = LB.parseDate(store.cycleStartDate); return ((Math.round((t-st)/86400000) % sch.days.length) + sch.days.length) % sch.days.length; })()
         : (store.cycleIndex || 0) % sch.days.length)
     : -1;
 
@@ -155,7 +155,7 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
               />
             </div>
             {store.weekPlanStartDate && (() => {
-              const start = new Date(store.weekPlanStartDate + 'T12:00:00');
+              const start = LB.parseDate(store.weekPlanStartDate);
               const today = new Date(); today.setHours(12, 0, 0, 0);
               const weekNum = Math.floor(Math.round((today - start) / 86400000) / 7) + 1;
               return <div className="micro" style={{ marginTop: 8 }}>Today = Week {weekNum}</div>;
@@ -399,7 +399,7 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
           Custom day types can be created when adding.
         </div>
 
-        <Btn kind="ghost" onClick={deleteSch} style={{ marginTop: 4, color: UI.danger, borderColor: 'rgba(200,116,105,0.25)', fontSize: 12 }}>Delete plan</Btn>
+        <Btn kind="ghost" onClick={deleteSch} style={{ marginTop: 4, color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)', fontSize: 12 }}>Delete plan</Btn>
       </div>
 
       {pickingType && (

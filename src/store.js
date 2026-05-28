@@ -160,6 +160,9 @@ async function importFromBackup(backup, userId) {
       cycle_week_view: sett.cycleWeekView ?? false,
       accent_color: sett.accentColor ?? 'copper',
       dark_mode: sett.darkMode ?? 'dark',
+      custom_day_types: backup.customDayTypes ?? [],
+      reminder_enabled: sett.reminderEnabled ?? false,
+      reminder_time: sett.reminderTime ?? '07:00',
     }),
   ].filter(Boolean));
 }
@@ -251,7 +254,7 @@ async function loadFromSupabase(userId, _depth = 0) {
     weekPlanStartDate: sett.week_plan_start_date ?? null,
     lastAdvancedDate: sett.last_advanced_date ?? null,
     inProgress: sett.in_progress_session_id ?? null,
-    customDayTypes: [],
+    customDayTypes: sett.custom_day_types ?? [],
     settings: {
         unit: sett.unit || 'kg',
         restDefault: sett.rest_default || 120,
@@ -269,7 +272,10 @@ async function loadFromSupabase(userId, _depth = 0) {
         smartProgression: sett.smart_progression ?? false,
         progressionRangeTop: sett.progression_range_top ?? 4,
         equipmentConfig: sett.equipment_config ?? {},
+        reminderEnabled: sett.reminder_enabled ?? false,
+        reminderTime: sett.reminder_time ?? '07:00',
       },
+    nextReminderAt: sett.next_reminder_at ?? null,
   };
   await autoArchiveMissedDays(userId, result);
   return result;
@@ -297,7 +303,7 @@ async function autoArchiveMissedDays(userId, state) {
       const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
       trainingDay = activeSch.days.find(day => day.weekday === wd && (day.items || []).length > 0) || null;
     } else {
-      const start = new Date(state.cycleStartDate + 'T12:00:00');
+      const start = parseDate(state.cycleStartDate);
       const n = Math.round((d.getTime() - start.getTime()) / 86400000);
       if (n < 0) continue;
       const idx = ((n % activeSch.days.length) + activeSch.days.length) % activeSch.days.length;
@@ -396,7 +402,11 @@ async function syncStore(prev, next, userId) {
     prev.settings?.tempoConcentric    !== next.settings?.tempoConcentric    ||
     prev.settings?.smartProgression   !== next.settings?.smartProgression   ||
     prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop ||
-    JSON.stringify(prev.settings?.equipmentConfig) !== JSON.stringify(next.settings?.equipmentConfig);
+    JSON.stringify(prev.settings?.equipmentConfig) !== JSON.stringify(next.settings?.equipmentConfig) ||
+    JSON.stringify(prev.customDayTypes) !== JSON.stringify(next.customDayTypes) ||
+    prev.settings?.reminderEnabled !== next.settings?.reminderEnabled ||
+    prev.settings?.reminderTime    !== next.settings?.reminderTime    ||
+    prev.nextReminderAt            !== next.nextReminderAt;
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
@@ -422,6 +432,10 @@ async function syncStore(prev, next, userId) {
       smart_progression: next.settings?.smartProgression ?? false,
       progression_range_top: next.settings?.progressionRangeTop ?? 4,
       equipment_config: next.settings?.equipmentConfig ?? {},
+      custom_day_types: next.customDayTypes ?? [],
+      reminder_enabled: next.settings?.reminderEnabled ?? false,
+      reminder_time: next.settings?.reminderTime ?? '07:00',
+      next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
     }));
   }
@@ -493,6 +507,75 @@ function seedStarter(state) {
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────
 
+// Date of the next upcoming training day (today if not yet trained, otherwise tomorrow+).
+// Returns an ISO date string or null.
+function computeNextTrainingDate(state) {
+  const sch = state.schedules.find(s => s.id === state.activeScheduleId);
+  if (!sch || !sch.days.length) return null;
+
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const todayStr = today.toISOString().slice(0, 10);
+  const trainedToday = state.sessions.some(s => s.date?.slice(0, 10) === todayStr && s.ended);
+  const wdPlan = isWeekdayPlan(sch);
+
+  for (let ahead = trainedToday ? 1 : 0; ahead <= 14; ahead++) {
+    const d = new Date(today); d.setDate(today.getDate() + ahead);
+    const dateStr = d.toISOString().slice(0, 10);
+    let training = false;
+    if (wdPlan) {
+      const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      const day = sch.days.find(x => x.weekday === wd);
+      training = !!(day && (day.items || []).length > 0);
+    } else {
+      if (!state.cycleStartDate) return null;
+      const start = parseDate(state.cycleStartDate);
+      const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+      if (n < 0) continue;
+      const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
+      training = (sch.days[idx]?.items || []).length > 0;
+    }
+    if (training) return dateStr;
+  }
+  return null;
+}
+
+// UTC ISO timestamp for the next training-day reminder, or null if reminder is disabled.
+// Skips today if today's reminder time has already passed (prevents re-firing after the
+// edge function clears next_reminder_at and the app writes the old value back via syncStore).
+function computeNextReminderAt(state) {
+  if (!state.settings?.reminderEnabled) return null;
+  const sch = state.schedules.find(s => s.id === state.activeScheduleId);
+  if (!sch || !sch.days.length) return null;
+
+  const time = state.settings?.reminderTime ?? '07:00';
+  const now = new Date();
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const todayStr = today.toISOString().slice(0, 10);
+  const trainedToday = state.sessions.some(s => s.date?.slice(0, 10) === todayStr && s.ended);
+  const todayTimePassed = new Date(todayStr + 'T' + time + ':00') <= now;
+  const wdPlan = isWeekdayPlan(sch);
+
+  for (let ahead = (trainedToday || todayTimePassed) ? 1 : 0; ahead <= 14; ahead++) {
+    const d = new Date(today); d.setDate(today.getDate() + ahead);
+    const dateStr = d.toISOString().slice(0, 10);
+    let training = false;
+    if (wdPlan) {
+      const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      const day = sch.days.find(x => x.weekday === wd);
+      training = !!(day && (day.items || []).length > 0);
+    } else {
+      if (!state.cycleStartDate) return null;
+      const start = parseDate(state.cycleStartDate);
+      const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+      if (n < 0) continue;
+      const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
+      training = (sch.days[idx]?.items || []).length > 0;
+    }
+    if (training) return new Date(dateStr + 'T' + time + ':00').toISOString();
+  }
+  return null;
+}
+
 function cancelPushover(settings, userId) {
   if (!settings?.pushEnabled) return;
   fetch(PUSHOVER_URL, {
@@ -504,6 +587,96 @@ function cancelPushover(settings, userId) {
 
 function findExercise(state, exId) {
   return state.exercises.find(e => e.id === exId);
+}
+
+// Parse a stored ISO date string ('YYYY-MM-DD' or full ISO) as noon local time —
+// avoids the DST/midnight TZ shifts that break "same calendar day" lookups.
+function parseDate(s) {
+  if (!s) return null;
+  return new Date(s.slice(0, 10) + 'T12:00:00');
+}
+
+// Effective reps for a set — for unilateral sets, the weaker side is the bottleneck.
+function effReps(st) {
+  if (st.repsL != null || st.repsR != null) {
+    return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
+  }
+  return st.reps;
+}
+
+// Epley-style estimated 1RM.
+function e1rm(kg, reps) {
+  return kg * (1 + reps / 30);
+}
+
+// Total volume (kg) of all completed sets in a session.
+function totalVolume(session) {
+  return (session.entries || []).reduce((sum, ex) =>
+    sum + (ex.sets || []).filter(st => st.done).reduce((s, st) => {
+      const reps = effReps(st) ?? 0;
+      return s + (+st.kg || 0) * reps;
+    }, 0), 0
+  );
+}
+
+// Index of the latest exercise whose entry has at least one completed set —
+// used by the Spectator screen to highlight the active row when no
+// currentExIdx broadcast has arrived yet.
+function inferCurrentExIdx(entries) {
+  if (!entries?.length) return 0;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].sets?.some(s => s.done)) return i;
+  }
+  return 0;
+}
+
+// Blended remaining-time estimate for a live session — used by Spectator
+// and the Active Users overview in Settings.
+// Early in the session, historical pace dominates; as more sets land,
+// the current-session pace gradually takes over.
+function calcBlended(startedAt, avgDurSec, avgSetsTotal, setsDone, setsTotal, nowMs) {
+  if (!avgDurSec || !startedAt) return null;
+  const elapsed = (nowMs - new Date(startedAt).getTime()) / 1000;
+  const remainingSets = Math.max(0, setsTotal - setsDone);
+  const histPace = avgSetsTotal > 0 ? avgDurSec / avgSetsTotal : null;
+  const currPace = setsDone >= 2 ? elapsed / setsDone : null;
+
+  let remainingSec;
+  if (!histPace || setsTotal === 0) {
+    remainingSec = Math.max(0, avgDurSec - elapsed);
+  } else if (!currPace) {
+    remainingSec = Math.max(0, avgDurSec - elapsed);
+  } else {
+    const w = Math.min(setsDone / 8, 0.7);
+    remainingSec = Math.max(0, (w * currPace + (1 - w) * histPace) * remainingSets);
+  }
+
+  const progress = setsTotal > 0
+    ? setsDone / setsTotal
+    : Math.min(1, Math.max(0, elapsed / (elapsed + remainingSec || 1)));
+
+  return { remainingMin: Math.round(remainingSec / 60), progress };
+}
+
+// Compute the seed-sets array when starting/logging a session for a planned item.
+// Honors smart-progression suggestions and falls back to last-session values.
+function buildSeedSets(it, last, suggestion, isUni, smartProgression) {
+  return Array.from({ length: it.sets }).map((_, i) => {
+    const prev = last?.entry?.sets?.[i];
+    if (suggestion) {
+      return isUni
+        ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false }
+        : { kg: suggestion.kg, reps: suggestion.reps, done: false };
+    }
+    if (smartProgression && prev) {
+      return isUni
+        ? { kg: prev.kg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
+        : { kg: prev.kg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
+    }
+    return isUni
+      ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
+      : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
+  });
 }
 
 function lastSessionForExercise(state, exId, dayId = null) {
@@ -535,7 +708,7 @@ function todaysDay(state) {
   let idx;
   if (state.cycleStartDate) {
     const today = new Date(); today.setHours(12, 0, 0, 0);
-    const start = new Date(state.cycleStartDate + 'T12:00:00');
+    const start = parseDate(state.cycleStartDate);
     const n = Math.round((today.getTime() - start.getTime()) / 86400000);
     idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
   } else {
@@ -550,7 +723,7 @@ function nextDay(state) {
   let curIdx;
   if (state.cycleStartDate) {
     const today = new Date(); today.setHours(12, 0, 0, 0);
-    const start = new Date(state.cycleStartDate + 'T12:00:00');
+    const start = parseDate(state.cycleStartDate);
     const n = Math.round((today.getTime() - start.getTime()) / 86400000);
     curIdx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
   } else {
@@ -656,10 +829,7 @@ function progressionSuggestion(store, exId, dayId, plannedReps) {
   const doneSets = (last.entry.sets || []).filter(s => !s.skipped && s.kg != null);
   if (!doneSets.length) return null;
 
-  const allHitTop = doneSets.every(s => {
-    const reps = s.repsL != null ? Math.min(s.repsL ?? 0, s.repsR ?? 0) : (s.reps ?? 0);
-    return reps >= targetRepsTop;
-  });
+  const allHitTop = doneSets.every(s => (effReps(s) ?? 0) >= targetRepsTop);
   if (!allHitTop) return null;
 
   const refKg = doneSets[0].kg;
@@ -675,9 +845,11 @@ window.LB = {
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
   signIn, signUp, signOut, deleteAllData, importFromBackup,
-  loadFromSupabase, syncStore, seedStarter,
+  loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan,
+  uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan,
+  effReps, e1rm, totalVolume, buildSeedSets, inferCurrentExIdx, calcBlended,
+  computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,
 };

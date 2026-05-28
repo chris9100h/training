@@ -48,9 +48,7 @@ function LoginScreen() {
 
       {/* Centered block: logo + title + form */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
-        <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain' }} />
-        <div style={{ textAlign: 'center', marginTop: 0, marginBottom: 28 }}>
-        </div>
+        <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain', marginBottom: 28 }} />
         <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
           <Field label="Email">
             <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus />
@@ -62,8 +60,8 @@ function LoginScreen() {
             <div style={{
               fontSize: 12, color: UI.danger,
               padding: '10px 14px',
-              background: 'rgba(200,116,105,0.06)',
-              border: `0.5px solid rgba(200,116,105,0.25)`,
+              background: 'rgba(var(--danger-rgb),0.06)',
+              border: `0.5px solid rgba(var(--danger-rgb),0.25)`,
               borderRadius: 10,
               fontFamily: UI.fontUi,
             }}>
@@ -81,6 +79,113 @@ function LoginScreen() {
         <span className="micro">{swVersion || '…'}</span>
       </div>
     </Screen>
+  );
+}
+
+// ─── Sub-components used by HomeScreen ────────────────────────────────
+
+function SkipReasonSheet({ modal, onClose, setStore, userId }) {
+  return (
+    <Sheet open={!!modal} onClose={onClose}>
+      {modal && (
+        <>
+          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase', textAlign: 'center', color: UI.ink, marginBottom: 4 }}>{modal.mode === 'edit' ? 'Edit Reason' : 'Why Did You Skip?'}</div>
+          <div className="micro" style={{ marginBottom: 18, color: UI.inkFaint, textAlign: 'center' }}>{modal.data?.dayName}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {SKIP_REASONS.map(reason => {
+              const isActive = modal.currentReason === reason;
+              return (
+                <button key={reason} onClick={() => {
+                  const { mode, skipId, data } = modal;
+                  if (mode === 'edit') {
+                    LB.updateSkipReason(skipId, reason).catch(() => {});
+                    setStore(s => ({ ...s, skips: (s.skips || []).map(x => x.id === skipId ? { ...x, skipReason: reason } : x) }));
+                  } else {
+                    const id = LB.uid();
+                    LB.createSkip(userId, { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason }).catch(() => {});
+                    setStore(s => ({ ...s, skips: [...(s.skips || []), { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason, skippedAt: new Date().toISOString() }] }));
+                  }
+                  onClose();
+                }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 10, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                  {reason}
+                </button>
+              );
+            })}
+          </div>
+          <Btn onClick={onClose} style={{ marginTop: 14, width: '100%' }}>Cancel</Btn>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+function LastSessionStrip({ session, onClick }) {
+  return (
+    <Frame onClick={onClick} style={{ flexShrink: 0, padding: '12px 16px', cursor: 'pointer' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="micro" style={{ marginBottom: 3 }}>LAST SESSION</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span className="display" style={{ fontSize: 18, color: UI.ink, lineHeight: 1 }}>{session.dayName}</span>
+            <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
+              {LB.parseDate(session.date).toLocaleDateString('en-US', { day:'2-digit', month:'short' }).toUpperCase()}
+            </span>
+            <span className="num" style={{ color: UI.gold, fontSize: 11 }}>
+              {LB.totalVolume(session).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>kg</span>
+            </span>
+          </div>
+        </div>
+        <ChevronRight />
+      </div>
+    </Frame>
+  );
+}
+
+function RecentBannerDay({ banner, store, setStore, go, sch, onOpenSkipSheet }) {
+  const { dateKey, dayName, daysAgo, skip, dayData, date, dayId } = banner;
+  const dateLabel = daysAgo === 1 ? 'YESTERDAY' : `${daysAgo}D AGO`;
+  if (skip) {
+    return (
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="micro" style={{ marginBottom: 3 }}>{dayName} · {dateLabel}</div>
+          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 999, padding: '2px 8px', display: 'inline-block' }}>
+            {skip.skipReason}
+          </span>
+        </div>
+        <button onClick={() => onOpenSkipSheet({ mode: 'edit', skipId: skip.id, currentReason: skip.skipReason, data: { dateKey, dayId: skip.dayId, dayName } })} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <button onClick={() => { LB.deleteSkip(skip.id).catch(() => {}); setStore(s => ({ ...s, skips: (s.skips || []).filter(x => x.id !== skip.id) })); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 18, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
+      </div>
+    );
+  }
+  return (
+    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.05)', border: `0.5px solid rgba(var(--danger-rgb),0.2)`, borderRadius: 12 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>{dayName} · {dateLabel}</div>
+        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Not logged</div>
+      </div>
+      <button onClick={() => {
+        const entries = (dayData?.items || []).map(it => {
+          const ex = LB.findExercise(store, it.exId);
+          const last = LB.lastSessionForExercise(store, it.exId, dayId);
+          const isUni = ex?.unilateral || false;
+          const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps);
+          const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
+          return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+        });
+        const session = { id: LB.uid(), scheduleId: sch.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
+        setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+        LB.broadcastSessionNav('start', session.id);
+        go({ name: 'train', sessionId: session.id });
+      }} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+        Log
+      </button>
+      <button onClick={() => onOpenSkipSheet({ mode: 'dismiss', data: { dateKey, dayId, dayName } })} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid rgba(var(--danger-rgb),0.25)`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: 'rgba(var(--danger-rgb),0.7)', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+        Dismiss
+      </button>
+    </div>
   );
 }
 
@@ -111,7 +216,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const todayN = useMemo(() => {
     if (weekdayMode || !store.cycleStartDate) return store.cycleIndex || 0;
     const today = new Date(); today.setHours(12, 0, 0, 0);
-    const start = new Date(store.cycleStartDate + 'T12:00:00');
+    const start = LB.parseDate(store.cycleStartDate);
     return Math.max(0, Math.round((today.getTime() - start.getTime()) / 86400000));
   }, [store.cycleStartDate, store.cycleIndex, weekdayMode]);
 
@@ -127,7 +232,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       if (store.weekPlanStartDate) {
         const now = new Date(); now.setHours(12, 0, 0, 0);
         const currentMondayMs = now.getTime() - todayWd * 86400000;
-        const start = new Date(store.weekPlanStartDate + 'T12:00:00');
+        const start = LB.parseDate(store.weekPlanStartDate);
         const planMondayMs = start.getTime() - ((start.getDay() + 6) % 7) * 86400000;
         const week0MondayMs = planMondayMs - 7 * 86400000;
         return Math.round((week0MondayMs - currentMondayMs) / (7 * 86400000));
@@ -137,7 +242,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (cycleWeekView && store.cycleStartDate && dayCount > 0) {
       const now = new Date(); now.setHours(12, 0, 0, 0);
       const currentMondayMs = now.getTime() - todayWd * 86400000;
-      const cycle0StartMs = new Date(store.cycleStartDate + 'T12:00:00').getTime() - dayCount * 86400000;
+      const cycle0StartMs = LB.parseDate(store.cycleStartDate).getTime() - dayCount * 86400000;
       const cycle0Wd = (new Date(cycle0StartMs).getDay() + 6) % 7;
       const cycle0MondayMs = cycle0StartMs - cycle0Wd * 86400000;
       return Math.round((cycle0MondayMs - currentMondayMs) / (7 * 86400000));
@@ -178,7 +283,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       });
     }
     if (cycleWeekView && store.cycleStartDate && dayCount > 0) {
-      const start = new Date(store.cycleStartDate + 'T12:00:00');
+      const start = LB.parseDate(store.cycleStartDate);
       const monday = new Date(); monday.setHours(12, 0, 0, 0);
       monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
       return Array.from({ length: 7 }).map((_, i) => {
@@ -236,7 +341,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       if (store.weekPlanStartDate) {
         const monday = new Date(); monday.setHours(12, 0, 0, 0);
         monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
-        const start = new Date(store.weekPlanStartDate + 'T12:00:00');
+        const start = LB.parseDate(store.weekPlanStartDate);
         const startMonday = new Date(start);
         startMonday.setDate(start.getDate() - ((start.getDay() + 6) % 7));
         startMonday.setHours(12, 0, 0, 0);
@@ -250,7 +355,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (cycleWeekView && store.cycleStartDate && dayCount > 0) {
       const monday = new Date(); monday.setHours(12, 0, 0, 0);
       monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
-      const start = new Date(store.cycleStartDate + 'T12:00:00');
+      const start = LB.parseDate(store.cycleStartDate);
       const dfs = Math.round((monday - start) / 86400000);
       return `CYCLE ${Math.floor(dfs / dayCount) + 1}`;
     }
@@ -301,13 +406,9 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const { improvementCount, regressionCount } = useMemo(() => {
     if (!doneSession) return { improvementCount: 0, regressionCount: 0 };
-    const effReps = (st) => {
-      if (st.repsL != null || st.repsR != null) return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
-      return st.reps;
-    };
     const cmp = (st, prevSet, better) => {
       if (!prevSet || !st.done || st.kg == null || prevSet.kg == null) return false;
-      const repsA = effReps(st); const repsB = effReps(prevSet);
+      const repsA = LB.effReps(st); const repsB = LB.effReps(prevSet);
       if (repsA == null || repsB == null) return false;
       return better
         ? (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB)
@@ -333,9 +434,9 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (weekdayMode || !sch) return null;
     const set = new Set();
     if (store.cycleStartDate) {
-      const start = new Date(store.cycleStartDate + 'T12:00:00');
+      const start = LB.parseDate(store.cycleStartDate);
       store.sessions.filter(s => s.ended).forEach(s => {
-        const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+        const d = LB.parseDate(s.date);
         set.add(Math.round((d - start) / 86400000));
       });
     } else {
@@ -348,7 +449,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (!weekdayMode) return null;
     const set = new Set();
     store.sessions.filter(s => s.ended).forEach(s => {
-      const d = new Date(s.date.slice(0, 10) + 'T12:00:00');
+      const d = LB.parseDate(s.date);
       set.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
     });
     return set;
@@ -356,7 +457,7 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const cycleBarSegments = useMemo(() => {
     if (!cycleWeekView || weekdayMode || !store.cycleStartDate || !sch || dayCount === 0) return null;
-    const start = new Date(store.cycleStartDate + 'T12:00:00');
+    const start = LB.parseDate(store.cycleStartDate);
     const monday = new Date(); monday.setHours(12, 0, 0, 0);
     monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
     const cycleNums = Array.from({ length: 7 }).map((_, i) => {
@@ -415,7 +516,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
         trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
       } else if (store.cycleStartDate) {
-        const start = new Date(store.cycleStartDate + 'T12:00:00');
+        const start = LB.parseDate(store.cycleStartDate);
         const n = Math.round((d.getTime() - start.getTime()) / 86400000);
         if (n < 0) continue;
         const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
@@ -435,22 +536,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       const last = LB.lastSessionForExercise(store, it.exId, activeDay.id);
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps);
-      const seedSets = Array.from({ length: it.sets }).map((_, i) => {
-        const prev = last?.entry?.sets?.[i];
-        if (suggestion) {
-          return isUnilateral
-            ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false }
-            : { kg: suggestion.kg, reps: suggestion.reps, done: false };
-        }
-        if (store.settings?.smartProgression && prev) {
-          return isUnilateral
-            ? { kg: prev.kg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
-            : { kg: prev.kg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
-        }
-        return isUnilateral
-          ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
-          : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
-      });
+      const seedSets = LB.buildSeedSets(it, last, suggestion, isUnilateral, !!store.settings?.smartProgression);
       return {
         exId: it.exId, name: ex?.name || '?',
         plannedSets: it.sets, plannedReps: it.reps,
@@ -487,7 +573,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         <TopBar
           title={<span>Hey, <em style={{ fontFamily: UI.fontDisplay, fontStyle: 'italic', fontWeight: 300, color: UI.gold }}>{store.user.name}</em></span>}
           sub={new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
-          right={<button onClick={() => go({ name: 'settings' })} style={{ ...btnIcon, fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: '50%', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
+          right={<button onClick={() => go({ name: 'settings' })} style={{ background: 'transparent', border: 'none', padding: 4, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: '50%', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
         />
         <div style={{ padding: 22 }}>
           {hasPlans ? (
@@ -628,8 +714,8 @@ function HomeScreen({ store, setStore, go, userId }) {
             const dateKey = d.date.toISOString().slice(0, 10);
             const isPast = !d.isToday && d.date < new Date();
             const isBeforePlanStart = weekdayMode
-              ? (store.weekPlanStartDate ? d.date < new Date(store.weekPlanStartDate + 'T12:00:00') : false)
-              : (store.cycleStartDate ? d.date < new Date(store.cycleStartDate + 'T12:00:00') : false);
+              ? (store.weekPlanStartDate ? d.date < LB.parseDate(store.weekPlanStartDate) : false)
+              : (store.cycleStartDate ? d.date < LB.parseDate(store.cycleStartDate) : false);
             const isMissed = !r && isPast && !isCompleted && !skipsMap.has(dateKey) && !isBeforePlanStart;
             const isSkipped = !r && isPast && !isCompleted && skipsMap.has(dateKey);
             return (
@@ -637,8 +723,8 @@ function HomeScreen({ store, setStore, go, userId }) {
                 onClick={() => (weekdayMode || cycleWeekView) ? setSelectedWd(i) : setSelectedSlot(i)}
                 style={{
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
-                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(200,116,105,0.08)' : isSkipped ? 'rgba(160,160,160,0.07)' : 'transparent',
-                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(200,116,105,0.4)' : isSkipped ? 'rgba(160,160,160,0.3)' : d.isToday ? UI.hairStrong : UI.hair}`,
+                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isSkipped ? 'rgba(160,160,160,0.07)' : 'transparent',
+                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(var(--danger-rgb),0.4)' : isSkipped ? 'rgba(160,160,160,0.3)' : d.isToday ? UI.hairStrong : UI.hair}`,
                   borderRadius: 8, cursor: 'pointer',
                   minHeight: 56,
                 }}>
@@ -824,133 +910,29 @@ function HomeScreen({ store, setStore, go, userId }) {
         )}
 
         {/* Missed / skipped banner */}
-        {recentBannerDay && !store.inProgress && (() => {
-          const { dateKey, dayName: bDayName, daysAgo, skip, dayData } = recentBannerDay;
-          const dateLabel = daysAgo === 1 ? 'YESTERDAY' : `${daysAgo}D AGO`;
-          if (skip) {
-            return (
-              <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 12 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="micro" style={{ marginBottom: 3 }}>{bDayName} · {dateLabel}</div>
-                  <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 999, padding: '2px 8px', display: 'inline-block' }}>
-                    {skip.skipReason}
-                  </span>
-                </div>
-                <button onClick={() => setSkipReasonModal({ mode: 'edit', skipId: skip.id, currentReason: skip.skipReason, data: { dateKey, dayId: skip.dayId, dayName: bDayName } })} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                </button>
-                <button onClick={() => { LB.deleteSkip(skip.id).catch(() => {}); setStore(s => ({ ...s, skips: (s.skips || []).filter(x => x.id !== skip.id) })); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 18, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
-              </div>
-            );
-          }
-          return (
-            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'rgba(200,116,105,0.05)', border: `0.5px solid rgba(200,116,105,0.2)`, borderRadius: 12 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>{bDayName} · {dateLabel}</div>
-                <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Not logged</div>
-              </div>
-              <button onClick={() => {
-                const entries = (dayData?.items || []).map(it => {
-                  const ex = LB.findExercise(store, it.exId);
-                  const last = LB.lastSessionForExercise(store, it.exId, recentBannerDay.dayId);
-                  const isUni = ex?.unilateral || false;
-                  const suggestion = LB.progressionSuggestion(store, it.exId, recentBannerDay.dayId, it.reps);
-                  const seedSets = Array.from({ length: it.sets }).map((_, idx) => {
-                    const prev = last?.entry?.sets?.[idx];
-                    if (suggestion) {
-                      return isUni ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false } : { kg: suggestion.kg, reps: suggestion.reps, done: false };
-                    }
-                    if (store.settings?.smartProgression && prev) {
-                      return isUni ? { kg: prev.kg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false } : { kg: prev.kg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
-                    }
-                    return isUni ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false } : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
-                  });
-                  return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
-                });
-                const session = { id: LB.uid(), scheduleId: sch.id, dayId: recentBannerDay.dayId, dayName: bDayName, date: recentBannerDay.date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
-                setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
-                LB.broadcastSessionNav('start', session.id);
-                go({ name: 'train', sessionId: session.id });
-              }} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-                Log
-              </button>
-              <button onClick={() => setSkipReasonModal({ mode: 'dismiss', data: { dateKey, dayId: recentBannerDay.dayId, dayName: bDayName } })} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid rgba(200,116,105,0.25)`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: 'rgba(200,116,105,0.7)', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-                Dismiss
-              </button>
-            </div>
-          );
-        })()}
+        {recentBannerDay && !store.inProgress && (
+          <RecentBannerDay
+            banner={recentBannerDay}
+            store={store} setStore={setStore} go={go} sch={sch}
+            onOpenSkipSheet={setSkipReasonModal}
+          />
+        )}
 
         {/* last session strip */}
         {lastSession && (
-          <Frame onClick={() => go({ name: 'session', sessionId: lastSession.id })} style={{ flexShrink: 0, padding: '12px 16px', cursor: 'pointer' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="micro" style={{ marginBottom: 3 }}>LAST SESSION</div>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <span className="display" style={{ fontSize: 18, color: UI.ink, lineHeight: 1 }}>{lastSession.dayName}</span>
-                  <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
-                    {new Date(lastSession.date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { day:'2-digit', month:'short' }).toUpperCase()}
-                  </span>
-                  <span className="num" style={{ color: UI.gold, fontSize: 11 }}>
-                    {totalVolume(lastSession).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>kg</span>
-                  </span>
-                </div>
-              </div>
-              <ChevronRight />
-            </div>
-          </Frame>
+          <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id })} />
         )}
       </div>
-      {skipReasonModal && (
-        <div onClick={() => setSkipReasonModal(null)} style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-          <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 440, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: '20px 20px 0 0', padding: '24px 22px calc(env(safe-area-inset-bottom,0px) + 28px)' }}>
-            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase', textAlign: 'center', color: UI.ink, marginBottom: 4 }}>{skipReasonModal.mode === 'edit' ? 'Edit Reason' : 'Why Did You Skip?'}</div>
-            <div className="micro" style={{ marginBottom: 18, color: UI.inkFaint, textAlign: 'center' }}>{skipReasonModal.data?.dayName}</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {SKIP_REASONS.map(reason => {
-                const isActive = skipReasonModal.currentReason === reason;
-                return (
-                  <button key={reason} onClick={() => {
-                    const { mode, skipId, data } = skipReasonModal;
-                    if (mode === 'edit') {
-                      LB.updateSkipReason(skipId, reason).catch(() => {});
-                      setStore(s => ({ ...s, skips: (s.skips || []).map(x => x.id === skipId ? { ...x, skipReason: reason } : x) }));
-                    } else {
-                      const id = LB.uid();
-                      LB.createSkip(userId, { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason }).catch(() => {});
-                      setStore(s => ({ ...s, skips: [...(s.skips || []), { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason, skippedAt: new Date().toISOString() }] }));
-                      // 'skip' just records the skip; the cycle advances with calendar days automatically
-                    }
-                    setSkipReasonModal(null);
-                  }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 10, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                    {reason}
-                  </button>
-                );
-              })}
-            </div>
-            <button onClick={() => setSkipReasonModal(null)} style={{ marginTop: 14, width: '100%', background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)', boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.3), inset 0 1px 0 rgba(255,240,200,0.3)', border: 'none', borderRadius: 14, padding: '16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'rgba(10,8,5,0.85)', letterSpacing: '0.14em', textTransform: 'uppercase', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+      <SkipReasonSheet
+        modal={skipReasonModal}
+        onClose={() => setSkipReasonModal(null)}
+        setStore={setStore}
+        userId={userId}
+      />
       {confirmEl}
     </Screen>
   );
 }
 
-function totalVolume(session) {
-  return session.entries.reduce((sum, ex) =>
-    sum + (ex.sets || []).filter(st => st.done).reduce((s, st) => {
-      const reps = (st.repsL != null || st.repsR != null)
-        ? Math.min(st.repsL ?? 0, st.repsR ?? 0)
-        : (+st.reps || 0);
-      return s + (+st.kg || 0) * reps;
-    }, 0), 0
-  );
-}
-
 window.Screens = window.Screens || {};
 Object.assign(window.Screens, { LoginScreen, HomeScreen });
-window.totalVolume = totalVolume;

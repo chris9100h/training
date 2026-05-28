@@ -394,20 +394,16 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     }));
   };
 
-  const effReps = (st) => {
-    if (st.repsL != null || st.repsR != null) return Math.min(st.repsL ?? st.repsR, st.repsR ?? st.repsL);
-    return st.reps;
-  };
   const isImprovement = (st, prevSet) => {
     if (!prevSet || st.kg == null || prevSet.kg == null) return false;
-    const repsA = effReps(st); const repsB = effReps(prevSet);
+    const repsA = LB.effReps(st); const repsB = LB.effReps(prevSet);
     if (repsA == null || repsB == null) return false;
     return (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB);
   };
   const isDecline = (st, prevSet) => {
     if (!prevSet || !st || st.skipped || prevSet.skipped) return false;
     if (st.kg == null || prevSet.kg == null) return false;
-    const rA = effReps(st); const rB = effReps(prevSet);
+    const rA = LB.effReps(st); const rB = LB.effReps(prevSet);
     if (rA == null || rB == null) return false;
     return st.kg < prevSet.kg || (st.kg === prevSet.kg && rA < rB);
   };
@@ -783,7 +779,6 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const [swapOpen, setSwapOpen] = useStateT(false);
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
-  const tempoStateRef = useRefT({ phase: 'ecc', tick: 0 });
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
@@ -1138,8 +1133,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 6,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(200,116,105,0.9), 0 0 70px rgba(200,116,105,0.5)' }}>↓</span>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.danger, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(200,116,105,1), 0 0 40px rgba(200,116,105,0.8), 0 0 80px rgba(200,116,105,0.4)' }}>REGRESSION</span>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(var(--danger-rgb),0.9), 0 0 70px rgba(var(--danger-rgb),0.5)' }}>↓</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.danger, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(var(--danger-rgb),1), 0 0 40px rgba(var(--danger-rgb),0.8), 0 0 80px rgba(var(--danger-rgb),0.4)' }}>REGRESSION</span>
           </div>
         </div>
       )}
@@ -1715,7 +1710,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
             <span>Volume</span>
             <span className="num" style={{ color: UI.gold }}>
-              {Math.round(totalVolume(session)).toLocaleString('en-US')} kg
+              {Math.round(LB.totalVolume(session)).toLocaleString('en-US')} kg
             </span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
