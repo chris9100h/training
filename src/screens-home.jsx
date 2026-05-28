@@ -1,6 +1,6 @@
 /* App screens — Login, Home — Haute Horlogerie redesign
    Logic identical to original (Supabase auth, cycle/weekday modes,
-   in-progress overlay, skipRest, future-slot retroactive logging).
+   in-progress overlay, future-slot retroactive logging).
 */
 
 const { useState, useEffect, useMemo, useRef } = React;
@@ -559,12 +559,6 @@ function HomeScreen({ store, setStore, go, userId }) {
     go({ name: 'train', sessionId: session.id });
   };
 
-  const skipRest = () => {
-    // Calendar-based cycle advances automatically — no date shift needed.
-    // Just record the acknowledgment date for streak logic.
-    setStore(s => ({ ...s, lastAdvancedDate: LB.todayISO() }));
-  };
-
   // ─── No-plan fallback
   if (!sch) {
     const hasPlans = store.schedules?.length > 0;
@@ -792,7 +786,6 @@ function HomeScreen({ store, setStore, go, userId }) {
               Recovery is part of the plan.
             </div>
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-              {!weekdayMode && isViewingToday && <Btn kind="ghost" onClick={skipRest} style={{ flex: 1 }}>Check off rest</Btn>}
               <Btn kind="ghost" onClick={() => go({ name: 'plan' })} style={{ flex: 1 }}>View plan</Btn>
             </div>
           </BracketFrame>
