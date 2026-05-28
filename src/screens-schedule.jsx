@@ -278,7 +278,7 @@ function PlanViewerScreen({ store, go, scheduleId }) {
         title={sch.name}
         sub={isWeekday
           ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ')
-          : `${sch.days.length}-day cycle · ${trainingDayCount} training`}
+          : `${sch.days.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`}
         onBack={() => go({ name: 'home' })}
       />
       <div style={{ padding: '14px 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -310,20 +310,53 @@ function PlanViewerScreen({ store, go, scheduleId }) {
               </div>
               {!isRest && d.items.map((it, k) => {
                 const ex = LB.findExercise(store, it.exId);
+                const isUni = !!ex?.unilateral;
+                const last = LB.lastSessionForExercise(store, it.exId, d.id);
+                const suggestion = LB.progressionSuggestion(store, it.exId, d.id, it.reps);
+                const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
+
+                // Collapse consecutive sets with identical prefill into one "N×" row.
+                const rows = [];
+                seedSets.forEach(st => {
+                  const kg = st.kg != null ? `${st.kg}kg` : '—';
+                  const reps = isUni
+                    ? `L${st.repsL ?? it.reps}/R${st.repsR ?? it.reps}`
+                    : `${st.reps ?? it.reps}`;
+                  const tail = rows[rows.length - 1];
+                  if (tail && tail.kg === kg && tail.reps === reps) tail.count++;
+                  else rows.push({ kg, reps, count: 1 });
+                });
+
                 return (
                   <div key={k} style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    padding: '5px 0',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                    gap: 12, padding: '7px 0',
                     borderTop: `0.5px solid ${k === 0 ? (isToday ? UI.goldSoft : UI.hair) : UI.hair}`,
                   }}>
-                    <span style={{ fontSize: 13, color: UI.inkSoft }}>{ex?.name || '—'}</span>
-                    <span className="num" style={{ fontSize: 11, color: isToday ? UI.gold : UI.inkFaint, flexShrink: 0, marginLeft: 12 }}>{it.sets}×{it.reps}</span>
+                    <span style={{ fontSize: 13, color: UI.inkSoft, paddingTop: 1 }}>
+                      {ex?.name || '—'}
+                      {isUni && <span className="micro" style={{ marginLeft: 6, color: UI.inkFaint }}>UNI</span>}
+                    </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
+                      {rows.map((r, ri) => (
+                        <span key={ri} className="num" style={{ fontSize: 11, color: suggestion ? UI.gold : isToday ? UI.gold : UI.inkSoft }}>
+                          {r.count > 1 ? `${r.count}× ` : ''}{r.kg} · {r.reps}
+                          {suggestion && ri === 0 && <i className="fa-solid fa-arrow-up" style={{ fontSize: 8, marginLeft: 4, color: UI.gold }} />}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 );
               })}
             </Container>
           );
         })}
+
+        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 6, textAlign: 'center' }}>
+          {store.settings?.smartProgression
+            ? <>Prefilled for your next session · <i className="fa-solid fa-arrow-up" style={{ fontSize: 8 }} /> = smart progression bump</>
+            : 'Prefilled from your last session on each day'}
+        </div>
       </div>
     </Screen>
   );
