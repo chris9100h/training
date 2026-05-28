@@ -973,7 +973,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       _log(`kbConfirm: ${field}→completeSet(${setIdx})`);
       completeSet(setIdx);
       const nextIdx = entry.sets.findIndex((s, i) => i > setIdx && !s.done);
-      if (nextIdx !== -1) setTimeout(() => activateKb(nextIdx, 'kg'), 350);
+      if (nextIdx !== -1) setTimeout(() => activateKb(nextIdx, isUnilateral ? 'repsL' : 'reps'), 350);
     }
   };
 
