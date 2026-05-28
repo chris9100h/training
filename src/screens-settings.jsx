@@ -11,6 +11,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [activeUsersOpen, setActiveUsersOpen] = useStateSet(false);
   const [accountOpen, setAccountOpen] = useStateSet(false);
   const [trainingOpen, setTrainingOpen] = useStateSet(false);
+  const [restTimersOpen, setRestTimersOpen] = useStateSet(false);
+  const [paceguardOpen, setPaceguardOpen] = useStateSet(false);
+  const [progressionOpen, setProgressionOpen] = useStateSet(false);
   const [progConfigOpen, setProgConfigOpen] = React.useState(false);
   const [progDisclaimer, setProgDisclaimer] = React.useState(false);
   const [activeSessions, setActiveSessions] = useStateSet([]);
@@ -542,66 +545,96 @@ function SettingsScreen({ store, setStore, go, userId }) {
             {chevron(trainingOpen)}
           </button>
           {trainingOpen && (
-            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div className="micro">REST TIMERS</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                {[
-                  ['Default', 'restDefault', 120],
-                  ['Big',     'restBig',     180],
-                  ['Medium',  'restMedium',  120],
-                  ['Small',   'restSmall',   90],
-                ].map(([label, key, def]) => (
-                  <div key={key}>
-                    <div className="micro" style={{ marginBottom: 6, textAlign: 'center' }}>{label.toUpperCase()}</div>
-                    <Stepper value={store.settings?.[key] || def} step={15} min={0} suffix="s"
-                      onChange={(v) => setStore(s => ({ ...s, settings: { ...s.settings, [key]: v } }))} />
-                  </div>
-                ))}
-              </div>
-              <Hairline style={{ margin: '2px 0' }} />
-              <div className="micro">PACEGUARD</div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span className="micro" style={{ color: UI.inkSoft }}>Enabled</span>
-                <div onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, tempoEnabled: !s.settings?.tempoEnabled } }))} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', background: store.settings?.tempoEnabled ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${store.settings?.tempoEnabled ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>
-                  <div style={{ position: 'absolute', top: 3, left: store.settings?.tempoEnabled ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: store.settings?.tempoEnabled ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
-                </div>
-              </div>
-              {store.settings?.tempoEnabled && (<>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <div>
-                    <div className="micro" style={{ marginBottom: 6, textAlign: 'center' }}>ECCENTRIC (DOWN)</div>
-                    <Stepper value={store.settings?.tempoEccentric ?? 4} step={0.5} min={0.5} max={10} suffix="s"
-                      onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoEccentric: v } }))} />
-                  </div>
-                  <div>
-                    <div className="micro" style={{ marginBottom: 6, textAlign: 'center' }}>CONCENTRIC (UP)</div>
-                    <Stepper value={store.settings?.tempoConcentric ?? 1} step={0.5} min={0.5} max={10} suffix="s"
-                      onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoConcentric: v } }))} />
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 0 }}>
+
+              {/* Rest Timers */}
+              <button onClick={() => setRestTimersOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0' }}>
+                <span className="micro" style={{ color: UI.inkSoft }}>Rest timers</span>
+                {chevron(restTimersOpen)}
+              </button>
+              {restTimersOpen && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 14 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                    {[
+                      ['Default', 'restDefault', 120],
+                      ['Big',     'restBig',     180],
+                      ['Medium',  'restMedium',  120],
+                      ['Small',   'restSmall',   90],
+                    ].map(([label, key, def]) => (
+                      <div key={key}>
+                        <div className="micro" style={{ marginBottom: 6, textAlign: 'center' }}>{label.toUpperCase()}</div>
+                        <Stepper value={store.settings?.[key] || def} step={15} min={0} suffix="s"
+                          onChange={(v) => setStore(s => ({ ...s, settings: { ...s.settings, [key]: v } }))} />
+                      </div>
+                    ))}
                   </div>
                 </div>
-                <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
-                  Beeps subdivide each phase evenly · count increases each beat
+              )}
+
+              <Hairline />
+
+              {/* Paceguard */}
+              <button onClick={() => setPaceguardOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0' }}>
+                <span className="micro" style={{ color: UI.inkSoft }}>Paceguard</span>
+                {chevron(paceguardOpen)}
+              </button>
+              {paceguardOpen && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span className="micro" style={{ color: UI.inkFaint }}>Enabled</span>
+                    <div onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, tempoEnabled: !s.settings?.tempoEnabled } }))} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', background: store.settings?.tempoEnabled ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${store.settings?.tempoEnabled ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>
+                      <div style={{ position: 'absolute', top: 3, left: store.settings?.tempoEnabled ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: store.settings?.tempoEnabled ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
+                    </div>
+                  </div>
+                  {store.settings?.tempoEnabled && (<>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                      <div>
+                        <div className="micro" style={{ marginBottom: 6, textAlign: 'center' }}>ECCENTRIC (DOWN)</div>
+                        <Stepper value={store.settings?.tempoEccentric ?? 4} step={0.5} min={0.5} max={10} suffix="s"
+                          onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoEccentric: v } }))} />
+                      </div>
+                      <div>
+                        <div className="micro" style={{ marginBottom: 6, textAlign: 'center' }}>CONCENTRIC (UP)</div>
+                        <Stepper value={store.settings?.tempoConcentric ?? 1} step={0.5} min={0.5} max={10} suffix="s"
+                          onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoConcentric: v } }))} />
+                      </div>
+                    </div>
+                    <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
+                      Beeps subdivide each phase evenly · count increases each beat
+                    </div>
+                  </>)}
                 </div>
-              </>)}
-              <Hairline style={{ margin: '2px 0' }} />
-              <div className="micro">SMART PROGRESSION</div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span className="micro" style={{ color: UI.inkSoft }}>Enabled</span>
-                <div onClick={() => { const turningOn = !store.settings?.smartProgression; setStore(s => ({ ...s, settings: { ...s.settings, smartProgression: turningOn } })); if (turningOn) setProgDisclaimer(true); }} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', background: store.settings?.smartProgression ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${store.settings?.smartProgression ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>
-                  <div style={{ position: 'absolute', top: 3, left: store.settings?.smartProgression ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: store.settings?.smartProgression ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
+              )}
+
+              <Hairline />
+
+              {/* Smart Progression */}
+              <button onClick={() => setProgressionOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0' }}>
+                <span className="micro" style={{ color: UI.inkSoft }}>Smart progression</span>
+                {chevron(progressionOpen)}
+              </button>
+              {progressionOpen && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span className="micro" style={{ color: UI.inkFaint }}>Enabled</span>
+                    <div onClick={() => { const turningOn = !store.settings?.smartProgression; setStore(s => ({ ...s, settings: { ...s.settings, smartProgression: turningOn } })); if (turningOn) setProgDisclaimer(true); }} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', background: store.settings?.smartProgression ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${store.settings?.smartProgression ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>
+                      <div style={{ position: 'absolute', top: 3, left: store.settings?.smartProgression ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: store.settings?.smartProgression ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
+                    </div>
+                  </div>
+                  {store.settings?.smartProgression && (<>
+                    <div>
+                      <div className="micro" style={{ marginBottom: 6 }}>REP RANGE TOP (+reps above target)</div>
+                      <Stepper value={store.settings?.progressionRangeTop ?? 4} step={1} min={1} max={10} suffix=" reps"
+                        onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, progressionRangeTop: v } }))} />
+                    </div>
+                    <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
+                      If target is 8 reps and range top is +4, weight increases only when all sets reach 12 reps.
+                    </div>
+                    <Btn onClick={() => setProgConfigOpen(true)}>Configure exercises</Btn>
+                  </>)}
                 </div>
-              </div>
-              {store.settings?.smartProgression && (<>
-                <div>
-                  <div className="micro" style={{ marginBottom: 6 }}>REP RANGE TOP (+reps above target)</div>
-                  <Stepper value={store.settings?.progressionRangeTop ?? 4} step={1} min={1} max={10} suffix=" reps"
-                    onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, progressionRangeTop: v } }))} />
-                </div>
-                <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
-                  If target is 8 reps and range top is +4, weight increases only when all sets reach 12 reps.
-                </div>
-                <Btn onClick={() => setProgConfigOpen(true)}>Configure exercises</Btn>
-              </>)}
+              )}
+
             </div>
           )}
         </Frame>
