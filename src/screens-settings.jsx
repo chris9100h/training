@@ -455,14 +455,31 @@ function SettingsScreen({ store, setStore, go, userId }) {
                     </div>
                   </div>
                   {reminderEnabled && (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span className="micro" style={{ color: UI.inkFaint }}>Notify at</span>
-                      <input
-                        type="time"
-                        value={reminderTime}
-                        onChange={e => updateReminderTime(e.target.value)}
-                        style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: 'dark' }}
-                      />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span className="micro" style={{ color: UI.inkFaint }}>Notify at</span>
+                        <input
+                          type="time"
+                          value={reminderTime}
+                          onChange={e => updateReminderTime(e.target.value)}
+                          style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: 'dark' }}
+                        />
+                      </div>
+                      {store.nextReminderAt && (() => {
+                        const dt = new Date(store.nextReminderAt);
+                        const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
+                        const tomorrowMid = new Date(todayMid); tomorrowMid.setDate(todayMid.getDate() + 1);
+                        const remMid = new Date(dt); remMid.setHours(0, 0, 0, 0);
+                        const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                        const dateStr = remMid.getTime() === todayMid.getTime() ? 'Today'
+                          : remMid.getTime() === tomorrowMid.getTime() ? 'Tomorrow'
+                          : dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+                        return (
+                          <div className="micro" style={{ color: UI.inkFaint, textAlign: 'right' }}>
+                            Next · {dateStr} · {timeStr}
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
             </div>
