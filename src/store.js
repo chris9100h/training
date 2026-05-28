@@ -223,7 +223,7 @@ async function loadFromSupabase(userId, _depth = 0) {
     .filter(s => s.ended === null && s.id !== sett.in_progress_session_id)
     .map(s => s.id);
   if (orphanIds.length) {
-    _supabase.from('zane_sessions').delete().in('id', orphanIds).catch(() => {});
+    _supabase.from('zane_sessions').delete().in('id', orphanIds).then(() => {}, () => {});
   }
 
   const { data: { user: authUser } } = await _supabase.auth.getUser();
