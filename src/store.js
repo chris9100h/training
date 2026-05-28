@@ -435,7 +435,7 @@ async function syncStore(prev, next, userId) {
       custom_day_types: next.customDayTypes ?? [],
       reminder_enabled: next.settings?.reminderEnabled ?? false,
       reminder_time: next.settings?.reminderTime ?? '07:00',
-      next_reminder_at: next.nextReminderAt ?? null,
+      next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
     }));
   }
@@ -540,12 +540,40 @@ function computeNextTrainingDate(state) {
 }
 
 // UTC ISO timestamp for the next training-day reminder, or null if reminder is disabled.
+// Skips today if today's reminder time has already passed (prevents re-firing after the
+// edge function clears next_reminder_at and the app writes the old value back via syncStore).
 function computeNextReminderAt(state) {
   if (!state.settings?.reminderEnabled) return null;
-  const nextDate = computeNextTrainingDate(state);
-  if (!nextDate) return null;
+  const sch = state.schedules.find(s => s.id === state.activeScheduleId);
+  if (!sch || !sch.days.length) return null;
+
   const time = state.settings?.reminderTime ?? '07:00';
-  return new Date(nextDate + 'T' + time + ':00').toISOString();
+  const now = new Date();
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const todayStr = today.toISOString().slice(0, 10);
+  const trainedToday = state.sessions.some(s => s.date?.slice(0, 10) === todayStr && s.ended);
+  const todayTimePassed = new Date(todayStr + 'T' + time + ':00') <= now;
+  const wdPlan = isWeekdayPlan(sch);
+
+  for (let ahead = (trainedToday || todayTimePassed) ? 1 : 0; ahead <= 14; ahead++) {
+    const d = new Date(today); d.setDate(today.getDate() + ahead);
+    const dateStr = d.toISOString().slice(0, 10);
+    let training = false;
+    if (wdPlan) {
+      const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      const day = sch.days.find(x => x.weekday === wd);
+      training = !!(day && (day.items || []).length > 0);
+    } else {
+      if (!state.cycleStartDate) return null;
+      const start = parseDate(state.cycleStartDate);
+      const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+      if (n < 0) continue;
+      const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
+      training = (sch.days[idx]?.items || []).length > 0;
+    }
+    if (training) return new Date(dateStr + 'T' + time + ':00').toISOString();
+  }
+  return null;
 }
 
 function cancelPushover(settings, userId) {
