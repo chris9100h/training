@@ -29,7 +29,7 @@ function PlanScreen({ store, setStore, go }) {
         {store.schedules.map(s => {
           const isActive = s.id === store.activeScheduleId;
           return isActive ? (
-            <BracketFrame key={s.id} gold onClick={() => go({ name: 'schedule', scheduleId: s.id })} style={{ cursor: 'pointer' }}>
+            <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1 }}>{s.name}</div>
                 <Pill gold>active</Pill>
@@ -46,7 +46,7 @@ function PlanScreen({ store, setStore, go }) {
               </div>
             </BracketFrame>
           ) : (
-            <Frame key={s.id} onClick={() => go({ name: 'schedule', scheduleId: s.id })} style={{ cursor: 'pointer', padding: '14px 16px' }}>
+            <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px' }}>
               <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1, marginBottom: 6 }}>{s.name}</div>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>
                 {LB.isWeekdayPlan(s)
@@ -66,15 +66,77 @@ function PlanScreen({ store, setStore, go }) {
   );
 }
 
-// ─── Detail (read-only) ────────────────────────────────────────────
-function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
-  const sch = store.schedules.find(s => s.id === scheduleId);
-  const [editingDay, setEditingDay] = useStateS(null);
-  if (!sch) return null;
+// ─── Plan viewer — fully read-only, no edit affordances ───────────────
+// Reached from the home rest-day card. Day chips switch between days
+// (like the exercise chips in training); each day shows the weights/reps
+// that will be prefilled when training, with no controls that change it.
+function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
+  const sch = store.schedules.find(s => s.id === (scheduleId || store.activeScheduleId));
+  const isWeekday = sch ? LB.isWeekdayPlan(sch) : false;
+  const jsDay = new Date().getDay();
+  const todayWeekday = jsDay === 0 ? 6 : jsDay - 1;
+  const displayDays = sch ? (isWeekday ? [...sch.days].sort((a, b) => a.weekday - b.weekday) : sch.days) : [];
+  const isActivePlan = !!sch && sch.id === store.activeScheduleId;
 
-  const updateSch = (fn) => setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === sch.id ? fn(x) : x) }));
-  const isWeekday = LB.isWeekdayPlan(sch);
-  const setActive = () => setStore(s => ({
+  const activeCycleDayIdx = isActivePlan && !isWeekday
+    ? (store.cycleStartDate
+        ? (() => { const t = new Date(); t.setHours(12, 0, 0, 0); const st = LB.parseDate(store.cycleStartDate); return ((Math.round((t - st) / 86400000) % sch.days.length) + sch.days.length) % sch.days.length; })()
+        : (store.cycleIndex || 0) % sch.days.length)
+    : -1;
+
+  const todayDayId = isActivePlan
+    ? (isWeekday ? (displayDays.find(d => d.weekday === todayWeekday)?.id ?? null) : (displayDays[activeCycleDayIdx]?.id ?? null))
+    : null;
+
+  const [selectedDayId, setSelectedDayId] = useStateS(() => todayDayId || displayDays[0]?.id || null);
+  const chipRowRef = React.useRef(null);
+
+  React.useEffect(() => {
+    const row = chipRowRef.current;
+    if (!row) return;
+    const idx = displayDays.findIndex(d => d.id === selectedDayId);
+    const chip = row.children[idx];
+    if (!chip) return;
+    row.scrollTo({ left: chip.offsetLeft - row.offsetWidth / 2 + chip.offsetWidth / 2, behavior: 'smooth' });
+  }, [selectedDayId]);
+
+  if (!sch) {
+    return (
+      <Screen>
+        <TopBar title="Plan" onBack={() => go({ name: 'home' })} />
+        <div style={{ padding: 22 }}>
+          <Empty title="No active plan" sub="Activate a plan to view it here." icon={ICON_CALENDAR} />
+        </div>
+      </Screen>
+    );
+  }
+
+  if (!displayDays.length) {
+    return (
+      <Screen>
+        <TopBar title={sch.name} onBack={() => go({ name: fromPlan ? 'plan' : 'home' })}
+          right={fromPlan ? (
+            <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })} style={{
+              background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+              borderRadius: 999, padding: '5px 12px', cursor: 'pointer',
+              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+            }}>Edit</button>
+          ) : null} />
+        <div style={{ padding: 22 }}>
+          <Empty title="No days yet" sub={fromPlan ? 'Tap Edit to add days to this plan.' : 'This plan has no days.'} icon={ICON_CALENDAR} />
+        </div>
+      </Screen>
+    );
+  }
+
+  const day = displayDays.find(d => d.id === selectedDayId) || displayDays[0];
+  const dayIdx = displayDays.findIndex(d => d.id === day.id);
+  const isRest = !day.items.length;
+  const isTodaySel = day.id === todayDayId;
+  const dayLabel = isWeekday ? WEEKDAYS_FULL[day.weekday] : `Day ${dayIdx + 1}`;
+  const trainingDayCount = sch.days.filter(d => d.items.length).length;
+
+  const activate = () => setStore(s => ({
     ...s,
     activeScheduleId: sch.id,
     cycleIndex: 0,
@@ -87,157 +149,132 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
     copy.name = copy.name + ' (Copy)';
     copy.days = copy.days.map(d => ({ ...d, id: LB.uid() }));
     setStore(s => ({ ...s, schedules: [...s.schedules, copy] }));
-    go({ name: 'schedule', scheduleId: copy.id });
+    go({ name: 'plan-view', scheduleId: copy.id, fromPlan: true });
   };
 
-  const jsDay = new Date().getDay();
-  const todayWeekday = jsDay === 0 ? 6 : jsDay - 1;
-  const displayDays = LB.isWeekdayPlan(sch) ? [...sch.days].sort((a,b)=>a.weekday-b.weekday) : sch.days;
-
-  const activeCycleDayIdx = sch.id === store.activeScheduleId && !LB.isWeekdayPlan(sch)
-    ? (store.cycleStartDate
-        ? (() => { const t = new Date(); t.setHours(12,0,0,0); const st = LB.parseDate(store.cycleStartDate); return ((Math.round((t-st)/86400000) % sch.days.length) + sch.days.length) % sch.days.length; })()
-        : (store.cycleIndex || 0) % sch.days.length)
-    : -1;
-
   return (
-    <Screen>
+    <Screen scroll={false}>
       <TopBar
         title={sch.name}
-        sub={LB.isWeekdayPlan(sch) ? displayDays.map(d=>WEEKDAYS[d.weekday]).join(' · ') : `${sch.days.length}-day cycle`}
-        onBack={() => go({ name: 'plan' })}
-        right={
+        sub={isWeekday
+          ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ')
+          : `${sch.days.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`}
+        onBack={() => go({ name: fromPlan ? 'plan' : 'home' })}
+        right={fromPlan ? (
           <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })} style={{
             background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
             borderRadius: 999, padding: '5px 12px', cursor: 'pointer',
             color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
           }}>Edit</button>
-        }
+        ) : null}
       />
-      <div style={{ padding: '14px 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {sch.id !== store.activeScheduleId && (
-          <Btn kind="ghost" onClick={setActive} style={{ marginBottom: 4, fontSize: 12 }}>Activate this plan</Btn>
-        )}
-        <Btn kind="ghost" onClick={duplicate} style={{ marginBottom: 4, fontSize: 12 }}>Duplicate plan</Btn>
-        {sch.id === store.activeScheduleId && !isWeekday && (
-          <Frame style={{ padding: '14px 16px' }}>
-            <span className="label">Cycle start date (Day 1)</span>
-            <div style={{ overflow: 'hidden', borderRadius: 8, marginTop: 8 }}>
-              <input type="date"
-                value={store.cycleStartDate || ''}
-                onChange={e => { if (e.target.value) setStore(s => ({ ...s, cycleStartDate: e.target.value })); }}
-                style={{
-                  background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-                  borderRadius: 8, padding: '10px 14px', color: UI.ink,
-                  fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
-                  width: '100%', boxSizing: 'border-box', display: 'block',
-                }}
-              />
-            </div>
-            <div className="micro" style={{ marginTop: 8 }}>
-              Today = Day {activeCycleDayIdx + 1} of {sch.days.length}
-            </div>
-          </Frame>
-        )}
-        {sch.id === store.activeScheduleId && isWeekday && (
-          <Frame style={{ padding: '14px 16px' }}>
-            <span className="label">Week plan start date (Week 1)</span>
-            <div style={{ overflow: 'hidden', borderRadius: 8, marginTop: 8 }}>
-              <input type="date"
-                value={store.weekPlanStartDate || ''}
-                onChange={e => { if (e.target.value) setStore(s => ({ ...s, weekPlanStartDate: e.target.value })); }}
-                style={{
-                  background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-                  borderRadius: 8, padding: '10px 14px', color: UI.ink,
-                  fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
-                  width: '100%', boxSizing: 'border-box', display: 'block',
-                }}
-              />
-            </div>
-            {store.weekPlanStartDate && (() => {
-              const start = LB.parseDate(store.weekPlanStartDate);
-              const today = new Date(); today.setHours(12, 0, 0, 0);
-              const weekNum = Math.floor(Math.round((today - start) / 86400000) / 7) + 1;
-              return <div className="micro" style={{ marginTop: 8 }}>Today = Week {weekNum}</div>;
-            })()}
-          </Frame>
-        )}
 
-        <Bezel>DAYS</Bezel>
+      {/* Plan-level actions — only when arriving from the plan list */}
+      {fromPlan && (
+        <div style={{ flexShrink: 0, padding: '14px 22px 10px', display: 'flex', gap: 8 }}>
+          {!isActivePlan && <Btn kind="ghost" onClick={activate} style={{ flex: 1, fontSize: 12 }}>Activate</Btn>}
+          {isActivePlan && <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pill gold>active</Pill></div>}
+          <Btn kind="ghost" onClick={duplicate} style={{ flex: 1, fontSize: 12 }}>Duplicate</Btn>
+        </div>
+      )}
 
+      {/* Day chips */}
+      <div ref={chipRowRef} style={{ flexShrink: 0, padding: '4px 22px 14px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
         {displayDays.map((d, i) => {
-          const isRest = !d.items.length;
-          const isToday = sch.id === store.activeScheduleId && (
-            LB.isWeekdayPlan(sch) ? d.weekday === todayWeekday : activeCycleDayIdx === i
-          );
-          const dayLabel = LB.isWeekdayPlan(sch) ? WEEKDAYS_FULL[d.weekday] : `Day ${i+1}`;
-          return isToday ? (
-            <BracketFrame key={d.id} gold
-              onClick={() => setEditingDay(d.id)}
-              style={{ cursor: 'pointer' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-                <div>
-                  <div className="micro-gold" style={{ marginBottom: 4 }}>{dayLabel.toUpperCase()} · TODAY</div>
-                  <div className="display" style={{ fontSize: 20, color: UI.gold, lineHeight: 1.1 }}>{d.name}</div>
-                </div>
-                <span className="num" style={{ color: UI.gold, fontSize: 11 }}>
-                  {isRest ? 'REST' : `${d.items.length} EX.`}
-                </span>
+          const active = d.id === selectedDayId;
+          const isToday = d.id === todayDayId;
+          const rest = !d.items.length;
+          const sub = isWeekday ? WEEKDAYS[d.weekday] : `Day ${i + 1}`;
+          return (
+            <button key={d.id} onClick={() => setSelectedDayId(d.id)} style={{
+              flexShrink: 0, maxWidth: 120, padding: '6px 12px 4px', borderRadius: 999,
+              border: `0.5px solid ${active ? UI.gold : isToday ? UI.goldSoft : UI.hairStrong}`,
+              background: active ? UI.goldFaint : 'transparent',
+              cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
+            }}>
+              <div style={{
+                fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em', fontWeight: 600,
+                color: active ? UI.gold : rest ? UI.inkFaint : UI.inkSoft,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {d.name}
               </div>
-              {!isRest && d.items.slice(0, 4).map((it, k) => {
-                const ex = LB.findExercise(store, it.exId);
-                return (
-                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderTop: k === 0 ? `0.5px solid ${UI.goldSoft}` : 'none' }}>
-                    <span style={{ fontSize: 13, color: UI.inkSoft }}>{ex?.name || '—'}</span>
-                    <span className="num" style={{ fontSize: 11, color: UI.gold }}>{it.sets}×{it.reps}</span>
-                  </div>
-                );
-              })}
-              {d.items.length > 4 && (
-                <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>+ {d.items.length - 4} more</div>
-              )}
-            </BracketFrame>
-          ) : (
-            <Frame key={d.id}
-              onClick={() => setEditingDay(d.id)}
-              style={{ cursor: 'pointer', padding: '12px 16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: isRest ? 0 : 6 }}>
-                <div>
-                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{dayLabel.toUpperCase()}</div>
-                  <div className="display" style={{ fontSize: 18, color: isRest ? UI.inkFaint : UI.ink, fontStyle: isRest ? 'italic' : 'normal', lineHeight: 1.1 }}>{d.name}</div>
-                </div>
-                <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>
-                  {isRest ? 'REST' : `${d.items.length} EX.`}
-                </span>
+              <div style={{ fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: active ? UI.gold : UI.inkFaint, marginTop: 1 }}>
+                {sub}
               </div>
-              {!isRest && d.items.slice(0, 3).map((it, k) => {
-                const ex = LB.findExercise(store, it.exId);
-                return (
-                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: UI.inkSoft, padding: '2px 0' }}>
-                    <span>{ex?.name || '—'}</span>
-                    <span className="num" style={{ fontSize: 11 }}>{it.sets}×{it.reps}</span>
-                  </div>
-                );
-              })}
-              {d.items.length > 3 && (
-                <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>+ {d.items.length - 3} more</div>
-              )}
-            </Frame>
+              <div style={{ height: 3, marginTop: 3, display: 'flex', justifyContent: 'center' }}>
+                {isToday && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold, marginTop: -1 }} />}
+              </div>
+            </button>
           );
         })}
       </div>
-      {editingDay && (
-        <DayEditor
-          store={store} setStore={setStore}
-          day={sch.days.find(d => d.id === editingDay)}
-          schedule={sch}
-          onClose={() => setEditingDay(null)}
-          onSave={(updated) => {
-            updateSch(s => ({ ...s, days: s.days.map(d => d.id === updated.id ? updated : d) }));
-            setEditingDay(null);
-          }}
-        />
-      )}
+
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Selected day header */}
+        <div>
+          <div className={isTodaySel ? 'micro-gold' : 'micro'} style={{ marginBottom: 4, color: isTodaySel ? undefined : UI.inkFaint }}>
+            {dayLabel.toUpperCase()}{isTodaySel ? ' · TODAY' : ''}
+          </div>
+          <div className="display" style={{ fontSize: 30, color: isRest ? UI.inkSoft : UI.ink, fontStyle: isRest ? 'italic' : 'normal', lineHeight: 1.05, letterSpacing: '-0.01em' }}>
+            {day.name}
+          </div>
+        </div>
+
+        {isRest ? (
+          <BracketFrame style={{ textAlign: 'center', padding: 36 }}>
+            <div className="display-it" style={{ fontSize: 38, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, marginBottom: 6 }}>Recover.</div>
+            <div style={{ fontSize: 13, color: UI.inkFaint }}>Recovery is part of the plan.</div>
+          </BracketFrame>
+        ) : (
+          <>
+            {day.items.map((it, k) => {
+              const ex = LB.findExercise(store, it.exId);
+              const isUni = !!ex?.unilateral;
+              const last = LB.lastSessionForExercise(store, it.exId, day.id);
+              const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps);
+              const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
+
+              // Collapse consecutive sets with identical prefill into one "N×" row.
+              const rows = [];
+              seedSets.forEach(st => {
+                const kg = st.kg != null ? `${st.kg}kg` : '—';
+                const reps = isUni
+                  ? `L${st.repsL ?? it.reps}/R${st.repsR ?? it.reps}`
+                  : `${st.reps ?? it.reps}`;
+                const tail = rows[rows.length - 1];
+                if (tail && tail.kg === kg && tail.reps === reps) tail.count++;
+                else rows.push({ kg, reps, count: 1 });
+              });
+
+              return (
+                <Frame key={k} style={{ padding: '12px 16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                    <span style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, paddingTop: 1 }}>
+                      {ex?.name || '—'}
+                      {isUni && <span className="micro" style={{ marginLeft: 6, color: UI.inkFaint }}>UNI</span>}
+                    </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
+                      {rows.map((r, ri) => (
+                        <span key={ri} className="num" style={{ fontSize: 13, color: suggestion ? UI.gold : UI.inkSoft }}>
+                          {r.count > 1 ? `${r.count}× ` : ''}{r.kg} · {r.reps}
+                          {suggestion && ri === 0 && <i className="fa-solid fa-arrow-up" style={{ fontSize: 9, marginLeft: 4, color: UI.gold }} />}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </Frame>
+              );
+            })}
+
+            <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 2, textAlign: 'center' }}>
+              {store.settings?.smartProgression
+                ? <>Prefilled for your next session · <i className="fa-solid fa-arrow-up" style={{ fontSize: 8 }} /> = smart progression bump</>
+                : 'Prefilled from your last session'}
+            </div>
+          </>
+        )}
+      </div>
     </Screen>
   );
 }
@@ -247,18 +284,18 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
   const [confirmEl, confirm] = useConfirm();
   const original = store.schedules.find(s => s.id === scheduleId);
   const [draft, setDraft] = useStateS(original ? JSON.parse(JSON.stringify(original)) : null);
-  const [pickingType, setPickingType] = useStateS(null);
+  const [pickingType, setPickingType] = useStateS(false);
+  const [editingDay, setEditingDay] = useStateS(null);
   if (!draft) return null;
+
+  const isActive = draft.id === store.activeScheduleId;
+  const isWeekday = LB.isWeekdayPlan(draft);
 
   const toggleWeekdayEdit = (idx) => {
     setDraft(d => {
       if (d.days.some(day => day.weekday === idx)) return { ...d, days: d.days.filter(day => day.weekday !== idx) };
       return { ...d, days: [...d.days, { id: LB.uid(), name: 'FULL', weekday: idx, items: [] }] };
     });
-  };
-  const replaceWeekdayType = (weekday, type) => {
-    setDraft(d => ({ ...d, days: d.days.map(day => day.weekday === weekday ? { ...day, name: type } : day) }));
-    setPickingType(null);
   };
 
   const moveDay = (idx, dir) => {
@@ -274,23 +311,14 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
     if (!await confirm(`Remove "${draft.days[idx].name}" from the cycle?`, { ok: 'Remove', danger: true })) return;
     setDraft(d => ({ ...d, days: d.days.filter((_, i) => i !== idx) }));
   };
-  const addDayType = (type, atIdx = null) => {
-    const newDay = { id: LB.uid(), name: type, items: [] };
-    setDraft(d => {
-      const days = [...d.days];
-      if (atIdx == null) days.push(newDay);
-      else days.splice(atIdx, 0, newDay);
-      return { ...d, days };
-    });
-  };
-  const replaceDayType = (idx, type) => {
-    setDraft(d => ({ ...d, days: d.days.map((day, i) => i === idx ? { ...day, name: type } : day) }));
-    setPickingType(null);
+  const addDayType = (type) => {
+    setDraft(d => ({ ...d, days: [...d.days, { id: LB.uid(), name: type, items: [] }] }));
+    setPickingType(false);
   };
 
   const save = () => {
     setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === draft.id ? draft : x) }));
-    go({ name: 'schedule', scheduleId: draft.id });
+    go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
   };
   const deleteSch = async () => {
     if (!await confirm(`This cannot be undone.`, { title: `Delete "${draft.name}"?`, ok: 'Delete', danger: true })) return;
@@ -303,6 +331,14 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
   };
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(original);
+  const dateInputStyle = {
+    background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+    borderRadius: 8, padding: '10px 14px', color: UI.ink,
+    fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
+    width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark',
+  };
+
+  const dayActionLabel = (day) => (day.name === 'REST' || !day.items.length) ? 'edit' : `${day.items.length} ex · edit`;
 
   return (
     <Screen>
@@ -310,7 +346,7 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
         title="Edit plan"
         onBack={async () => {
           if (dirty && !await confirm('Unsaved changes will be lost.', { title: 'Discard changes?', ok: 'Discard', danger: true })) return;
-          go({ name: 'schedule', scheduleId: draft.id });
+          go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
         }}
         right={
           <button onClick={save} style={{
@@ -326,7 +362,38 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
           <TextInput value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v.toUpperCase() }))} />
         </Field>
 
-        {LB.isWeekdayPlan(draft) ? (
+        {isActive && !isWeekday && (
+          <Field label="Cycle start date (Day 1)">
+            <div style={{ overflow: 'hidden', borderRadius: 8, width: '100%' }}>
+              <input type="date" value={store.cycleStartDate || ''}
+                onChange={e => { if (e.target.value) setStore(s => ({ ...s, cycleStartDate: e.target.value })); }}
+                style={dateInputStyle} />
+            </div>
+            {store.cycleStartDate && draft.days.length > 0 && (() => {
+              const t = new Date(); t.setHours(12, 0, 0, 0);
+              const st = LB.parseDate(store.cycleStartDate);
+              const idx = ((Math.round((t - st) / 86400000) % draft.days.length) + draft.days.length) % draft.days.length;
+              return <div className="micro" style={{ marginTop: 8 }}>Today = Day {idx + 1} of {draft.days.length}</div>;
+            })()}
+          </Field>
+        )}
+        {isActive && isWeekday && (
+          <Field label="Week plan start date (Week 1)">
+            <div style={{ overflow: 'hidden', borderRadius: 8, width: '100%' }}>
+              <input type="date" value={store.weekPlanStartDate || ''}
+                onChange={e => { if (e.target.value) setStore(s => ({ ...s, weekPlanStartDate: e.target.value })); }}
+                style={dateInputStyle} />
+            </div>
+            {store.weekPlanStartDate && (() => {
+              const start = LB.parseDate(store.weekPlanStartDate);
+              const today = new Date(); today.setHours(12, 0, 0, 0);
+              const weekNum = Math.floor(Math.round((today - start) / 86400000) / 7) + 1;
+              return <div className="micro" style={{ marginTop: 8 }}>Today = Week {weekNum}</div>;
+            })()}
+          </Field>
+        )}
+
+        {isWeekday ? (
           <div>
             <span className="label">Training days</span>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '10px 0 14px' }}>
@@ -351,11 +418,12 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
                   padding: '8px 12px', borderRadius: 10,
                 }}>
                   <div className="num" style={{ width: 30, textAlign: 'center', color: UI.inkSoft, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[day.weekday]}</div>
-                  <button onClick={() => setPickingType({ replaceWeekday: day.weekday })} style={{
-                    flex: 1, textAlign: 'left', background: 'transparent', border: 'none', cursor: 'pointer',
+                  <button onClick={() => setEditingDay(day.id)} style={{
+                    flex: 1, background: 'transparent', border: 'none', cursor: 'pointer',
                     padding: '6px 8px', borderRadius: 8,
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                     color: day.name === 'REST' ? UI.inkFaint : UI.ink, fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi,
-                  }}>{day.name}<span className="micro" style={{ marginLeft: 8, fontStyle: 'normal' }}>change</span></button>
+                  }}><span>{day.name}</span><span className="micro" style={{ fontStyle: 'normal' }}>{dayActionLabel(day)}</span></button>
                   <button onClick={() => toggleWeekdayEdit(day.weekday)} style={{ ...dayEditIconBtn, color: UI.danger, fontSize: 18 }}>×</button>
                 </div>
               ))}
@@ -378,16 +446,17 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
                       <button onClick={() => moveDay(i, 1)} disabled={i === draft.days.length - 1} style={{ ...dayEditIconBtn, opacity: i === draft.days.length - 1 ? 0.3 : 1 }}>▼</button>
                     </div>
                     <div className="num" style={{ width: 26, textAlign: 'center', color: UI.inkFaint, fontSize: 11 }}>{i+1}</div>
-                    <button onClick={() => setPickingType({ replaceIdx: i })} style={{
-                      flex: 1, textAlign: 'left', background: 'transparent', border: 'none', cursor: 'pointer',
+                    <button onClick={() => setEditingDay(day.id)} style={{
+                      flex: 1, background: 'transparent', border: 'none', cursor: 'pointer',
                       padding: '6px 8px', borderRadius: 8,
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                       color: isRest ? UI.inkFaint : UI.ink, fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi,
-                    }}>{day.name}<span className="micro" style={{ marginLeft: 8, fontStyle: 'normal' }}>change</span></button>
+                    }}><span>{day.name}</span><span className="micro" style={{ fontStyle: 'normal' }}>{dayActionLabel(day)}</span></button>
                     <button onClick={() => removeDay(i)} style={{ ...dayEditIconBtn, color: UI.danger, fontSize: 18 }}>×</button>
                   </div>
                 );
               })}
-              <Btn kind="ghost" onClick={() => setPickingType({ append: true })} style={{ borderStyle: 'dashed', fontSize: 12 }}>
+              <Btn kind="ghost" onClick={() => setPickingType(true)} style={{ borderStyle: 'dashed', fontSize: 12 }}>
                 + Add day
               </Btn>
             </div>
@@ -395,23 +464,30 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
         )}
 
         <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.7 }}>
-          Exercises per day are edited in plan detail.<br/>
-          Custom day types can be created when adding.
+          Tap a day to edit its type and exercises.
         </div>
 
         <Btn kind="ghost" onClick={deleteSch} style={{ marginTop: 4, color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)', fontSize: 12 }}>Delete plan</Btn>
       </div>
 
+      {editingDay && (
+        <DayEditor
+          store={store} setStore={setStore}
+          day={draft.days.find(d => d.id === editingDay)}
+          schedule={draft}
+          onClose={() => setEditingDay(null)}
+          onSave={(updated) => {
+            setDraft(d => ({ ...d, days: d.days.map(x => x.id === updated.id ? updated : x) }));
+            setEditingDay(null);
+          }}
+        />
+      )}
       {pickingType && (
         <DayTypePicker
           store={store} setStore={setStore}
-          title={pickingType.replaceIdx != null ? `Change day ${pickingType.replaceIdx + 1}` : 'Choose day type'}
-          onClose={() => setPickingType(null)}
-          onPick={(type) => {
-            if (pickingType.replaceIdx != null) replaceDayType(pickingType.replaceIdx, type);
-            else if (pickingType.replaceWeekday != null) replaceWeekdayType(pickingType.replaceWeekday, type);
-            else addDayType(type);
-          }}
+          title="Choose day type"
+          onClose={() => setPickingType(false)}
+          onPick={addDayType}
         />
       )}
       {confirmEl}
@@ -596,6 +672,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const [addingEx, setAddingEx] = useStateS(false);
   const [copyingFrom, setCopyingFrom] = useStateS(false);
   const [editingItem, setEditingItem] = useStateS(null);
+  const [pickingType, setPickingType] = useStateS(false);
 
   if (!draft) return null;
 
@@ -649,8 +726,16 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
 
   return (
     <Sheet open={true} onClose={onClose} title="Edit day">
-      <Field label="Day name">
-        <TextInput value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v.toUpperCase() }))} />
+      <Field label="Day type">
+        <button onClick={() => setPickingType(true)} style={{
+          width: '100%', textAlign: 'left', background: UI.bgInset,
+          border: `0.5px solid ${UI.hairStrong}`, borderRadius: 10, padding: '10px 14px',
+          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          color: draft.name === 'REST' ? UI.inkFaint : UI.ink, fontSize: 15, fontWeight: 600, fontFamily: UI.fontUi,
+        }}>
+          <span>{draft.name}</span>
+          <span className="micro" style={{ fontStyle: 'normal' }}>change</span>
+        </button>
       </Field>
       {draft.name === 'REST' ? (
         <div style={{ marginTop: 18, padding: '18px 14px', textAlign: 'center',
@@ -747,6 +832,14 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
           currentDayId={draft.id}
           onClose={() => setCopyingFrom(false)}
           onCopy={copyItemsFromDay}
+        />
+      )}
+      {pickingType && (
+        <DayTypePicker
+          store={store} setStore={setStore}
+          title="Day type"
+          onClose={() => setPickingType(false)}
+          onPick={(type) => { setDraft(d => ({ ...d, name: type })); setPickingType(false); }}
         />
       )}
     </Sheet>
@@ -851,7 +944,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
       const withTypes = ensureCustomTypes(s, pattern);
       return { ...withTypes, schedules: [...withTypes.schedules, newSch] };
     });
-    go({ name: 'schedule', scheduleId: newSch.id });
+    go({ name: 'schedule-edit', scheduleId: newSch.id });
   };
 
   const toggleWeekday = (idx) => {
@@ -873,7 +966,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
       const withTypes = ensureCustomTypes(s, sorted.map(d => d.name));
       return { ...withTypes, schedules: [...withTypes.schedules, newSch] };
     });
-    go({ name: 'schedule', scheduleId: newSch.id });
+    go({ name: 'schedule-edit', scheduleId: newSch.id });
   };
 
   return (
@@ -1048,4 +1141,4 @@ function ScheduleNewScreen({ store, setStore, go }) {
   );
 }
 
-Object.assign(window.Screens, { PlanScreen, ScheduleDetailScreen, ScheduleEditScreen, ScheduleNewScreen, ExercisePicker, DayTypePicker });
+Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, ExercisePicker, DayTypePicker });
