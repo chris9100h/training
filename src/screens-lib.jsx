@@ -1679,7 +1679,10 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
           const fmtSet = s => {
             if (!s) return '—';
             if (s.skipped) return 'skipped';
-            return `${s.kg != null ? s.kg + 'kg' : '—'} × ${s.reps ?? '—'}`;
+            const repsStr = (s.repsL != null || s.repsR != null)
+              ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
+              : (s.reps ?? '—');
+            return `${s.kg != null ? s.kg + 'kg' : '—'} × ${repsStr}`;
           };
           return (
             <div key={ei} style={{ marginBottom: 20 }}>
