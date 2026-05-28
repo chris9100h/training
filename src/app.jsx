@@ -548,6 +548,7 @@ function App() {
   switch (route.name) {
     case 'home':          screen = <window.Screens.HomeScreen {...props} />; break;
     case 'plan':          screen = <window.Screens.PlanScreen {...props} />; break;
+    case 'plan-view':     screen = <window.Screens.PlanViewerScreen {...props} scheduleId={route.scheduleId} />; break;
     case 'schedule':      screen = <window.Screens.ScheduleDetailScreen {...props} scheduleId={route.scheduleId} />; break;
     case 'schedule-new':  screen = <window.Screens.ScheduleNewScreen {...props} />; break;
     case 'schedule-edit': screen = <window.Screens.ScheduleEditScreen {...props} scheduleId={route.scheduleId} />; break;

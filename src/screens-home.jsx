@@ -786,7 +786,7 @@ function HomeScreen({ store, setStore, go, userId }) {
               Recovery is part of the plan.
             </div>
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-              <Btn kind="ghost" onClick={() => go({ name: 'plan' })} style={{ flex: 1 }}>View plan</Btn>
+              <Btn kind="ghost" onClick={() => go({ name: 'plan-view' })} style={{ flex: 1 }}>View plan</Btn>
             </div>
           </BracketFrame>
         ) : (

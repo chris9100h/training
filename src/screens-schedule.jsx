@@ -242,6 +242,93 @@ function ScheduleDetailScreen({ store, setStore, go, scheduleId }) {
   );
 }
 
+// ─── Plan viewer — fully read-only, no edit affordances ───────────────
+// Reached from the home rest-day card. Shows every day and every exercise
+// of the active plan without any tappable controls that could change it.
+function PlanViewerScreen({ store, go, scheduleId }) {
+  const sch = store.schedules.find(s => s.id === (scheduleId || store.activeScheduleId));
+  if (!sch) {
+    return (
+      <Screen>
+        <TopBar title="Plan" onBack={() => go({ name: 'home' })} />
+        <div style={{ padding: 22 }}>
+          <Empty title="No active plan" sub="Activate a plan to view it here." icon={ICON_CALENDAR} />
+        </div>
+      </Screen>
+    );
+  }
+
+  const isWeekday = LB.isWeekdayPlan(sch);
+  const jsDay = new Date().getDay();
+  const todayWeekday = jsDay === 0 ? 6 : jsDay - 1;
+  const displayDays = isWeekday ? [...sch.days].sort((a, b) => a.weekday - b.weekday) : sch.days;
+  const isActivePlan = sch.id === store.activeScheduleId;
+
+  const activeCycleDayIdx = isActivePlan && !isWeekday
+    ? (store.cycleStartDate
+        ? (() => { const t = new Date(); t.setHours(12, 0, 0, 0); const st = LB.parseDate(store.cycleStartDate); return ((Math.round((t - st) / 86400000) % sch.days.length) + sch.days.length) % sch.days.length; })()
+        : (store.cycleIndex || 0) % sch.days.length)
+    : -1;
+
+  const trainingDayCount = sch.days.filter(d => d.items.length).length;
+
+  return (
+    <Screen>
+      <TopBar
+        title={sch.name}
+        sub={isWeekday
+          ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ')
+          : `${sch.days.length}-day cycle · ${trainingDayCount} training`}
+        onBack={() => go({ name: 'home' })}
+      />
+      <div style={{ padding: '14px 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <Bezel>{isWeekday ? 'WEEK' : 'CYCLE'}</Bezel>
+
+        {displayDays.map((d, i) => {
+          const isRest = !d.items.length;
+          const isToday = isActivePlan && (isWeekday ? d.weekday === todayWeekday : activeCycleDayIdx === i);
+          const dayLabel = isWeekday ? WEEKDAYS_FULL[d.weekday] : `Day ${i + 1}`;
+          const Container = isToday ? BracketFrame : Frame;
+          const containerProps = isToday
+            ? { gold: true }
+            : { padding: isRest ? '12px 16px' : '14px 16px' };
+
+          return (
+            <Container key={d.id} {...containerProps}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: isRest ? 0 : 8 }}>
+                <div>
+                  <div className={isToday ? 'micro-gold' : 'micro'} style={{ marginBottom: 4, color: isToday ? undefined : UI.inkFaint }}>
+                    {dayLabel.toUpperCase()}{isToday ? ' · TODAY' : ''}
+                  </div>
+                  <div className="display" style={{ fontSize: isToday ? 20 : 18, color: isToday ? UI.gold : isRest ? UI.inkFaint : UI.ink, fontStyle: isRest ? 'italic' : 'normal', lineHeight: 1.1 }}>
+                    {d.name}
+                  </div>
+                </div>
+                <span className="num" style={{ color: isToday ? UI.gold : UI.inkFaint, fontSize: isToday ? 11 : 10 }}>
+                  {isRest ? 'REST' : `${d.items.length} EX.`}
+                </span>
+              </div>
+              {!isRest && d.items.map((it, k) => {
+                const ex = LB.findExercise(store, it.exId);
+                return (
+                  <div key={k} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '5px 0',
+                    borderTop: `0.5px solid ${k === 0 ? (isToday ? UI.goldSoft : UI.hair) : UI.hair}`,
+                  }}>
+                    <span style={{ fontSize: 13, color: UI.inkSoft }}>{ex?.name || '—'}</span>
+                    <span className="num" style={{ fontSize: 11, color: isToday ? UI.gold : UI.inkFaint, flexShrink: 0, marginLeft: 12 }}>{it.sets}×{it.reps}</span>
+                  </div>
+                );
+              })}
+            </Container>
+          );
+        })}
+      </div>
+    </Screen>
+  );
+}
+
 // ─── Edit screen — rename, manage pattern ─
 function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
   const [confirmEl, confirm] = useConfirm();
@@ -1048,4 +1135,4 @@ function ScheduleNewScreen({ store, setStore, go }) {
   );
 }
 
-Object.assign(window.Screens, { PlanScreen, ScheduleDetailScreen, ScheduleEditScreen, ScheduleNewScreen, ExercisePicker, DayTypePicker });
+Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleDetailScreen, ScheduleEditScreen, ScheduleNewScreen, ExercisePicker, DayTypePicker });
