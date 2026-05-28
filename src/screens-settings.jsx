@@ -31,7 +31,7 @@ function Toggle({ on, onToggle }) {
 function Row({ label, children, first = false }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '11px 0', borderTop: first ? 'none' : `0.5px solid ${UI.hair}` }}>
-      <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
+      <span style={{ fontSize: 15, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
       {children}
     </div>
   );
@@ -40,7 +40,7 @@ function Row({ label, children, first = false }) {
 function NavRow({ label, hint, onTap, first = false }) {
   return (
     <button onClick={onTap} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', borderTop: first ? 'none' : `0.5px solid ${UI.hair}`, WebkitTapHighlightColor: 'transparent' }}>
-      <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
+      <span style={{ fontSize: 15, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {hint != null && <span style={{ fontSize: 16, color: UI.inkFaint, fontFamily: UI.fontUi }}>{hint}</span>}
         <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
