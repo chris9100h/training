@@ -161,6 +161,8 @@ async function importFromBackup(backup, userId) {
       accent_color: sett.accentColor ?? 'copper',
       dark_mode: sett.darkMode ?? 'dark',
       custom_day_types: backup.customDayTypes ?? [],
+      reminder_enabled: sett.reminderEnabled ?? false,
+      reminder_time: sett.reminderTime ?? '07:00',
     }),
   ].filter(Boolean));
 }
@@ -270,7 +272,10 @@ async function loadFromSupabase(userId, _depth = 0) {
         smartProgression: sett.smart_progression ?? false,
         progressionRangeTop: sett.progression_range_top ?? 4,
         equipmentConfig: sett.equipment_config ?? {},
+        reminderEnabled: sett.reminder_enabled ?? false,
+        reminderTime: sett.reminder_time ?? '07:00',
       },
+    nextReminderAt: sett.next_reminder_at ?? null,
   };
   await autoArchiveMissedDays(userId, result);
   return result;
@@ -398,7 +403,10 @@ async function syncStore(prev, next, userId) {
     prev.settings?.smartProgression   !== next.settings?.smartProgression   ||
     prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop ||
     JSON.stringify(prev.settings?.equipmentConfig) !== JSON.stringify(next.settings?.equipmentConfig) ||
-    JSON.stringify(prev.customDayTypes) !== JSON.stringify(next.customDayTypes);
+    JSON.stringify(prev.customDayTypes) !== JSON.stringify(next.customDayTypes) ||
+    prev.settings?.reminderEnabled !== next.settings?.reminderEnabled ||
+    prev.settings?.reminderTime    !== next.settings?.reminderTime    ||
+    prev.nextReminderAt            !== next.nextReminderAt;
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
@@ -425,6 +433,9 @@ async function syncStore(prev, next, userId) {
       progression_range_top: next.settings?.progressionRangeTop ?? 4,
       equipment_config: next.settings?.equipmentConfig ?? {},
       custom_day_types: next.customDayTypes ?? [],
+      reminder_enabled: next.settings?.reminderEnabled ?? false,
+      reminder_time: next.settings?.reminderTime ?? '07:00',
+      next_reminder_at: next.nextReminderAt ?? null,
       in_progress_session_id: next.inProgress ?? null,
     }));
   }
@@ -495,6 +506,47 @@ function seedStarter(state) {
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────
+
+// Date of the next upcoming training day (today if not yet trained, otherwise tomorrow+).
+// Returns an ISO date string or null.
+function computeNextTrainingDate(state) {
+  const sch = state.schedules.find(s => s.id === state.activeScheduleId);
+  if (!sch || !sch.days.length) return null;
+
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const todayStr = today.toISOString().slice(0, 10);
+  const trainedToday = state.sessions.some(s => s.date?.slice(0, 10) === todayStr && s.ended);
+  const wdPlan = isWeekdayPlan(sch);
+
+  for (let ahead = trainedToday ? 1 : 0; ahead <= 14; ahead++) {
+    const d = new Date(today); d.setDate(today.getDate() + ahead);
+    const dateStr = d.toISOString().slice(0, 10);
+    let training = false;
+    if (wdPlan) {
+      const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      const day = sch.days.find(x => x.weekday === wd);
+      training = !!(day && (day.items || []).length > 0);
+    } else {
+      if (!state.cycleStartDate) return null;
+      const start = parseDate(state.cycleStartDate);
+      const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+      if (n < 0) continue;
+      const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
+      training = (sch.days[idx]?.items || []).length > 0;
+    }
+    if (training) return dateStr;
+  }
+  return null;
+}
+
+// UTC ISO timestamp for the next training-day reminder, or null if reminder is disabled.
+function computeNextReminderAt(state) {
+  if (!state.settings?.reminderEnabled) return null;
+  const nextDate = computeNextTrainingDate(state);
+  if (!nextDate) return null;
+  const time = state.settings?.reminderTime ?? '07:00';
+  return new Date(nextDate + 'T' + time + ':00').toISOString();
+}
 
 function cancelPushover(settings, userId) {
   if (!settings?.pushEnabled) return;
@@ -769,6 +821,7 @@ window.LB = {
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan,
   effReps, e1rm, totalVolume, buildSeedSets, inferCurrentExIdx, calcBlended,
+  computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,
 };

@@ -28,6 +28,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [pushEnabled, setPushEnabled] = useStateSet(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
   const [pushKeyDraft, setPushKeyDraft] = useStateSet('');
   const [pushKeyModalOpen, setPushKeyModalOpen] = useStateSet(false);
+  const [testPickerOpen, setTestPickerOpen] = useStateSet(false);
+  const [reminderEnabled, setReminderEnabled] = useStateSet(() => store.settings?.reminderEnabled ?? false);
+  const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
@@ -135,6 +138,17 @@ function SettingsScreen({ store, setStore, go, userId }) {
       setPushStatus(`Error: ${e.message}`);
       pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
     }
+  };
+
+  const toggleReminder = () => {
+    const next = !reminderEnabled;
+    setReminderEnabled(next);
+    setStore(s => ({ ...s, settings: { ...s.settings, reminderEnabled: next } }));
+  };
+
+  const updateReminderTime = (val) => {
+    setReminderTime(val);
+    setStore(s => ({ ...s, settings: { ...s.settings, reminderTime: val } }));
   };
 
   const saveNickname = () => {
@@ -409,24 +423,45 @@ function SettingsScreen({ store, setStore, go, userId }) {
                     </div>
                   </div>
                   {store.settings?.pushoverUserKey && (
-                    <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'left' }}>
-                      Change user key
-                    </button>
-                  )}
-                  {pushEnabled && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <Btn kind="ghost" onClick={() => testPushover(0)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>Now</Btn>
-                        <Btn kind="ghost" onClick={() => testPushover(10)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>10s</Btn>
-                        <Btn kind="ghost" onClick={() => testPushover(30)} style={{ flex: 1, fontSize: 11, minHeight: 36 }}>30s</Btn>
-                  </div>
-                  {pushStatus && (
-                    <div className="micro" style={{ color: pushStatus.startsWith('✓') ? UI.gold : UI.inkSoft, textAlign: 'center' }}>
-                      {pushStatus}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span className="micro" style={{ color: UI.inkFaint }}>User key</span>
+                      <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={{ background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.25)', color: 'var(--accent)', padding: '5px 12px', borderRadius: 8, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent' }}>
+                        Change
+                      </button>
                     </div>
                   )}
-                </div>
-              )}
+                  {pushEnabled && (<>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span className="micro" style={{ color: UI.inkFaint }}>Test notifications</span>
+                      <button onClick={() => setTestPickerOpen(true)} style={{ background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.25)', color: 'var(--accent)', padding: '5px 12px', borderRadius: 8, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent' }}>
+                        Test
+                      </button>
+                    </div>
+                    {pushStatus && (
+                      <div className="micro" style={{ color: pushStatus.startsWith('✓') ? UI.gold : UI.inkSoft, textAlign: 'center' }}>
+                        {pushStatus}
+                      </div>
+                    )}
+                  </>)}
+                  <Hairline style={{ margin: '4px 0' }} />
+                  <div className="micro">TRAINING REMINDER</div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span className="micro" style={{ color: UI.inkSoft }}>Remind me on training days</span>
+                    <div onClick={toggleReminder} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', background: reminderEnabled ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${reminderEnabled ? UI.goldSoft : UI.hairStrong}`, position: 'relative', transition: 'background 0.2s' }}>
+                      <div style={{ position: 'absolute', top: 3, left: reminderEnabled ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: reminderEnabled ? '#0a0805' : UI.inkFaint, transition: 'left 0.2s' }} />
+                    </div>
+                  </div>
+                  {reminderEnabled && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span className="micro" style={{ color: UI.inkFaint }}>Notify at</span>
+                      <input
+                        type="time"
+                        value={reminderTime}
+                        onChange={e => updateReminderTime(e.target.value)}
+                        style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: 'dark' }}
+                      />
+                    </div>
+                  )}
             </div>
           )}
         </Frame>
@@ -644,6 +679,13 @@ function SettingsScreen({ store, setStore, go, userId }) {
         </div>
       </div>
       {confirmEl}
+      <Sheet open={testPickerOpen} onClose={() => setTestPickerOpen(false)} title="Send test notification">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
+          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(0); }} style={{ fontSize: 13 }}>Now</Btn>
+          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(10); }} style={{ fontSize: 13 }}>In 10 seconds</Btn>
+          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(30); }} style={{ fontSize: 13 }}>In 30 seconds</Btn>
+        </div>
+      </Sheet>
       <Sheet open={pushKeyModalOpen} onClose={() => setPushKeyModalOpen(false)} title="Pushover User Key">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.5 }}>

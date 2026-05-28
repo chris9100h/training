@@ -508,6 +508,26 @@ function App() {
     return () => window.removeEventListener('online', onOnline);
   }, [userId, flushSync]);
 
+  // Keep nextReminderAt in sync whenever reminder settings or schedule state changes.
+  useEffectA(() => {
+    if (!store || phase !== 'ready') return;
+    if (!store.settings?.reminderEnabled) {
+      if (store.nextReminderAt != null) setStore(s => ({ ...s, nextReminderAt: null }));
+      return;
+    }
+    const computed = LB.computeNextReminderAt(store);
+    if (computed !== (store.nextReminderAt ?? null)) {
+      setStore(s => ({ ...s, nextReminderAt: computed }));
+    }
+  }, [
+    store?.settings?.reminderEnabled,
+    store?.settings?.reminderTime,
+    store?.activeScheduleId,
+    store?.cycleStartDate,
+    store?.lastAdvancedDate,
+    store?.inProgress,
+  ]);
+
   // helper for in-sheet "+ new exercise"
   window.__createExercise = (name) => {
     const id = LB.uid();
