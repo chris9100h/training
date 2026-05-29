@@ -2031,7 +2031,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           padding: '0 32px',
         }}>
           {/* Pulsing gold border ring — same as improvement overlay */}
-          <div style={{ position: 'absolute', inset: 0, animation: 'improvedBorderPulse 1.4s ease-in-out infinite' }} />
+          <div style={{ position: 'absolute', inset: 0, animation: 'improvedBorderPulse 1.4s ease-in-out infinite', pointerEvents: 'none' }} />
 
           {/* Label */}
           <span className="micro-gold" style={{
