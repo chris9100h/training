@@ -443,18 +443,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
     });
     setFlashSet(setIdx);
     setTimeout(() => setFlashSet(null), 1400);
-    const prevSet = last?.entry?.sets?.[setIdx];
+    // Match the current set to the same working-set position in the previous
+    // session. Either session may carry a different number of warm-up sets, so
+    // compare by working-set index (warm-ups excluded), never the raw index.
+    const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
+    const prevWorkingSetFor = (idx) => {
+      if (entry.sets[idx]?.warmup) return undefined;
+      const wIdx = entry.sets.slice(0, idx + 1).filter(s => !s.warmup).length - 1;
+      return wIdx >= 0 ? prevWorkingSets[wIdx] : undefined;
+    };
+    const prevSet = prevWorkingSetFor(setIdx);
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
 
     const progressionResult = (() => {
       if (!store.settings?.smartProgression) return null;
-      if (!updatedSets.every(s => s.done || s.skipped)) return null;
+      if (!updatedSets.filter(s => !s.warmup).every(s => s.done || s.skipped)) return null;
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? null;
       if (!increment) return null;
       const baseReps = exercise?.progression_reps ?? entry.plannedReps;
       const targetRepsTop = (baseReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
-      const doneSets = updatedSets.filter(s => s.done && !s.skipped && s.kg != null);
+      const doneSets = updatedSets.filter(s => s.done && !s.skipped && !s.warmup && s.kg != null);
       if (!doneSets.length) return null;
       const allHitTop = doneSets.every(s => {
         const reps = s.repsL != null ? Math.min(s.repsL ?? 0, s.repsR ?? 0) : (s.reps ?? 0);
@@ -472,7 +481,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         setImprovedSet(true);
         setTimeout(() => setImprovedSet(false), 2500);
       } else {
-        const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, last?.entry?.sets?.[k]));
+        const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, prevWorkingSetFor(k)));
         if (!anyImprovementBefore && isDecline(entry.sets[setIdx], prevSet)) {
           setRegressionSet(true);
           setTimeout(() => setRegressionSet(false), 2500);
@@ -1085,7 +1094,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
     : currentSetIdx;
   const heroSet = bgSetIdx >= 0 ? entry.sets[bgSetIdx] : null;
   // For warmup sets there's no meaningful "last session" comparison
-  const prevHeroSet = isCurrentWarmup ? null : last?.entry?.sets?.[bgSetIdx >= 0 ? bgSetIdx - warmupCount : 0];
+  const prevHeroSet = isCurrentWarmup ? null : (last?.entry?.sets || []).filter(s => !s.warmup)[bgSetIdx >= 0 ? bgSetIdx - warmupCount : 0];
 
   const workingSetsArr = entry.sets.filter(s => !s.warmup);
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
@@ -1550,7 +1559,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
               // Hide warmup rows once training has started — they're done and tapping them would re-trigger the overlay
               if (isWarmupRow && !warmupActive) return null;
               // Working sets offset index by warmupCount so prev-session lookup is correct
-              const prevSet = isWarmupRow ? null : last?.entry?.sets?.[i - warmupCount];
+              const prevSet = isWarmupRow ? null : (last?.entry?.sets || []).filter(s => !s.warmup)[i - warmupCount];
               const isCurrent = i === currentSetIdx;
               const showWorkingSep = !isWarmupRow && i === warmupCount && warmupCount > 0 && warmupActive;
               const warmupRowNum = isWarmupRow ? entry.sets.slice(0, i + 1).filter(x => x.warmup).length : 0;
