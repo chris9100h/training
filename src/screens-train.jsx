@@ -525,10 +525,9 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         if (!progressionResult) setTimeout(() => navigate(1), 600);
       }
     }
-    // Last warmup set done → start the workout timer
+    // Last warmup set done → start 3-min rest, workout timer begins when rest expires
     if (isLastWarmupSet && !session.startedAt) {
-      const warmupEndTime = new Date().toISOString();
-      updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: warmupEndTime });
+      persistRestStart(Date.now(), 180);
     }
   };
 
@@ -736,6 +735,9 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     const prev = prevRestRemaining.current;
     prevRestRemaining.current = restRemaining;
     if (prev !== null && prev > 0 && restRemaining === 0) {
+      if (!session.startedAt) {
+        updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
+      }
       setRestModalOpen(true);
       // gold screen flash 3×
       let i = 0;
@@ -1071,7 +1073,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const currentSetIdx = entry.sets.findIndex(s => !s.done);
   const warmupCount = entry.sets.filter(s => s.warmup).length;
   const isCurrentWarmup = warmupCount > 0 && currentSetIdx >= 0 && !!entry.sets[currentSetIdx]?.warmup;
-  const warmupActive = warmupCount > 0 && entry.sets.filter(s => s.warmup).some(s => !s.done) && !session.startedAt;
+  const warmupActive = warmupCount > 0 && !session.startedAt;
   const currentSetNum = currentSetIdx >= 0 ? currentSetIdx + 1 : entry.sets.length;
   const heroSet = currentSetIdx >= 0 ? entry.sets[currentSetIdx] : null;
   // For warmup sets there's no meaningful "last session" comparison
