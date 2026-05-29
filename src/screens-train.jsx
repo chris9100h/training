@@ -1080,9 +1080,13 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const postWarmupRest = allWarmupDone && !session.startedAt;
   const warmupActive = warmupCount > 0 && !session.startedAt;
   const currentSetNum = currentSetIdx >= 0 ? currentSetIdx + 1 : entry.sets.length;
-  const heroSet = currentSetIdx >= 0 ? entry.sets[currentSetIdx] : null;
+  // While the warmup overlay is showing, the background displays the first working set (not the warmup set)
+  const bgSetIdx = warmupSetsRemaining
+    ? entry.sets.findIndex(s => !s.warmup)
+    : currentSetIdx;
+  const heroSet = bgSetIdx >= 0 ? entry.sets[bgSetIdx] : null;
   // For warmup sets there's no meaningful "last session" comparison
-  const prevHeroSet = isCurrentWarmup ? null : last?.entry?.sets?.[currentSetIdx >= 0 ? currentSetIdx - warmupCount : 0];
+  const prevHeroSet = isCurrentWarmup ? null : last?.entry?.sets?.[bgSetIdx >= 0 ? bgSetIdx - warmupCount : 0];
 
   const workingSetsArr = entry.sets.filter(s => !s.warmup);
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
@@ -1388,9 +1392,9 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
             <div style={{ padding: '12px 6px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0 18px', marginBottom: 8 }}>
                 <span className="micro-gold">
-                  {isCurrentWarmup
+                  {(!warmupSetsRemaining && isCurrentWarmup)
                     ? `WARMUP ${String(entry.sets.slice(0,currentSetIdx+1).filter(s=>s.warmup).length).padStart(2,'0')} / ${String(warmupCount).padStart(2,'0')}`
-                    : `SET ${String(entry.sets.slice(0,currentSetIdx+1).filter(s=>!s.warmup).length).padStart(2,'0')} / ${String(workingSetsArr.length).padStart(2,'0')}`
+                    : `SET ${String(entry.sets.slice(0,bgSetIdx+1).filter(s=>!s.warmup).length).padStart(2,'0')} / ${String(workingSetsArr.length).padStart(2,'0')}`
                   }
                 </span>
                 <div style={{ textAlign: 'right' }}>
@@ -1419,16 +1423,16 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                       letterSpacing: '-0.02em',
                       textAlign: 'center', width: '100%', padding: 0,
                     }}
-                    onActivate={() => activateKb(currentSetIdx, 'kg')}
+                    onActivate={() => activateKb(bgSetIdx, 'kg')}
                     kbRaw={kbRaw}
-                    isKbActive={kbField?.setIdx === currentSetIdx && kbField?.field === 'kg'}
+                    isKbActive={kbField?.setIdx === bgSetIdx && kbField?.field === 'kg'}
                     onChange={kg => updateSession(sess => ({
                       ...sess,
                       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
                         ...en,
                         sets: en.sets.map((st, si) =>
-                          si === currentSetIdx ? { ...st, kg, done: false }
-                          : si > currentSetIdx && !st.done ? { ...st, kg }
+                          si === bgSetIdx ? { ...st, kg, done: false }
+                          : si > bgSetIdx && !st.done && !st.warmup ? { ...st, kg }
                           : st
                         ),
                       }),
@@ -1442,10 +1446,10 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                     <div style={{ flex: 1, textAlign: 'center' }}>
                       <input readOnly type="text" inputMode="none"
                         autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
-                        value={kbField?.setIdx === currentSetIdx && kbField?.field === 'repsL' ? kbRaw : (heroSet.repsL ?? '')}
+                        value={kbField?.setIdx === bgSetIdx && kbField?.field === 'repsL' ? kbRaw : (heroSet.repsL ?? '')}
                         placeholder="—"
-                        style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === currentSetIdx && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
-                        onPointerDown={e => { e.preventDefault(); e.stopPropagation(); activateKb(currentSetIdx, 'repsL'); }}
+                        style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === bgSetIdx && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
+                        onPointerDown={e => { e.preventDefault(); e.stopPropagation(); activateKb(bgSetIdx, 'repsL'); }}
                       />
                       <div className="micro" style={{ marginTop: 2 }}>LEFT</div>
                     </div>
@@ -1453,10 +1457,10 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                     <div style={{ flex: 1, textAlign: 'center' }}>
                       <input readOnly type="text" inputMode="none"
                         autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
-                        value={kbField?.setIdx === currentSetIdx && kbField?.field === 'repsR' ? kbRaw : (heroSet.repsR ?? '')}
+                        value={kbField?.setIdx === bgSetIdx && kbField?.field === 'repsR' ? kbRaw : (heroSet.repsR ?? '')}
                         placeholder="—"
-                        style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === currentSetIdx && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
-                        onPointerDown={e => { e.preventDefault(); e.stopPropagation(); activateKb(currentSetIdx, 'repsR'); }}
+                        style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === bgSetIdx && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
+                        onPointerDown={e => { e.preventDefault(); e.stopPropagation(); activateKb(bgSetIdx, 'repsR'); }}
                       />
                       <div className="micro" style={{ marginTop: 2 }}>RIGHT</div>
                     </div>
@@ -1465,10 +1469,10 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                   <div style={{ flex: 1, textAlign: 'center' }}>
                     <input readOnly type="text" inputMode="none"
                       autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
-                      value={kbField?.setIdx === currentSetIdx && kbField?.field === 'reps' ? kbRaw : (heroSet.reps ?? '')}
+                      value={kbField?.setIdx === bgSetIdx && kbField?.field === 'reps' ? kbRaw : (heroSet.reps ?? '')}
                       placeholder="—"
-                      style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === currentSetIdx && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
-                      onPointerDown={e => { e.preventDefault(); e.stopPropagation(); activateKb(currentSetIdx, 'reps'); }}
+                      style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === bgSetIdx && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
+                      onPointerDown={e => { e.preventDefault(); e.stopPropagation(); activateKb(bgSetIdx, 'reps'); }}
                     />
                     <div className="micro" style={{ marginTop: 2 }}>REPETITIONS</div>
                   </div>
@@ -1484,7 +1488,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                     if (currentSetIdx < 0) return;
                     completeSet(currentSetIdx);
                   }}
-                  disabled={heroSet.kg == null || (kbField?.setIdx !== currentSetIdx && (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps))}
+                  disabled={warmupSetsRemaining || postWarmupRest || heroSet.kg == null || (kbField?.setIdx !== bgSetIdx && (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps))}
                   style={{
                     width: '100%', minHeight: 44,
                     background: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
