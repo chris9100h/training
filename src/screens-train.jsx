@@ -1510,7 +1510,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         {/* All sets list */}
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
-            <span className="micro">{warmupCount > 0 ? 'WARMUP' : 'ALL SETS'}</span>
+            <span className="micro">{warmupCount > 0 && warmupActive ? 'WARMUP' : 'ALL SETS'}</span>
             <button onClick={checkAllSets} disabled={anyMissingData && !allWorkingDone} style={{
               padding: '4px 10px', borderRadius: 999,
               background: allWorkingDone ? UI.goldFaint : 'transparent',
@@ -1548,10 +1548,12 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {entry.sets.map((s, i) => {
               const isWarmupRow = !!s.warmup;
+              // Hide warmup rows once training has started — they're done and tapping them would re-trigger the overlay
+              if (isWarmupRow && !warmupActive) return null;
               // Working sets offset index by warmupCount so prev-session lookup is correct
               const prevSet = isWarmupRow ? null : last?.entry?.sets?.[i - warmupCount];
               const isCurrent = i === currentSetIdx;
-              const showWorkingSep = !isWarmupRow && i === warmupCount && warmupCount > 0;
+              const showWorkingSep = !isWarmupRow && i === warmupCount && warmupCount > 0 && warmupActive;
               const warmupRowNum = isWarmupRow ? entry.sets.slice(0, i + 1).filter(x => x.warmup).length : 0;
               const workingRowNum = !isWarmupRow ? entry.sets.slice(0, i + 1).filter(x => !x.warmup).length : 0;
               return (
