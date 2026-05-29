@@ -1,6 +1,16 @@
 /* Schedules — list, detail, edit, create */
 
-const { useState: useStateS, useMemo: useMemoS } = React;
+const { useState: useStateS, useMemo: useMemoS, useEffect: useEffectS } = React;
+
+function useIsPadS() {
+  const [isPad, setIsPad] = useStateS(() => window.innerWidth >= 768);
+  useEffectS(() => {
+    const handler = () => setIsPad(window.innerWidth >= 768);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+  return isPad;
+}
 
 const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','BACK','REST'];
 
@@ -136,6 +146,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
   const dayLabel = isWeekday ? WEEKDAYS_FULL[day.weekday] : `Day ${dayIdx + 1}`;
   const trainingDayCount = sch.days.filter(d => d.items.length).length;
 
+  const isPad = useIsPadS();
   const [confirmEl, confirm] = useConfirm();
   const activate = async () => {
     if (!await confirm(`"${sch.name}" will become your active plan and the cycle will reset.`, { title: 'Activate plan?', ok: 'Activate' })) return;
@@ -156,6 +167,71 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
     go({ name: 'plan-view', scheduleId: copy.id, fromPlan: true });
   };
 
+  const planActions = fromPlan && (
+    <>
+      {!isActivePlan && <Btn kind="ghost" onClick={activate} style={{ flex: 1, fontSize: 12 }}>Activate</Btn>}
+      {isActivePlan && <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pill gold>active</Pill></div>}
+      <Btn kind="ghost" onClick={duplicate} style={{ flex: 1, fontSize: 12 }}>Duplicate</Btn>
+    </>
+  );
+
+  const dayHeader = (
+    <div>
+      <div className={isTodaySel ? 'micro-gold' : 'micro'} style={{ marginBottom: 4, color: isTodaySel ? undefined : UI.inkFaint }}>
+        {dayLabel.toUpperCase()}{isTodaySel ? ' · TODAY' : ''}
+      </div>
+      <div className="display" style={{ fontSize: 30, color: isRest ? UI.inkSoft : UI.ink, fontStyle: isRest ? 'italic' : 'normal', lineHeight: 1.05, letterSpacing: '-0.01em' }}>
+        {day.name}
+      </div>
+    </div>
+  );
+
+  const exerciseList = isRest ? (
+    <BracketFrame style={{ textAlign: 'center', padding: 36 }}>
+      <div className="display-it" style={{ fontSize: 38, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, marginBottom: 6 }}>Recover.</div>
+      <div style={{ fontSize: 13, color: UI.inkFaint }}>Recovery is part of the plan.</div>
+    </BracketFrame>
+  ) : (
+    <>
+      {day.items.map((it, k) => {
+        const ex = LB.findExercise(store, it.exId);
+        const isUni = !!ex?.unilateral;
+        const last = LB.lastSessionForExercise(store, it.exId, day.id);
+        const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps);
+        const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
+        return (
+          <Frame key={k} style={{ padding: '12px 16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+              <span style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, paddingTop: 1 }}>
+                {ex?.name || '—'}
+                {isUni && <span className="micro" style={{ marginLeft: 6, color: UI.inkFaint }}>UNI</span>}
+              </span>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
+                {seedSets.map((st, si) => {
+                  const kg = st.kg != null ? `${st.kg}kg` : '—';
+                  const reps = isUni
+                    ? `L${st.repsL ?? it.reps}/R${st.repsR ?? it.reps}`
+                    : `${st.reps ?? it.reps}`;
+                  return (
+                    <span key={si} className="num" style={{ fontSize: 13, color: suggestion ? UI.gold : UI.inkSoft }}>
+                      {kg} · {reps}
+                      {suggestion && si === 0 && <i className="fa-solid fa-arrow-up" style={{ fontSize: 9, marginLeft: 4, color: UI.gold }} />}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          </Frame>
+        );
+      })}
+      <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 2, textAlign: 'center' }}>
+        {store.settings?.smartProgression
+          ? <>Prefilled for your next session · <i className="fa-solid fa-arrow-up" style={{ fontSize: 8 }} /> = smart progression bump</>
+          : 'Prefilled from your last session'}
+      </div>
+    </>
+  );
+
   return (
     <Screen scroll={false}>
       {confirmEl}
@@ -174,112 +250,91 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
         ) : null}
       />
 
-      {/* Plan-level actions — only when arriving from the plan list */}
-      {fromPlan && (
-        <div style={{ flexShrink: 0, padding: '14px 22px 10px', display: 'flex', gap: 8 }}>
-          {!isActivePlan && <Btn kind="ghost" onClick={activate} style={{ flex: 1, fontSize: 12 }}>Activate</Btn>}
-          {isActivePlan && <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pill gold>active</Pill></div>}
-          <Btn kind="ghost" onClick={duplicate} style={{ flex: 1, fontSize: 12 }}>Duplicate</Btn>
-        </div>
-      )}
-
-      {/* Day chips */}
-      <div ref={chipRowRef} style={{ flexShrink: 0, padding: '4px 22px 14px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
-        {displayDays.map((d, i) => {
-          const active = d.id === selectedDayId;
-          const isToday = d.id === todayDayId;
-          const rest = !d.items.length;
-          const sub = isWeekday ? WEEKDAYS[d.weekday] : `Day ${i + 1}`;
-          return (
-            <button key={d.id} onClick={() => setSelectedDayId(d.id)} style={{
-              flexShrink: 0, maxWidth: 120, padding: '6px 12px 4px', borderRadius: 999,
-              border: `0.5px solid ${active ? UI.gold : isToday ? UI.goldSoft : UI.hairStrong}`,
-              background: active ? UI.goldFaint : 'transparent',
-              cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
-            }}>
-              <div style={{
-                fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em', fontWeight: 600,
-                color: active ? UI.gold : rest ? UI.inkFaint : UI.inkSoft,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>
-                {d.name}
+      {isPad ? (
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
+          {/* Left sidebar: plan actions + vertical day chips */}
+          <div style={{ width: 210, flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+            {fromPlan && (
+              <div style={{ flexShrink: 0, padding: '14px 14px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {planActions}
               </div>
-              <div style={{ fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: active ? UI.gold : UI.inkFaint, marginTop: 1 }}>
-                {sub}
-              </div>
-              <div style={{ height: 3, marginTop: 3, display: 'flex', justifyContent: 'center' }}>
-                {isToday && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold, marginTop: -1 }} />}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {/* Selected day header */}
-        <div>
-          <div className={isTodaySel ? 'micro-gold' : 'micro'} style={{ marginBottom: 4, color: isTodaySel ? undefined : UI.inkFaint }}>
-            {dayLabel.toUpperCase()}{isTodaySel ? ' · TODAY' : ''}
-          </div>
-          <div className="display" style={{ fontSize: 30, color: isRest ? UI.inkSoft : UI.ink, fontStyle: isRest ? 'italic' : 'normal', lineHeight: 1.05, letterSpacing: '-0.01em' }}>
-            {day.name}
-          </div>
-        </div>
-
-        {isRest ? (
-          <BracketFrame style={{ textAlign: 'center', padding: 36 }}>
-            <div className="display-it" style={{ fontSize: 38, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, marginBottom: 6 }}>Recover.</div>
-            <div style={{ fontSize: 13, color: UI.inkFaint }}>Recovery is part of the plan.</div>
-          </BracketFrame>
-        ) : (
-          <>
-            {day.items.map((it, k) => {
-              const ex = LB.findExercise(store, it.exId);
-              const isUni = !!ex?.unilateral;
-              const last = LB.lastSessionForExercise(store, it.exId, day.id);
-              const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps);
-              const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
-
-              // Collapse consecutive sets with identical prefill into one "N×" row.
-              const rows = [];
-              seedSets.forEach(st => {
-                const kg = st.kg != null ? `${st.kg}kg` : '—';
-                const reps = isUni
-                  ? `L${st.repsL ?? it.reps}/R${st.repsR ?? it.reps}`
-                  : `${st.reps ?? it.reps}`;
-                const tail = rows[rows.length - 1];
-                if (tail && tail.kg === kg && tail.reps === reps) tail.count++;
-                else rows.push({ kg, reps, count: 1 });
-              });
-
-              return (
-                <Frame key={k} style={{ padding: '12px 16px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                    <span style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, paddingTop: 1 }}>
-                      {ex?.name || '—'}
-                      {isUni && <span className="micro" style={{ marginLeft: 6, color: UI.inkFaint }}>UNI</span>}
-                    </span>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
-                      {rows.map((r, ri) => (
-                        <span key={ri} className="num" style={{ fontSize: 13, color: suggestion ? UI.gold : UI.inkSoft }}>
-                          {r.count > 1 ? `${r.count}× ` : ''}{r.kg} · {r.reps}
-                          {suggestion && ri === 0 && <i className="fa-solid fa-arrow-up" style={{ fontSize: 9, marginLeft: 4, color: UI.gold }} />}
-                        </span>
-                      ))}
+            )}
+            <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 10px 16px', display: 'flex', flexDirection: 'column', gap: 4, scrollbarWidth: 'none' }}>
+              {displayDays.map((d, i) => {
+                const active = d.id === selectedDayId;
+                const isToday = d.id === todayDayId;
+                const rest = !d.items.length;
+                const sub = isWeekday ? WEEKDAYS[d.weekday] : `Day ${i + 1}`;
+                return (
+                  <button key={d.id} onClick={() => setSelectedDayId(d.id)} style={{
+                    flexShrink: 0, padding: '8px 12px 6px', borderRadius: 10,
+                    border: `0.5px solid ${active ? UI.gold : isToday ? UI.goldSoft : UI.hairStrong}`,
+                    background: active ? UI.goldFaint : 'transparent',
+                    cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
+                    display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 11, fontFamily: UI.fontUi, letterSpacing: '0.07em', fontWeight: 600,
+                        color: active ? UI.gold : rest ? UI.inkFaint : UI.inkSoft,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>{d.name}</div>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: active ? UI.gold : UI.inkFaint, marginTop: 1 }}>{sub}</div>
                     </div>
+                    {isToday && <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.gold, flexShrink: 0 }} />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Right: day content */}
+          <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '20px 32px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {dayHeader}
+            {exerciseList}
+          </div>
+        </div>
+      ) : (
+        <>
+          {fromPlan && (
+            <div style={{ flexShrink: 0, padding: '14px 22px 10px', display: 'flex', gap: 8 }}>
+              {planActions}
+            </div>
+          )}
+
+          <div ref={chipRowRef} style={{ flexShrink: 0, padding: '4px 22px 14px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
+            {displayDays.map((d, i) => {
+              const active = d.id === selectedDayId;
+              const isToday = d.id === todayDayId;
+              const rest = !d.items.length;
+              const sub = isWeekday ? WEEKDAYS[d.weekday] : `Day ${i + 1}`;
+              return (
+                <button key={d.id} onClick={() => setSelectedDayId(d.id)} style={{
+                  flexShrink: 0, maxWidth: 120, padding: '6px 12px 4px', borderRadius: 999,
+                  border: `0.5px solid ${active ? UI.gold : isToday ? UI.goldSoft : UI.hairStrong}`,
+                  background: active ? UI.goldFaint : 'transparent',
+                  cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
+                }}>
+                  <div style={{
+                    fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em', fontWeight: 600,
+                    color: active ? UI.gold : rest ? UI.inkFaint : UI.inkSoft,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>{d.name}</div>
+                  <div style={{ fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: active ? UI.gold : UI.inkFaint, marginTop: 1 }}>{sub}</div>
+                  <div style={{ height: 3, marginTop: 3, display: 'flex', justifyContent: 'center' }}>
+                    {isToday && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold, marginTop: -1 }} />}
                   </div>
-                </Frame>
+                </button>
               );
             })}
+          </div>
 
-            <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 2, textAlign: 'center' }}>
-              {store.settings?.smartProgression
-                ? <>Prefilled for your next session · <i className="fa-solid fa-arrow-up" style={{ fontSize: 8 }} /> = smart progression bump</>
-                : 'Prefilled from your last session'}
-            </div>
-          </>
-        )}
-      </div>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {dayHeader}
+            {exerciseList}
+          </div>
+        </>
+      )}
     </Screen>
   );
 }
