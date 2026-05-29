@@ -1227,8 +1227,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
       {/* Pace bar — only when historical avg is available */}
       {avgStats && (() => {
-        const totalSetsDone  = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done).length || 0), 0);
-        const totalSetsTotal = session.entries.reduce((s, e) => s + (e.sets?.filter(x => !x.skipped).length || 0), 0);
+        const totalSetsDone  = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done && !x.warmup).length || 0), 0);
+        const totalSetsTotal = session.entries.reduce((s, e) => s + (e.sets?.filter(x => !x.skipped && !x.warmup).length || 0), 0);
         const avgDurSec = avgStats.avgDurSec;
         const avgSetsTotal = avgStats.avgSetsTotal;
         if (!avgDurSec || !session.startedAt) return null;
