@@ -2022,43 +2022,61 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         </>
       )}
 
-      {/* ── Post-warmup rest overlay ─────────────────────────────────────────── */}
+      {/* ── Post-warmup rest overlay — full-screen dramatic countdown ────────── */}
       {postWarmupRest && (
-        <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(8,6,3,0.88)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }} />
-          <div style={{
-            position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 61,
-            background: 'var(--bg, #080603)',
-            borderRadius: '20px 20px 0 0',
-            boxShadow: `0 -0.5px 0 ${UI.hairStrong}, 0 -24px 60px rgba(0,0,0,0.7)`,
-            padding: `28px 22px calc(env(safe-area-inset-bottom, 0px) + 28px)`,
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0,
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 61,
+          background: 'rgb(8,6,3)',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          padding: '0 32px',
+        }}>
+          {/* Pulsing gold border ring — same as improvement overlay */}
+          <div style={{ position: 'absolute', inset: 0, animation: 'improvedBorderPulse 1.4s ease-in-out infinite' }} />
+
+          {/* Label */}
+          <span className="micro-gold" style={{
+            letterSpacing: '0.22em', marginBottom: 24,
+            animation: 'timerPulse 2s ease-in-out infinite',
+          }}>WARMUP COMPLETE</span>
+
+          {/* Exercise name */}
+          <div className="display-it" style={{
+            fontSize: session.entries[0]?.name.length > 22 ? 22 : 30,
+            color: UI.ink, lineHeight: 1.05,
+            textAlign: 'center', marginBottom: 48,
+          }}>{session.entries[0]?.name}</div>
+
+          {/* Big countdown */}
+          <div className="num" style={{
+            fontSize: 88, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1,
+            color: UI.gold,
+            textShadow: '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)',
+            animation: 'timerPulse 1.6s ease-in-out infinite',
           }}>
-            <span className="micro-gold" style={{ marginBottom: 16, letterSpacing: '0.18em' }}>WARMUP COMPLETE</span>
-            <div className="num" style={{
-              fontSize: 72, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1,
-              color: UI.gold,
-              animation: restRemaining === 0 ? 'timerPulse 0.8s ease-in-out infinite' : 'none',
-              marginBottom: 14,
-            }}>
-              {restRemaining != null
-                ? `${Math.floor(restRemaining / 60)}:${(restRemaining % 60).toString().padStart(2, '0')}`
-                : '—'}
-            </div>
-            <div style={{ height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden', width: '100%', marginBottom: 24 }}>
-              <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
-            </div>
-            <button onClick={startNow} style={{
-              width: '100%', minHeight: 46,
-              background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-              border: `0.5px solid var(--accent-deep)`,
-              color: '#0a0805', borderRadius: 999,
-              fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em',
-              cursor: 'pointer', boxShadow: '0 8px 30px rgba(var(--accent-rgb),0.30)',
-              WebkitTapHighlightColor: 'transparent',
-            }}>Start now →</button>
+            {restRemaining != null
+              ? `${Math.floor(restRemaining / 60)}:${(restRemaining % 60).toString().padStart(2, '0')}`
+              : '—'}
           </div>
-        </>
+
+          {/* Progress bar */}
+          <div style={{ height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden', marginTop: 22, width: 180 }}>
+            <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+          </div>
+
+          {/* Start now */}
+          <button onClick={startNow} style={{
+            marginTop: 52,
+            padding: '18px 56px',
+            background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
+            border: `0.5px solid var(--accent-deep)`,
+            color: '#0a0805', borderRadius: 999,
+            fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em',
+            cursor: 'pointer',
+            boxShadow: '0 8px 40px rgba(var(--accent-rgb),0.40)',
+            animation: 'pulseGold 2.2s ease-in-out infinite',
+            WebkitTapHighlightColor: 'transparent',
+          }}>Start now →</button>
+        </div>
       )}
 
       {confirmEl}
