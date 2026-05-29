@@ -735,10 +735,12 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     const prev = prevRestRemaining.current;
     prevRestRemaining.current = restRemaining;
     if (prev !== null && prev > 0 && restRemaining === 0) {
-      if (!session.startedAt) {
+      const wasPostWarmup = !session.startedAt;
+      if (wasPostWarmup) {
         updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
+      } else {
+        setRestModalOpen(true);
       }
-      setRestModalOpen(true);
       // gold screen flash 3×
       let i = 0;
       const flash = () => {
@@ -1073,6 +1075,9 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const currentSetIdx = entry.sets.findIndex(s => !s.done);
   const warmupCount = entry.sets.filter(s => s.warmup).length;
   const isCurrentWarmup = warmupCount > 0 && currentSetIdx >= 0 && !!entry.sets[currentSetIdx]?.warmup;
+  const warmupSetsRemaining = warmupCount > 0 && entry.sets.filter(s => s.warmup).some(s => !s.done);
+  const allWarmupDone = warmupCount > 0 && entry.sets.filter(s => s.warmup).every(s => s.done);
+  const postWarmupRest = allWarmupDone && !session.startedAt;
   const warmupActive = warmupCount > 0 && !session.startedAt;
   const currentSetNum = currentSetIdx >= 0 ? currentSetIdx + 1 : entry.sets.length;
   const heroSet = currentSetIdx >= 0 ? entry.sets[currentSetIdx] : null;
@@ -1095,6 +1100,181 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     persistRestStart(Date.now(), restDef);
     setTimeout(() => navigate(1), 600);
   };
+
+  const skipWarmup = () => {
+    updateSession(sess => ({
+      ...sess,
+      startedAt: new Date().toISOString(),
+      entries: sess.entries.map((e, i) => i === 0
+        ? { ...e, sets: e.sets.map(st => st.warmup ? { ...st, done: true } : st) }
+        : e
+      ),
+    }));
+    persistRestStart(null);
+  };
+
+  const startNow = () => {
+    updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
+    persistRestStart(null);
+  };
+
+  // ── Warmup phase — dedicated full-screen view ──────────────────────────────
+  if (warmupSetsRemaining) {
+    const currentWarmupGlobalIdx = entry.sets.findIndex(s => s.warmup && !s.done);
+    const warmupSets = entry.sets.filter(s => s.warmup);
+    return (
+      <Screen scroll={false}>
+        {screenFlash && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />
+        )}
+        <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 8px', display: 'flex', alignItems: 'center', gap: 14 }}>
+          <button onClick={abandon} style={{
+            width: 32, height: 32, borderRadius: '50%',
+            boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, background: 'transparent',
+            color: UI.danger, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, lineHeight: 1,
+          }}>×</button>
+          <span className="micro-gold" style={{ flex: 1, textAlign: 'center' }}>{session.dayName}</span>
+          <button onClick={skipWarmup} style={{
+            padding: '6px 14px', borderRadius: 999,
+            background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+            color: UI.inkSoft, cursor: 'pointer',
+            fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
+          }}>Skip</button>
+        </div>
+
+        <div style={{ flexShrink: 0, padding: '20px 22px 8px' }}>
+          <span className="micro-gold" style={{ display: 'block', marginBottom: 10 }}>WARMUP · {warmupCount} SETS</span>
+          <div className="display" style={{
+            fontSize: entry.name.length > 22 ? 22 : 28,
+            color: UI.ink, lineHeight: 1.05, fontWeight: 400,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>{entry.name}</div>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 22px 32px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {warmupSets.map((s, wi) => {
+            const globalIdx = entry.sets.indexOf(s);
+            const isCurrent = globalIdx === currentWarmupGlobalIdx;
+            return (
+              <div key={wi} style={{
+                display: 'flex', alignItems: 'center', gap: 16, padding: '18px 20px',
+                borderRadius: 14,
+                background: s.done ? 'transparent' : isCurrent ? UI.goldFaint : UI.bgInset,
+                border: `0.5px solid ${s.done ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
+                opacity: s.done ? 0.35 : 1,
+                transition: 'opacity 0.3s, border-color 0.2s',
+              }}>
+                <div style={{
+                  width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+                  background: isCurrent ? UI.gold : 'transparent',
+                  boxShadow: `inset 0 0 0 0.5px ${isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.hairStrong}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontFamily: UI.fontNum, fontSize: 9, fontWeight: 700,
+                  color: isCurrent ? '#0a0805' : s.done ? UI.goldDeep : UI.inkFaint,
+                }}>W{wi + 1}</div>
+                <div style={{ flex: 1 }}>
+                  <span className="num" style={{ fontSize: 22, color: isCurrent ? UI.gold : UI.inkSoft }}>
+                    {s.kg != null ? `${s.kg}` : <span style={{ color: UI.inkFaint }}>{s.warmupPct}%</span>}
+                  </span>
+                  {s.kg != null && <span className="num" style={{ fontSize: 13, color: UI.inkFaint, marginLeft: 2 }}>kg</span>}
+                  <span style={{ color: UI.hair, margin: '0 10px', fontFamily: UI.fontDisplay, fontSize: 20, fontStyle: 'italic', fontWeight: 200 }}>×</span>
+                  <span className="num" style={{ fontSize: 22, color: isCurrent ? UI.gold : UI.inkSoft }}>{s.reps}</span>
+                  <span className="num" style={{ fontSize: 13, color: UI.inkFaint, marginLeft: 2 }}>reps</span>
+                </div>
+                <button
+                  onClick={() => { if (!s.done && isCurrent) completeSet(globalIdx); }}
+                  disabled={s.done || !isCurrent || s.kg == null}
+                  style={{
+                    width: 42, height: 42, borderRadius: 10, flexShrink: 0,
+                    background: s.done ? UI.goldFaint : isCurrent
+                      ? `linear-gradient(180deg, var(--accent-light), var(--accent))`
+                      : 'transparent',
+                    border: `0.5px solid ${s.done ? UI.goldDeep : isCurrent ? 'var(--accent-deep)' : UI.hair}`,
+                    color: s.done ? UI.gold : isCurrent ? '#0a0805' : UI.inkFaint,
+                    fontSize: 18, fontWeight: 700,
+                    cursor: s.done || !isCurrent ? 'default' : 'pointer',
+                    opacity: (!isCurrent && !s.done) ? 0.25 : 1,
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>✓</button>
+              </div>
+            );
+          })}
+        </div>
+        {confirmEl}
+      </Screen>
+    );
+  }
+
+  // ── Post-warmup rest phase — countdown before workout timer starts ──────────
+  if (postWarmupRest) {
+    const firstWorkingName = session.entries[0]?.name ?? '';
+    return (
+      <Screen scroll={false}>
+        {screenFlash && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />
+        )}
+        <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 8px', display: 'flex', alignItems: 'center' }}>
+          <button onClick={abandon} style={{
+            width: 32, height: 32, borderRadius: '50%',
+            boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, background: 'transparent',
+            color: UI.danger, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, lineHeight: 1,
+          }}>×</button>
+          <div style={{ flex: 1 }} />
+          <button onClick={() => go({ name: 'home' })} style={{
+            width: 32, height: 32, borderRadius: '50%',
+            boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, background: 'transparent',
+            color: UI.inkSoft, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/>
+              <path d="M9 21V12h6v9"/>
+            </svg>
+          </button>
+        </div>
+
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px 60px', gap: 0 }}>
+          <span className="micro-gold" style={{ marginBottom: 20, letterSpacing: '0.18em' }}>WARMUP COMPLETE</span>
+          <div className="display" style={{
+            fontSize: firstWorkingName.length > 22 ? 22 : 28,
+            color: UI.ink, lineHeight: 1.05, fontWeight: 400, textAlign: 'center',
+            marginBottom: 6, maxWidth: 280,
+          }}>{firstWorkingName}</div>
+          <span style={{ color: UI.inkFaint, fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, marginBottom: 44 }}>Rest before first set</span>
+
+          <div className="num" style={{
+            fontSize: 80, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1,
+            color: UI.gold,
+            animation: restRemaining === 0 ? 'timerPulse 0.8s ease-in-out infinite' : 'none',
+          }}>
+            {restRemaining != null
+              ? `${Math.floor(restRemaining / 60)}:${(restRemaining % 60).toString().padStart(2, '0')}`
+              : '—'}
+          </div>
+
+          <div style={{ height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden', marginTop: 18, width: 180 }}>
+            <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+          </div>
+
+          <button onClick={startNow} style={{
+            marginTop: 44,
+            padding: '16px 52px',
+            background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
+            border: `0.5px solid var(--accent-deep)`,
+            color: '#0a0805',
+            borderRadius: 999,
+            fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em',
+            cursor: 'pointer',
+            boxShadow: '0 8px 30px rgba(var(--accent-rgb),0.30)',
+            WebkitTapHighlightColor: 'transparent',
+          }}>Start now →</button>
+        </div>
+        {confirmEl}
+      </Screen>
+    );
+  }
 
   return (
     <Screen scroll={false}>
