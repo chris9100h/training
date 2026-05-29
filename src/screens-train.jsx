@@ -409,6 +409,8 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   };
 
   const completeSet = (setIdx) => {
+    const isLastWarmupSet = !!entry.sets[setIdx]?.warmup &&
+      !entry.sets.slice(setIdx + 1).some(s => s.warmup);
     const kb = kbFieldRef.current;
     const rawRef = kbRawRef.current;
     _log(`completeSet(${setIdx}) kb=${kb?.field ?? 'none'} raw='${rawRef}'`);
@@ -466,7 +468,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
       return nextKg > refKg ? { exName: entry.name, currentKg: refKg, nextKg } : null;
     })();
 
-    if (!progressionResult) {
+    if (!entry.sets[setIdx]?.warmup && !progressionResult) {
       if (isImprovement(entry.sets[setIdx], prevSet)) {
         setImprovedSet(true);
         setTimeout(() => setImprovedSet(false), 2500);
@@ -516,10 +518,17 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         }
       }
     } else {
-      persistRestStart(Date.now(), restDef);
+      if (!entry.sets[setIdx]?.warmup) {
+        persistRestStart(Date.now(), restDef);
+      }
       if (updatedSets.every(st => st.done)) {
         if (!progressionResult) setTimeout(() => navigate(1), 600);
       }
+    }
+    // Last warmup set done → start the workout timer
+    if (isLastWarmupSet && !session.startedAt) {
+      const warmupEndTime = new Date().toISOString();
+      updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: warmupEndTime });
     }
   };
 
@@ -1060,19 +1069,25 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const completed = entry.sets.filter(s => s.done).length;
   const allDone = completed === entry.sets.length;
   const currentSetIdx = entry.sets.findIndex(s => !s.done);
+  const warmupCount = entry.sets.filter(s => s.warmup).length;
+  const isCurrentWarmup = warmupCount > 0 && currentSetIdx >= 0 && !!entry.sets[currentSetIdx]?.warmup;
+  const warmupActive = warmupCount > 0 && entry.sets.filter(s => s.warmup).some(s => !s.done) && !session.startedAt;
   const currentSetNum = currentSetIdx >= 0 ? currentSetIdx + 1 : entry.sets.length;
   const heroSet = currentSetIdx >= 0 ? entry.sets[currentSetIdx] : null;
-  const prevHeroSet = last?.entry?.sets?.[currentSetIdx >= 0 ? currentSetIdx : 0];
+  // For warmup sets there's no meaningful "last session" comparison
+  const prevHeroSet = isCurrentWarmup ? null : last?.entry?.sets?.[currentSetIdx >= 0 ? currentSetIdx - warmupCount : 0];
 
-  const anyMissingData = entry.sets.some(st => !st.done && (st.kg == null || (isUnilateral ? (!st.repsL || !st.repsR) : !st.reps)));
+  const workingSetsArr = entry.sets.filter(s => !s.warmup);
+  const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
+  const anyMissingData = workingSetsArr.some(st => !st.done && !st.skipped && (st.kg == null || (isUnilateral ? (!st.repsL || !st.repsR) : !st.reps)));
 
   const checkAllSets = async () => {
-    if (allDone || anyMissingData) return;
-    if (!await confirm(`Check off all ${entry.sets.length} sets and continue?`, { ok: 'Check all' })) return;
+    if (allWorkingDone || anyMissingData) return;
+    if (!await confirm(`Check off all ${workingSetsArr.length} sets and continue?`, { ok: 'Check all' })) return;
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
-        ? { ...e, sets: e.sets.map(st => ({ ...st, done: true })) }
+        ? { ...e, sets: e.sets.map(st => st.warmup ? st : { ...st, done: true }) }
         : e),
     }));
     persistRestStart(Date.now(), restDef);
@@ -1170,10 +1185,13 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, lineHeight: 1,
         }}>×</button>
         <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
-          {/* session time */}
+          {/* session time / warmup indicator */}
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
             <div style={{ width: 6, height: 6, borderRadius: 3, background: UI.gold, animation: 'pulseDot 1.6s ease-in-out infinite' }} />
-            <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }}>{sessionTimeStr}</span>
+            {warmupActive
+              ? <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>WARMUP</span>
+              : <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }}>{sessionTimeStr}</span>
+            }
           </div>
           {/* rest countdown — only when active */}
           {restStart && restRemaining > 0 && (<>
@@ -1338,7 +1356,12 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
           <BracketFrame gold padding={0}>
             <div style={{ padding: '12px 6px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0 18px', marginBottom: 8 }}>
-                <span className="micro-gold">SET {String(currentSetNum).padStart(2, '0')} / {String(entry.sets.length).padStart(2, '0')}</span>
+                <span className="micro-gold">
+                  {isCurrentWarmup
+                    ? `WARMUP ${String(entry.sets.slice(0,currentSetIdx+1).filter(s=>s.warmup).length).padStart(2,'0')} / ${String(warmupCount).padStart(2,'0')}`
+                    : `SET ${String(entry.sets.slice(0,currentSetIdx+1).filter(s=>!s.warmup).length).padStart(2,'0')} / ${String(workingSetsArr.length).padStart(2,'0')}`
+                  }
+                </span>
                 <div style={{ textAlign: 'right' }}>
                   {prevHeroSet && prevHeroSet.kg ? (
                     <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>
@@ -1452,17 +1475,17 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         {/* All sets list */}
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
-            <span className="micro">ALL SETS</span>
-            <button onClick={checkAllSets} disabled={anyMissingData && !allDone} style={{
+            <span className="micro">{warmupCount > 0 ? 'WARMUP' : 'ALL SETS'}</span>
+            <button onClick={checkAllSets} disabled={anyMissingData && !allWorkingDone} style={{
               padding: '4px 10px', borderRadius: 999,
-              background: allDone ? UI.goldFaint : 'transparent',
-              border: `0.5px solid ${allDone ? UI.goldSoft : UI.hair}`,
-              color: allDone ? UI.gold : UI.inkFaint,
+              background: allWorkingDone ? UI.goldFaint : 'transparent',
+              border: `0.5px solid ${allWorkingDone ? UI.goldSoft : UI.hair}`,
+              color: allWorkingDone ? UI.gold : UI.inkFaint,
               fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
               fontFamily: UI.fontUi, fontWeight: 500,
-              cursor: anyMissingData && !allDone ? 'default' : 'pointer',
-              opacity: anyMissingData && !allDone ? 0.3 : 1,
-            }}>{allDone ? '✓ All' : 'All ✓'}</button>
+              cursor: anyMissingData && !allWorkingDone ? 'default' : 'pointer',
+              opacity: anyMissingData && !allWorkingDone ? 0.3 : 1,
+            }}>{allWorkingDone ? '✓ All' : 'All ✓'}</button>
           </div>
 
           <div style={{
@@ -1489,101 +1512,116 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {entry.sets.map((s, i) => {
-              const prevSet = last?.entry?.sets?.[i];
+              const isWarmupRow = !!s.warmup;
+              // Working sets offset index by warmupCount so prev-session lookup is correct
+              const prevSet = isWarmupRow ? null : last?.entry?.sets?.[i - warmupCount];
               const isCurrent = i === currentSetIdx;
+              const showWorkingSep = !isWarmupRow && i === warmupCount && warmupCount > 0;
+              const warmupRowNum = isWarmupRow ? entry.sets.slice(0, i + 1).filter(x => x.warmup).length : 0;
+              const workingRowNum = !isWarmupRow ? entry.sets.slice(0, i + 1).filter(x => !x.warmup).length : 0;
               return (
-                <div key={i} data-kb-row={i} style={{
-                  display: 'grid',
-                  gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
-                  gap: 8, alignItems: 'center',
-                  padding: '10px 4px',
-                  borderBottom: i < entry.sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
-                  opacity: s.done || s.skipped ? 0.4 : 1,
-                  animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
-                }}>
-                  <div style={{
-                    width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
-                    background: isCurrent ? UI.goldFaint : 'transparent',
-                    boxShadow: `inset 0 0 0 0.5px ${isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.hairStrong}`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontFamily: UI.fontNum, fontSize: 10, fontWeight: 500,
-                    color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
-                  }}>{i + 1}</div>
-
-                  <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
-                    {prevSet?.kg && (prevSet?.reps || prevSet?.repsL != null) ? `${prevSet.kg}kg × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'}
-                  </div>
-
-                  <KgInput
-                    value={s.kg}
-                    done={s.done || s.skipped}
-                    style={setInputStyle(s.done || s.skipped, isCurrent)}
-                    onActivate={() => activateKb(i, 'kg')}
-                    kbRaw={kbRaw}
-                    isKbActive={kbField?.setIdx === i && kbField?.field === 'kg'}
-                    onChange={kg => updateSession(sess => ({
-                      ...sess,
-                      entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
-                        ...en,
-                        sets: en.sets.map((st, si) =>
-                          si === i ? { ...st, kg, done: false }
-                          : si > i && !st.done ? { ...st, kg }
-                          : st
-                        ),
-                      }),
-                    }))}
-                  />
-
-                  {isUnilateral ? (
-                    <>
-                      <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsL'); }} />
-                      <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsR'); }} />
-                    </>
-                  ) : (
-                    <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder="—" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
+                <React.Fragment key={i}>
+                  {showWorkingSep && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 4px 4px', borderBottom: `0.5px solid ${UI.hairStrong}` }}>
+                      <span className="micro" style={{ color: UI.inkFaint }}>WORKING SETS</span>
+                    </div>
                   )}
-
-                  <button
-                    data-complete-btn
-                    onPointerDown={e => { _log(`row${i} pointerdown done=${s.done}`); e.stopPropagation(); }}
-                    onClick={() => {
-                      const now = Date.now();
-                      _log(`row${i} click done=${s.done} skipped=${s.skipped}`);
-                      if (s.skipped) { updateSet(i, { skipped: false }); return; }
-                      if (s.done) {
-                        const globalDelta = now - (lastCompleteRef.current || 0);
-                        const rowDelta = now - (recentCompleteRef.current[i] || 0);
-                        _log(`row${i} uncheck? globalΔ=${globalDelta}ms rowΔ=${rowDelta}ms`);
-                        if (globalDelta < 2000) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
-                        if (rowDelta < 3000) { _log(`row${i} BLOCKED by row guard (${rowDelta}ms)`); return; }
-                        _log(`row${i} UNCHECK → updateSet done:false`);
-                        updateSet(i, { done: false });
-                        return;
-                      }
-                      if (s.kg == null) return;
-                      _log(`row${i} → completeSet`);
-                      completeSet(i);
-                    }}
-                    disabled={!s.done && !s.skipped && (s.kg == null || (kbField?.setIdx !== i && (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)))}
-                    style={{
-                      width: 26, height: 26, borderRadius: 5, border: 'none', cursor: 'pointer',
-                      background: s.done ? UI.gold : 'transparent',
-                      outline: `0.5px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
+                  <div data-kb-row={i} style={{
+                    display: 'grid',
+                    gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
+                    gap: 8, alignItems: 'center',
+                    padding: '10px 4px',
+                    borderBottom: i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) ? `0.5px solid ${UI.hair}` : 'none',
+                    opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
+                    animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
+                  }}>
+                    <div style={{
+                      width: 24, height: 24, borderRadius: isWarmupRow ? 5 : '50%', flexShrink: 0,
+                      background: isCurrent ? UI.goldFaint : 'transparent',
+                      boxShadow: `inset 0 0 0 0.5px ${isCurrent ? UI.gold : s.done ? UI.goldDeep : isWarmupRow ? UI.hair : UI.hairStrong}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: s.skipped ? 12 : 14, fontWeight: 700,
-                      color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
-                      opacity: !s.done && !s.skipped && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? 0.35 : 1,
-                      flexShrink: 0,
-                      WebkitTapHighlightColor: 'transparent',
-                    }}>{s.skipped ? '×' : '✓'}</button>
+                      fontFamily: UI.fontNum, fontSize: isWarmupRow ? 8 : 10, fontWeight: 500,
+                      color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
+                    }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
-                  {!s.done && entry.sets.length > 1 ? (
-                    <button onClick={() => removeSet(i)} style={{
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      color: UI.danger, fontSize: 16, lineHeight: 1, padding: 0, opacity: 0.6,
-                    }}>−</button>
-                  ) : <span />}
-                </div>
+                    <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
+                      {isWarmupRow
+                        ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
+                        : prevSet?.kg && (prevSet?.reps || prevSet?.repsL != null) ? `${prevSet.kg}kg × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
+                      }
+                    </div>
+
+                    <KgInput
+                      value={s.kg}
+                      done={s.done || s.skipped}
+                      style={setInputStyle(s.done || s.skipped, isCurrent)}
+                      onActivate={() => activateKb(i, 'kg')}
+                      kbRaw={kbRaw}
+                      isKbActive={kbField?.setIdx === i && kbField?.field === 'kg'}
+                      onChange={kg => updateSession(sess => ({
+                        ...sess,
+                        entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+                          ...en,
+                          sets: en.sets.map((st, si) =>
+                            si === i ? { ...st, kg, done: false }
+                            : si > i && !st.done && !st.warmup ? { ...st, kg }
+                            : st
+                          ),
+                        }),
+                      }))}
+                    />
+
+                    {isUnilateral ? (
+                      <>
+                        <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsL'); }} />
+                        <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsR'); }} />
+                      </>
+                    ) : (
+                      <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder="—" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
+                    )}
+
+                    <button
+                      data-complete-btn
+                      onPointerDown={e => { _log(`row${i} pointerdown done=${s.done}`); e.stopPropagation(); }}
+                      onClick={() => {
+                        const now = Date.now();
+                        _log(`row${i} click done=${s.done} skipped=${s.skipped}`);
+                        if (s.skipped) { updateSet(i, { skipped: false }); return; }
+                        if (s.done) {
+                          const globalDelta = now - (lastCompleteRef.current || 0);
+                          const rowDelta = now - (recentCompleteRef.current[i] || 0);
+                          _log(`row${i} uncheck? globalΔ=${globalDelta}ms rowΔ=${rowDelta}ms`);
+                          if (globalDelta < 2000) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
+                          if (rowDelta < 3000) { _log(`row${i} BLOCKED by row guard (${rowDelta}ms)`); return; }
+                          _log(`row${i} UNCHECK → updateSet done:false`);
+                          updateSet(i, { done: false });
+                          return;
+                        }
+                        if (s.kg == null) return;
+                        _log(`row${i} → completeSet`);
+                        completeSet(i);
+                      }}
+                      disabled={!s.done && !s.skipped && (s.kg == null || (kbField?.setIdx !== i && (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)))}
+                      style={{
+                        width: 26, height: 26, borderRadius: 5, border: 'none', cursor: 'pointer',
+                        background: s.done ? UI.gold : 'transparent',
+                        outline: `0.5px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: s.skipped ? 12 : 14, fontWeight: 700,
+                        color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
+                        opacity: !s.done && !s.skipped && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? 0.35 : 1,
+                        flexShrink: 0,
+                        WebkitTapHighlightColor: 'transparent',
+                      }}>{s.skipped ? '×' : '✓'}</button>
+
+                    {!s.warmup && !s.done && entry.sets.length > 1 ? (
+                      <button onClick={() => removeSet(i)} style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: UI.danger, fontSize: 16, lineHeight: 1, padding: 0, opacity: 0.6,
+                      }}>−</button>
+                    ) : <span />}
+                  </div>
+                </React.Fragment>
               );
             })}
           </div>

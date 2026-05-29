@@ -226,6 +226,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [selectedWd, setSelectedWd] = useState(todayWd);
   const [skipReasonModal, setSkipReasonModal] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(dayIdx);
+  const [warmupPromptData, setWarmupPromptData] = useState(null);
 
   const minOffset = (() => {
     if (weekdayMode) {
@@ -544,14 +545,33 @@ function HomeScreen({ store, setStore, go, userId }) {
         supersetGroup: it.supersetGroup || null,
       };
     });
-    const nowISO = new Date().toISOString();
     const cyclePos = weekdayMode ? null :
       cycleWeekView
         ? (week.find(d => d.weekday === selectedWd)?.daysFromStart ?? null)
         : (currentCycleNum + weekOffset) * dayCount + selectedSlot;
+    const firstWorkingKg = entries[0]?.sets[0]?.kg ?? null;
+    setWarmupPromptData({ entries, cyclePos, firstWorkingKg, firstName: entries[0]?.name || '?' });
+  };
+
+  const confirmStart = (withWarmup) => {
+    const { entries: rawEntries, cyclePos, firstWorkingKg } = warmupPromptData;
+    setWarmupPromptData(null);
+    let entries = rawEntries;
+    let startedAt = new Date().toISOString();
+    if (withWarmup) {
+      const ft10 = kg => Math.floor(kg / 10) * 10;
+      const wKg = firstWorkingKg;
+      const warmupSets = [
+        { kg: wKg != null ? (ft10(wKg * 0.30) || null) : null, reps: 12, done: false, warmup: true, warmupPct: 30 },
+        { kg: wKg != null ? (ft10(wKg * 0.60) || null) : null, reps: 8,  done: false, warmup: true, warmupPct: 60 },
+        { kg: wKg != null ? wKg : null,                          reps: 4,  done: false, warmup: true, warmupPct: 100 },
+      ];
+      entries = entries.map((e, i) => i === 0 ? { ...e, sets: [...warmupSets, ...e.sets] } : e);
+      startedAt = null; // timer starts when last warmup set is completed
+    }
     const session = {
       id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
-      date: sessionDate.toISOString(), startedAt: nowISO, ended: null, entries, currentExIdx: 0,
+      date: sessionDate.toISOString(), startedAt, ended: null, entries, currentExIdx: 0,
       cyclePos,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
@@ -922,6 +942,36 @@ function HomeScreen({ store, setStore, go, userId }) {
         setStore={setStore}
         userId={userId}
       />
+      {warmupPromptData && (() => {
+        const { firstWorkingKg, firstName } = warmupPromptData;
+        const ft10 = kg => Math.floor(kg / 10) * 10;
+        const preview = [
+          { pct: 30, kg: firstWorkingKg != null ? (ft10(firstWorkingKg * 0.30) || null) : null, reps: 12 },
+          { pct: 60, kg: firstWorkingKg != null ? (ft10(firstWorkingKg * 0.60) || null) : null, reps: 8 },
+          { pct: 100, kg: firstWorkingKg, reps: 4 },
+        ];
+        return (
+          <Sheet open={true} onClose={() => setWarmupPromptData(null)} title="Warmup?">
+            <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.7, marginBottom: 14 }}>
+              3 sets · <span style={{ color: UI.inkSoft }}>{firstName}</span> · timer starts after last warmup set
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 22 }}>
+              {preview.map(({ pct, kg, reps }) => (
+                <div key={pct} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hairStrong}` }}>
+                  <span className="micro" style={{ color: UI.inkFaint }}>{pct}%</span>
+                  <span className="num" style={{ fontSize: 14, color: kg != null ? UI.inkSoft : UI.inkFaint }}>
+                    {kg != null ? `${kg}kg` : '—'} · {reps}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => confirmStart(false)} style={{ flex: 1, fontSize: 12 }}>Skip</Btn>
+              <Btn onClick={() => confirmStart(true)} style={{ flex: 2, fontSize: 12 }}>Start with warmup</Btn>
+            </div>
+          </Sheet>
+        );
+      })()}
       {confirmEl}
     </Screen>
   );
