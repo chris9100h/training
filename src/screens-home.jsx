@@ -559,7 +559,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     let entries = rawEntries;
     let startedAt = new Date().toISOString();
     if (withWarmup) {
-      const ft10 = kg => Math.floor(kg / 10) * 10;
+      const ft10 = kg => Math.round(kg / 10) * 10;
       const wKg = firstWorkingKg;
       const warmupSets = [
         { kg: wKg != null ? (ft10(wKg * 0.30) || null) : null, reps: 12, done: false, warmup: true, warmupPct: 30 },
@@ -944,7 +944,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       />
       {warmupPromptData && (() => {
         const { firstWorkingKg, firstName } = warmupPromptData;
-        const ft10 = kg => Math.floor(kg / 10) * 10;
+        const ft10 = kg => Math.round(kg / 10) * 10;
         const preview = [
           { pct: 30, kg: firstWorkingKg != null ? (ft10(firstWorkingKg * 0.30) || null) : null, reps: 12 },
           { pct: 60, kg: firstWorkingKg != null ? (ft10(firstWorkingKg * 0.60) || null) : null, reps: 8 },
