@@ -136,12 +136,7 @@ async function importFromBackup(backup, userId) {
       backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
     ),
     backup.sessions?.length && _supabase.from('zane_sessions').upsert(
-      backup.sessions.filter(s => s.id).map(s => {
-        const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, ...rest } = s;
-        const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
-        if (startedAt != null) row.started_at = startedAt;
-        return row;
-      })
+      backup.sessions.filter(s => s.id).map(s => sessionToRow(s, userId))
     ),
     _supabase.from('zane_user_settings').upsert({
       user_id: userId,

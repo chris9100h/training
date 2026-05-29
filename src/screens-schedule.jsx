@@ -154,8 +154,10 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
       ...s,
       activeScheduleId: sch.id,
       cycleIndex: 0,
-      cycleStartDate:    isWeekday ? s.cycleStartDate : LB.todayISO(),
-      weekPlanStartDate: isWeekday ? LB.todayISO()    : s.weekPlanStartDate,
+      // Reset the start date that doesn't apply to this plan type, so a later
+      // type switch can't read a stale date left over from a different plan.
+      cycleStartDate:    isWeekday ? null          : LB.todayISO(),
+      weekPlanStartDate: isWeekday ? LB.todayISO() : null,
     }));
   };
   const duplicate = () => {
@@ -745,7 +747,15 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
       return it;
     })};
   });
-  const removeItem = (idx) => setDraft(d => ({ ...d, items: d.items.filter((_, i) => i !== idx) }));
+  // A superset group is only meaningful as a contiguous run of >= 2 adjacent
+  // items. After a move/remove, drop the group id from any item no longer next
+  // to a same-group partner so distant rows can't stay silently coupled.
+  const normalizeSupersets = (items) => items.map((it, i) => {
+    if (!it.supersetGroup) return it;
+    const linked = items[i - 1]?.supersetGroup === it.supersetGroup || items[i + 1]?.supersetGroup === it.supersetGroup;
+    return linked ? it : { ...it, supersetGroup: null };
+  });
+  const removeItem = (idx) => setDraft(d => ({ ...d, items: normalizeSupersets(d.items.filter((_, i) => i !== idx)) }));
   const addExercise = (exId) => {
     const ex = LB.findExercise(store, exId);
     const defaultReps = ex?.progression_reps ?? 8;
@@ -758,11 +768,22 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
       if (j < 0 || j >= d.items.length) return d;
       const items = [...d.items];
       [items[idx], items[j]] = [items[j], items[idx]];
-      return { ...d, items };
+      return { ...d, items: normalizeSupersets(items) };
     });
   };
   const copyItemsFromDay = (items) => {
-    setDraft(d => ({ ...d, items: [...items] }));
+    // Deep-copy each item and remap superset group ids — a shallow [...items]
+    // would share item objects (and group ids) with the source day.
+    const gidMap = {};
+    const copied = items.map(it => {
+      const next = { ...it };
+      if (it.supersetGroup) {
+        gidMap[it.supersetGroup] = gidMap[it.supersetGroup] || LB.uid();
+        next.supersetGroup = gidMap[it.supersetGroup];
+      }
+      return next;
+    });
+    setDraft(d => ({ ...d, items: copied }));
     setCopyingFrom(false);
   };
 

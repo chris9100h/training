@@ -191,7 +191,7 @@ function LibraryScreen({ store, setStore, go }) {
         {tab === 'recent' && recent.map(({ ex, last, lastEntry, trend }, ri) => {
           const days = Math.round((Date.now() - new Date(last)) / 86400000);
           const isToday = days === 0;
-          const top = lastEntry?.sets?.find(s => s.kg);
+          const top = lastEntry?.sets?.find(s => s.kg != null);
           const trendColor = trend === 'up' ? UI.ok : trend === 'down' ? UI.danger : UI.inkFaint;
           const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : trend === 'same' ? '→' : null;
           return (
@@ -207,7 +207,7 @@ function LibraryScreen({ store, setStore, go }) {
                 <div className="display" style={{ fontSize: 19, color: isToday ? UI.gold : UI.ink, lineHeight: 1.1, marginBottom: 3 }}>{ex.name}</div>
                 <div className="num" style={{ fontSize: 10, color: isToday ? UI.gold : UI.inkFaint, letterSpacing: '0.05em', marginBottom: 4 }}>
                   {isToday ? 'today' : `${days}d ago`}
-                  {top && ` · ${top.kg}kg × ${top.reps}`}
+                  {top && ` · ${top.kg}kg × ${LB.effReps(top) ?? '?'}`}
                 </div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                   {ex.tags?.map(t => <Pill key={t}>{t}</Pill>)}
@@ -452,10 +452,17 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
 }
 
 // ─── EXERCISE DETAIL ─────────────────────────────────────────────────
-function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [], editQueueTotal = 0, autoEdit = false }) {
-  const ex = LB.findExercise(store, exId);
-  if (!ex) { go(back || { name: 'lib' }); return null; }
+function ExerciseDetailScreen(props) {
+  const ex = LB.findExercise(props.store, props.exId);
+  // Redirect from an effect — never call go() during render. The inner
+  // component mounts only when the exercise exists, so its hook order stays
+  // stable even if the exercise is deleted while the screen is open.
+  useEffectL(() => { if (!ex) props.go(props.back || { name: 'lib' }); }, [!!ex]);
+  if (!ex) return null;
+  return <ExerciseDetailScreenInner {...props} ex={ex} />;
+}
 
+function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue = [], editQueueTotal = 0, autoEdit = false, ex }) {
   const [confirmEl, confirm] = useConfirm();
   const [editMode, setEditMode] = useStateL(autoEdit);
   const [editName, setEditName] = useStateL(autoEdit ? ex.name : '');
@@ -528,7 +535,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
   const pr = points.length ? Math.max(...points.map(p => p.est)) : 0;
 
   const volPr = history.length ? Math.max(...history.map(h =>
-    (h.entry.sets || []).filter(s => s.kg != null && s.reps).reduce((sum, s) => sum + s.kg * s.reps, 0)
+    (h.entry.sets || []).reduce((sum, s) => s.kg == null ? sum : sum + s.kg * (LB.effReps(s) ?? 0), 0)
   )) : 0;
 
   const queuePos = editQueueTotal > 0 ? editQueueTotal - editQueue.length : 0;
@@ -712,7 +719,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      {h.entry.sets.filter(s => s.kg).map((s, i) => {
+                      {h.entry.sets.filter(s => s.kg != null).map((s, i) => {
                         const isBest = sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01;
                         const repsStr = (s.repsL != null || s.repsR != null)
                           ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
@@ -766,6 +773,9 @@ function ProgressChart({ points }) {
 // ─── STATS TAB ───────────────────────────────────────────────────────
 function StatsTab({ store, sessions, go }) {
   const today = new Date(); today.setHours(12, 0, 0, 0);
+  // Stable per-day key so the date-scoped memos below re-run when the calendar
+  // day rolls over (long-lived PWA session), but stay memoized within a day.
+  const todayKey = today.toISOString().slice(0, 10);
 
   // Monday of current week
   const dow = today.getDay();
@@ -806,12 +816,12 @@ function StatsTab({ store, sessions, go }) {
   const thisWeekSessions = useMemoL(() => sessions.filter(s => {
     const d = LB.parseDate(s.date);
     return d >= monday && d <= sunday;
-  }), [sessions]);
+  }), [sessions, todayKey]);
 
   const thisMonthSessions = useMemoL(() => sessions.filter(s => {
     const d = LB.parseDate(s.date);
     return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
-  }), [sessions]);
+  }), [sessions, todayKey]);
 
   // Weekly sets per muscle group
   const setsPerMuscle = useMemoL(() => {
@@ -840,12 +850,10 @@ function StatsTab({ store, sessions, go }) {
       weeks.push({ label, vol });
     }
     return weeks;
-  }, [sessions]);
+  }, [sessions, todayKey]);
 
   // All-time stats
   const totalVol = sessions.reduce((sum, s) => sum + LB.totalVolume(s), 0);
-  const totalSets = sessions.reduce((sum, s) => sum + s.entries.reduce((c, e) => c + e.sets.filter(st => st.done).length, 0), 0);
-  const totalReps = sessions.reduce((sum, s) => sum + s.entries.reduce((c, e) => c + e.sets.filter(st => st.done).reduce((r, st) => r + (+st.reps || 0), 0), 0), 0);
   const avgVol = sessions.length ? Math.round(totalVol / sessions.length) : 0;
   const durations = sessions
     .map(s => s.durationMinutes != null
@@ -910,7 +918,7 @@ function StatsTab({ store, sessions, go }) {
 
   const thisYearSessions = useMemoL(() => sessions.filter(s => {
     return LB.parseDate(s.date).getFullYear() === today.getFullYear();
-  }), [sessions]);
+  }), [sessions, todayKey]);
 
   const avgSessionsPerWeek = useMemoL(() => {
     const relevant = planStart
@@ -1201,7 +1209,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const [capturing, setCapturing] = useStateL(false);
   const captureRef = useRefL(null);
   const s = store.sessions.find(x => x.id === sessionId);
-  if (!s) { go({ name: 'hist' }); return null; }
+  useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
+  if (!s) return null;
   const vol = LB.totalVolume(s);
   const duration = s.durationMinutes != null
     ? s.durationMinutes

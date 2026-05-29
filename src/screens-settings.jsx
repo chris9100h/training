@@ -91,7 +91,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   useEffectSet(() => {
     let mounted = true;
     LB.supabase.rpc('check_active_users_access')
-      .then(({ data }) => { const val = !!data; localStorage.setItem('logbook-active-users-access', val); if (mounted) setHasActiveUsersAccess(val); })
+      .then(({ data }) => { const val = !!data; localStorage.setItem('logbook-active-users-access', String(val)); if (mounted) setHasActiveUsersAccess(val); })
       .catch(() => {});
     return () => { mounted = false; };
   }, []);
@@ -123,6 +123,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   };
 
   const pushStatusTimer = useRefSet(null);
+  useEffectSet(() => () => clearTimeout(pushStatusTimer.current), []);
   const togglePush = () => {
     if (!pushEnabled) {
       if (store.settings?.pushoverUserKey) { setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true'); setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } })); }

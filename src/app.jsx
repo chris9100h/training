@@ -229,9 +229,11 @@ function App() {
       reg.addEventListener('updatefound', () => trackWorker(reg.installing));
     });
     // Only reload when the user explicitly clicked "Update now"
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
+    const onControllerChange = () => {
       if (intentionalUpdate.current) window.location.reload(true);
-    });
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+    return () => navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
   }, []);
 
   const applyUpdate = useCallbackA(async () => {
@@ -431,7 +433,7 @@ function App() {
               }),
             };
           });
-          sessions[idx] = { ...existing, entries: mergedEntries, ended: session.ended, startedAt: session.startedAt };
+          sessions[idx] = { ...existing, entries: mergedEntries, ended: session.ended, startedAt: session.startedAt, durationMinutes: session.durationMinutes ?? existing.durationMinutes ?? null };
           // Session finished remotely — clear inProgress and go to summary
           if (session.ended && s.inProgress === session.id) {
             setRoute({ name: 'session', sessionId: session.id });

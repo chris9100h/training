@@ -658,9 +658,12 @@ function HomeScreen({ store, setStore, go, userId }) {
               {activeSession.dayName}
             </span>
             <button onClick={async () => {
+              // Capture the id before awaiting — a cross-device sync could swap
+              // the in-progress session while the confirm dialog is open.
+              const cancelId = store.inProgress;
               if (!await confirm('The session will be deleted.', { title: 'Cancel training?', ok: 'Cancel', cancel: 'Back', danger: true })) return;
               LB.cancelPushover(store.settings, userId);
-              setStore(s => ({ ...s, sessions: s.sessions.filter(x => x.id !== store.inProgress), inProgress: null }));
+              setStore(s => s.inProgress !== cancelId ? s : { ...s, sessions: s.sessions.filter(x => x.id !== cancelId), inProgress: null });
             }} style={{
               background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0,
               fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, padding: '4px 0',
