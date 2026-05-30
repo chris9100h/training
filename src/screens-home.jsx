@@ -950,6 +950,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                 {activeDay.items.map((item, i) => {
                   const ex = LB.findExercise(store, item.exId);
                   let setsText, repsText, isActual = false, maxKg = null;
+
                   if (isSlotDone && doneSession) {
                     const entry = doneSession.entries.find(e => e.exId === item.exId);
                     if (entry) {
@@ -962,7 +963,23 @@ function HomeScreen({ store, setStore, go, userId }) {
                       isActual = true;
                     }
                   }
-                  if (!isActual) { setsText = item.sets; repsText = item.reps; }
+
+                  if (!isActual) {
+                    setsText = item.sets;
+                    const suggestion = LB.progressionSuggestion(store, item.exId, activeDay.id, item.reps);
+                    const last = LB.lastSessionForExercise(store, item.exId, activeDay.id);
+                    const prev = last?.entry?.sets?.find(s => !s.warmup);
+                    const smart = !!store.settings?.smartProgression;
+                    if (suggestion) {
+                      repsText = suggestion.reps; maxKg = suggestion.kg;
+                    } else if (smart && prev) {
+                      repsText = prev.reps != null ? prev.reps + 1 : item.reps; maxKg = prev.kg ?? null;
+                    } else if (prev) {
+                      repsText = prev.reps ?? item.reps; maxKg = prev.kg ?? null;
+                    } else {
+                      repsText = item.reps;
+                    }
+                  }
                   return (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${UI.hair}` }}>
                       <span className="num" style={{ fontSize: 10, color: UI.inkGhost, minWidth: 20, textAlign: 'right', flexShrink: 0 }}>{String(i + 1).padStart(2, '0')}</span>
