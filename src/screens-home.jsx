@@ -955,11 +955,13 @@ function HomeScreen({ store, setStore, go, userId }) {
                     const entry = doneSession.entries.find(e => e.exId === item.exId);
                     if (entry) {
                       const doneSets = entry.sets.filter(s => !s.warmup && s.done && !s.skipped);
-                      setsText = String(doneSets.length);
-                      const repsArr = doneSets.map(s => s.reps).filter(r => r != null);
-                      repsText = repsArr.length > 0 ? repsArr[0] : item.reps;
+                      setsText = null; // slash format doesn't use sets×
+                      // per-set reps as slash-separated string: 14/13
+                      const repsArr = doneSets.map(s => s.reps ?? s.repsL ?? '?');
+                      repsText = repsArr.length > 0 ? repsArr.join('/') : '—';
+                      // weight from first set (most meaningful reference point)
                       const kgs = doneSets.map(s => s.kg).filter(k => k != null);
-                      maxKg = kgs.length > 0 ? Math.max(...kgs) : null;
+                      maxKg = kgs.length > 0 ? kgs[0] : null;
                       isActual = true;
                     }
                   }
@@ -985,7 +987,9 @@ function HomeScreen({ store, setStore, go, userId }) {
                       <span className="num" style={{ fontSize: 10, color: UI.inkGhost, minWidth: 20, textAlign: 'right', flexShrink: 0 }}>{String(i + 1).padStart(2, '0')}</span>
                       <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: isActual ? UI.ink : UI.inkSoft, fontWeight: isActual ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || '?'}</span>
                       {maxKg != null && <span className="num" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{maxKg}kg</span>}
-                      <span className="micro" style={{ color: isActual ? UI.gold : UI.inkFaint, letterSpacing: '0.10em', flexShrink: 0 }}>{setsText}×{repsText}</span>
+                      <span className="num" style={{ fontSize: 11, color: isActual ? UI.gold : UI.inkFaint, flexShrink: 0 }}>
+                        {isActual ? repsText : `${setsText}×${repsText}`}
+                      </span>
                     </div>
                   );
                 })}
