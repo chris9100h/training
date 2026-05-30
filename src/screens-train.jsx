@@ -1168,7 +1168,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 6,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8), 0 0 80px rgba(201,169,97,0.4)' }}>IMPROVEMENT</span>
           </div>
         </div>
@@ -1191,7 +1191,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 6,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(var(--danger-rgb),0.9), 0 0 70px rgba(var(--danger-rgb),0.5)' }}>↓</span>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--danger-rgb),0.9), 0 0 70px rgba(var(--danger-rgb),0.5)' }}>↓</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.danger, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(var(--danger-rgb),1), 0 0 40px rgba(var(--danger-rgb),0.8), 0 0 80px rgba(var(--danger-rgb),0.4)' }}>REGRESSION</span>
           </div>
         </div>
@@ -1207,9 +1207,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           gap: 8,
         }}>
           <div style={{ animation: 'improvedBorderPulse 0.8s ease-in-out infinite', position: 'absolute', inset: 0 }} />
-          <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
+          <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
           <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8)' }}>PROGRESSION UNLOCKED</span>
-          <span style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontStyle: 'italic', fontWeight: 400, marginTop: 4 }}>You've earned the next load.</span>
+          <span style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, marginTop: 4 }}>You've earned the next load.</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
             <span className="num" style={{ fontSize: 22, color: UI.inkSoft }}>{progressionUnlocked.currentKg}kg</span>
             <span style={{ color: UI.gold, fontSize: 20, lineHeight: 1 }}>→</span>
@@ -1222,8 +1222,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       {/* Top: close + session timer */}
       <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 8px', display: 'flex', alignItems: 'center', gap: 14 }}>
         <button onClick={abandon} style={{
-          width: 32, height: 32, borderRadius: '50%',
-          boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, background: 'transparent',
+          width: 32, height: 32, borderRadius: 4,
+          border: `1px solid ${UI.hairStrong}`, background: 'transparent',
           color: UI.danger, cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, lineHeight: 1,
         }}>×</button>
@@ -1256,8 +1256,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           </>)}
         </div>
         <button onClick={() => go({ name: 'home' })} style={{
-          width: 32, height: 32, borderRadius: '50%',
-          boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, background: 'transparent',
+          width: 32, height: 32, borderRadius: 4,
+          border: `1px solid ${UI.hairStrong}`, background: 'transparent',
           color: UI.inkSoft, cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
@@ -1340,8 +1340,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
               onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
               style={{
                 flexShrink: 0, maxWidth: 110,
-                padding: '5px 11px 4px', borderRadius: 999,
-                border: `0.5px solid ${active ? UI.gold : done ? UI.goldSoft : UI.hairStrong}`,
+                padding: '5px 11px 4px', borderRadius: 4,
+                border: `1px solid ${active ? UI.gold : done ? UI.goldSoft : UI.hairStrong}`,
                 background: active ? UI.goldFaint : done ? 'rgba(201,169,97,0.05)' : 'transparent',
                 cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                 transition: 'all 0.15s',
@@ -1371,7 +1371,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         <div style={{ flexShrink: 0 }}>
           <div className="display" style={{
             fontSize: entry.name.length > 28 ? 16 : entry.name.length > 22 ? 20 : entry.name.length > 16 ? 26 : 32,
-            color: UI.ink, lineHeight: 1.05, letterSpacing: '-0.01em', fontWeight: 400,
+            color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>
             {entry.name}
@@ -1389,7 +1389,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         {allDone ? (
           <Frame accent style={{ padding: 28, textAlign: 'center' }}>
             <div className="micro-gold" style={{ marginBottom: 10 }}>ALL SETS</div>
-            <div className="display" style={{ fontSize: 28, color: UI.gold, fontStyle: 'italic', fontWeight: 300, marginBottom: 6 }}>Done.</div>
+            <div className="display" style={{ fontSize: 28, color: UI.gold, fontWeight: 900, marginBottom: 6 }}>Done.</div>
             <div style={{ color: UI.inkSoft, fontSize: 13 }}>Next exercise ready.</div>
             <Btn onClick={() => navigate(1)} style={{ marginTop: 18 }}>
               {exIdx === session.entries.length - 1 ? 'Finish session →' : 'Next exercise →'}
@@ -1448,7 +1448,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                   />
                   <div className="micro" style={{ marginTop: 2 }}>KILOGRAMS</div>
                 </div>
-                <div style={{ fontSize: 32, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 200, fontStyle: 'italic', alignSelf: 'flex-start', marginTop: 6 }}>×</div>
+                <div style={{ fontSize: 32, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 700, alignSelf: 'flex-start', marginTop: 6 }}>×</div>
                 {isUnilateral ? (
                   <div style={{ flex: 1, display: 'flex', gap: 4 }}>
                     <div style={{ flex: 1, textAlign: 'center' }}>
@@ -1500,9 +1500,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                   style={{
                     width: '100%', minHeight: 44,
                     background: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-                    border: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? `0.5px solid ${UI.hairStrong}` : `0.5px solid var(--accent-deep)`,
+                    border: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? `1px solid ${UI.hairStrong}` : `1px solid var(--accent-deep)`,
                     color: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? UI.inkFaint : '#0a0805',
-                    borderRadius: 999,
+                    borderRadius: 6,
                     fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em', textTransform: 'uppercase',
                     cursor: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'default' : 'pointer',
                     boxShadow: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'none' : '0 8px 30px rgba(var(--accent-rgb),0.30)',
@@ -1520,9 +1520,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
             <span className="micro">{warmupCount > 0 && warmupActive ? 'WARMUP' : 'ALL SETS'}</span>
             <button onClick={checkAllSets} disabled={anyMissingData && !allWorkingDone} style={{
-              padding: '4px 10px', borderRadius: 999,
+              padding: '4px 10px', borderRadius: 4,
               background: allWorkingDone ? UI.goldFaint : 'transparent',
-              border: `0.5px solid ${allWorkingDone ? UI.goldSoft : UI.hair}`,
+              border: `1px solid ${allWorkingDone ? UI.goldSoft : UI.hair}`,
               color: allWorkingDone ? UI.gold : UI.inkFaint,
               fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
               fontFamily: UI.fontUi, fontWeight: 500,
@@ -1536,7 +1536,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
             gap: 8, alignItems: 'baseline',
             padding: '0 4px 6px',
-            borderBottom: `0.5px solid ${UI.hair}`,
+            borderBottom: `1px solid ${UI.hair}`,
             marginBottom: 2,
           }}>
             <div />
@@ -1567,7 +1567,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
               return (
                 <React.Fragment key={i}>
                   {showWorkingSep && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 4px 4px', borderBottom: `0.5px solid ${UI.hairStrong}` }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 4px 4px', borderBottom: `1px solid ${UI.hairStrong}` }}>
                       <span className="micro" style={{ color: UI.inkFaint }}>WORKING SETS</span>
                     </div>
                   )}
@@ -1576,14 +1576,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                     gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
                     gap: 8, alignItems: 'center',
                     padding: '10px 4px',
-                    borderBottom: i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) ? `0.5px solid ${UI.hair}` : 'none',
+                    borderBottom: i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) ? `1px solid ${UI.hair}` : 'none',
                     opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
                     animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
                   }}>
                     <div style={{
-                      width: 24, height: 24, borderRadius: isWarmupRow ? 5 : '50%', flexShrink: 0,
+                      width: 24, height: 24, borderRadius: 3, flexShrink: 0,
                       background: isCurrent ? UI.goldFaint : 'transparent',
-                      boxShadow: `inset 0 0 0 0.5px ${isCurrent ? UI.gold : s.done ? UI.goldDeep : isWarmupRow ? UI.hair : UI.hairStrong}`,
+                      outline: `1px solid ${isCurrent ? UI.gold : s.done ? UI.goldDeep : isWarmupRow ? UI.hair : UI.hairStrong}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontFamily: UI.fontNum, fontSize: isWarmupRow ? 8 : 10, fontWeight: 500,
                       color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
@@ -1674,22 +1674,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           {/* Add set / swap / note */}
           <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
             <button onClick={addSet} style={{
-              width: 32, height: 32, borderRadius: '50%',
-              background: 'transparent', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
+              width: 32, height: 32, borderRadius: 4,
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               color: UI.inkSoft, fontSize: 18, lineHeight: 1, cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>+</button>
             <button onClick={swapExercise} style={{
-              width: 32, height: 32, borderRadius: '50%',
-              background: 'transparent', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
+              width: 32, height: 32, borderRadius: 4,
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>⇄</button>
             {store.settings?.tempoEnabled && (
               <button onClick={() => tempoActive ? stopTempo() : startTempo()} style={{
-                borderRadius: 999, padding: '6px 12px', cursor: 'pointer',
+                borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
                 background: tempoActive ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-                border: `0.5px solid ${tempoActive ? 'var(--accent)' : UI.hairStrong}`,
+                border: `1px solid ${tempoActive ? 'var(--accent)' : UI.hairStrong}`,
                 color: tempoActive ? 'var(--accent)' : UI.inkFaint,
                 fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
               }}>
@@ -1699,8 +1699,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             <div style={{ flex: 1 }} />
             <button onClick={() => entry.note ? setSessionNoteOpen(true) : setNotePicker(true)} style={{
               background: entry.note ? UI.goldFaint : 'transparent',
-              border: `0.5px solid ${entry.note ? UI.goldSoft : UI.hairStrong}`,
-              borderRadius: 999, padding: '6px 12px', cursor: 'pointer',
+              border: `1px solid ${entry.note ? UI.goldSoft : UI.hairStrong}`,
+              borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
               color: entry.note ? UI.gold : UI.inkFaint, fontSize: 10,
               fontFamily: UI.fontUi, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
             }}>
@@ -1712,10 +1712,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           {entry.note ? (
             <button onClick={() => setSessionNoteOpen(true)} style={{
               marginTop: 10, width: '100%', textAlign: 'left',
-              background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`,
-              borderRadius: 10, padding: '10px 12px', cursor: 'pointer',
+              background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
+              borderRadius: 6, padding: '10px 12px', cursor: 'pointer',
               fontFamily: UI.fontDisplay, fontSize: 15, color: UI.gold,
-              fontStyle: 'italic', lineHeight: 1.5, whiteSpace: 'pre-wrap',
+              lineHeight: 1.5, whiteSpace: 'pre-wrap',
               WebkitTapHighlightColor: 'transparent',
             }}>
               {entry.note}
@@ -1727,7 +1727,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         {exercise?.note && (
           <Frame style={{ padding: 14 }} onClick={() => { setExNoteVal(exercise?.note || ''); setExNoteOpen(true); }}>
             <div className="micro" style={{ marginBottom: 6 }}>NOTE · {entry.name.toUpperCase()}</div>
-            <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.inkSoft, lineHeight: 1.5, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.inkSoft, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
               {exercise.note}
             </div>
           </Frame>
@@ -1739,12 +1739,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       <div style={{
         flexShrink: 0,
         padding: `10px 22px calc(env(safe-area-inset-bottom, 8px) + 10px)`,
-        borderTop: `0.5px solid ${UI.hair}`,
+        borderTop: `1px solid ${UI.hair}`,
         display: 'flex', gap: 10,
       }}>
         <button onClick={() => navigate(-1)} disabled={exIdx === 0} style={{
-          width: 56, minHeight: 50, borderRadius: 999,
-          background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+          width: 56, minHeight: 50, borderRadius: 6,
+          background: 'transparent', border: `1px solid ${UI.hairStrong}`,
           color: UI.inkSoft, cursor: exIdx === 0 ? 'default' : 'pointer',
           opacity: exIdx === 0 ? 0.3 : 1,
           display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
@@ -1773,7 +1773,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
               .filter(e => e.remaining > 0);
             if (!incomplete.length) return null;
             return (
-              <div style={{ background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 10, padding: '10px 12px', marginBottom: 14 }}>
+              <div style={{ background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '10px 12px', marginBottom: 14 }}>
                 <div className="label" style={{ color: 'var(--accent)', marginBottom: 8 }}>Incomplete sets</div>
                 {incomplete.map(e => (
                   <div key={e.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 4 }}>
@@ -1784,13 +1784,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
               </div>
             );
           })()}
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${UI.hair}` }}>
             <span>Sets</span>
             <span className="num" style={{ color: UI.ink }}>
               {session.entries.reduce((c, e) => c + e.sets.filter(s => s.done).length, 0)} / {session.entries.reduce((c, e) => c + e.sets.length, 0)}
             </span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${UI.hair}` }}>
             <span>Volume</span>
             <span className="num" style={{ color: UI.gold }}>
               {Math.round(LB.totalVolume(session)).toLocaleString('en-US')} kg
@@ -1811,14 +1811,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       <Sheet open={notePicker} onClose={() => setNotePicker(false)} title="Which note?">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button onClick={() => { setNotePicker(false); setSessionNoteOpen(true); }} style={{
-            background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 12,
+            background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
             padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
           }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Session note</div>
             <div style={{ fontSize: 12, color: UI.inkSoft }}>Only for this workout — e.g. how the set felt.</div>
           </button>
           <button onClick={() => { setNotePicker(false); setExNoteVal(exercise?.note || ''); setExNoteOpen(true); }} style={{
-            background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 12,
+            background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
             padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
           }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Exercise note</div>
@@ -1836,8 +1836,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           rows={4}
           style={{
             width: '100%', boxSizing: 'border-box',
-            background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-            borderRadius: 10, padding: 12, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
+            background: UI.bgInset, border: `1px solid ${UI.hair}`,
+            borderRadius: 6, padding: 12, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
             resize: 'vertical', outline: 'none',
           }}
         />
@@ -1853,8 +1853,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           rows={4}
           style={{
             width: '100%', boxSizing: 'border-box',
-            background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-            borderRadius: 10, padding: 12, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
+            background: UI.bgInset, border: `1px solid ${UI.hair}`,
+            borderRadius: 6, padding: 12, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
             resize: 'vertical', outline: 'none',
           }}
         />
@@ -1923,18 +1923,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           {/* controls */}
           <div style={{ display: 'flex', gap: 10, width: '100%' }}>
             <button onClick={() => { cancelPushover(); persistRestStart(null); setRestModalOpen(false); }} style={{
-              flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-              color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
+              flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
             }}>Skip</button>
             <button onClick={() => persistRestStart(restStart - 30000, activeRestDef)} style={{
-              flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-              color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
+              flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
             }}>−30s</button>
             <button onClick={() => persistRestStart(restStart + 30000, activeRestDef)} style={{
-              flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-              color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
+              flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
             }}>+30s</button>
           </div>
@@ -1951,7 +1951,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 61,
             background: 'var(--bg, #080603)',
             borderRadius: '20px 20px 0 0',
-            boxShadow: `0 -0.5px 0 ${UI.hairStrong}, 0 -24px 60px rgba(0,0,0,0.7)`,
+            boxShadow: `0 -1px 0 ${UI.hairStrong}, 0 -24px 60px rgba(0,0,0,0.7)`,
             padding: `18px 22px calc(env(safe-area-inset-bottom, 0px) + 24px)`,
           }}>
             {/* Header */}
@@ -1961,8 +1961,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                 <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>WARMUP</span>
               </div>
               <button onClick={skipWarmup} style={{
-                padding: '6px 14px', borderRadius: 999,
-                background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+                padding: '6px 14px', borderRadius: 4,
+                background: 'transparent', border: `1px solid ${UI.hairStrong}`,
                 color: UI.inkSoft, cursor: 'pointer',
                 fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
               }}>Skip</button>
@@ -1987,7 +1987,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                     }
                     <div className="micro" style={{ marginTop: 4 }}>{warmupOverlayHasKg ? 'KILOGRAMS' : 'NO SEED WEIGHT'}</div>
                   </div>
-                  <div style={{ fontSize: 28, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 200, fontStyle: 'italic', alignSelf: 'flex-start', marginTop: 4 }}>×</div>
+                  <div style={{ fontSize: 28, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 700, alignSelf: 'flex-start', marginTop: 4 }}>×</div>
                   <div style={{ flex: 1, textAlign: 'center' }}>
                     <div className="num" style={{ fontSize: 52, fontWeight: 300, color: UI.gold, letterSpacing: '-0.02em', lineHeight: 1 }}>{warmupOverlaySet.reps}</div>
                     <div className="micro" style={{ marginTop: 4 }}>REPETITIONS</div>
@@ -2001,9 +2001,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                     style={{
                       width: '100%', minHeight: 46,
                       background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-                      border: `0.5px solid var(--accent-deep)`,
-                      color: '#0a0805', borderRadius: 999,
-                      fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em',
+                      border: `1px solid var(--accent-deep)`,
+                      color: '#0a0805', borderRadius: 6,
+                      fontFamily: UI.fontUi, fontWeight: 700, fontSize: 13, letterSpacing: '0.14em',
                       cursor: 'pointer', boxShadow: '0 8px 30px rgba(var(--accent-rgb),0.30)',
                       WebkitTapHighlightColor: 'transparent',
                     }}>✓  Check warmup set</button>
@@ -2078,9 +2078,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             marginTop: 52,
             padding: '18px 56px',
             background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-            border: `0.5px solid var(--accent-deep)`,
-            color: '#0a0805', borderRadius: 999,
-            fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em',
+            border: `1px solid var(--accent-deep)`,
+            color: '#0a0805', borderRadius: 6,
+            fontFamily: UI.fontUi, fontWeight: 700, fontSize: 13, letterSpacing: '0.14em',
             cursor: 'pointer',
             boxShadow: '0 8px 40px rgba(var(--accent-rgb),0.40)',
             animation: 'pulseGold 2.2s ease-in-out infinite',
@@ -2128,7 +2128,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
 function setInputStyle(done, current) {
   return {
     background: done ? 'transparent' : current ? 'rgba(201,169,97,0.06)' : UI.bgInset,
-    border: `0.5px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.hair}`,
+    border: `1px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.hair}`,
     borderRadius: 8, outline: 'none',
     color: done ? UI.inkSoft : UI.ink,
     fontFamily: UI.fontNum, fontSize: 15, fontWeight: 500,
