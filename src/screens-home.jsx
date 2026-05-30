@@ -60,8 +60,8 @@ function LoginScreen() {
               fontSize: 12, color: UI.danger,
               padding: '10px 14px',
               background: 'rgba(var(--danger-rgb),0.06)',
-              border: `0.5px solid rgba(var(--danger-rgb),0.25)`,
-              borderRadius: 10,
+              border: `1px solid rgba(var(--danger-rgb),0.25)`,
+              borderRadius: 4,
               fontFamily: UI.fontUi,
             }}>
               {error}
@@ -743,7 +743,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
                   background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isSkipped ? 'rgba(160,160,160,0.07)' : 'transparent',
                   border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(var(--danger-rgb),0.4)' : isSkipped ? 'rgba(160,160,160,0.3)' : d.isToday ? UI.hairStrong : UI.hair}`,
-                  borderRadius: 8, cursor: 'pointer',
+                  borderRadius: 4, cursor: 'pointer',
                   minHeight: 56,
                 }}>
                 <div className="num" style={{ fontSize: 9, color: isSelected ? UI.gold : d.isToday ? UI.inkSoft : UI.inkFaint }}>
@@ -894,7 +894,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                   <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
                     <button onClick={startSession} disabled={!!store.inProgress} style={{
                       opacity: store.inProgress ? 0.35 : 1,
-                      flex: 1, minHeight: 90, borderRadius: 8, border: 'none', cursor: 'pointer',
+                      flex: 1, minHeight: 90, borderRadius: 6, border: 'none', cursor: 'pointer',
                       background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
                       boxShadow: '0 12px 40px rgba(var(--accent-rgb),0.35), 0 0 0 1px rgba(var(--accent-rgb),0.6)',
                       animation: 'pulseGold 3.5s ease-out infinite',
@@ -908,7 +908,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                     </button>
                     {!weekdayMode && isViewingToday && (
                       <button onClick={() => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
-                        flex: 1, minHeight: 90, borderRadius: 8, cursor: 'pointer',
+                        flex: 1, minHeight: 90, borderRadius: 6, cursor: 'pointer',
                         background: 'transparent',
                         border: `1px solid ${UI.hairStrong}`,
                         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
@@ -961,7 +961,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 22 }}>
               {preview.map(({ pct, kg, reps }) => (
-                <div key={pct} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hairStrong}` }}>
+                <div key={pct} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 14px', background: UI.bgInset, borderRadius: 4, border: `1px solid ${UI.hairStrong}` }}>
                   <span className="micro" style={{ color: UI.inkFaint }}>{pct}%</span>
                   <span className="num" style={{ fontSize: 14, color: kg != null ? UI.inkSoft : UI.inkFaint }}>
                     {kg != null ? `${kg}kg` : '—'} · {reps}

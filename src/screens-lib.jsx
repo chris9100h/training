@@ -251,8 +251,8 @@ function LibraryScreen({ store, setStore, go }) {
               </div>
               {selecting ? (
                 <div style={{
-                  width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
-                  boxShadow: `inset 0 0 0 0.5px ${isSelected ? UI.danger : UI.hairStrong}`,
+                  width: 20, height: 20, borderRadius: 3, flexShrink: 0,
+                  border: `1px solid ${isSelected ? UI.danger : UI.hairStrong}`,
                   background: isSelected ? UI.danger : 'transparent',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>

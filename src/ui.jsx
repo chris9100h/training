@@ -230,7 +230,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
               width: '100%', maxWidth: 520,
               background: UI.bgRaised,
               border: `1px solid ${UI.hairStrong}`,
-              borderRadius: 8,
+              borderRadius: 4,
               padding: '32px 28px 22px',
               boxShadow: '0 40px 100px rgba(0,0,0,0.8)',
               animation: 'fadeUp 0.22s ease',
@@ -321,7 +321,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
         backdropFilter: 'blur(24px) saturate(130%)',
         WebkitBackdropFilter: 'blur(24px) saturate(130%)',
         border: `1px solid ${UI.hairStrong}`,
-        borderRadius: 10,
+        borderRadius: 6,
         padding: 6,
         boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
       }}>
@@ -509,7 +509,7 @@ function Sheet({ open, onClose, title, children }) {
       <div onClick={e => e.stopPropagation()} style={{
         width: '100%', maxWidth: 540, boxSizing: 'border-box',
         background: UI.bgRaised,
-        borderRadius: '10px 10px 0 0',
+        borderRadius: '6px 6px 0 0',
         border: `1px solid ${UI.hairStrong}`, borderBottom: 'none',
         boxShadow: '0 -16px 48px rgba(0,0,0,0.6)',
         padding: `16px 22px ${kbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,

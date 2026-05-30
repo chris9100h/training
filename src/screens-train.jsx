@@ -168,10 +168,10 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
   return (
     <Sheet open={open} onClose={onClose} title="Plate Calculator">
       {/* Segmented control */}
-      <div style={{ display: 'flex', gap: 3, marginBottom: 24, background: UI.bgInset, borderRadius: 10, padding: 3 }}>
+      <div style={{ display: 'flex', gap: 3, marginBottom: 24, background: UI.bgInset, borderRadius: 4, padding: 3 }}>
         {['Dual side', 'Single'].map((l, i) => (
           <button key={i} onClick={() => setTab(i)} style={{
-            flex: 1, padding: '8px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
+            flex: 1, padding: '8px 0', borderRadius: 4, border: 'none', cursor: 'pointer',
             background: tab === i ? 'var(--accent)' : 'transparent',
             color: tab === i ? '#0a0805' : UI.inkFaint,
             fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.06em',
@@ -274,7 +274,7 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
             setRaw(fresh ? k : r => r + k);
             setFresh(false);
           }} style={{
-            height: 46, borderRadius: 8, border: 'none', cursor: 'pointer',
+            height: 46, borderRadius: 4, border: 'none', cursor: 'pointer',
             background: 'var(--bg-raised)', boxShadow: `0 0 0 0.5px var(--hair)`,
             color: k === '⌫' ? UI.inkSoft : UI.ink,
             fontFamily: UI.fontNum, fontSize: 20, fontWeight: 400,
@@ -1866,7 +1866,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
           {planDiff.map((d, i) => (
             <div key={i} style={{
-              background: UI.bgInset, borderRadius: 10, padding: '10px 14px',
+              background: UI.bgInset, borderRadius: 4, padding: '10px 14px', border: `1px solid ${UI.hair}`,
               fontSize: 13, color: UI.ink, display: 'flex', alignItems: 'center', gap: 8,
             }}>
               {d.type === 'swap' ? (
@@ -1949,7 +1949,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           <div style={{
             position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 61,
             background: 'var(--bg, #080603)',
-            borderRadius: '20px 20px 0 0',
+            borderRadius: '8px 8px 0 0',
             boxShadow: `0 -1px 0 ${UI.hairStrong}, 0 -24px 60px rgba(0,0,0,0.7)`,
             padding: `18px 22px calc(env(safe-area-inset-bottom, 0px) + 24px)`,
           }}>
