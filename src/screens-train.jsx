@@ -331,10 +331,18 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   );
 }
 
-function TrainingScreen({ store, setStore, go, sessionId, userId }) {
-  const session = store.sessions.find(s => s.id === sessionId);
-  if (!session) { go({ name: 'home' }); return null; }
+function TrainingScreen(props) {
+  const session = props.store.sessions.find(s => s.id === props.sessionId);
+  // Redirect from an effect — never call go() during render, and never return
+  // before the hooks below. The inner component mounts only when the session
+  // exists, so its hook order stays stable even if the session disappears
+  // mid-workout (abandon, delete, cross-device sync).
+  useEffectT(() => { if (!session) props.go({ name: 'home' }); }, [!!session]);
+  if (!session) return null;
+  return <TrainingScreenInner {...props} session={session} />;
+}
 
+function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }) {
   useEffectT(() => {
     if (!('wakeLock' in navigator)) return;
     let lock = null;
@@ -365,23 +373,14 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     return target > 0 ? target : null;
   })();
 
+  // Keep the reducer pure — no logging or Error().stack side effects inside
+  // setStore (React may invoke updaters more than once). fn only runs for the
+  // matching session, so a vanished session is a safe no-op.
   const updateSession = (fn) => {
-    setStore(s => {
-      const prev = s.sessions.find(x => x.id === session.id);
-      const next = fn(prev);
-      // Detect any set flipping done:true → done:false and log the call stack
-      if (prev && next) {
-        next.entries?.forEach((en, ei) => {
-          en.sets?.forEach((st, si) => {
-            if (st.done === false && prev.entries?.[ei]?.sets?.[si]?.done === true) {
-              const stack = new Error().stack?.split('\n').slice(2, 5).join(' | ') ?? '';
-              _log(`⚠ DONE→FALSE: ex${ei} set${si} | ${stack}`);
-            }
-          });
-        });
-      }
-      return { ...s, sessions: s.sessions.map(x => x.id === session.id ? next : x) };
-    });
+    setStore(s => ({
+      ...s,
+      sessions: s.sessions.map(x => x.id === session.id ? fn(x) : x),
+    }));
   };
 
   const updateSet = (setIdx, patch) => {
@@ -444,18 +443,27 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     });
     setFlashSet(setIdx);
     setTimeout(() => setFlashSet(null), 1400);
-    const prevSet = last?.entry?.sets?.[setIdx];
+    // Match the current set to the same working-set position in the previous
+    // session. Either session may carry a different number of warm-up sets, so
+    // compare by working-set index (warm-ups excluded), never the raw index.
+    const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
+    const prevWorkingSetFor = (idx) => {
+      if (entry.sets[idx]?.warmup) return undefined;
+      const wIdx = entry.sets.slice(0, idx + 1).filter(s => !s.warmup).length - 1;
+      return wIdx >= 0 ? prevWorkingSets[wIdx] : undefined;
+    };
+    const prevSet = prevWorkingSetFor(setIdx);
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
 
     const progressionResult = (() => {
       if (!store.settings?.smartProgression) return null;
-      if (!updatedSets.every(s => s.done || s.skipped)) return null;
+      if (!updatedSets.filter(s => !s.warmup).every(s => s.done || s.skipped)) return null;
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? null;
       if (!increment) return null;
       const baseReps = exercise?.progression_reps ?? entry.plannedReps;
       const targetRepsTop = (baseReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
-      const doneSets = updatedSets.filter(s => s.done && !s.skipped && s.kg != null);
+      const doneSets = updatedSets.filter(s => s.done && !s.skipped && !s.warmup && s.kg != null);
       if (!doneSets.length) return null;
       const allHitTop = doneSets.every(s => {
         const reps = s.repsL != null ? Math.min(s.repsL ?? 0, s.repsR ?? 0) : (s.reps ?? 0);
@@ -473,7 +481,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
         setImprovedSet(true);
         setTimeout(() => setImprovedSet(false), 2500);
       } else {
-        const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, last?.entry?.sets?.[k]));
+        const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, prevWorkingSetFor(k)));
         if (!anyImprovementBefore && isDecline(entry.sets[setIdx], prevSet)) {
           setRegressionSet(true);
           setTimeout(() => setRegressionSet(false), 2500);
@@ -713,7 +721,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
   const activeRestDef = (restStart !== null && restDuration !== null) ? restDuration : restDef;
   const restElapsed = restStart ? Math.floor((now - restStart) / 1000) : null;
   const restRemaining = restElapsed != null ? Math.max(0, activeRestDef - restElapsed) : null;
-  const restPct = restElapsed != null ? Math.min(100, (restElapsed / activeRestDef) * 100) : 0;
+  const restPct = restElapsed != null ? Math.max(0, Math.min(100, (restElapsed / activeRestDef) * 100)) : 0;
 
   useEffectT(() => {
     if (!restStart) return;
@@ -1086,7 +1094,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
     : currentSetIdx;
   const heroSet = bgSetIdx >= 0 ? entry.sets[bgSetIdx] : null;
   // For warmup sets there's no meaningful "last session" comparison
-  const prevHeroSet = isCurrentWarmup ? null : last?.entry?.sets?.[bgSetIdx >= 0 ? bgSetIdx - warmupCount : 0];
+  const prevHeroSet = isCurrentWarmup ? null : (last?.entry?.sets || []).filter(s => !s.warmup)[bgSetIdx >= 0 ? bgSetIdx - warmupCount : 0];
 
   const workingSetsArr = entry.sets.filter(s => !s.warmup);
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
@@ -1488,7 +1496,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                     if (currentSetIdx < 0) return;
                     completeSet(currentSetIdx);
                   }}
-                  disabled={warmupSetsRemaining || postWarmupRest || heroSet.kg == null || (kbField?.setIdx !== bgSetIdx && (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps))}
+                  disabled={warmupSetsRemaining || postWarmupRest || heroSet.kg == null || (!(kbField?.setIdx === bgSetIdx && kbField?.field !== 'kg') && (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps))}
                   style={{
                     width: '100%', minHeight: 44,
                     background: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
@@ -1551,7 +1559,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               // Hide warmup rows once training has started — they're done and tapping them would re-trigger the overlay
               if (isWarmupRow && !warmupActive) return null;
               // Working sets offset index by warmupCount so prev-session lookup is correct
-              const prevSet = isWarmupRow ? null : last?.entry?.sets?.[i - warmupCount];
+              const prevSet = isWarmupRow ? null : (last?.entry?.sets || []).filter(s => !s.warmup)[i - warmupCount];
               const isCurrent = i === currentSetIdx;
               const showWorkingSep = !isWarmupRow && i === warmupCount && warmupCount > 0 && warmupActive;
               const warmupRowNum = isWarmupRow ? entry.sets.slice(0, i + 1).filter(x => x.warmup).length : 0;
@@ -1584,7 +1592,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                     <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                       {isWarmupRow
                         ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
-                        : prevSet?.kg && (prevSet?.reps || prevSet?.repsL != null) ? `${prevSet.kg}kg × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
+                        : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${prevSet.kg}kg × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
                       }
                     </div>
 
@@ -1638,7 +1646,7 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
                         _log(`row${i} → completeSet`);
                         completeSet(i);
                       }}
-                      disabled={!s.done && !s.skipped && (s.kg == null || (kbField?.setIdx !== i && (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)))}
+                      disabled={!s.done && !s.skipped && (s.kg == null || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)))}
                       style={{
                         width: 26, height: 26, borderRadius: 5, border: 'none', cursor: 'pointer',
                         background: s.done ? UI.gold : 'transparent',
@@ -1919,12 +1927,12 @@ function TrainingScreen({ store, setStore, go, sessionId, userId }) {
               color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
             }}>Skip</button>
-            <button onClick={() => persistRestStart(restStart - 30000)} style={{
+            <button onClick={() => persistRestStart(restStart - 30000, activeRestDef)} style={{
               flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
               color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
             }}>−30s</button>
-            <button onClick={() => persistRestStart(restStart + 30000)} style={{
+            <button onClick={() => persistRestStart(restStart + 30000, activeRestDef)} style={{
               flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
               color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,

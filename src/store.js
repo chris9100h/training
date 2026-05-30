@@ -136,12 +136,7 @@ async function importFromBackup(backup, userId) {
       backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
     ),
     backup.sessions?.length && _supabase.from('zane_sessions').upsert(
-      backup.sessions.filter(s => s.id).map(s => {
-        const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, ...rest } = s;
-        const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
-        if (startedAt != null) row.started_at = startedAt;
-        return row;
-      })
+      backup.sessions.filter(s => s.id).map(s => sessionToRow(s, userId))
     ),
     _supabase.from('zane_user_settings').upsert({
       user_id: userId,
@@ -274,6 +269,7 @@ async function loadFromSupabase(userId, _depth = 0) {
         equipmentConfig: sett.equipment_config ?? {},
         reminderEnabled: sett.reminder_enabled ?? false,
         reminderTime: sett.reminder_time ?? '07:00',
+        showWarmupInSummary: sett.show_warmup_in_summary ?? true,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
   };
@@ -404,9 +400,10 @@ async function syncStore(prev, next, userId) {
     prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop ||
     JSON.stringify(prev.settings?.equipmentConfig) !== JSON.stringify(next.settings?.equipmentConfig) ||
     JSON.stringify(prev.customDayTypes) !== JSON.stringify(next.customDayTypes) ||
-    prev.settings?.reminderEnabled !== next.settings?.reminderEnabled ||
-    prev.settings?.reminderTime    !== next.settings?.reminderTime    ||
-    prev.nextReminderAt            !== next.nextReminderAt;
+    prev.settings?.reminderEnabled      !== next.settings?.reminderEnabled      ||
+    prev.settings?.reminderTime         !== next.settings?.reminderTime         ||
+    prev.settings?.showWarmupInSummary  !== next.settings?.showWarmupInSummary  ||
+    prev.nextReminderAt                 !== next.nextReminderAt;
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
@@ -435,6 +432,7 @@ async function syncStore(prev, next, userId) {
       custom_day_types: next.customDayTypes ?? [],
       reminder_enabled: next.settings?.reminderEnabled ?? false,
       reminder_time: next.settings?.reminderTime ?? '07:00',
+      show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
     }));
@@ -609,14 +607,20 @@ function e1rm(kg, reps) {
   return kg * (1 + reps / 30);
 }
 
-// Total volume (kg) of all completed sets in a session.
+// Total volume (kg) of all completed working sets in a session (warm-ups excluded).
 function totalVolume(session) {
   return (session.entries || []).reduce((sum, ex) =>
-    sum + (ex.sets || []).filter(st => st.done).reduce((s, st) => {
+    sum + (ex.sets || []).filter(st => st.done && !st.warmup).reduce((s, st) => {
       const reps = effReps(st) ?? 0;
       return s + (+st.kg || 0) * reps;
     }, 0), 0
   );
+}
+
+// Count of completed working sets in a session (warm-ups excluded).
+function doneSetCount(session) {
+  return (session.entries || []).reduce((c, e) =>
+    c + (e.sets || []).filter(st => st.done && !st.warmup).length, 0);
 }
 
 // Index of the latest exercise whose entry has at least one completed set —
@@ -848,7 +852,7 @@ window.LB = {
   loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan,
-  effReps, e1rm, totalVolume, buildSeedSets, inferCurrentExIdx, calcBlended,
+  effReps, e1rm, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,

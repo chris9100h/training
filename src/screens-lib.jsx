@@ -191,7 +191,7 @@ function LibraryScreen({ store, setStore, go }) {
         {tab === 'recent' && recent.map(({ ex, last, lastEntry, trend }, ri) => {
           const days = Math.round((Date.now() - new Date(last)) / 86400000);
           const isToday = days === 0;
-          const top = lastEntry?.sets?.find(s => s.kg);
+          const top = lastEntry?.sets?.find(s => s.kg != null);
           const trendColor = trend === 'up' ? UI.ok : trend === 'down' ? UI.danger : UI.inkFaint;
           const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : trend === 'same' ? '→' : null;
           return (
@@ -207,7 +207,7 @@ function LibraryScreen({ store, setStore, go }) {
                 <div className="display" style={{ fontSize: 19, color: isToday ? UI.gold : UI.ink, lineHeight: 1.1, marginBottom: 3 }}>{ex.name}</div>
                 <div className="num" style={{ fontSize: 10, color: isToday ? UI.gold : UI.inkFaint, letterSpacing: '0.05em', marginBottom: 4 }}>
                   {isToday ? 'today' : `${days}d ago`}
-                  {top && ` · ${top.kg}kg × ${top.reps}`}
+                  {top && ` · ${top.kg}kg × ${LB.effReps(top) ?? '?'}`}
                 </div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                   {ex.tags?.map(t => <Pill key={t}>{t}</Pill>)}
@@ -452,10 +452,17 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
 }
 
 // ─── EXERCISE DETAIL ─────────────────────────────────────────────────
-function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [], editQueueTotal = 0, autoEdit = false }) {
-  const ex = LB.findExercise(store, exId);
-  if (!ex) { go(back || { name: 'lib' }); return null; }
+function ExerciseDetailScreen(props) {
+  const ex = LB.findExercise(props.store, props.exId);
+  // Redirect from an effect — never call go() during render. The inner
+  // component mounts only when the exercise exists, so its hook order stays
+  // stable even if the exercise is deleted while the screen is open.
+  useEffectL(() => { if (!ex) props.go(props.back || { name: 'lib' }); }, [!!ex]);
+  if (!ex) return null;
+  return <ExerciseDetailScreenInner {...props} ex={ex} />;
+}
 
+function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue = [], editQueueTotal = 0, autoEdit = false, ex }) {
   const [confirmEl, confirm] = useConfirm();
   const [editMode, setEditMode] = useStateL(autoEdit);
   const [editName, setEditName] = useStateL(autoEdit ? ex.name : '');
@@ -528,7 +535,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
   const pr = points.length ? Math.max(...points.map(p => p.est)) : 0;
 
   const volPr = history.length ? Math.max(...history.map(h =>
-    (h.entry.sets || []).filter(s => s.kg != null && s.reps).reduce((sum, s) => sum + s.kg * s.reps, 0)
+    (h.entry.sets || []).reduce((sum, s) => s.kg == null ? sum : sum + s.kg * (LB.effReps(s) ?? 0), 0)
   )) : 0;
 
   const queuePos = editQueueTotal > 0 ? editQueueTotal - editQueue.length : 0;
@@ -712,7 +719,7 @@ function ExerciseDetailScreen({ store, setStore, go, exId, back, editQueue = [],
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      {h.entry.sets.filter(s => s.kg).map((s, i) => {
+                      {h.entry.sets.filter(s => s.kg != null).map((s, i) => {
                         const isBest = sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01;
                         const repsStr = (s.repsL != null || s.repsR != null)
                           ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
@@ -766,6 +773,9 @@ function ProgressChart({ points }) {
 // ─── STATS TAB ───────────────────────────────────────────────────────
 function StatsTab({ store, sessions, go }) {
   const today = new Date(); today.setHours(12, 0, 0, 0);
+  // Stable per-day key so the date-scoped memos below re-run when the calendar
+  // day rolls over (long-lived PWA session), but stay memoized within a day.
+  const todayKey = today.toISOString().slice(0, 10);
 
   // Monday of current week
   const dow = today.getDay();
@@ -806,12 +816,12 @@ function StatsTab({ store, sessions, go }) {
   const thisWeekSessions = useMemoL(() => sessions.filter(s => {
     const d = LB.parseDate(s.date);
     return d >= monday && d <= sunday;
-  }), [sessions]);
+  }), [sessions, todayKey]);
 
   const thisMonthSessions = useMemoL(() => sessions.filter(s => {
     const d = LB.parseDate(s.date);
     return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
-  }), [sessions]);
+  }), [sessions, todayKey]);
 
   // Weekly sets per muscle group
   const setsPerMuscle = useMemoL(() => {
@@ -820,7 +830,7 @@ function StatsTab({ store, sessions, go }) {
       s.entries.forEach(entry => {
         const ex = store.exercises.find(e => e.id === entry.exId);
         const muscles = (ex?.tags || []).filter(t => MUSCLES.includes(t));
-        const done = entry.sets.filter(st => st.done).length;
+        const done = entry.sets.filter(st => st.done && !st.warmup).length;
         muscles.forEach(m => { counts[m] = (counts[m] || 0) + done; });
       });
     });
@@ -840,12 +850,10 @@ function StatsTab({ store, sessions, go }) {
       weeks.push({ label, vol });
     }
     return weeks;
-  }, [sessions]);
+  }, [sessions, todayKey]);
 
   // All-time stats
   const totalVol = sessions.reduce((sum, s) => sum + LB.totalVolume(s), 0);
-  const totalSets = sessions.reduce((sum, s) => sum + s.entries.reduce((c, e) => c + e.sets.filter(st => st.done).length, 0), 0);
-  const totalReps = sessions.reduce((sum, s) => sum + s.entries.reduce((c, e) => c + e.sets.filter(st => st.done).reduce((r, st) => r + (+st.reps || 0), 0), 0), 0);
   const avgVol = sessions.length ? Math.round(totalVol / sessions.length) : 0;
   const durations = sessions
     .map(s => s.durationMinutes != null
@@ -910,7 +918,7 @@ function StatsTab({ store, sessions, go }) {
 
   const thisYearSessions = useMemoL(() => sessions.filter(s => {
     return LB.parseDate(s.date).getFullYear() === today.getFullYear();
-  }), [sessions]);
+  }), [sessions, todayKey]);
 
   const avgSessionsPerWeek = useMemoL(() => {
     const relevant = planStart
@@ -1037,7 +1045,7 @@ function StatsTab({ store, sessions, go }) {
                   {LB.parseDate(bestSession.date).toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()}
                 </div>
                 <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>
-                  {bestSession.entries.length} exercises · {bestSession.entries.reduce((sum, e) => sum + e.sets.filter(st => st.done).length, 0)} sets
+                  {bestSession.entries.length} exercises · {LB.doneSetCount(bestSession)} sets
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
@@ -1136,7 +1144,7 @@ function HistoryScreen({ store, go, initialTab }) {
                 );
               }
               const s = item.session;
-              const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
+              const setsLogged = LB.doneSetCount(s);
               const vol = LB.totalVolume(s);
               const date = LB.parseDate(s.date);
               const days = Math.round((Date.now() - date) / 86400000);
@@ -1201,7 +1209,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const [capturing, setCapturing] = useStateL(false);
   const captureRef = useRefL(null);
   const s = store.sessions.find(x => x.id === sessionId);
-  if (!s) { go({ name: 'hist' }); return null; }
+  useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
+  if (!s) return null;
   const vol = LB.totalVolume(s);
   const duration = s.durationMinutes != null
     ? s.durationMinutes
@@ -1361,7 +1370,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   {[
                     { label: 'Volume', value: `${Math.round(vol).toLocaleString('en-US')} kg`, gold: true },
                     ...(duration ? [{ label: 'Duration', value: `${duration} min`, gold: false }] : []),
-                    { label: 'Sets', value: String(s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)), gold: false },
+                    { label: 'Sets', value: String(LB.doneSetCount(s)), gold: false },
                   ].map((st, k, arr) => (
                     <div key={st.label} style={{
                       flex: 1,
@@ -1383,12 +1392,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           <div style={{ display: 'flex', justifyContent: 'space-around' }}>
             <SubDial label="Duration" value={duration ?? '—'} sub={duration ? 'min' : ''} size={90} />
             <SubDial label="Volume" value={Math.round(vol).toLocaleString('en-US')} sub="kg" size={90} gold />
-            <SubDial label="Sets" value={s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)} size={90} />
+            <SubDial label="Sets" value={LB.doneSetCount(s)} size={90} />
           </div>
         )}
         {capturing && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', marginTop: -8 }}>
-            {[['DURATION', duration != null ? `${duration} min` : '—', false], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} kg`, true], ['SETS', s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0), false]].map(([label, value, gold], idx) => (
+            {[['DURATION', duration != null ? `${duration} min` : '—', false], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} kg`, true], ['SETS', LB.doneSetCount(s), false]].map(([label, value, gold], idx) => (
               <div key={label} style={{ padding: '6px 12px', borderRight: idx < 2 ? `0.5px solid ${UI.hair}` : 'none', textAlign: 'center' }}>
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{label}</div>
                 <div className="num" style={{ fontSize: 16, color: gold ? UI.gold : UI.ink }}>{value}</div>
@@ -1440,10 +1449,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 }
               }
 
+              const showWarmup = store.settings?.showWarmupInSummary ?? true;
               const renderEntry = (e, i) => {
                 const prev = prevEntryMap[e.exId];
                 const exName = store.exercises.find(ex => ex.id === e.exId)?.name ?? e.name;
-                const filteredSets = e.sets.filter(st => !st.skipped);
+                const filteredSets = e.sets.filter(st => !st.skipped && (showWarmup || !st.warmup));
+                // Compare working sets by position, warm-ups excluded on both sides.
+                const prevWorking = (prev?.sets || []).filter(st => !st.warmup);
+                const prevWorkingFor = (j) => {
+                  if (filteredSets[j]?.warmup) return undefined;
+                  const wIdx = filteredSets.slice(0, j + 1).filter(st => !st.warmup).length - 1;
+                  return wIdx >= 0 ? prevWorking[wIdx] : undefined;
+                };
                 return (
                 <div key={i}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
@@ -1451,20 +1468,23 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {filteredSets.map((st, j) => {
-                      const pr = isPR(st, e.exId);
-                      const highlight = pr || isImprovement(st, prev?.sets?.[j]);
-                      const anyImprovementBefore = filteredSets.slice(0, j).some((s, k) => isPR(s, e.exId) || isImprovement(s, prev?.sets?.[k]));
-                      const decline = !anyImprovementBefore && isDecline(st, prev?.sets?.[j]);
+                      const isWarm = !!st.warmup;
+                      const prevSet = prevWorkingFor(j);
+                      const pr = !isWarm && isPR(st, e.exId);
+                      const highlight = !isWarm && (pr || isImprovement(st, prevSet));
+                      const anyImprovementBefore = !isWarm && filteredSets.slice(0, j).some((s, k) => !s.warmup && (isPR(s, e.exId) || isImprovement(s, prevWorkingFor(k))));
+                      const decline = !isWarm && !anyImprovementBefore && isDecline(st, prevSet);
                       return (
                         <span key={j} style={{
-                          opacity: st.done ? 1 : 0.3,
+                          opacity: st.done ? (isWarm ? 0.5 : 1) : 0.3,
                           background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent',
                           border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
                           borderRadius: 6, padding: '3px 8px',
                           fontFamily: UI.fontNum, fontSize: 12,
-                          color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,
+                          color: isWarm ? UI.inkFaint : highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,
                         }}>
-                          {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
+                          {isWarm && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkFaint, marginRight: 4 }}>W</span>}
+                          {st.kg ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
                         </span>
                       );
                     })}

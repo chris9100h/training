@@ -65,9 +65,10 @@ CREATE TABLE IF NOT EXISTS public.zane_user_settings (
   progression_range_top  integer DEFAULT 4,
   equipment_config       jsonb,
   custom_day_types       text[] NOT NULL DEFAULT '{}',
-  reminder_enabled       boolean NOT NULL DEFAULT false,
-  reminder_time          text NOT NULL DEFAULT '07:00',
-  next_reminder_at       timestamptz
+  reminder_enabled         boolean NOT NULL DEFAULT false,
+  reminder_time            text NOT NULL DEFAULT '07:00',
+  next_reminder_at         timestamptz,
+  show_warmup_in_summary   boolean NOT NULL DEFAULT true
 );
 
 -- Pushover cancellation token — no RLS, never exposed to clients directly.

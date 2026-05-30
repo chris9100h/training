@@ -423,9 +423,12 @@ function HomeScreen({ store, setStore, go, userId }) {
         .find(x => x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null)));
       const prevEntry = prev?.entries.find(en => en.exId === e.exId);
       if (!prevEntry) return;
-      const improved = e.sets.some((st, j) => cmp(st, prevEntry.sets?.[j], true));
+      // Compare working sets by position, warmups excluded on both sides
+      const currWorking = e.sets.filter(st => !st.warmup && !st.skipped);
+      const prevWorking = prevEntry.sets.filter(st => !st.warmup);
+      const improved = currWorking.some((st, j) => cmp(st, prevWorking[j], true));
       if (improved) { improvements++; return; }
-      const regressed = e.sets.some((st, j) => cmp(st, prevEntry.sets?.[j], false));
+      const regressed = currWorking.some((st, j) => cmp(st, prevWorking[j], false));
       if (regressed) regressions++;
     });
     return { improvementCount: improvements, regressionCount: regressions };
@@ -658,9 +661,12 @@ function HomeScreen({ store, setStore, go, userId }) {
               {activeSession.dayName}
             </span>
             <button onClick={async () => {
+              // Capture the id before awaiting — a cross-device sync could swap
+              // the in-progress session while the confirm dialog is open.
+              const cancelId = store.inProgress;
               if (!await confirm('The session will be deleted.', { title: 'Cancel training?', ok: 'Cancel', cancel: 'Back', danger: true })) return;
               LB.cancelPushover(store.settings, userId);
-              setStore(s => ({ ...s, sessions: s.sessions.filter(x => x.id !== store.inProgress), inProgress: null }));
+              setStore(s => s.inProgress !== cancelId ? s : { ...s, sessions: s.sessions.filter(x => x.id !== cancelId), inProgress: null });
             }} style={{
               background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0,
               fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, padding: '4px 0',

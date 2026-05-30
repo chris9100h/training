@@ -85,13 +85,14 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
+  const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
   const [debugPanel, setDebugPanel] = useStateSet(() => localStorage.getItem('logbook-debug-panel') === 'true');
 
   useEffectSet(() => {
     let mounted = true;
     LB.supabase.rpc('check_active_users_access')
-      .then(({ data }) => { const val = !!data; localStorage.setItem('logbook-active-users-access', val); if (mounted) setHasActiveUsersAccess(val); })
+      .then(({ data }) => { const val = !!data; localStorage.setItem('logbook-active-users-access', String(val)); if (mounted) setHasActiveUsersAccess(val); })
       .catch(() => {});
     return () => { mounted = false; };
   }, []);
@@ -123,6 +124,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   };
 
   const pushStatusTimer = useRefSet(null);
+  useEffectSet(() => () => clearTimeout(pushStatusTimer.current), []);
   const togglePush = () => {
     if (!pushEnabled) {
       if (store.settings?.pushoverUserKey) { setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true'); setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } })); }
@@ -365,6 +367,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <NavRow label="Rest timers" hint={restHint} onTap={() => setRestSheet(true)} first />
               <NavRow label="Paceguard" hint={paceguardHint} onTap={() => setPaceguardSheet(true)} />
               <NavRow label="Smart progression" hint={progressionHint} onTap={() => setProgressionSheet(true)} />
+              <Row label="Warmup sets in summary">
+                <Toggle on={showWarmupInSummary} onToggle={() => { const n = !showWarmupInSummary; setShowWarmupInSummary(n); setStore(s => ({ ...s, settings: { ...s.settings, showWarmupInSummary: n } })); }} />
+              </Row>
             </div>
           )}
         </Frame>
