@@ -949,11 +949,26 @@ function HomeScreen({ store, setStore, go, userId }) {
                 </div>
                 {activeDay.items.map((item, i) => {
                   const ex = LB.findExercise(store, item.exId);
+                  let setsText, repsText, isActual = false, maxKg = null;
+                  if (isSlotDone && doneSession) {
+                    const entry = doneSession.entries.find(e => e.exId === item.exId);
+                    if (entry) {
+                      const doneSets = entry.sets.filter(s => !s.warmup && s.done && !s.skipped);
+                      setsText = String(doneSets.length);
+                      const repsArr = doneSets.map(s => s.reps).filter(r => r != null);
+                      repsText = repsArr.length > 0 ? repsArr[0] : item.reps;
+                      const kgs = doneSets.map(s => s.kg).filter(k => k != null);
+                      maxKg = kgs.length > 0 ? Math.max(...kgs) : null;
+                      isActual = true;
+                    }
+                  }
+                  if (!isActual) { setsText = item.sets; repsText = item.reps; }
                   return (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${UI.hair}` }}>
                       <span className="num" style={{ fontSize: 10, color: UI.inkGhost, minWidth: 20, textAlign: 'right', flexShrink: 0 }}>{String(i + 1).padStart(2, '0')}</span>
-                      <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: UI.inkSoft, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || '?'}</span>
-                      <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.10em', flexShrink: 0 }}>{item.sets}×{item.reps}</span>
+                      <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: isActual ? UI.ink : UI.inkSoft, fontWeight: isActual ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || '?'}</span>
+                      {maxKg != null && <span className="num" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{maxKg}kg</span>}
+                      <span className="micro" style={{ color: isActual ? UI.gold : UI.inkFaint, letterSpacing: '0.10em', flexShrink: 0 }}>{setsText}×{repsText}</span>
                     </div>
                   );
                 })}
