@@ -269,6 +269,7 @@ async function loadFromSupabase(userId, _depth = 0) {
         equipmentConfig: sett.equipment_config ?? {},
         reminderEnabled: sett.reminder_enabled ?? false,
         reminderTime: sett.reminder_time ?? '07:00',
+        showWarmupInSummary: sett.show_warmup_in_summary ?? true,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
   };
@@ -399,9 +400,10 @@ async function syncStore(prev, next, userId) {
     prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop ||
     JSON.stringify(prev.settings?.equipmentConfig) !== JSON.stringify(next.settings?.equipmentConfig) ||
     JSON.stringify(prev.customDayTypes) !== JSON.stringify(next.customDayTypes) ||
-    prev.settings?.reminderEnabled !== next.settings?.reminderEnabled ||
-    prev.settings?.reminderTime    !== next.settings?.reminderTime    ||
-    prev.nextReminderAt            !== next.nextReminderAt;
+    prev.settings?.reminderEnabled      !== next.settings?.reminderEnabled      ||
+    prev.settings?.reminderTime         !== next.settings?.reminderTime         ||
+    prev.settings?.showWarmupInSummary  !== next.settings?.showWarmupInSummary  ||
+    prev.nextReminderAt                 !== next.nextReminderAt;
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
@@ -430,6 +432,7 @@ async function syncStore(prev, next, userId) {
       custom_day_types: next.customDayTypes ?? [],
       reminder_enabled: next.settings?.reminderEnabled ?? false,
       reminder_time: next.settings?.reminderTime ?? '07:00',
+      show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
     }));

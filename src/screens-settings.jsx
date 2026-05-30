@@ -85,6 +85,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
+  const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
   const [debugPanel, setDebugPanel] = useStateSet(() => localStorage.getItem('logbook-debug-panel') === 'true');
 
@@ -366,6 +367,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <NavRow label="Rest timers" hint={restHint} onTap={() => setRestSheet(true)} first />
               <NavRow label="Paceguard" hint={paceguardHint} onTap={() => setPaceguardSheet(true)} />
               <NavRow label="Smart progression" hint={progressionHint} onTap={() => setProgressionSheet(true)} />
+              <Row label="Warmup sets in summary">
+                <Toggle on={showWarmupInSummary} onToggle={() => { const n = !showWarmupInSummary; setShowWarmupInSummary(n); setStore(s => ({ ...s, settings: { ...s.settings, showWarmupInSummary: n } })); }} />
+              </Row>
             </div>
           )}
         </Frame>

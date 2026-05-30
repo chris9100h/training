@@ -1449,10 +1449,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 }
               }
 
+              const showWarmup = store.settings?.showWarmupInSummary ?? true;
               const renderEntry = (e, i) => {
                 const prev = prevEntryMap[e.exId];
                 const exName = store.exercises.find(ex => ex.id === e.exId)?.name ?? e.name;
-                const filteredSets = e.sets.filter(st => !st.skipped);
+                const filteredSets = e.sets.filter(st => !st.skipped && (showWarmup || !st.warmup));
                 // Compare working sets by position, warm-ups excluded on both sides.
                 const prevWorking = (prev?.sets || []).filter(st => !st.warmup);
                 const prevWorkingFor = (j) => {
