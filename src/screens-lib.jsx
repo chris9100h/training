@@ -1472,9 +1472,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       const highlight = !isWarm && (pr || isImprovement(st, prevSet));
                       const anyImprovementBefore = !isWarm && filteredSets.slice(0, j).some((s, k) => !s.warmup && (isPR(s, e.exId) || isImprovement(s, prevWorkingFor(k))));
                       const decline = !isWarm && !anyImprovementBefore && isDecline(st, prevSet);
+                      const hasData = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
                       return (
                         <span key={j} style={{
-                          opacity: st.done ? (isWarm ? 0.5 : 1) : 0.3,
+                          opacity: (st.done || hasData) ? (isWarm ? 0.5 : 1) : 0.3,
                           background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent',
                           border: `1px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
                           borderRadius: 3, padding: '3px 8px',
