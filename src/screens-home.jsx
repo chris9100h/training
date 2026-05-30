@@ -41,9 +41,8 @@ function LoginScreen() {
     <Screen scroll={false} style={{ position: 'relative', overflow: 'hidden' }}>
       <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
 
-      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
-        <span className="micro">ZANE · CAL. M.01</span>
-        <span className="micro">EST. 2026</span>
+      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
+        <span className="micro">ZANE TRAINING</span>
       </div>
 
       {/* Centered block: logo + title + form */}
@@ -74,8 +73,7 @@ function LoginScreen() {
         </div>
       </div>
 
-      <div style={{ flexShrink: 0, padding: '0 22px calc(env(safe-area-inset-bottom, 8px) + 18px)', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
-        <span className="micro">REF. CZ-V2-2026</span>
+      <div style={{ flexShrink: 0, padding: '0 22px calc(env(safe-area-inset-bottom, 8px) + 18px)', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
         <span className="micro">{swVersion || '…'}</span>
       </div>
     </Screen>
@@ -588,7 +586,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     return (
       <Screen>
         <TopBar
-          title={<span>Hey, <em style={{ fontFamily: UI.fontDisplay, fontStyle: 'italic', fontWeight: 300, color: UI.gold }}>{store.user.name}</em></span>}
+          title={<span>HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span></span>}
           sub={new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
           right={<button onClick={() => go({ name: 'settings' })} style={{ background: 'transparent', border: 'none', padding: 4, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: '50%', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
         />
@@ -628,8 +626,8 @@ function HomeScreen({ store, setStore, go, userId }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <div className="micro">{new Date().toLocaleDateString('en-US', { weekday:'long', day:'2-digit', month:'long' }).toUpperCase()}</div>
-            <div style={{ marginTop: 6, fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
-              Hey, <em style={{ fontStyle: 'italic', fontWeight: 300, color: UI.gold }}>{store.user.name}</em>
+            <div style={{ marginTop: 4, fontFamily: UI.fontDisplay, fontSize: 36, color: UI.ink, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', lineHeight: 1 }}>
+              HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span>
             </div>
           </div>
           <button onClick={() => go({ name: 'settings' })} style={{
@@ -804,9 +802,9 @@ function HomeScreen({ store, setStore, go, userId }) {
         {/* day card — flex:1 so it fills */}
         {isActiveRest ? (
           <BracketFrame style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: 28 }}>
-            <div className="micro" style={{ marginBottom: 8 }}>{cardLabel}</div>
-            <div className="display-it" style={{ fontSize: 44, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, letterSpacing: '0.02em', marginBottom: 6 }}>
-              Recover.
+            <div className="micro" style={{ marginBottom: 12 }}>{cardLabel}</div>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 56, fontWeight: 900, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.inkSoft, lineHeight: 0.9, marginBottom: 14 }}>
+              RECOVER.
             </div>
             <div style={{ fontSize: 13, color: UI.inkFaint, marginBottom: 22, maxWidth: 220 }}>
               Recovery is part of the plan.
@@ -818,20 +816,20 @@ function HomeScreen({ store, setStore, go, userId }) {
         ) : (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '4px 0' }}>
             <div className="micro-gold" style={{ marginBottom: 6 }}>{cardLabel}</div>
-            <div className="display" style={{
-              fontSize: 56, color: UI.gold,
-              fontWeight: 400, fontStyle: 'italic',
-              letterSpacing: '0.04em', lineHeight: 1, marginBottom: 24,
+            <div style={{
+              fontFamily: UI.fontDisplay, fontSize: 72, fontWeight: 900,
+              textTransform: 'uppercase', letterSpacing: '0.04em',
+              color: UI.gold, lineHeight: 0.9, marginBottom: 28,
             }}>
               {activeDay.name}
             </div>
 
-            {/* Complications — 3 SubDials */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 28 }}>
+            {/* Stats */}
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: 20, marginBottom: 28, width: '100%', justifyContent: 'center' }}>
               <SubDial size={80} label="EXERCISES" value={activeDay.items.length} />
-              <div style={{ width: '0.5px', height: 36, background: UI.hair }} />
+              <div style={{ width: 1, background: UI.hairStrong, alignSelf: 'stretch' }} />
               <SubDial size={80} label="MIN" value={avgDayDuration != null ? `~${avgDayDuration}` : `~${Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))}`} />
-              <div style={{ width: '0.5px', height: 36, background: UI.hair }} />
+              <div style={{ width: 1, background: UI.hairStrong, alignSelf: 'stretch' }} />
               <SubDial size={80} label="SETS" value={activeDay.items.reduce((a,b) => a + b.sets, 0)} />
             </div>
 
@@ -896,9 +894,9 @@ function HomeScreen({ store, setStore, go, userId }) {
                   <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
                     <button onClick={startSession} disabled={!!store.inProgress} style={{
                       opacity: store.inProgress ? 0.35 : 1,
-                      flex: 1, minHeight: 90, borderRadius: 18, border: 'none', cursor: 'pointer',
+                      flex: 1, minHeight: 90, borderRadius: 8, border: 'none', cursor: 'pointer',
                       background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-                      boxShadow: '0 16px 50px rgba(var(--accent-rgb),0.35), 0 0 0 0.5px rgba(var(--accent-rgb),0.6), inset 0 1px 0 rgba(255,240,200,0.4)',
+                      boxShadow: '0 12px 40px rgba(var(--accent-rgb),0.35), 0 0 0 1px rgba(var(--accent-rgb),0.6)',
                       animation: 'pulseGold 3.5s ease-out infinite',
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
                       WebkitTapHighlightColor: 'transparent',
@@ -910,14 +908,14 @@ function HomeScreen({ store, setStore, go, userId }) {
                     </button>
                     {!weekdayMode && isViewingToday && (
                       <button onClick={() => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
-                        flex: 1, minHeight: 90, borderRadius: 18, cursor: 'pointer',
+                        flex: 1, minHeight: 90, borderRadius: 8, cursor: 'pointer',
                         background: 'transparent',
-                        border: `0.5px solid ${UI.hairStrong}`,
+                        border: `1px solid ${UI.hairStrong}`,
                         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
                         WebkitTapHighlightColor: 'transparent',
                       }}>
                         <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.22em', fontWeight: 600 }}>DAY</span>
-                        <span style={{ fontSize: 24, color: UI.inkSoft, fontFamily: UI.fontDisplay, fontStyle: 'italic', lineHeight: 1 }}>→</span>
+                        <span style={{ fontSize: 28, color: UI.inkSoft, fontFamily: UI.fontDisplay, fontWeight: 700, lineHeight: 1 }}>→</span>
                         <span className="micro" style={{ color: UI.inkFaint }}>SKIP</span>
                       </button>
                     )}
