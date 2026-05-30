@@ -1648,9 +1648,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                       }}
                       disabled={!s.done && !s.skipped && (s.kg == null || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)))}
                       style={{
-                        width: 26, height: 26, borderRadius: 5, border: 'none', cursor: 'pointer',
+                        width: 26, height: 26, borderRadius: 3, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
                         background: s.done ? UI.gold : 'transparent',
-                        outline: `0.5px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontSize: s.skipped ? 12 : 14, fontWeight: 700,
                         color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
@@ -2129,7 +2128,7 @@ function setInputStyle(done, current) {
   return {
     background: done ? 'transparent' : current ? 'rgba(201,169,97,0.06)' : UI.bgInset,
     border: `1px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.hair}`,
-    borderRadius: 8, outline: 'none',
+    borderRadius: 3, outline: 'none',
     color: done ? UI.inkSoft : UI.ink,
     fontFamily: UI.fontNum, fontSize: 15, fontWeight: 500,
     fontVariantNumeric: 'tabular-nums',
