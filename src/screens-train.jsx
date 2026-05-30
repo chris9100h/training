@@ -1034,8 +1034,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       if (entry.exId !== planItem.exId) {
         const oldEx = LB.findExercise(store, planItem.exId);
         acc.push({ type: 'swap', idx: i, oldName: oldEx?.name || '?', newName: entry.name, newExId: entry.exId });
-      } else if (entry.sets.length !== planItem.sets) {
-        acc.push({ type: 'sets', idx: i, exName: entry.name, oldSets: planItem.sets, newSets: entry.sets.length });
+      } else if (entry.sets.filter(s => !s.warmup).length !== planItem.sets) {
+        acc.push({ type: 'sets', idx: i, exName: entry.name, oldSets: planItem.sets, newSets: entry.sets.filter(s => !s.warmup).length });
       }
       return acc;
     }, []);
@@ -1060,7 +1060,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         const diff = planDiff.find(d => d.idx === i);
         if (!diff) return item;
         if (diff.type === 'swap') return { ...item, exId: session.entries[i].exId };
-        if (diff.type === 'sets') return { ...item, sets: session.entries[i].sets.length };
+        if (diff.type === 'sets') return { ...item, sets: session.entries[i].sets.filter(s => !s.warmup).length };
         return item;
       });
       setStore(s => ({
