@@ -269,8 +269,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
                 const sub = isWeekday ? WEEKDAYS[d.weekday] : `Day ${i + 1}`;
                 return (
                   <button key={d.id} onClick={() => setSelectedDayId(d.id)} style={{
-                    flexShrink: 0, padding: '8px 12px 6px', borderRadius: 10,
-                    border: `0.5px solid ${active ? UI.gold : isToday ? UI.goldSoft : UI.hairStrong}`,
+                    flexShrink: 0, padding: '8px 12px 6px', borderRadius: 4,
+                    border: `1px solid ${active ? UI.gold : isToday ? UI.goldSoft : UI.hairStrong}`,
                     background: active ? UI.goldFaint : 'transparent',
                     cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
                     display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
@@ -394,8 +394,8 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(original);
   const dateInputStyle = {
-    background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-    borderRadius: 8, padding: '10px 14px', color: UI.ink,
+    background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+    borderRadius: 4, padding: '10px 14px', color: UI.ink,
     fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
     width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark',
   };
@@ -426,7 +426,7 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
 
         {isActive && !isWeekday && (
           <Field label="Cycle start date (Day 1)">
-            <div style={{ overflow: 'hidden', borderRadius: 8, width: '100%' }}>
+            <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%' }}>
               <input type="date" value={store.cycleStartDate || ''}
                 onChange={e => { if (e.target.value) setStore(s => ({ ...s, cycleStartDate: e.target.value })); }}
                 style={dateInputStyle} />
@@ -441,7 +441,7 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
         )}
         {isActive && isWeekday && (
           <Field label="Week plan start date (Week 1)">
-            <div style={{ overflow: 'hidden', borderRadius: 8, width: '100%' }}>
+            <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%' }}>
               <input type="date" value={store.weekPlanStartDate || ''}
                 onChange={e => { if (e.target.value) setStore(s => ({ ...s, weekPlanStartDate: e.target.value })); }}
                 style={dateInputStyle} />
@@ -476,13 +476,13 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
               {[...draft.days].sort((a,b)=>a.weekday-b.weekday).map(day => (
                 <div key={day.id} style={{
                   display: 'flex', alignItems: 'center', gap: 8,
-                  background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-                  padding: '8px 12px', borderRadius: 10,
+                  background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+                  padding: '8px 12px', borderRadius: 4,
                 }}>
                   <div className="num" style={{ width: 30, textAlign: 'center', color: UI.inkSoft, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[day.weekday]}</div>
                   <button onClick={() => setEditingDay(day.id)} style={{
                     flex: 1, background: 'transparent', border: 'none', cursor: 'pointer',
-                    padding: '6px 8px', borderRadius: 8,
+                    padding: '6px 8px', borderRadius: 4,
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                     color: day.name === 'REST' ? UI.inkFaint : UI.ink, fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi,
                   }}><span>{day.name}</span><span className="micro" style={{ fontStyle: 'normal' }}>{dayActionLabel(day)}</span></button>
@@ -500,8 +500,8 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
                 return (
                   <div key={day.id} style={{
                     display: 'flex', alignItems: 'center', gap: 8,
-                    background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-                    padding: '8px 12px', borderRadius: 10,
+                    background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+                    padding: '8px 12px', borderRadius: 4,
                   }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                       <button onClick={() => moveDay(i, -1)} disabled={i === 0} style={{ ...dayEditIconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
@@ -510,7 +510,7 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
                     <div className="num" style={{ width: 26, textAlign: 'center', color: UI.inkFaint, fontSize: 11 }}>{i+1}</div>
                     <button onClick={() => setEditingDay(day.id)} style={{
                       flex: 1, background: 'transparent', border: 'none', cursor: 'pointer',
-                      padding: '6px 8px', borderRadius: 8,
+                      padding: '6px 8px', borderRadius: 4,
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                       color: isRest ? UI.inkFaint : UI.ink, fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi,
                     }}><span>{day.name}</span><span className="micro" style={{ fontStyle: 'normal' }}>{dayActionLabel(day)}</span></button>
@@ -558,7 +558,7 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
 }
 
 const dayEditIconBtn = {
-  width: 22, height: 18, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+  width: 22, height: 18, background: 'transparent', border: `1px solid ${UI.hairStrong}`,
   borderRadius: 4, color: UI.inkFaint, cursor: 'pointer', fontSize: 9,
   display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
 };
@@ -626,7 +626,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick }) {
       {creating && (
         <div style={{
           display: 'flex', gap: 8, alignItems: 'center', marginTop: 10,
-          padding: 10, background: UI.bgInset, border: `0.5px dashed ${UI.goldSoft}`, borderRadius: 10,
+          padding: 10, background: UI.bgInset, border: `1px dashed ${UI.goldSoft}`, borderRadius: 4,
         }}>
           <input
             autoFocus
@@ -636,7 +636,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick }) {
             placeholder="e.g. PUSH1"
             style={{
               flex: 1, background: 'transparent', border: 'none',
-              borderBottom: `0.5px solid ${UI.goldSoft}`,
+              borderBottom: `1px solid ${UI.goldSoft}`,
               color: UI.gold, padding: '8px 0',
               fontFamily: UI.fontNum, fontSize: 14, letterSpacing: '0.08em', outline: 'none',
             }}
@@ -678,8 +678,8 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
           {copyableDays.map(d => (
             <button key={d.id} onClick={() => onCopy(d.items)} style={{
-              background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-              borderRadius: 10, padding: '12px 14px', cursor: 'pointer',
+              background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
               textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi,
             }}
             onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
@@ -810,7 +810,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
       <Field label="Day type">
         <button onClick={() => setPickingType(true)} style={{
           width: '100%', textAlign: 'left', background: UI.bgInset,
-          border: `0.5px solid ${UI.hairStrong}`, borderRadius: 10, padding: '10px 14px',
+          border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px',
           cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           color: draft.name === 'REST' ? UI.inkFaint : UI.ink, fontSize: 15, fontWeight: 600, fontFamily: UI.fontUi,
         }}>
@@ -820,7 +820,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
       </Field>
       {draft.name === 'REST' ? (
         <div style={{ marginTop: 18, padding: '18px 14px', textAlign: 'center',
-          border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 10, color: UI.inkFaint }}>
+          border: `1px dashed ${UI.hairStrong}`, borderRadius: 4, color: UI.inkFaint }}>
           <div className="display-it" style={{ fontSize: 16, color: UI.inkSoft, marginBottom: 4 }}>Rest day.</div>
           <div className="micro">Change day name to add exercises.</div>
         </div>
@@ -849,8 +849,8 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                 <div key={`item-${i}`} onClick={() => setEditingItem(i)} style={{
                   display: 'flex', gap: 8, alignItems: 'center',
                   background: inGroup ? UI.goldFaint : UI.bgInset,
-                  border: `0.5px solid ${inGroup ? UI.goldSoft : UI.hairStrong}`,
-                  borderRadius: linkedToPrev && linkedToNext ? 0 : linkedToPrev ? '0 0 10px 10px' : linkedToNext ? '10px 10px 0 0' : 10,
+                  border: `1px solid ${inGroup ? UI.goldSoft : UI.hairStrong}`,
+                  borderRadius: linkedToPrev && linkedToNext ? 0 : linkedToPrev ? '0 0 4px 4px' : linkedToNext ? '4px 4px 0 0' : 4,
                   padding: '10px 12px', cursor: 'pointer', marginBottom: linkedToNext ? 0 : 6,
                 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -863,7 +863,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                   </div>
                   <div className="num" style={{
                     fontSize: 12, color: UI.gold, background: UI.goldFaint,
-                    border: `0.5px solid ${UI.goldSoft}`, borderRadius: 8,
+                    border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
                     padding: '3px 8px', whiteSpace: 'nowrap',
                   }}>{it.sets}×{it.reps}</div>
                   <button onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...dayEditIconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
@@ -872,7 +872,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
               if (i < draft.items.length - 1) {
                 if (linkedToNext) {
                   els.push(
-                    <div key={`conn-${i}`} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', background: UI.goldFaint, borderLeft: `0.5px solid ${UI.goldSoft}`, borderRight: `0.5px solid ${UI.goldSoft}`, padding: '1px 12px', marginBottom: 0 }}>
+                    <div key={`conn-${i}`} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', background: UI.goldFaint, borderLeft: `1px solid ${UI.goldSoft}`, borderRight: `1px solid ${UI.goldSoft}`, padding: '1px 12px', marginBottom: 0 }}>
                       <button onClick={e => { e.stopPropagation(); toggleSuperset(i); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.gold, fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.12em', padding: '2px 0' }}>SUPERSET ×</button>
                     </div>
                   );
@@ -973,8 +973,8 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
       </div>
       {q && !list.find(e => e.name.toUpperCase() === q.toUpperCase()) && (
         <button onClick={() => setCreatingNew(q)} style={{
-          background: UI.goldFaint, border: `0.5px dashed ${UI.goldSoft}`,
-          padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
+          background: UI.goldFaint, border: `1px dashed ${UI.goldSoft}`,
+          padding: '12px 14px', borderRadius: 4, cursor: 'pointer',
           color: UI.gold, fontSize: 13, marginTop: 8, fontFamily: UI.fontUi, textAlign: 'left',
           width: '100%', boxSizing: 'border-box',
         }}>+ Create "{q}"</button>
@@ -1078,10 +1078,10 @@ function ScheduleNewScreen({ store, setStore, go }) {
         {step === 1 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             {/* Mode toggle */}
-            <div style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 10, padding: 3 }}>
+            <div style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: 3 }}>
               {[{key:'cycle',label:'Cycle'},{key:'weekday',label:'Weekdays'}].map(m => (
                 <button key={m.key} onClick={() => setMode(m.key)} style={{
-                  flex: 1, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer',
+                  flex: 1, padding: '8px 0', border: 'none', borderRadius: 4, cursor: 'pointer',
                   background: mode === m.key ? UI.bgRaised : 'transparent',
                   color: mode === m.key ? UI.ink : UI.inkFaint,
                   fontFamily: UI.fontUi, fontSize: 12, fontWeight: mode === m.key ? 600 : 400,
@@ -1107,12 +1107,12 @@ function ScheduleNewScreen({ store, setStore, go }) {
                       }}>Clear all</button>
                     )}
                   </div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: 12, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 10, minHeight: 54, marginTop: 8 }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: 12, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, minHeight: 54, marginTop: 8 }}>
                     {pattern.map((p, i) => (
                       <button key={i} onClick={() => setPattern(pat => pat.filter((_,j) => j !== i))} style={{
-                        padding: '5px 10px', borderRadius: 8,
+                        padding: '5px 10px', borderRadius: 4,
                         background: p === 'REST' ? 'transparent' : UI.goldFaint,
-                        border: `0.5px ${p === 'REST' ? 'dashed' : 'solid'} ${p === 'REST' ? UI.hairStrong : UI.goldSoft}`,
+                        border: `1px ${p === 'REST' ? 'dashed' : 'solid'} ${p === 'REST' ? UI.hairStrong : UI.goldSoft}`,
                         color: p === 'REST' ? UI.inkFaint : UI.gold,
                         fontSize: 11, fontFamily: UI.fontNum, letterSpacing: '0.06em', cursor: 'pointer',
                       }} title="Tap to remove">{p} ×</button>
@@ -1126,8 +1126,8 @@ function ScheduleNewScreen({ store, setStore, go }) {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
                     {presets.map(p => (
                       <button key={p.label} onClick={() => setPattern(p.val)} style={{
-                        background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-                        padding: '10px 14px', borderRadius: 10, cursor: 'pointer',
+                        background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+                        padding: '10px 14px', borderRadius: 4, cursor: 'pointer',
                         color: UI.ink, textAlign: 'left', fontFamily: UI.fontUi, fontSize: 13,
                         display: 'flex', justifyContent: 'space-between',
                       }}>
@@ -1171,8 +1171,8 @@ function ScheduleNewScreen({ store, setStore, go }) {
                       {[...weekdayDays].sort((a,b)=>a.weekday-b.weekday).map(d => (
                         <div key={d.weekday} style={{
                           display: 'flex', alignItems: 'center', gap: 10,
-                          background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-                          padding: '8px 12px', borderRadius: 10,
+                          background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+                          padding: '8px 12px', borderRadius: 4,
                         }}>
                           <div className="num" style={{ width: 30, color: UI.inkFaint, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[d.weekday]}</div>
                           <button onClick={() => setPickingWeekday(d.weekday)} style={{

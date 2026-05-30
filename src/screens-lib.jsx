@@ -944,7 +944,7 @@ function StatsTab({ store, sessions, go }) {
   const maxWeekVol = Math.max(...weeklyVolume.map(w => w.vol), 1);
 
   const StatCard = ({ label, value, sub, gold }) => (
-    <div style={{ background: gold ? UI.goldFaint : UI.bgInset, borderRadius: 12, padding: '12px 14px', textAlign: 'center', border: gold ? `0.5px solid ${UI.goldSoft}` : 'none' }}>
+    <div style={{ background: gold ? UI.goldFaint : UI.bgInset, borderRadius: 4, padding: '12px 14px', textAlign: 'center', border: gold ? `1px solid ${UI.goldSoft}` : `1px solid ${UI.hair}` }}>
       <div className="micro" style={{ color: gold ? UI.gold : UI.inkFaint, marginBottom: 6 }}>{label}</div>
       <div className="num" style={{ fontSize: 22, color: gold ? UI.gold : UI.ink, lineHeight: 1 }}>{value}</div>
       {sub && <div className="micro" style={{ color: gold ? UI.gold : UI.inkFaint, marginTop: 3, opacity: gold ? 0.7 : 1 }}>{sub}</div>}
@@ -1011,7 +1011,7 @@ function StatsTab({ store, sessions, go }) {
           <StatCard label="Avg Volume" value={avgVol.toLocaleString('en-US')} sub="kg / session" />
           <StatCard label="Avg Duration" value={avgDuration || '—'} sub={avgDuration ? 'min' : ''} />
           <StatCard label="Longest Session" value={maxDuration || '—'} sub={maxDuration ? 'min' : ''} />
-          <div style={{ gridColumn: '1 / -1', background: UI.bgInset, borderRadius: 12, padding: '12px 14px', textAlign: 'center' }}>
+          <div style={{ gridColumn: '1 / -1', background: UI.bgInset, borderRadius: 4, padding: '12px 14px', textAlign: 'center', border: `1px solid ${UI.hair}` }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Total Time Trained</div>
             <div className="num" style={{ fontSize: 22, color: UI.ink, lineHeight: 1 }}>{totalTrainingMins ? totalTrainingStr : '—'}</div>
           </div>
@@ -1476,8 +1476,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         <span key={j} style={{
                           opacity: st.done ? (isWarm ? 0.5 : 1) : 0.3,
                           background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent',
-                          border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
-                          borderRadius: 6, padding: '3px 8px',
+                          border: `1px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
+                          borderRadius: 3, padding: '3px 8px',
                           fontFamily: UI.fontNum, fontSize: 12,
                           color: isWarm ? UI.inkFaint : highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,
                         }}>
@@ -1487,7 +1487,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       );
                     })}
                     {(() => { const n = e.sets.filter(st => st.skipped).length; return n > 0 && (
-                      <span style={{ border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.05em' }}>
+                      <span style={{ border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.05em' }}>
                         {n} SET{n > 1 ? 'S' : ''} SKIPPED
                       </span>
                     ); })()}
@@ -1570,14 +1570,14 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   };
 
   const inputStyle = {
-    background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-    borderRadius: 10, padding: '11px 14px', color: UI.ink,
+    background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+    borderRadius: 4, padding: '11px 14px', color: UI.ink,
     fontFamily: UI.fontNum, fontSize: 16, outline: 'none',
     width: '100%', boxSizing: 'border-box', display: 'block',
   };
   const numInputStyle = {
-    width: 64, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-    borderRadius: 8, color: UI.ink, padding: '9px 6px', textAlign: 'center',
+    width: 64, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+    borderRadius: 4, color: UI.ink, padding: '9px 6px', textAlign: 'center',
     fontFamily: UI.fontNum, fontSize: 15, outline: 'none', flexShrink: 0,
   };
 
@@ -1586,7 +1586,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 160 }}>
         <div>
           <span className="label">Date</span>
-          <div style={{ width: '100%', overflow: 'hidden', borderRadius: 10, marginTop: 6 }}>
+          <div style={{ width: '100%', overflow: 'hidden', borderRadius: 4, marginTop: 6 }}>
             <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} style={{ ...inputStyle, textAlign: 'center', textAlignLast: 'center' }} />
           </div>
         </div>
@@ -1609,7 +1609,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
                   {e.sets.map((st, sIdx) => {
                     const isEmpty = st.kg == null && st.reps == null && st.repsL == null && st.repsR == null;
                     return (
-                      <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: UI.bgInset, borderRadius: 10, padding: '8px 12px', opacity: st.skipped ? 0.5 : 1 }}>
+                      <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: UI.bgInset, borderRadius: 4, padding: '8px 12px', opacity: st.skipped ? 0.5 : 1, border: `1px solid ${UI.hair}` }}>
                         <span className="num" style={{ width: 20, fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{sIdx + 1}</span>
                         {st.skipped ? (
                           <>
