@@ -604,14 +604,20 @@ function e1rm(kg, reps) {
   return kg * (1 + reps / 30);
 }
 
-// Total volume (kg) of all completed sets in a session.
+// Total volume (kg) of all completed working sets in a session (warm-ups excluded).
 function totalVolume(session) {
   return (session.entries || []).reduce((sum, ex) =>
-    sum + (ex.sets || []).filter(st => st.done).reduce((s, st) => {
+    sum + (ex.sets || []).filter(st => st.done && !st.warmup).reduce((s, st) => {
       const reps = effReps(st) ?? 0;
       return s + (+st.kg || 0) * reps;
     }, 0), 0
   );
+}
+
+// Count of completed working sets in a session (warm-ups excluded).
+function doneSetCount(session) {
+  return (session.entries || []).reduce((c, e) =>
+    c + (e.sets || []).filter(st => st.done && !st.warmup).length, 0);
 }
 
 // Index of the latest exercise whose entry has at least one completed set —
@@ -843,7 +849,7 @@ window.LB = {
   loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan,
-  effReps, e1rm, totalVolume, buildSeedSets, inferCurrentExIdx, calcBlended,
+  effReps, e1rm, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,

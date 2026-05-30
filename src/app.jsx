@@ -307,13 +307,13 @@ function App() {
             // cache. The in-progress session is always kept regardless of its date.
             const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 2);
             const cutoffISO = cutoff.toISOString().slice(0, 10);
-            // Never resurrect ended=null sessions from cache — the localDirty
-            // guard above ensures this branch only runs when no active session
-            // is being written, so any unended local-only session is an orphan.
+            // Keep the in-progress session even if it's unended and not yet
+            // synced to the server (e.g. app killed right after starting a
+            // warmup, before the first sync). Other ended=null sessions are
+            // orphans and only ended sessions qualify via the recency window.
             const localOnly = (cur.sessions || []).filter(x =>
               !serverIds.has(x.id) &&
-              (x.id === inProgressId || (x.date || '') >= cutoffISO) &&
-              x.ended != null
+              (x.id === inProgressId || ((x.date || '') >= cutoffISO && x.ended != null))
             );
             // Drop inProgress if the session is gone from the server and not in
             // localOnly (would only survive if it somehow has an ended timestamp).

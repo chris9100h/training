@@ -830,7 +830,7 @@ function StatsTab({ store, sessions, go }) {
       s.entries.forEach(entry => {
         const ex = store.exercises.find(e => e.id === entry.exId);
         const muscles = (ex?.tags || []).filter(t => MUSCLES.includes(t));
-        const done = entry.sets.filter(st => st.done).length;
+        const done = entry.sets.filter(st => st.done && !st.warmup).length;
         muscles.forEach(m => { counts[m] = (counts[m] || 0) + done; });
       });
     });
@@ -1045,7 +1045,7 @@ function StatsTab({ store, sessions, go }) {
                   {LB.parseDate(bestSession.date).toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()}
                 </div>
                 <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>
-                  {bestSession.entries.length} exercises · {bestSession.entries.reduce((sum, e) => sum + e.sets.filter(st => st.done).length, 0)} sets
+                  {bestSession.entries.length} exercises · {LB.doneSetCount(bestSession)} sets
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
@@ -1144,7 +1144,7 @@ function HistoryScreen({ store, go, initialTab }) {
                 );
               }
               const s = item.session;
-              const setsLogged = s.entries.reduce((c, e) => c + e.sets.filter(x => x.done).length, 0);
+              const setsLogged = LB.doneSetCount(s);
               const vol = LB.totalVolume(s);
               const date = LB.parseDate(s.date);
               const days = Math.round((Date.now() - date) / 86400000);
@@ -1370,7 +1370,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   {[
                     { label: 'Volume', value: `${Math.round(vol).toLocaleString('en-US')} kg`, gold: true },
                     ...(duration ? [{ label: 'Duration', value: `${duration} min`, gold: false }] : []),
-                    { label: 'Sets', value: String(s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)), gold: false },
+                    { label: 'Sets', value: String(LB.doneSetCount(s)), gold: false },
                   ].map((st, k, arr) => (
                     <div key={st.label} style={{
                       flex: 1,
@@ -1392,12 +1392,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           <div style={{ display: 'flex', justifyContent: 'space-around' }}>
             <SubDial label="Duration" value={duration ?? '—'} sub={duration ? 'min' : ''} size={90} />
             <SubDial label="Volume" value={Math.round(vol).toLocaleString('en-US')} sub="kg" size={90} gold />
-            <SubDial label="Sets" value={s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0)} size={90} />
+            <SubDial label="Sets" value={LB.doneSetCount(s)} size={90} />
           </div>
         )}
         {capturing && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', marginTop: -8 }}>
-            {[['DURATION', duration != null ? `${duration} min` : '—', false], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} kg`, true], ['SETS', s.entries.reduce((c,e) => c + e.sets.filter(x => x.done).length, 0), false]].map(([label, value, gold], idx) => (
+            {[['DURATION', duration != null ? `${duration} min` : '—', false], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} kg`, true], ['SETS', LB.doneSetCount(s), false]].map(([label, value, gold], idx) => (
               <div key={label} style={{ padding: '6px 12px', borderRight: idx < 2 ? `0.5px solid ${UI.hair}` : 'none', textAlign: 'center' }}>
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{label}</div>
                 <div className="num" style={{ fontSize: 16, color: gold ? UI.gold : UI.ink }}>{value}</div>
@@ -1453,6 +1453,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 const prev = prevEntryMap[e.exId];
                 const exName = store.exercises.find(ex => ex.id === e.exId)?.name ?? e.name;
                 const filteredSets = e.sets.filter(st => !st.skipped);
+                // Compare working sets by position, warm-ups excluded on both sides.
+                const prevWorking = (prev?.sets || []).filter(st => !st.warmup);
+                const prevWorkingFor = (j) => {
+                  if (filteredSets[j]?.warmup) return undefined;
+                  const wIdx = filteredSets.slice(0, j + 1).filter(st => !st.warmup).length - 1;
+                  return wIdx >= 0 ? prevWorking[wIdx] : undefined;
+                };
                 return (
                 <div key={i}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
@@ -1460,20 +1467,23 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {filteredSets.map((st, j) => {
-                      const pr = isPR(st, e.exId);
-                      const highlight = pr || isImprovement(st, prev?.sets?.[j]);
-                      const anyImprovementBefore = filteredSets.slice(0, j).some((s, k) => isPR(s, e.exId) || isImprovement(s, prev?.sets?.[k]));
-                      const decline = !anyImprovementBefore && isDecline(st, prev?.sets?.[j]);
+                      const isWarm = !!st.warmup;
+                      const prevSet = prevWorkingFor(j);
+                      const pr = !isWarm && isPR(st, e.exId);
+                      const highlight = !isWarm && (pr || isImprovement(st, prevSet));
+                      const anyImprovementBefore = !isWarm && filteredSets.slice(0, j).some((s, k) => !s.warmup && (isPR(s, e.exId) || isImprovement(s, prevWorkingFor(k))));
+                      const decline = !isWarm && !anyImprovementBefore && isDecline(st, prevSet);
                       return (
                         <span key={j} style={{
-                          opacity: st.done ? 1 : 0.3,
+                          opacity: st.done ? (isWarm ? 0.5 : 1) : 0.3,
                           background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent',
                           border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
                           borderRadius: 6, padding: '3px 8px',
                           fontFamily: UI.fontNum, fontSize: 12,
-                          color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,
+                          color: isWarm ? UI.inkFaint : highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,
                         }}>
-                          {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
+                          {isWarm && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkFaint, marginRight: 4 }}>W</span>}
+                          {st.kg ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
                         </span>
                       );
                     })}
