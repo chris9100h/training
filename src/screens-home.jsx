@@ -954,14 +954,20 @@ function HomeScreen({ store, setStore, go, userId }) {
                   if (isSlotDone && doneSession) {
                     const entry = doneSession.entries.find(e => e.exId === item.exId);
                     if (entry) {
-                      const doneSets = entry.sets.filter(s => !s.warmup && !s.skipped && (s.done || s.kg != null || s.reps != null || s.repsL != null || s.repsR != null));
-                      setsText = null; // slash format doesn't use sets×
-                      // per-set reps as slash-separated string: 14/13
-                      const repsArr = doneSets.map(s => s.reps ?? s.repsL ?? '?');
-                      repsText = repsArr.length > 0 ? repsArr.join('/') : '—';
-                      // weight from first set (most meaningful reference point)
-                      const kgs = doneSets.map(s => s.kg).filter(k => k != null);
-                      maxKg = kgs.length > 0 ? kgs[0] : null;
+                      const workingSets = entry.sets.filter(s => !s.warmup);
+                      const doneSets = workingSets.filter(s => !s.skipped && (s.done || s.kg != null || s.reps != null || s.repsL != null || s.repsR != null));
+                      const allSkipped = workingSets.length > 0 && workingSets.every(s => s.skipped);
+                      setsText = null;
+                      if (allSkipped) {
+                        repsText = 'SKIPPED'; maxKg = null;
+                      } else if (doneSets.length > 0) {
+                        const repsArr = doneSets.map(s => s.reps ?? s.repsL ?? '?');
+                        repsText = repsArr.join('/');
+                        const kgs = doneSets.map(s => s.kg).filter(k => k != null);
+                        maxKg = kgs.length > 0 ? kgs[0] : null;
+                      } else {
+                        repsText = '—'; maxKg = null;
+                      }
                       isActual = true;
                     }
                   }
@@ -987,7 +993,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                       <span className="num" style={{ fontSize: 10, color: UI.inkGhost, minWidth: 20, textAlign: 'right', flexShrink: 0 }}>{String(i + 1).padStart(2, '0')}</span>
                       <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: isActual ? UI.ink : UI.inkSoft, fontWeight: isActual ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || '?'}</span>
                       {maxKg != null && <span className="num" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{maxKg}kg</span>}
-                      <span className="num" style={{ fontSize: 11, color: isActual ? UI.gold : UI.inkFaint, flexShrink: 0 }}>
+                      <span className="num" style={{ fontSize: 11, color: isActual ? (repsText === 'SKIPPED' ? UI.inkFaint : UI.gold) : UI.inkFaint, flexShrink: 0 }}>
                         {isActual ? repsText : `${setsText}×${repsText}`}
                       </span>
                     </div>
