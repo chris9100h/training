@@ -954,7 +954,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                   if (isSlotDone && doneSession) {
                     const entry = doneSession.entries.find(e => e.exId === item.exId);
                     if (entry) {
-                      const doneSets = entry.sets.filter(s => !s.warmup && s.done && !s.skipped);
+                      const doneSets = entry.sets.filter(s => !s.warmup && !s.skipped && (s.done || s.kg != null || s.reps != null || s.repsL != null || s.repsR != null));
                       setsText = null; // slash format doesn't use sets×
                       // per-set reps as slash-separated string: 14/13
                       const repsArr = doneSets.map(s => s.reps ?? s.repsL ?? '?');
