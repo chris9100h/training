@@ -22,8 +22,8 @@ function PlanScreen({ store, setStore, go }) {
         title="Plan"
         right={
           <button onClick={() => go({ name: 'schedule-new' })} style={{
-            width: 32, height: 32, borderRadius: '50%',
-            boxShadow: `inset 0 0 0 0.5px ${UI.goldSoft}`, background: UI.goldFaint,
+            width: 32, height: 32, borderRadius: 4,
+            border: `1px solid ${UI.goldSoft}`, background: UI.goldFaint,
             color: UI.gold, cursor: 'pointer', fontSize: 20, lineHeight: 1,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>+</button>
@@ -127,8 +127,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
         <TopBar title={sch.name} onBack={() => go({ name: fromPlan ? 'plan' : 'home' })}
           right={fromPlan ? (
             <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })} style={{
-              background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-              borderRadius: 999, padding: '5px 12px', cursor: 'pointer',
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
               color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
             }}>Edit</button>
           ) : null} />
@@ -245,8 +245,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
         onBack={() => go({ name: fromPlan ? 'plan' : 'home' })}
         right={fromPlan ? (
           <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })} style={{
-            background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-            borderRadius: 999, padding: '5px 12px', cursor: 'pointer',
+            background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
             color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
           }}>Edit</button>
         ) : null}
@@ -312,8 +312,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
               const sub = isWeekday ? WEEKDAYS[d.weekday] : `Day ${i + 1}`;
               return (
                 <button key={d.id} onClick={() => setSelectedDayId(d.id)} style={{
-                  flexShrink: 0, maxWidth: 120, padding: '6px 12px 4px', borderRadius: 999,
-                  border: `0.5px solid ${active ? UI.gold : isToday ? UI.goldSoft : UI.hairStrong}`,
+                  flexShrink: 0, maxWidth: 120, padding: '6px 12px 4px', borderRadius: 4,
+                  border: `1px solid ${active ? UI.gold : isToday ? UI.goldSoft : UI.hairStrong}`,
                   background: active ? UI.goldFaint : 'transparent',
                   cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
                 }}>
@@ -413,8 +413,8 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
         right={
           <button onClick={save} style={{
             background: dirty ? UI.goldFaint : 'transparent',
-            border: `0.5px solid ${dirty ? UI.goldSoft : UI.hairStrong}`,
-            borderRadius: 999, padding: '5px 12px', cursor: 'pointer',
+            border: `1px solid ${dirty ? UI.goldSoft : UI.hairStrong}`,
+            borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
             color: dirty ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
           }}>Save</button>
         }
@@ -463,8 +463,8 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
                 const active = draft.days.some(d => d.weekday === i);
                 return (
                   <button key={i} onClick={() => toggleWeekdayEdit(i)} style={{
-                    width: 44, height: 44, borderRadius: 999,
-                    border: `0.5px solid ${active ? UI.goldSoft : UI.hairStrong}`,
+                    width: 44, height: 44, borderRadius: 6,
+                    border: `1px solid ${active ? UI.goldSoft : UI.hairStrong}`,
                     background: active ? UI.goldFaint : 'transparent',
                     color: active ? UI.gold : UI.inkFaint,
                     fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', fontWeight: active ? 600 : 400,
@@ -604,7 +604,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick }) {
           </div>
         )}
         {custom.map(t => (
-          <div key={t} style={{ display: 'flex', alignItems: 'stretch', borderRadius: 999, overflow: 'hidden', border: `0.5px solid ${UI.goldSoft}` }}>
+          <div key={t} style={{ display: 'flex', alignItems: 'stretch', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.goldSoft}` }}>
             <button onClick={() => onPick(t)} style={{
               ...dayTypeChip(false),
               border: 'none', borderRadius: 0,
@@ -656,9 +656,9 @@ function DayTypePicker({ store, setStore, title, onClose, onPick }) {
 
 function dayTypeChip(dashed) {
   return {
-    padding: '7px 12px', borderRadius: 999,
+    padding: '7px 12px', borderRadius: 4,
     background: 'transparent',
-    border: `0.5px ${dashed ? 'dashed' : 'solid'} ${UI.hairStrong}`,
+    border: `1px ${dashed ? 'dashed' : 'solid'} ${UI.hairStrong}`,
     color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 11, letterSpacing: '0.08em',
     cursor: 'pointer',
   };
@@ -1155,8 +1155,8 @@ function ScheduleNewScreen({ store, setStore, go }) {
                     const sel = weekdayDays.some(d => d.weekday === i);
                     return (
                       <button key={i} onClick={() => toggleWeekday(i)} style={{
-                        width: 42, height: 42, borderRadius: 999,
-                        border: `0.5px solid ${sel ? UI.goldSoft : UI.hairStrong}`,
+                        width: 42, height: 42, borderRadius: 6,
+                        border: `1px solid ${sel ? UI.goldSoft : UI.hairStrong}`,
                         background: sel ? UI.goldFaint : 'transparent',
                         color: sel ? UI.gold : UI.inkFaint,
                         fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', fontWeight: sel ? 600 : 400,

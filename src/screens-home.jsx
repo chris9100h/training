@@ -147,7 +147,7 @@ function RecentBannerDay({ banner, store, setStore, go, sch, onOpenSkipSheet }) 
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="micro" style={{ marginBottom: 3 }}>{dayName} · {dateLabel}</div>
-          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 999, padding: '2px 8px', display: 'inline-block' }}>
+          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `1px solid ${UI.hairStrong}`, borderRadius: 3, padding: '2px 8px', display: 'inline-block' }}>
             {skip.skipReason}
           </span>
         </div>
@@ -177,10 +177,10 @@ function RecentBannerDay({ banner, store, setStore, go, sch, onOpenSkipSheet }) 
         setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
         LB.broadcastSessionNav('start', session.id);
         go({ name: 'train', sessionId: session.id });
-      }} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+      }} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 4, background: 'transparent', border: `1px solid ${UI.hairStrong}`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
         Log
       </button>
-      <button onClick={() => onOpenSkipSheet({ mode: 'dismiss', data: { dateKey, dayId, dayName } })} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid rgba(var(--danger-rgb),0.25)`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: 'rgba(var(--danger-rgb),0.7)', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+      <button onClick={() => onOpenSkipSheet({ mode: 'dismiss', data: { dateKey, dayId, dayName } })} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 4, background: 'transparent', border: `1px solid rgba(var(--danger-rgb),0.25)`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: 'rgba(var(--danger-rgb),0.7)', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
         Dismiss
       </button>
     </div>
@@ -588,7 +588,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         <TopBar
           title={<span>HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span></span>}
           sub={new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
-          right={<button onClick={() => go({ name: 'settings' })} style={{ background: 'transparent', border: 'none', padding: 4, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: '50%', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
+          right={<button onClick={() => go({ name: 'settings' })} style={{ background: 'transparent', border: `1px solid ${UI.hairStrong}`, padding: 4, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
         />
         <div style={{ padding: 22 }}>
           {hasPlans ? (
@@ -631,8 +631,8 @@ function HomeScreen({ store, setStore, go, userId }) {
             </div>
           </div>
           <button onClick={() => go({ name: 'settings' })} style={{
-            width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-            background: 'transparent', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
+            width: 36, height: 36, borderRadius: 4, flexShrink: 0,
+            background: 'transparent', border: `1px solid ${UI.hairStrong}`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             cursor: 'pointer', color: UI.inkSoft,
           }}>
@@ -671,7 +671,7 @@ function HomeScreen({ store, setStore, go, userId }) {
               letterSpacing: '0.10em', textTransform: 'uppercase',
             }}>Cancel</button>
             <button onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{
-              flexShrink: 0, padding: '6px 14px', borderRadius: 999,
+              flexShrink: 0, padding: '6px 14px', borderRadius: 4,
               background: UI.gold, border: 'none', cursor: 'pointer',
               fontSize: 12, fontWeight: 600, fontFamily: UI.fontUi, color: '#0a0805',
               letterSpacing: '0.08em',
@@ -685,9 +685,9 @@ function HomeScreen({ store, setStore, go, userId }) {
         {/* Period navigation */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
           <button onClick={goBack} disabled={weekOffset <= minOffset} style={{
-            width: 30, height: 30, borderRadius: '50%',
+            width: 30, height: 30, borderRadius: 4,
             background: 'transparent',
-            boxShadow: `inset 0 0 0 0.5px ${weekOffset <= minOffset ? 'transparent' : UI.hairStrong}`,
+            border: `1px solid ${weekOffset <= minOffset ? 'transparent' : UI.hairStrong}`,
             color: weekOffset <= minOffset ? UI.inkGhost : UI.inkSoft,
             cursor: weekOffset <= minOffset ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -698,9 +698,9 @@ function HomeScreen({ store, setStore, go, userId }) {
             <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft, textTransform: 'uppercase' }}>{periodLabel}</span>
           </div>
           <button onClick={goForward} disabled={weekOffset === 0} style={{
-            width: 30, height: 30, borderRadius: '50%',
+            width: 30, height: 30, borderRadius: 4,
             background: 'transparent',
-            boxShadow: `inset 0 0 0 0.5px ${weekOffset === 0 ? 'transparent' : UI.hairStrong}`,
+            border: `1px solid ${weekOffset === 0 ? 'transparent' : UI.hairStrong}`,
             color: weekOffset === 0 ? UI.inkGhost : UI.inkSoft,
             cursor: weekOffset === 0 ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -840,7 +840,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                 style={{ padding: '14px 18px', width: '100%', cursor: doneSession ? 'pointer' : 'default' }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: UI.goldFaint, boxShadow: `inset 0 0 0 0.5px ${UI.goldSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 4, background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5"><path d="M2 6l2.5 2.5L10 3"/></svg>
                   </div>
                   <div style={{ flex: 1 }}>
@@ -874,7 +874,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                 {selectedDateSkip && (
                   <Frame style={{ padding: '12px 16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{ width: 28, height: 28, borderRadius: '50%', background: UI.bgInset, boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <div style={{ width: 28, height: 28, borderRadius: 4, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                         <span style={{ color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>—</span>
                       </div>
                       <div style={{ flex: 1 }}>

@@ -124,14 +124,14 @@ function LibraryScreen({ store, setStore, go }) {
     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
       {store.exercises.length > 0 && (
         <button onClick={() => { setTab('all'); setSelecting(true); }} style={{
-          background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-          borderRadius: 999, padding: '6px 12px', cursor: 'pointer',
+          background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+          borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
           color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
         }}>Select</button>
       )}
       <button onClick={() => setCreating(true)} style={{
-        width: 32, height: 32, borderRadius: '50%',
-        boxShadow: `inset 0 0 0 0.5px ${UI.goldSoft}`, background: UI.goldFaint,
+        width: 32, height: 32, borderRadius: 4,
+        border: `1px solid ${UI.goldSoft}`, background: UI.goldFaint,
         color: UI.gold, cursor: 'pointer', fontSize: 20, lineHeight: 1,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>+</button>
@@ -171,8 +171,8 @@ function LibraryScreen({ store, setStore, go }) {
                 </div>
                 <button onClick={() => setFiltersOpen(true)} style={{
                   flexShrink: 0, background: activeCount > 0 ? UI.goldFaint : 'transparent',
-                  border: `0.5px solid ${activeCount > 0 ? UI.goldSoft : UI.hairStrong}`,
-                  borderRadius: 999, padding: '6px 12px', cursor: 'pointer',
+                  border: `1px solid ${activeCount > 0 ? UI.goldSoft : UI.hairStrong}`,
+                  borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
                   color: activeCount > 0 ? UI.gold : UI.inkSoft,
                   fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
                   display: 'flex', alignItems: 'center', gap: 5,
@@ -552,9 +552,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             {editMode ? (
               autoEdit && (
                 <button onClick={() => go(back || { name: 'lib' })} style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  width: 30, height: 30, borderRadius: '50%',
-                  boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
+                  background: 'none', border: `1px solid ${UI.hairStrong}`, cursor: 'pointer',
+                  width: 30, height: 30, borderRadius: 4,
                   color: UI.inkSoft, fontSize: 16, lineHeight: 1,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>×</button>
@@ -567,9 +566,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                   letterSpacing: '0.1em', textTransform: 'uppercase',
                 }}>Edit</button>
                 <button onClick={deleteExercise} style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  width: 30, height: 30, borderRadius: '50%',
-                  boxShadow: `inset 0 0 0 0.5px rgba(var(--danger-rgb),0.3)`,
+                  background: 'none', border: `1px solid rgba(var(--danger-rgb),0.3)`, cursor: 'pointer',
+                  width: 30, height: 30, borderRadius: 4,
                   color: UI.danger, fontSize: 16, lineHeight: 1,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>×</button>
@@ -1320,18 +1318,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         right={
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <button onClick={takeScreenshot} disabled={capturing} style={{
-              background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-              borderRadius: 999, padding: '5px 10px', cursor: 'pointer',
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 4, padding: '5px 10px', cursor: 'pointer',
               color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase',
             }}>{capturing ? '…' : '↓'}</button>
             <button onClick={() => setEditing(true)} style={{
-              background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-              borderRadius: 999, padding: '5px 10px', cursor: 'pointer',
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 4, padding: '5px 10px', cursor: 'pointer',
               color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase',
             }}>Edit</button>
             <button onClick={deleteSession} style={{
-              width: 28, height: 28, borderRadius: '50%',
-              boxShadow: `inset 0 0 0 0.5px rgba(var(--danger-rgb),0.25)`, background: 'transparent',
+              width: 28, height: 28, borderRadius: 4,
+              border: `1px solid rgba(var(--danger-rgb),0.25)`, background: 'transparent',
               color: UI.danger, cursor: 'pointer', fontSize: 16, lineHeight: 1,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>×</button>
@@ -1854,8 +1852,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
         display: 'flex', alignItems: 'center', gap: 12,
       }}>
         <button onClick={() => go({ name: 'settings' })} style={{
-          width: 32, height: 32, borderRadius: '50%',
-          border: `0.5px solid ${UI.hairStrong}`, background: 'transparent',
+          width: 32, height: 32, borderRadius: 4,
+          border: `1px solid ${UI.hairStrong}`, background: 'transparent',
           color: UI.gold, cursor: 'pointer', flexShrink: 0,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
@@ -1887,8 +1885,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
           const isCurrent = i === exIdx;
           return (
             <button key={i} onClick={() => setExIdx(i)} style={{
-              flexShrink: 0, padding: '6px 12px', borderRadius: 999,
-              border: `${isCurrent ? '1.5px' : '0.5px'} solid ${isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.hair}`,
+              flexShrink: 0, padding: '6px 12px', borderRadius: 4,
+              border: `${isCurrent ? '1.5px' : '1px'} solid ${isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.hair}`,
               background: isCurrent ? UI.goldFaint : allDone ? 'rgba(201,169,97,0.06)' : 'transparent',
               color: isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.inkSoft,
               fontFamily: UI.fontUi, fontSize: 12, fontWeight: isCurrent ? 600 : 400,
