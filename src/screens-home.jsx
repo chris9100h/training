@@ -614,32 +614,46 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
+      {/* Background ZANE watermark */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+        <img src="icons/zane-logo.png" style={{ width: '85%', maxWidth: 320, opacity: 0.04, filter: 'grayscale(1) brightness(3)', objectFit: 'contain' }} />
+      </div>
+
       {/* Header */}
       <div style={{
         flexShrink: 0,
-        padding: `calc(env(safe-area-inset-top, 0px) + 16px) 22px 16px`,
-        borderBottom: `0.5px solid ${UI.hair}`,
+        padding: `calc(env(safe-area-inset-top, 0px) + 12px) 22px 12px`,
+        borderBottom: `1px solid ${UI.hair}`,
         position: 'sticky', top: 0, zIndex: 5,
         backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-        background: 'rgba(var(--bg-rgb),0.85)',
+        background: 'rgba(var(--bg-rgb),0.92)',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <div className="micro">{new Date().toLocaleDateString('en-US', { weekday:'long', day:'2-digit', month:'long' }).toUpperCase()}</div>
-            <div style={{ marginTop: 4, fontFamily: UI.fontDisplay, fontSize: 36, color: UI.ink, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', lineHeight: 1 }}>
-              HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 900, letterSpacing: '0.10em', color: UI.gold, lineHeight: 1 }}>ZANE</span>
+              <i className="fa-solid fa-dumbbell" style={{ fontSize: 13, color: UI.inkFaint }} />
             </div>
+            <div className="micro" style={{ marginTop: 3, letterSpacing: '0.18em' }}>BARBELL CLUB · MEMBER</div>
           </div>
-          <button onClick={() => go({ name: 'settings' })} style={{
-            width: 36, height: 36, borderRadius: 4, flexShrink: 0,
-            background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', color: UI.inkSoft,
-          }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ textAlign: 'right' }}>
+              <div className="micro" style={{ marginBottom: 3 }}>{new Date().toLocaleDateString('en-US', { weekday:'long', day:'2-digit', month:'long' }).toUpperCase()}</div>
+              <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 900, letterSpacing: '0.06em', color: UI.ink, lineHeight: 1, textTransform: 'uppercase' }}>
+                HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span>
+              </div>
+            </div>
+            <button onClick={() => go({ name: 'settings' })} style={{
+              width: 34, height: 34, borderRadius: 4, flexShrink: 0,
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', color: UI.inkSoft,
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -653,6 +667,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             background: UI.goldFaint,
             borderBottom: `0.5px solid ${UI.goldSoft}`,
             display: 'flex', alignItems: 'center', gap: 10,
+            position: 'relative', zIndex: 1,
           }}>
             <div style={{ width: 7, height: 7, borderRadius: '50%', background: UI.gold, flexShrink: 0, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
             <span style={{ flex: 1, fontSize: 13, color: UI.gold, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -680,7 +695,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         ) : null;
       })()}
 
-      <div style={{ flex: 1, minHeight: 0, padding: '16px 22px 18px', display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
+      <div style={{ flex: 1, minHeight: 0, padding: '16px 22px 18px', display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', position: 'relative', zIndex: 1 }}>
 
         {/* Period navigation */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
