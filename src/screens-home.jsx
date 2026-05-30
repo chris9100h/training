@@ -829,18 +829,18 @@ function HomeScreen({ store, setStore, go, userId }) {
             </div>
           </BracketFrame>
         ) : (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '4px 0' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', padding: '4px 0' }}>
             <div className="micro-gold" style={{ marginBottom: 6 }}>{cardLabel}</div>
             <div style={{
               fontFamily: UI.fontDisplay, fontSize: 72, fontWeight: 900,
               textTransform: 'uppercase', letterSpacing: '0.04em',
-              color: UI.gold, lineHeight: 0.9, marginBottom: 28,
+              color: UI.gold, lineHeight: 0.9, marginBottom: 20,
             }}>
               {activeDay.name}
             </div>
 
             {/* Stats */}
-            <div style={{ display: 'flex', alignItems: 'stretch', gap: 20, marginBottom: 28, width: '100%', justifyContent: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: 20, marginBottom: 18, width: '100%', justifyContent: 'center' }}>
               <SubDial size={80} label="EXERCISES" value={activeDay.items.length} />
               <div style={{ width: 1, background: UI.hairStrong, alignSelf: 'stretch' }} />
               <SubDial size={80} label="MIN" value={avgDayDuration != null ? `~${avgDayDuration}` : `~${Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))}`} />
@@ -848,26 +848,7 @@ function HomeScreen({ store, setStore, go, userId }) {
               <SubDial size={80} label="SETS" value={activeDay.items.reduce((a,b) => a + b.sets, 0)} />
             </div>
 
-            {/* THE WORK divider + exercise list */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', marginBottom: 10 }}>
-              <div style={{ flex: 1, height: 1, background: UI.hair }} />
-              <span style={{ fontFamily: UI.fontDisplay, fontSize: 10, fontWeight: 700, letterSpacing: '0.30em', color: UI.inkFaint }}>THE WORK</span>
-              <div style={{ flex: 1, height: 1, background: UI.hair }} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', width: '100%', marginBottom: 18 }}>
-              {activeDay.items.map((item, i) => {
-                const ex = LB.findExercise(store, item.exId);
-                return (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${UI.hair}` }}>
-                    <span className="num" style={{ fontSize: 10, color: UI.inkGhost, minWidth: 20, textAlign: 'right', flexShrink: 0 }}>{String(i + 1).padStart(2, '0')}</span>
-                    <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: UI.inkSoft, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || '?'}</span>
-                    <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.10em', flexShrink: 0 }}>{item.sets}×{item.reps}</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* CTAs */}
+            {/* CTAs — above exercise list so the action is always immediately visible */}
             {isSlotDone ? (
               <Frame
                 onClick={doneSession ? () => go({ name: 'session', sessionId: doneSession.id, back: { name: 'home' } }) : undefined}
@@ -955,6 +936,27 @@ function HomeScreen({ store, setStore, go, userId }) {
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* THE WORK divider + exercise list */}
+            {activeDay.items.length > 0 && (
+              <div style={{ width: '100%', marginTop: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <div style={{ flex: 1, height: 1, background: UI.hair }} />
+                  <span style={{ fontFamily: UI.fontDisplay, fontSize: 10, fontWeight: 700, letterSpacing: '0.30em', color: UI.inkFaint }}>THE WORK</span>
+                  <div style={{ flex: 1, height: 1, background: UI.hair }} />
+                </div>
+                {activeDay.items.map((item, i) => {
+                  const ex = LB.findExercise(store, item.exId);
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${UI.hair}` }}>
+                      <span className="num" style={{ fontSize: 10, color: UI.inkGhost, minWidth: 20, textAlign: 'right', flexShrink: 0 }}>{String(i + 1).padStart(2, '0')}</span>
+                      <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: UI.inkSoft, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || '?'}</span>
+                      <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.10em', flexShrink: 0 }}>{item.sets}×{item.reps}</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
