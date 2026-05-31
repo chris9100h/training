@@ -104,7 +104,7 @@ function SkipReasonSheet({ modal, onClose, setStore, userId }) {
                     setStore(s => ({ ...s, skips: [...(s.skips || []), { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason, skippedAt: new Date().toISOString() }] }));
                   }
                   onClose();
-                }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 10, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                   {reason}
                 </button>
               );
@@ -920,7 +920,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                         {isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION'}
                       </span>
                     </button>
-                    {!weekdayMode && isViewingToday && (
+                    {isViewingToday && (
                       <button onClick={() => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
                         flexShrink: 0, width: 80, minHeight: 48, borderRadius: 6, cursor: 'pointer',
                         background: 'transparent',
