@@ -1081,6 +1081,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
   const [pickingType, setPickingType] = useStateS(false);
   const [pickingWeekday, setPickingWeekday] = useStateS(null);
   const [importingFromPlan, setImportingFromPlan] = useStateS(false);
+  const [importingWeekday, setImportingWeekday] = useStateS(null);
 
   const presets = [
     { label: 'Push · Pull · Rest', val: ['PUSH','PULL','REST'] },
@@ -1128,7 +1129,10 @@ function ScheduleNewScreen({ store, setStore, go }) {
       id: LB.uid(),
       name: name.trim() || 'My Plan',
       mode: 'weekday',
-      days: sorted.map(d => ({ id: LB.uid(), name: d.name, weekday: d.weekday, items: [] })),
+      days: sorted.map(d => d.items
+        ? { id: d.id, name: d.name, weekday: d.weekday, items: d.items }
+        : { id: LB.uid(), name: d.name, weekday: d.weekday, items: [] }
+      ),
       archived: false,
     };
     setStore(s => {
@@ -1273,7 +1277,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
                       {[...weekdayDays].sort((a,b)=>a.weekday-b.weekday).map(d => (
                         <div key={d.weekday} style={{
                           display: 'flex', alignItems: 'center', gap: 10,
-                          background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+                          background: UI.bgInset, border: `1px solid ${d.items ? UI.goldSoft : UI.hairStrong}`,
                           padding: '8px 12px', borderRadius: 4,
                         }}>
                           <div className="num" style={{ width: 30, color: UI.inkFaint, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[d.weekday]}</div>
@@ -1281,9 +1285,17 @@ function ScheduleNewScreen({ store, setStore, go }) {
                             flex: 1, textAlign: 'left', background: 'transparent', border: 'none',
                             cursor: 'pointer', color: d.name === 'REST' ? UI.inkFaint : UI.gold,
                             fontSize: 13, fontWeight: 600, fontFamily: UI.fontUi, padding: 0,
+                            display: 'flex', alignItems: 'center', gap: 6,
                           }}>
+                            {d.items && <span style={{ fontSize: 10, opacity: 0.7 }}>↩</span>}
                             {d.name} <span className="micro" style={{ fontStyle: 'normal' }}>change</span>
                           </button>
+                          {store.schedules.some(s => s.days.some(day => day.items.length > 0)) && (
+                            <button onClick={() => setImportingWeekday(d.weekday)} style={{
+                              background: 'transparent', border: 'none', cursor: 'pointer',
+                              color: UI.gold, fontSize: 11, fontFamily: UI.fontNum, padding: '2px 4px',
+                            }} title="Import from plan">↩</button>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1329,6 +1341,22 @@ function ScheduleNewScreen({ store, setStore, go }) {
           onCopy={(day, migrateId) => {
             setPattern(pat => [...pat, { id: migrateId || LB.uid(), name: day.name, items: day.items }]);
             setImportingFromPlan(false);
+          }}
+        />
+      )}
+      {importingWeekday != null && (
+        <DayCopyPicker
+          store={store}
+          schedule={null}
+          currentDayId={null}
+          onClose={() => setImportingWeekday(null)}
+          onCopy={(day, migrateId) => {
+            setWeekdayDays(days => days.map(d =>
+              d.weekday === importingWeekday
+                ? { ...d, name: day.name, id: migrateId || LB.uid(), items: day.items }
+                : d
+            ));
+            setImportingWeekday(null);
           }}
         />
       )}
