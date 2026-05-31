@@ -1003,7 +1003,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                           {isActual ? repsText : `${setsText}×${repsText}`}
                         </span>
                       </div>
-                      <div className="knurl" style={{ marginLeft: 30 }} />
+                      {i < activeDay.items.length - 1 && <div className="knurl" style={{ marginLeft: 30 }} />}
                     </React.Fragment>
                   );
                 })}
