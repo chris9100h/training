@@ -1028,13 +1028,18 @@ function StatsTab({ store, sessions, go }) {
       <div>
         <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>CONSISTENCY</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          {/* Hero: current streak */}
-          <div style={{ gridColumn: '1 / -1', background: UI.goldFaint, borderRadius: 4, padding: '22px 14px', textAlign: 'center', border: `1px solid ${UI.goldSoft}` }}>
-            <div className="micro" style={{ color: UI.gold, marginBottom: 10 }}>CURRENT STREAK</div>
-            <div className="num" style={{ fontSize: 52, color: UI.gold, lineHeight: 1 }}>{currentStreak}</div>
-            <div className="micro" style={{ color: UI.gold, marginTop: 8, opacity: 0.7 }}>{currentStreak === 1 ? 'DAY' : 'DAYS'}</div>
+          {/* Current streak — full width, slightly taller than longest */}
+          <div style={{ gridColumn: '1 / -1', background: UI.goldFaint, borderRadius: 4, padding: '14px 14px', textAlign: 'center', border: `1px solid ${UI.goldSoft}` }}>
+            <div className="micro" style={{ color: UI.gold, marginBottom: 6 }}>CURRENT STREAK</div>
+            <div className="num" style={{ fontSize: 40, color: UI.gold, lineHeight: 1 }}>{currentStreak}</div>
+            <div className="micro" style={{ color: UI.gold, marginTop: 5, opacity: 0.7 }}>{currentStreak === 1 ? 'DAY' : 'DAYS'}</div>
           </div>
-          <StatCard label="Longest Streak" value={longestStreak} sub={longestStreak === 1 ? 'day' : 'days'} gold />
+          {/* Longest streak — full width, slightly shorter than current */}
+          <div style={{ gridColumn: '1 / -1', background: UI.goldFaint, borderRadius: 4, padding: '10px 14px', textAlign: 'center', border: `1px solid ${UI.goldSoft}` }}>
+            <div className="micro" style={{ color: UI.gold, marginBottom: 4 }}>LONGEST STREAK</div>
+            <div className="num" style={{ fontSize: 28, color: UI.gold, lineHeight: 1 }}>{longestStreak}</div>
+            <div className="micro" style={{ color: UI.gold, marginTop: 3, opacity: 0.7 }}>{longestStreak === 1 ? 'DAY' : 'DAYS'}</div>
+          </div>
           <StatCard label="Avg / Week" value={avgSessionsPerWeek} sub="sessions" compact />
           <StatCard label="This Year" value={thisYearSessions.length} sub="sessions" compact />
           <StatCard label="This Month" value={thisMonthSessions.length} sub="sessions" compact />
