@@ -941,7 +941,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             </div>{/* end fixed header */}
 
             {/* Scrollable: THE WORK + banners */}
-            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', width: '100%', paddingBottom: 18 }}>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', width: '100%', paddingBottom: 18, scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
             {activeDay.items.length > 0 && (
               <div style={{ width: '100%', marginTop: 18 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
