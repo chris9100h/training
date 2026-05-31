@@ -17,6 +17,8 @@ const _log = window._log;
 // Patch console so DebugPanel captures it like DevTools
 if (!window._consolePatched) {
   window._consolePatched = true;
+
+  // console.log / warn / error
   ['log', 'warn', 'error'].forEach(level => {
     const orig = console[level];
     console[level] = (...args) => {
@@ -26,6 +28,32 @@ if (!window._consolePatched) {
       orig.apply(console, args);
     };
   });
+
+  // Uncaught JS exceptions
+  window.addEventListener('error', e => {
+    window._log(`[UNCAUGHT] ${e.message} @ ${(e.filename || '').split('/').pop()}:${e.lineno}`);
+  });
+
+  // Unhandled promise rejections
+  window.addEventListener('unhandledrejection', e => {
+    const reason = e.reason instanceof Error ? e.reason.message : String(e.reason ?? 'unknown');
+    window._log(`[PROMISE] ${reason}`);
+  });
+
+  // Fetch — log non-2xx responses and network errors (skip successes to stay lean)
+  const origFetch = window.fetch;
+  window.fetch = async (...args) => {
+    const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '?');
+    const short = url.replace(/^https?:\/\/[^/]+/, '').slice(0, 80);
+    try {
+      const res = await origFetch(...args);
+      if (!res.ok) window._log(`[FETCH] ${res.status} ${res.statusText} — ${short}`);
+      return res;
+    } catch (err) {
+      window._log(`[FETCH] ERR ${short} — ${err.message}`);
+      throw err;
+    }
+  };
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
