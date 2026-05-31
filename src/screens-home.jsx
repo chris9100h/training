@@ -1015,15 +1015,21 @@ function HomeScreen({ store, setStore, go, userId }) {
                 onOpenSkipSheet={setSkipReasonModal}
               />
             )}
-
-            {/* last session strip */}
-            {lastSession && (
-              <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id })} />
-            )}
             </div>{/* end scrollable */}
           </div>
         )}
       </div>
+
+      {/* Last session strip — fixed above tab bar */}
+      {lastSession && (
+        <div style={{ flexShrink: 0 }}>
+          <div className="knurl" />
+          <div style={{ padding: '10px 22px 10px' }}>
+            <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id })} />
+          </div>
+        </div>
+      )}
+
       <SkipReasonSheet
         modal={skipReasonModal}
         onClose={() => setSkipReasonModal(null)}
