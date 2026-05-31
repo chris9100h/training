@@ -136,90 +136,6 @@ function ErrorScreen({ onRetry }) {
   );
 }
 
-function DebugPanel() {
-  const [open, setOpen] = useStateA(false);
-  const [entries, setEntries] = useStateA([]);
-  useEffectA(() => {
-    if (!open) return;
-    const refresh = () => setEntries([...(window._dbg || [])].reverse());
-    refresh();
-    const id = setInterval(refresh, 400);
-    return () => clearInterval(id);
-  }, [open]);
-
-  const copyLog = () => {
-    const log = window._dbg || [];
-    const text = [...log].reverse().map((e, idx, arr) => {
-      const prev = arr[idx + 1];
-      const delta = prev ? `+${e.t - prev.t}ms` : '      ';
-      return `${delta.padStart(8)}  ${e.msg}`;
-    }).join('\n');
-    navigator.clipboard?.writeText(text).catch(() => {});
-  };
-
-  const tbBtn = {
-    background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 4,
-    color: '#888', fontSize: 10, padding: '4px 10px', cursor: 'pointer', fontFamily: 'monospace',
-  };
-
-  if (!open) {
-    return (
-      <button onClick={() => setOpen(true)} style={{
-        position: 'fixed', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 56px)', left: 8, zIndex: 9990,
-        background: 'rgba(201,169,97,0.15)', border: '0.5px solid rgba(201,169,97,0.4)',
-        borderRadius: 6, color: '#c9a961', fontSize: 10, fontFamily: 'monospace',
-        padding: '3px 7px', cursor: 'pointer', letterSpacing: '0.05em',
-      }}>DBG</button>
-    );
-  }
-
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 9991,
-      background: 'rgba(8,6,3,0.97)', display: 'flex', flexDirection: 'column',
-      fontFamily: 'monospace', fontSize: 11,
-    }}>
-      {/* Header bar — safe-area-top aware, title + controls at top */}
-      <div style={{
-        flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
-        padding: 'calc(env(safe-area-inset-top, 0px) + 12px) 12px 10px',
-        borderBottom: '0.5px solid rgba(255,255,255,0.12)',
-      }}>
-        <span style={{ flex: 1, color: '#c9a961', fontWeight: 700, fontSize: 11, letterSpacing: '0.10em' }}>DEBUG LOG</span>
-        <button onClick={copyLog} style={tbBtn}>COPY</button>
-        <button onClick={() => { window._dbg = []; setEntries([]); }} style={tbBtn}>CLEAR</button>
-        <button onClick={() => setOpen(false)} style={{ ...tbBtn, fontSize: 18, padding: '1px 8px', border: 'none', color: '#aaa' }}>×</button>
-      </div>
-      {/* Scrollable entries */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0 calc(env(safe-area-inset-bottom, 0px) + 8px)' }}>
-        {entries.length === 0 && (
-          <div style={{ color: '#444', padding: '16px 12px', fontSize: 12 }}>— no entries —</div>
-        )}
-        {entries.map((e, idx) => {
-          const prev = entries[idx + 1];
-          const delta = prev ? e.t - prev.t : 0;
-          const color = e.msg.includes('BLOCK') ? '#e87'
-            : e.msg.includes('UNCHECK') ? '#f96'
-            : e.msg.includes('complete') ? '#c9a961'
-            : e.msg.includes('NULL') ? '#f55'
-            : '#9db';
-          return (
-            <div key={idx} style={{
-              padding: '3px 10px', borderBottom: '0.5px solid rgba(255,255,255,0.04)',
-              display: 'flex', gap: 8, alignItems: 'baseline',
-            }}>
-              <span style={{ color: '#444', flexShrink: 0, width: 54, textAlign: 'right', fontSize: 10 }}>
-                {prev ? `+${delta}ms` : ''}
-              </span>
-              <span style={{ color, wordBreak: 'break-all' }}>{e.msg}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function App() {
   const isPad = useIsPad();
   const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error'
@@ -670,8 +586,6 @@ function App() {
     default:              screen = <window.Screens.HomeScreen {...props} />; break;
   }
 
-  const debugPanel = localStorage.getItem('logbook-debug-panel') === 'true' && <DebugPanel />;
-
   if (isPad && showTab) {
     return (
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -682,7 +596,6 @@ function App() {
           </ErrorBoundary>
         </div>
         {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
-        {debugPanel}
       </div>
     );
   }
@@ -694,7 +607,6 @@ function App() {
       </ErrorBoundary>
       {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
       {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} />}
-      {debugPanel}
     </>
   );
 }

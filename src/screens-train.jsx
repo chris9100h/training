@@ -13,6 +13,20 @@ window._log = window._log || ((msg) => {
   if (window._dbg.length > 1000) window._dbg.shift();
 });
 const _log = window._log;
+
+// Patch console so DebugPanel captures it like DevTools
+if (!window._consolePatched) {
+  window._consolePatched = true;
+  ['log', 'warn', 'error'].forEach(level => {
+    const orig = console[level];
+    console[level] = (...args) => {
+      window._log(`[${level.toUpperCase()}] ${args.map(a => {
+        try { return typeof a === 'object' ? JSON.stringify(a) : String(a); } catch (_) { return String(a); }
+      }).join(' ')}`);
+      orig.apply(console, args);
+    };
+  });
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
 function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }) {
