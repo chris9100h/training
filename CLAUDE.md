@@ -86,7 +86,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_pushover_active`:** `id` (text), `nonce` (text)
 
-**`zane_schedules`:** `id` (text), `user_id` (uuid), `name` (text), `days` (jsonb)
+**`zane_schedules`:** `id` (text), `user_id` (uuid), `name` (text), `days` (jsonb), `archived` (boolean, default false)
 
 **`zane_sessions`:** `id` (text), `user_id` (uuid), `schedule_id`, `day_id`, `day_name` (text), `date`, `started_at`, `ended` (timestamptz), `entries` (jsonb), `duration_minutes` (int)
 

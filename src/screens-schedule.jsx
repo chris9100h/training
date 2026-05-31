@@ -36,7 +36,7 @@ function PlanScreen({ store, setStore, go }) {
             action={<Btn onClick={() => go({ name: 'schedule-new' })}>Create plan</Btn>}
             icon={ICON_CALENDAR} />
         )}
-        {store.schedules.map(s => {
+        {store.schedules.filter(s => !s.archived).map(s => {
           const isActive = s.id === store.activeScheduleId;
           return isActive ? (
             <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer' }}>
@@ -71,6 +71,29 @@ function PlanScreen({ store, setStore, go }) {
             </Frame>
           );
         })}
+        {store.schedules.some(s => s.archived) && (
+          <>
+            <div className="micro" style={{ marginTop: 8, paddingLeft: 2 }}>ARCHIVED</div>
+            {store.schedules.filter(s => s.archived).map(s => (
+              <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px', opacity: 0.55 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1 }}>{s.name}</div>
+                  <Pill>archived</Pill>
+                </div>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>
+                  {LB.isWeekdayPlan(s)
+                    ? `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`
+                    : `${s.days.length}-day cycle · ${s.days.filter(d => d.items.length).length} training days`}
+                </div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {s.days.map((d) => (
+                    <Pill key={d.id}>{d.name}</Pill>
+                  ))}
+                </div>
+              </Frame>
+            ))}
+          </>
+        )}
       </div>
     </Screen>
   );
@@ -165,6 +188,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
     copy.id = LB.uid();
     copy.name = copy.name + ' (Copy)';
     copy.days = copy.days.map(d => ({ ...d, id: LB.uid() }));
+    copy.archived = false;
     setStore(s => ({ ...s, schedules: [...s.schedules, copy] }));
     go({ name: 'plan-view', scheduleId: copy.id, fromPlan: true });
   };
@@ -391,6 +415,18 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
     }));
     go({ name: 'plan' });
   };
+  const toggleArchive = async () => {
+    const willArchive = !draft.archived;
+    if (willArchive && isActive) {
+      if (!await confirm('Archiving will deactivate this plan.', { title: `Archive "${draft.name}"?`, ok: 'Archive' })) return;
+    }
+    setStore(s => ({
+      ...s,
+      schedules: s.schedules.map(x => x.id === draft.id ? { ...x, archived: willArchive } : x),
+      activeScheduleId: (willArchive && s.activeScheduleId === draft.id) ? null : s.activeScheduleId,
+    }));
+    go({ name: 'plan' });
+  };
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(original);
   const dateInputStyle = {
@@ -529,7 +565,12 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
           Tap a day to edit its type and exercises.
         </div>
 
-        <Btn kind="ghost" onClick={deleteSch} style={{ marginTop: 4, color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)', fontSize: 12 }}>Delete plan</Btn>
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <Btn kind="ghost" onClick={toggleArchive} style={{ flex: 1, fontSize: 12, color: UI.inkSoft, borderColor: UI.hairStrong }}>
+            {draft.archived ? 'Unarchive' : 'Archive plan'}
+          </Btn>
+          <Btn kind="ghost" onClick={deleteSch} style={{ flex: 1, fontSize: 12, color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)' }}>Delete plan</Btn>
+        </div>
       </div>
 
       {editingDay && (
@@ -664,35 +705,65 @@ function dayTypeChip(dashed) {
   };
 }
 
-// ─── Day copy picker ─────────────────────────────────────────────────
+// ─── Day copy / migrate picker ───────────────────────────────────────
+// onCopy(items, migrateId?) — migrateId is the source day's id when
+// copying from another plan; passing it preserves the day id so all
+// historical sessions automatically carry over to the new plan.
 function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy }) {
-  const copyableDays = schedule.days.filter(d => d.id !== currentDayId && d.items.length > 0);
+  const thisScheduleDays = (schedule?.days || []).filter(d => d.id !== currentDayId && d.items.length > 0);
+  const otherSchedules = store.schedules.filter(s => schedule ? s.id !== schedule.id : true);
+
+  const DayBtn = ({ d, migrateId }) => (
+    <button key={d.id} onClick={() => onCopy(d.items, migrateId)} style={{
+      background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+      borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+      textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
+    }}
+    onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
+    onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.hairStrong}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div className="display" style={{ fontSize: 16 }}>{d.name}</div>
+        {migrateId && (
+          <div className="micro" style={{ color: UI.gold, marginLeft: 8, flexShrink: 0, marginTop: 1 }}>↩ history</div>
+        )}
+      </div>
+      <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 4 }}>
+        {d.items.map(it => LB.findExercise(store, it.exId)?.name || '—').join(' · ')}
+      </div>
+      <div className="num" style={{ fontSize: 10, color: UI.inkFaint, marginTop: 4 }}>
+        {d.items.length} exercise{d.items.length !== 1 ? 's' : ''}
+      </div>
+    </button>
+  );
+
+  const hasAny = thisScheduleDays.length > 0 || otherSchedules.some(s => s.days.some(d => d.items.length > 0));
 
   return (
-    <Sheet open={true} onClose={onClose} title="Copy exercises from">
-      {copyableDays.length === 0 ? (
+    <Sheet open={true} onClose={onClose} title="Import exercises from">
+      {!hasAny ? (
         <div style={{ padding: '24px 0', textAlign: 'center', color: UI.inkFaint, fontSize: 13 }}>
-          No other days with exercises.
+          No days with exercises available.
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-          {copyableDays.map(d => (
-            <button key={d.id} onClick={() => onCopy(d.items)} style={{
-              background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-              borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
-              textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi,
-            }}
-            onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
-            onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.hairStrong}>
-              <div className="display" style={{ fontSize: 16, marginBottom: 4 }}>{d.name}</div>
-              <div style={{ fontSize: 12, color: UI.inkSoft }}>
-                {d.items.map(it => LB.findExercise(store, it.exId)?.name || '—').join(' · ')}
-              </div>
-              <div className="num" style={{ fontSize: 10, color: UI.inkFaint, marginTop: 4 }}>
-                {d.items.length} exercise{d.items.length !== 1 ? 's' : ''}
-              </div>
-            </button>
-          ))}
+          {thisScheduleDays.length > 0 && (
+            <>
+              <div className="micro" style={{ paddingLeft: 2, marginBottom: 2 }}>THIS PLAN</div>
+              {thisScheduleDays.map(d => <DayBtn key={d.id} d={d} migrateId={undefined} />)}
+            </>
+          )}
+          {otherSchedules.map(s => {
+            const days = s.days.filter(d => d.items.length > 0);
+            if (!days.length) return null;
+            return (
+              <React.Fragment key={s.id}>
+                <div className="micro" style={{ paddingLeft: 2, marginTop: thisScheduleDays.length > 0 ? 8 : 2, marginBottom: 2 }}>
+                  {s.name}{s.archived ? ' · ARCHIVED' : ''}
+                </div>
+                {days.map(d => <DayBtn key={d.id} d={d} migrateId={d.id} />)}
+              </React.Fragment>
+            );
+          })}
         </div>
       )}
     </Sheet>
@@ -771,7 +842,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
       return { ...d, items: normalizeSupersets(items) };
     });
   };
-  const copyItemsFromDay = (items) => {
+  const copyItemsFromDay = (items, migrateId) => {
     // Deep-copy each item and remap superset group ids — a shallow [...items]
     // would share item objects (and group ids) with the source day.
     const gidMap = {};
@@ -783,7 +854,9 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
       }
       return next;
     });
-    setDraft(d => ({ ...d, items: copied }));
+    // migrateId: preserve the source day's id so historical sessions for that
+    // day carry over to this new plan automatically (sessions reference day_id).
+    setDraft(d => ({ ...d, items: copied, ...(migrateId ? { id: migrateId } : {}) }));
     setCopyingFrom(false);
   };
 
@@ -803,7 +876,9 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     });
   };
 
-  const otherDaysWithExercises = schedule ? schedule.days.filter(d => d.id !== draft.id && d.items.length > 0) : [];
+  const canImportFromPlan = store.schedules.some(s =>
+    s.days.some(d => d.items.length > 0 && (s.id !== schedule?.id || d.id !== draft.id))
+  );
 
   return (
     <Sheet open={true} onClose={onClose} title="Edit day">
@@ -828,12 +903,12 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
         <div style={{ marginTop: 18 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <span className="label" style={{ marginBottom: 0 }}>Exercises</span>
-            {otherDaysWithExercises.length > 0 && (
+            {canImportFromPlan && (
               <button onClick={() => setCopyingFrom(true)} style={{
                 background: 'transparent', border: 'none', cursor: 'pointer',
                 color: UI.gold, fontSize: 10, fontFamily: UI.fontUi, padding: '2px 0',
                 letterSpacing: '0.1em', textTransform: 'uppercase',
-              }}>Copy from day</button>
+              }}>Import from plan</button>
             )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1023,6 +1098,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
       id: LB.uid(),
       name: name.trim() || 'My Plan',
       days: pattern.map(p => ({ id: LB.uid(), name: p, items: [] })),
+      archived: false,
     };
     setStore(s => {
       const withTypes = ensureCustomTypes(s, pattern);
@@ -1045,6 +1121,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
       name: name.trim() || 'My Plan',
       mode: 'weekday',
       days: sorted.map(d => ({ id: LB.uid(), name: d.name, weekday: d.weekday, items: [] })),
+      archived: false,
     };
     setStore(s => {
       const withTypes = ensureCustomTypes(s, sorted.map(d => d.name));

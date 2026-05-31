@@ -21,10 +21,11 @@ CREATE TABLE IF NOT EXISTS public.zane_exercises (
 );
 
 CREATE TABLE IF NOT EXISTS public.zane_schedules (
-  id      text PRIMARY KEY,
-  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  name    text NOT NULL DEFAULT '',
-  days    jsonb NOT NULL DEFAULT '[]'
+  id       text PRIMARY KEY,
+  user_id  uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name     text NOT NULL DEFAULT '',
+  days     jsonb NOT NULL DEFAULT '[]',
+  archived boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS public.zane_sessions (
