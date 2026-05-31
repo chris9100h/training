@@ -591,6 +591,10 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
           title="Choose day type"
           onClose={() => setPickingType(false)}
           onPick={addDayType}
+          onImport={(day, migrateId) => {
+            setDraft(d => ({ ...d, days: [...d.days, { id: migrateId || LB.uid(), name: day.name, items: day.items }] }));
+            setPickingType(false);
+          }}
         />
       )}
       {confirmEl}
@@ -605,11 +609,13 @@ const dayEditIconBtn = {
 };
 
 // ─── Day-type picker (sheet) ─────────────────────────────────────────
-function DayTypePicker({ store, setStore, title, onClose, onPick }) {
+function DayTypePicker({ store, setStore, title, onClose, onPick, onImport }) {
   const [confirmEl, confirm] = useConfirm();
   const [creating, setCreating] = useStateS(false);
   const [newName, setNewName] = useStateS('');
+  const [importOpen, setImportOpen] = useStateS(false);
   const custom = store.customDayTypes || [];
+  const hasImportable = onImport && store.schedules.some(s => s.days.some(d => d.items.length > 0));
 
   const createCustom = () => {
     const name = newName.trim().toUpperCase();
@@ -690,7 +696,33 @@ function DayTypePicker({ store, setStore, title, onClose, onPick }) {
       <div className="micro" style={{ marginTop: 18, color: UI.inkFaint, lineHeight: 1.7 }}>
         For plans like PUSH1 / PULL1 / REST / LEGS1, create several custom types.
       </div>
+
+      {hasImportable && (
+        <>
+          <div style={{ height: 1, background: UI.hair, margin: '18px 0 14px' }} />
+          <span className="label">From existing plan</span>
+          <button onClick={() => setImportOpen(true)} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            width: '100%', marginTop: 8, padding: '12px 14px', borderRadius: 4,
+            background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
+            cursor: 'pointer', color: UI.gold, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+          }}>
+            <span>↩ Import day with history</span>
+            <span className="micro" style={{ color: UI.gold, opacity: 0.7 }}>exercises + progression →</span>
+          </button>
+        </>
+      )}
+
       {confirmEl}
+      {importOpen && (
+        <DayCopyPicker
+          store={store}
+          schedule={null}
+          currentDayId={null}
+          onClose={() => setImportOpen(false)}
+          onCopy={(day, migrateId) => { onImport(day, migrateId); setImportOpen(false); }}
+        />
+      )}
     </Sheet>
   );
 }
@@ -1080,8 +1112,6 @@ function ScheduleNewScreen({ store, setStore, go }) {
   const [weekdayDays, setWeekdayDays] = useStateS([]);
   const [pickingType, setPickingType] = useStateS(false);
   const [pickingWeekday, setPickingWeekday] = useStateS(null);
-  const [importingFromPlan, setImportingFromPlan] = useStateS(false);
-  const [importingWeekday, setImportingWeekday] = useStateS(null);
 
   const presets = [
     { label: 'Push · Pull · Rest', val: ['PUSH','PULL','REST'] },
@@ -1221,12 +1251,7 @@ function ScheduleNewScreen({ store, setStore, go }) {
                     {pattern.length === 0 && <div className="micro" style={{ color: UI.inkFaint, alignSelf: 'center' }}>empty — add a day</div>}
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <Btn kind="ghost" onClick={() => setPickingType(true)} style={{ flex: 1, borderStyle: 'dashed', fontSize: 12 }}>+ Add day</Btn>
-                  {store.schedules.some(s => s.days.some(d => d.items.length > 0)) && (
-                    <Btn kind="ghost" onClick={() => setImportingFromPlan(true)} style={{ flex: 1, borderStyle: 'dashed', fontSize: 12, color: UI.gold, borderColor: UI.goldSoft }}>↩ From plan</Btn>
-                  )}
-                </div>
+                <Btn kind="ghost" onClick={() => setPickingType(true)} style={{ borderStyle: 'dashed', fontSize: 12 }}>+ Add day</Btn>
                 <div>
                   <span className="label">Quick select</span>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
@@ -1290,12 +1315,6 @@ function ScheduleNewScreen({ store, setStore, go }) {
                             {d.items && <span style={{ fontSize: 10, opacity: 0.7 }}>↩</span>}
                             {d.name} <span className="micro" style={{ fontStyle: 'normal' }}>change</span>
                           </button>
-                          {store.schedules.some(s => s.days.some(day => day.items.length > 0)) && (
-                            <button onClick={() => setImportingWeekday(d.weekday)} style={{
-                              background: 'transparent', border: 'none', cursor: 'pointer',
-                              color: UI.gold, fontSize: 11, fontFamily: UI.fontNum, padding: '2px 4px',
-                            }} title="Import from plan">↩</button>
-                          )}
                         </div>
                       ))}
                     </div>
@@ -1318,7 +1337,11 @@ function ScheduleNewScreen({ store, setStore, go }) {
           store={store} setStore={setStore}
           title="Choose day type"
           onClose={() => setPickingType(false)}
-          onPick={(t) => { setPattern(pat => [...pat, t]); }}
+          onPick={(t) => { setPattern(pat => [...pat, t]); setPickingType(false); }}
+          onImport={(day, migrateId) => {
+            setPattern(pat => [...pat, { id: migrateId || LB.uid(), name: day.name, items: day.items }]);
+            setPickingType(false);
+          }}
         />
       )}
       {pickingWeekday != null && (
@@ -1327,36 +1350,16 @@ function ScheduleNewScreen({ store, setStore, go }) {
           title={`${WEEKDAYS_FULL[pickingWeekday]} — choose type`}
           onClose={() => setPickingWeekday(null)}
           onPick={(t) => {
-            setWeekdayDays(days => days.map(d => d.weekday === pickingWeekday ? { ...d, name: t } : d));
+            setWeekdayDays(days => days.map(d => d.weekday === pickingWeekday ? { ...d, name: t, id: undefined, items: undefined } : d));
             setPickingWeekday(null);
           }}
-        />
-      )}
-      {importingFromPlan && (
-        <DayCopyPicker
-          store={store}
-          schedule={null}
-          currentDayId={null}
-          onClose={() => setImportingFromPlan(false)}
-          onCopy={(day, migrateId) => {
-            setPattern(pat => [...pat, { id: migrateId || LB.uid(), name: day.name, items: day.items }]);
-            setImportingFromPlan(false);
-          }}
-        />
-      )}
-      {importingWeekday != null && (
-        <DayCopyPicker
-          store={store}
-          schedule={null}
-          currentDayId={null}
-          onClose={() => setImportingWeekday(null)}
-          onCopy={(day, migrateId) => {
+          onImport={(day, migrateId) => {
             setWeekdayDays(days => days.map(d =>
-              d.weekday === importingWeekday
+              d.weekday === pickingWeekday
                 ? { ...d, name: day.name, id: migrateId || LB.uid(), items: day.items }
                 : d
             ));
-            setImportingWeekday(null);
+            setPickingWeekday(null);
           }}
         />
       )}
