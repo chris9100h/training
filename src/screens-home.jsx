@@ -940,15 +940,18 @@ function HomeScreen({ store, setStore, go, userId }) {
 
             </div>{/* end fixed header */}
 
-            {/* Scrollable: THE WORK + banners */}
-            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', width: '100%', paddingBottom: 18, scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+            {/* Fixed: THE WORK headline */}
             {activeDay.items.length > 0 && (
-              <div style={{ width: '100%', marginTop: 18 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <div className="knurl" style={{ flex: 1 }} />
-                  <span style={{ fontFamily: UI.fontDisplay, fontSize: 10, fontWeight: 700, letterSpacing: '0.30em', color: UI.inkFaint }}>THE WORK</span>
-                  <div className="knurl" style={{ flex: 1 }} />
-                </div>
+              <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, marginTop: 18, width: '100%' }}>
+                <div className="knurl" style={{ flex: 1 }} />
+                <span style={{ fontFamily: UI.fontDisplay, fontSize: 10, fontWeight: 700, letterSpacing: '0.30em', color: UI.inkFaint }}>THE WORK</span>
+                <div className="knurl" style={{ flex: 1 }} />
+              </div>
+            )}
+
+            {/* Scrollable: exercise rows only */}
+            {activeDay.items.length > 0 && (
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', width: '100%', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                 {activeDay.items.map((item, i) => {
                   const ex = LB.findExercise(store, item.exId);
                   let setsText, repsText, isActual = false, maxKg = null;
@@ -992,30 +995,32 @@ function HomeScreen({ store, setStore, go, userId }) {
                   }
                   return (
                     <React.Fragment key={i}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0' }}>
-                      <span className="num" style={{ fontSize: 10, color: UI.inkGhost, minWidth: 20, textAlign: 'right', flexShrink: 0 }}>{String(i + 1).padStart(2, '0')}</span>
-                      <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: isActual ? UI.ink : UI.inkSoft, fontWeight: isActual ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || '?'}</span>
-                      {maxKg != null && <span className="num" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{maxKg}kg</span>}
-                      <span className="num" style={{ fontSize: 11, color: isActual ? (repsText === 'SKIPPED' ? UI.inkFaint : UI.gold) : UI.inkFaint, flexShrink: 0 }}>
-                        {isActual ? repsText : `${setsText}×${repsText}`}
-                      </span>
-                    </div>
-                    <div className="knurl" style={i < activeDay.items.length - 1 ? { marginLeft: 30 } : {}} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0' }}>
+                        <span className="num" style={{ fontSize: 10, color: UI.inkGhost, minWidth: 20, textAlign: 'right', flexShrink: 0 }}>{String(i + 1).padStart(2, '0')}</span>
+                        <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: isActual ? UI.ink : UI.inkSoft, fontWeight: isActual ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || '?'}</span>
+                        {maxKg != null && <span className="num" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{maxKg}kg</span>}
+                        <span className="num" style={{ fontSize: 11, color: isActual ? (repsText === 'SKIPPED' ? UI.inkFaint : UI.gold) : UI.inkFaint, flexShrink: 0 }}>
+                          {isActual ? repsText : `${setsText}×${repsText}`}
+                        </span>
+                      </div>
+                      <div className="knurl" style={{ marginLeft: 30 }} />
                     </React.Fragment>
                   );
                 })}
+
+                {/* Missed / skipped banner */}
+                {recentBannerDay && !store.inProgress && (
+                  <RecentBannerDay
+                    banner={recentBannerDay}
+                    store={store} setStore={setStore} go={go} sch={sch}
+                    onOpenSkipSheet={setSkipReasonModal}
+                  />
+                )}
               </div>
             )}
 
-            {/* Missed / skipped banner */}
-            {recentBannerDay && !store.inProgress && (
-              <RecentBannerDay
-                banner={recentBannerDay}
-                store={store} setStore={setStore} go={go} sch={sch}
-                onOpenSkipSheet={setSkipReasonModal}
-              />
-            )}
-            </div>{/* end scrollable */}
+            {/* Fixed: bottom knurl closing THE WORK */}
+            {activeDay.items.length > 0 && <div className="knurl" style={{ flexShrink: 0 }} />}
           </div>
         )}
       </div>
