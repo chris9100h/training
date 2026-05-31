@@ -565,6 +565,29 @@ function App() {
     flushSync(userId);
   }, [store]);
 
+  // Global debug logging — DOM events + route changes captured on every screen.
+  useEffectA(() => {
+    const log = window._log; if (!log) return;
+    log(`[NAV] → ${route.name}`);
+  }, [route]);
+
+  useEffectA(() => {
+    const onPD = e => {
+      const log = window._log; if (!log) return;
+      log(`[DOM] pointerdown type=${e.pointerType} isPrimary=${e.isPrimary} tag=${e.target.tagName}`);
+    };
+    const onClick = e => {
+      const log = window._log; if (!log) return;
+      log(`[DOM] click isTrusted=${e.isTrusted} tag=${e.target.tagName}`);
+    };
+    document.addEventListener('pointerdown', onPD, true);
+    document.addEventListener('click', onClick, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPD, true);
+      document.removeEventListener('click', onClick, true);
+    };
+  }, []);
+
   // Check for SW updates on every screen navigation.
   // Fetches sw.js directly from the network (bypassing the SW cache via ?_v=)
   // and compares the CACHE version string. iOS Safari ignores reg.update() when

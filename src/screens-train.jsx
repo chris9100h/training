@@ -7,11 +7,12 @@ const { useState: useStateT, useEffect: useEffectT, useRef: useRefT } = React;
 
 // ── Debug log ────────────────────────────────────────────────────────────────
 window._dbg = window._dbg || [];
-const _log = (msg) => {
+window._log = window._log || ((msg) => {
   const entry = { t: Date.now(), msg };
   window._dbg.push(entry);
   if (window._dbg.length > 1000) window._dbg.shift();
-};
+});
+const _log = window._log;
 // ─────────────────────────────────────────────────────────────────────────────
 
 function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }) {
