@@ -622,19 +622,15 @@ function HomeScreen({ store, setStore, go, userId }) {
       {/* Header */}
       <div style={{
         flexShrink: 0,
-        padding: `calc(env(safe-area-inset-top, 0px) + 12px) 22px 12px`,
-        borderBottom: `1px solid ${UI.hair}`,
+        padding: `calc(env(safe-area-inset-top, 0px) + 12px) 22px 0`,
         position: 'sticky', top: 0, zIndex: 5,
         backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
         background: 'rgba(var(--bg-rgb),0.92)',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 900, letterSpacing: '0.10em', color: UI.gold, lineHeight: 1 }}>ZANE</span>
-              <i className="fa-solid fa-dumbbell" style={{ fontSize: 13, color: UI.inkFaint }} />
-            </div>
-            <div className="micro" style={{ marginTop: 3, letterSpacing: '0.18em' }}>BARBELL CLUB · MEMBER</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 34, fontWeight: 900, letterSpacing: '0.10em', color: UI.gold, lineHeight: 1 }}>ZANE</span>
+            <i className="fa-solid fa-dumbbell" style={{ fontSize: 18, color: UI.inkFaint }} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ textAlign: 'right' }}>
@@ -655,6 +651,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             </button>
           </div>
         </div>
+        <div className="knurl" style={{ marginLeft: -22, marginRight: -22 }} />
       </div>
 
       {/* In-progress banner */}
@@ -695,7 +692,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         ) : null;
       })()}
 
-      <div style={{ flex: 1, minHeight: 0, padding: '16px 22px 18px', display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', position: 'relative', zIndex: 1 }}>
+      <div style={{ flex: 1, minHeight: 0, padding: '16px 22px 0', display: 'flex', flexDirection: 'column', gap: 12, overflow: 'hidden', position: 'relative', zIndex: 1 }}>
 
         {/* Period navigation */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -829,7 +826,9 @@ function HomeScreen({ store, setStore, go, userId }) {
             </div>
           </BracketFrame>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', padding: '4px 0' }}>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', overflow: 'hidden' }}>
+            {/* Fixed: label, name, stats, CTAs */}
+            <div style={{ flexShrink: 0, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 4 }}>
             <div className="micro-gold" style={{ marginBottom: 6 }}>{cardLabel}</div>
             <div style={{
               fontFamily: UI.fontDisplay, fontSize: 72, fontWeight: 900,
@@ -939,7 +938,10 @@ function HomeScreen({ store, setStore, go, userId }) {
               </div>
             )}
 
-            {/* THE WORK divider + exercise list */}
+            </div>{/* end fixed header */}
+
+            {/* Scrollable: THE WORK + banners */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', width: '100%', paddingBottom: 18 }}>
             {activeDay.items.length > 0 && (
               <div style={{ width: '100%', marginTop: 18 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
@@ -1004,21 +1006,22 @@ function HomeScreen({ store, setStore, go, userId }) {
                 })}
               </div>
             )}
+
+            {/* Missed / skipped banner */}
+            {recentBannerDay && !store.inProgress && (
+              <RecentBannerDay
+                banner={recentBannerDay}
+                store={store} setStore={setStore} go={go} sch={sch}
+                onOpenSkipSheet={setSkipReasonModal}
+              />
+            )}
+
+            {/* last session strip */}
+            {lastSession && (
+              <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id })} />
+            )}
+            </div>{/* end scrollable */}
           </div>
-        )}
-
-        {/* Missed / skipped banner */}
-        {recentBannerDay && !store.inProgress && (
-          <RecentBannerDay
-            banner={recentBannerDay}
-            store={store} setStore={setStore} go={go} sch={sch}
-            onOpenSkipSheet={setSkipReasonModal}
-          />
-        )}
-
-        {/* last session strip */}
-        {lastSession && (
-          <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id })} />
         )}
       </div>
       <SkipReasonSheet
