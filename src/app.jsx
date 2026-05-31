@@ -55,17 +55,17 @@ function UpdateBanner({ onUpdate }) {
       <div style={{
         width: '100%', maxWidth: 320,
         background: UI.bgRaised,
-        border: `0.5px solid ${UI.goldSoft}`,
-        borderRadius: 20,
+        border: `1px solid ${UI.goldSoft}`,
+        borderRadius: 6,
         padding: '32px 28px',
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         gap: 10, textAlign: 'center',
         boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(201,169,97,0.2)',
       }}>
         <div style={{
-          width: 48, height: 48, borderRadius: '50%',
+          width: 48, height: 48, borderRadius: 6,
           background: UI.goldFaint,
-          border: `0.5px solid ${UI.goldSoft}`,
+          border: `1px solid ${UI.goldSoft}`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           marginBottom: 6,
         }}>
@@ -81,7 +81,7 @@ function UpdateBanner({ onUpdate }) {
         </div>
         <button onClick={onUpdate} style={{
           marginTop: 10, width: '100%', padding: '14px 0',
-          borderRadius: 12, border: 'none', cursor: 'pointer',
+          borderRadius: 6, border: 'none', cursor: 'pointer',
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
           color: '#0a0805', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
@@ -125,7 +125,7 @@ function ErrorScreen({ onRetry }) {
         </div>
         <button onClick={onRetry} style={{
           background: UI.gold, color: '#0a0a0a',
-          border: 'none', borderRadius: 8,
+          border: 'none', borderRadius: 4,
           padding: '8px 18px', fontSize: 13, fontWeight: 600,
           fontFamily: UI.fontUi, cursor: 'pointer',
         }}>
@@ -480,6 +480,29 @@ function App() {
     LB.saveToLocal(store, userId);
     flushSync(userId);
   }, [store]);
+
+  // Global debug logging — DOM events + route changes captured on every screen.
+  useEffectA(() => {
+    const log = window._log; if (!log) return;
+    log(`[NAV] → ${route.name}`);
+  }, [route]);
+
+  useEffectA(() => {
+    const onPD = e => {
+      const log = window._log; if (!log) return;
+      log(`[DOM] pointerdown type=${e.pointerType} isPrimary=${e.isPrimary} tag=${e.target.tagName}`);
+    };
+    const onClick = e => {
+      const log = window._log; if (!log) return;
+      log(`[DOM] click isTrusted=${e.isTrusted} tag=${e.target.tagName}`);
+    };
+    document.addEventListener('pointerdown', onPD, true);
+    document.addEventListener('click', onClick, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPD, true);
+      document.removeEventListener('click', onClick, true);
+    };
+  }, []);
 
   // Check for SW updates on every screen navigation.
   // Fetches sw.js directly from the network (bypassing the SW cache via ?_v=)

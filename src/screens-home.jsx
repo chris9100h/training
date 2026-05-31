@@ -41,9 +41,8 @@ function LoginScreen() {
     <Screen scroll={false} style={{ position: 'relative', overflow: 'hidden' }}>
       <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
 
-      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
-        <span className="micro">ZANE · CAL. M.01</span>
-        <span className="micro">EST. 2026</span>
+      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
+        <span className="micro">ZANE TRAINING</span>
       </div>
 
       {/* Centered block: logo + title + form */}
@@ -61,8 +60,8 @@ function LoginScreen() {
               fontSize: 12, color: UI.danger,
               padding: '10px 14px',
               background: 'rgba(var(--danger-rgb),0.06)',
-              border: `0.5px solid rgba(var(--danger-rgb),0.25)`,
-              borderRadius: 10,
+              border: `1px solid rgba(var(--danger-rgb),0.25)`,
+              borderRadius: 4,
               fontFamily: UI.fontUi,
             }}>
               {error}
@@ -74,8 +73,7 @@ function LoginScreen() {
         </div>
       </div>
 
-      <div style={{ flexShrink: 0, padding: '0 22px calc(env(safe-area-inset-bottom, 8px) + 18px)', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
-        <span className="micro">REF. CZ-V2-2026</span>
+      <div style={{ flexShrink: 0, padding: '0 22px calc(env(safe-area-inset-bottom, 8px) + 18px)', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
         <span className="micro">{swVersion || '…'}</span>
       </div>
     </Screen>
@@ -106,7 +104,7 @@ function SkipReasonSheet({ modal, onClose, setStore, userId }) {
                     setStore(s => ({ ...s, skips: [...(s.skips || []), { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason, skippedAt: new Date().toISOString() }] }));
                   }
                   onClose();
-                }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 10, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                   {reason}
                 </button>
               );
@@ -149,7 +147,7 @@ function RecentBannerDay({ banner, store, setStore, go, sch, onOpenSkipSheet }) 
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="micro" style={{ marginBottom: 3 }}>{dayName} · {dateLabel}</div>
-          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 999, padding: '2px 8px', display: 'inline-block' }}>
+          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `1px solid ${UI.hairStrong}`, borderRadius: 3, padding: '2px 8px', display: 'inline-block' }}>
             {skip.skipReason}
           </span>
         </div>
@@ -179,10 +177,10 @@ function RecentBannerDay({ banner, store, setStore, go, sch, onOpenSkipSheet }) 
         setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
         LB.broadcastSessionNav('start', session.id);
         go({ name: 'train', sessionId: session.id });
-      }} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+      }} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 4, background: 'transparent', border: `1px solid ${UI.hairStrong}`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
         Log
       </button>
-      <button onClick={() => onOpenSkipSheet({ mode: 'dismiss', data: { dateKey, dayId, dayName } })} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 999, background: 'transparent', border: `0.5px solid rgba(var(--danger-rgb),0.25)`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: 'rgba(var(--danger-rgb),0.7)', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+      <button onClick={() => onOpenSkipSheet({ mode: 'dismiss', data: { dateKey, dayId, dayName } })} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 4, background: 'transparent', border: `1px solid rgba(var(--danger-rgb),0.25)`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: 'rgba(var(--danger-rgb),0.7)', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
         Dismiss
       </button>
     </div>
@@ -227,6 +225,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [skipReasonModal, setSkipReasonModal] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(dayIdx);
   const [warmupPromptData, setWarmupPromptData] = useState(null);
+  const [notLoggedModalOpen, setNotLoggedModalOpen] = useState(false);
 
   const minOffset = (() => {
     if (weekdayMode) {
@@ -588,9 +587,9 @@ function HomeScreen({ store, setStore, go, userId }) {
     return (
       <Screen>
         <TopBar
-          title={<span>Hey, <em style={{ fontFamily: UI.fontDisplay, fontStyle: 'italic', fontWeight: 300, color: UI.gold }}>{store.user.name}</em></span>}
+          title={<span>HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span></span>}
           sub={new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
-          right={<button onClick={() => go({ name: 'settings' })} style={{ background: 'transparent', border: 'none', padding: 4, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: '50%', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
+          right={<button onClick={() => go({ name: 'settings' })} style={{ background: 'transparent', border: `1px solid ${UI.hairStrong}`, padding: 4, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
         />
         <div style={{ padding: 22 }}>
           {hasPlans ? (
@@ -616,33 +615,50 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
+      {/* Background ZANE watermark */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+        <img src="icons/zane-logo.png" style={{ width: '85%', maxWidth: 320, opacity: 0.04, filter: 'grayscale(1) brightness(3)', objectFit: 'contain' }} />
+      </div>
+
       {/* Header */}
       <div style={{
         flexShrink: 0,
-        padding: `calc(env(safe-area-inset-top, 0px) + 16px) 22px 16px`,
-        borderBottom: `0.5px solid ${UI.hair}`,
+        padding: `calc(env(safe-area-inset-top, 0px) + 12px) 22px 0`,
         position: 'sticky', top: 0, zIndex: 5,
         backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-        background: 'rgba(var(--bg-rgb),0.85)',
+        background: 'rgba(var(--bg-rgb),0.92)',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <div className="micro">{new Date().toLocaleDateString('en-US', { weekday:'long', day:'2-digit', month:'long' }).toUpperCase()}</div>
-            <div style={{ marginTop: 6, fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
-              Hey, <em style={{ fontStyle: 'italic', fontWeight: 300, color: UI.gold }}>{store.user.name}</em>
-            </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 34, fontWeight: 900, letterSpacing: '0.10em', color: UI.gold, lineHeight: 1 }}>ZANE</span>
+            <i className="fa-solid fa-dumbbell" style={{ fontSize: 18, color: UI.inkFaint }} />
           </div>
-          <button onClick={() => go({ name: 'settings' })} style={{
-            width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-            background: 'transparent', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', color: UI.inkSoft,
-          }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <div style={{ textAlign: 'right', minWidth: 0 }}>
+              <div className="micro" style={{ marginBottom: 3 }}>{new Date().toLocaleDateString('en-US', { weekday:'long', day:'2-digit', month:'long' }).toUpperCase()}</div>
+              {(() => {
+                const greetLen = ('HEY, ' + (store.user.name || '')).length;
+                const fs = greetLen > 16 ? 14 : greetLen > 13 ? 17 : greetLen > 10 ? 20 : 22;
+                return (
+                  <div style={{ fontFamily: UI.fontDisplay, fontSize: fs, fontWeight: 900, letterSpacing: '0.06em', color: UI.ink, lineHeight: 1, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                    HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span>
+                  </div>
+                );
+              })()}
+            </div>
+            <button onClick={() => go({ name: 'settings' })} style={{
+              width: 34, height: 34, borderRadius: 4, flexShrink: 0,
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', color: UI.inkSoft,
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            </button>
+          </div>
         </div>
+        <div className="knurl" style={{ marginLeft: -22, marginRight: -22 }} />
       </div>
 
       {/* In-progress banner */}
@@ -655,6 +671,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             background: UI.goldFaint,
             borderBottom: `0.5px solid ${UI.goldSoft}`,
             display: 'flex', alignItems: 'center', gap: 10,
+            position: 'relative', zIndex: 1,
           }}>
             <div style={{ width: 7, height: 7, borderRadius: '50%', background: UI.gold, flexShrink: 0, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
             <span style={{ flex: 1, fontSize: 13, color: UI.gold, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -673,7 +690,7 @@ function HomeScreen({ store, setStore, go, userId }) {
               letterSpacing: '0.10em', textTransform: 'uppercase',
             }}>Cancel</button>
             <button onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{
-              flexShrink: 0, padding: '6px 14px', borderRadius: 999,
+              flexShrink: 0, padding: '6px 14px', borderRadius: 4,
               background: UI.gold, border: 'none', cursor: 'pointer',
               fontSize: 12, fontWeight: 600, fontFamily: UI.fontUi, color: '#0a0805',
               letterSpacing: '0.08em',
@@ -682,14 +699,14 @@ function HomeScreen({ store, setStore, go, userId }) {
         ) : null;
       })()}
 
-      <div style={{ flex: 1, minHeight: 0, padding: '16px 22px 18px', display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
+      <div style={{ flex: 1, minHeight: 0, padding: '16px 22px 0', display: 'flex', flexDirection: 'column', gap: 12, position: 'relative', zIndex: 1 }}>
 
         {/* Period navigation */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
           <button onClick={goBack} disabled={weekOffset <= minOffset} style={{
-            width: 30, height: 30, borderRadius: '50%',
+            width: 30, height: 30, borderRadius: 4,
             background: 'transparent',
-            boxShadow: `inset 0 0 0 0.5px ${weekOffset <= minOffset ? 'transparent' : UI.hairStrong}`,
+            border: `1px solid ${weekOffset <= minOffset ? 'transparent' : UI.hairStrong}`,
             color: weekOffset <= minOffset ? UI.inkGhost : UI.inkSoft,
             cursor: weekOffset <= minOffset ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -700,9 +717,9 @@ function HomeScreen({ store, setStore, go, userId }) {
             <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft, textTransform: 'uppercase' }}>{periodLabel}</span>
           </div>
           <button onClick={goForward} disabled={weekOffset === 0} style={{
-            width: 30, height: 30, borderRadius: '50%',
+            width: 30, height: 30, borderRadius: 4,
             background: 'transparent',
-            boxShadow: `inset 0 0 0 0.5px ${weekOffset === 0 ? 'transparent' : UI.hairStrong}`,
+            border: `1px solid ${weekOffset === 0 ? 'transparent' : UI.hairStrong}`,
             color: weekOffset === 0 ? UI.inkGhost : UI.inkSoft,
             cursor: weekOffset === 0 ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -745,7 +762,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
                   background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isSkipped ? 'rgba(160,160,160,0.07)' : 'transparent',
                   border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(var(--danger-rgb),0.4)' : isSkipped ? 'rgba(160,160,160,0.3)' : d.isToday ? UI.hairStrong : UI.hair}`,
-                  borderRadius: 8, cursor: 'pointer',
+                  borderRadius: 4, cursor: 'pointer',
                   minHeight: 56,
                 }}>
                 <div className="num" style={{ fontSize: 9, color: isSelected ? UI.gold : d.isToday ? UI.inkSoft : UI.inkFaint }}>
@@ -804,9 +821,9 @@ function HomeScreen({ store, setStore, go, userId }) {
         {/* day card — flex:1 so it fills */}
         {isActiveRest ? (
           <BracketFrame style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: 28 }}>
-            <div className="micro" style={{ marginBottom: 8 }}>{cardLabel}</div>
-            <div className="display-it" style={{ fontSize: 44, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, letterSpacing: '0.02em', marginBottom: 6 }}>
-              Recover.
+            <div className="micro" style={{ marginBottom: 12 }}>{cardLabel}</div>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 56, fontWeight: 900, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.inkSoft, lineHeight: 0.9, marginBottom: 14 }}>
+              RECOVER.
             </div>
             <div style={{ fontSize: 13, color: UI.inkFaint, marginBottom: 22, maxWidth: 220 }}>
               Recovery is part of the plan.
@@ -816,33 +833,35 @@ function HomeScreen({ store, setStore, go, userId }) {
             </div>
           </BracketFrame>
         ) : (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '4px 0' }}>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+            {/* Fixed: label, name, stats, CTAs */}
+            <div style={{ flexShrink: 0, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 4 }}>
             <div className="micro-gold" style={{ marginBottom: 6 }}>{cardLabel}</div>
-            <div className="display" style={{
-              fontSize: 56, color: UI.gold,
-              fontWeight: 400, fontStyle: 'italic',
-              letterSpacing: '0.04em', lineHeight: 1, marginBottom: 24,
+            <div style={{
+              fontFamily: UI.fontDisplay, fontSize: 72, fontWeight: 900,
+              textTransform: 'uppercase', letterSpacing: '0.04em',
+              color: UI.gold, lineHeight: 0.9, marginBottom: 20,
             }}>
               {activeDay.name}
             </div>
 
-            {/* Complications — 3 SubDials */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 28 }}>
+            {/* Stats */}
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: 20, marginBottom: 18, width: '100%', justifyContent: 'center' }}>
               <SubDial size={80} label="EXERCISES" value={activeDay.items.length} />
-              <div style={{ width: '0.5px', height: 36, background: UI.hair }} />
+              <div style={{ width: 1, background: UI.hairStrong, alignSelf: 'stretch' }} />
               <SubDial size={80} label="MIN" value={avgDayDuration != null ? `~${avgDayDuration}` : `~${Math.round(activeDay.items.reduce((a,b) => a + b.sets*2 + 3, 0))}`} />
-              <div style={{ width: '0.5px', height: 36, background: UI.hair }} />
+              <div style={{ width: 1, background: UI.hairStrong, alignSelf: 'stretch' }} />
               <SubDial size={80} label="SETS" value={activeDay.items.reduce((a,b) => a + b.sets, 0)} />
             </div>
 
-            {/* CTAs */}
+            {/* CTAs — above exercise list so the action is always immediately visible */}
             {isSlotDone ? (
               <Frame
                 onClick={doneSession ? () => go({ name: 'session', sessionId: doneSession.id, back: { name: 'home' } }) : undefined}
                 style={{ padding: '14px 18px', width: '100%', cursor: doneSession ? 'pointer' : 'default' }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: UI.goldFaint, boxShadow: `inset 0 0 0 0.5px ${UI.goldSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 4, background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5"><path d="M2 6l2.5 2.5L10 3"/></svg>
                   </div>
                   <div style={{ flex: 1 }}>
@@ -876,7 +895,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                 {selectedDateSkip && (
                   <Frame style={{ padding: '12px 16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{ width: 28, height: 28, borderRadius: '50%', background: UI.bgInset, boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <div style={{ width: 28, height: 28, borderRadius: 4, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                         <span style={{ color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>—</span>
                       </div>
                       <div style={{ flex: 1 }}>
@@ -896,28 +915,27 @@ function HomeScreen({ store, setStore, go, userId }) {
                   <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
                     <button onClick={startSession} disabled={!!store.inProgress} style={{
                       opacity: store.inProgress ? 0.35 : 1,
-                      flex: 1, minHeight: 90, borderRadius: 18, border: 'none', cursor: 'pointer',
+                      flex: 1, minHeight: 48, borderRadius: 6, border: '1px solid rgba(var(--accent-rgb),0.6)', cursor: 'pointer',
                       background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-                      boxShadow: '0 16px 50px rgba(var(--accent-rgb),0.35), 0 0 0 0.5px rgba(var(--accent-rgb),0.6), inset 0 1px 0 rgba(255,240,200,0.4)',
+                      boxShadow: '0 8px 28px rgba(var(--accent-rgb),0.35)',
                       animation: 'pulseGold 3.5s ease-out infinite',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
+                      display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
                       WebkitTapHighlightColor: 'transparent',
                     }}>
-                      <span style={{ color: 'rgba(10,8,5,0.75)', letterSpacing: '0.18em', fontWeight: 700, fontSize: 15, fontFamily: UI.fontUi }}>
+                      <i className="fa-solid fa-dumbbell" style={{ fontSize: 13, color: 'rgba(10,8,5,0.55)' }} />
+                      <span style={{ color: 'rgba(10,8,5,0.75)', letterSpacing: '0.18em', fontWeight: 700, fontSize: 13, fontFamily: UI.fontUi }}>
                         {isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION'}
                       </span>
-                      <i className="fa-solid fa-dumbbell" style={{ fontSize: 22, color: 'rgba(10,8,5,0.55)' }} />
                     </button>
-                    {!weekdayMode && isViewingToday && (
+                    {isViewingToday && (
                       <button onClick={() => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
-                        flex: 1, minHeight: 90, borderRadius: 18, cursor: 'pointer',
+                        flexShrink: 0, width: 80, minHeight: 48, borderRadius: 6, cursor: 'pointer',
                         background: 'transparent',
-                        border: `0.5px solid ${UI.hairStrong}`,
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
+                        border: `1px solid ${UI.hairStrong}`,
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
                         WebkitTapHighlightColor: 'transparent',
                       }}>
-                        <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.22em', fontWeight: 600 }}>DAY</span>
-                        <span style={{ fontSize: 24, color: UI.inkSoft, fontFamily: UI.fontDisplay, fontStyle: 'italic', lineHeight: 1 }}>→</span>
+                        <span style={{ fontSize: 16, color: UI.inkSoft, fontFamily: UI.fontDisplay, fontWeight: 700, lineHeight: 1 }}>→</span>
                         <span className="micro" style={{ color: UI.inkFaint }}>SKIP</span>
                       </button>
                     )}
@@ -925,29 +943,149 @@ function HomeScreen({ store, setStore, go, userId }) {
                 )}
               </div>
             )}
+
+            </div>{/* end fixed header */}
+
+            {/* Fixed: THE WORK headline */}
+            {activeDay.items.length > 0 && (
+              <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, marginTop: 18, width: '100%' }}>
+                <div className="knurl" style={{ flex: 1 }} />
+                <span style={{ fontFamily: UI.fontDisplay, fontSize: 10, fontWeight: 700, letterSpacing: '0.30em', color: UI.inkFaint }}>THE WORK</span>
+                <div className="knurl" style={{ flex: 1 }} />
+              </div>
+            )}
+
+            {/* Scrollable: exercise rows only */}
+            {activeDay.items.length > 0 && (
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', width: '100%', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                {activeDay.items.map((item, i) => {
+                  const ex = LB.findExercise(store, item.exId);
+                  let setsText, repsText, isActual = false, maxKg = null;
+
+                  if (isSlotDone && doneSession) {
+                    const entry = doneSession.entries.find(e => e.exId === item.exId);
+                    if (entry) {
+                      const workingSets = entry.sets.filter(s => !s.warmup);
+                      const doneSets = workingSets.filter(s => !s.skipped && (s.done || s.kg != null || s.reps != null || s.repsL != null || s.repsR != null));
+                      const allSkipped = workingSets.length > 0 && workingSets.every(s => s.skipped);
+                      setsText = null;
+                      if (allSkipped) {
+                        repsText = 'SKIPPED'; maxKg = null;
+                      } else if (doneSets.length > 0) {
+                        const repsArr = doneSets.map(s => s.reps ?? s.repsL ?? '?');
+                        repsText = repsArr.join('/');
+                        const kgs = doneSets.map(s => s.kg).filter(k => k != null);
+                        maxKg = kgs.length > 0 ? kgs[0] : null;
+                      } else {
+                        repsText = '—'; maxKg = null;
+                      }
+                      isActual = true;
+                    }
+                  }
+
+                  if (!isActual) {
+                    setsText = item.sets;
+                    const suggestion = LB.progressionSuggestion(store, item.exId, activeDay.id, item.reps);
+                    const last = LB.lastSessionForExercise(store, item.exId, activeDay.id);
+                    const prev = last?.entry?.sets?.find(s => !s.warmup);
+                    const smart = !!store.settings?.smartProgression;
+                    if (suggestion) {
+                      repsText = suggestion.reps; maxKg = suggestion.kg;
+                    } else if (smart && prev) {
+                      repsText = prev.reps != null ? prev.reps + 1 : item.reps; maxKg = prev.kg ?? null;
+                    } else if (prev) {
+                      repsText = prev.reps ?? item.reps; maxKg = prev.kg ?? null;
+                    } else {
+                      repsText = item.reps;
+                    }
+                  }
+                  return (
+                    <React.Fragment key={i}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0' }}>
+                        <span className="num" style={{ fontSize: 10, color: UI.inkGhost, minWidth: 20, textAlign: 'right', flexShrink: 0 }}>{String(i + 1).padStart(2, '0')}</span>
+                        <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: isActual ? UI.ink : UI.inkSoft, fontWeight: isActual ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || '?'}</span>
+                        {maxKg != null && <span className="num" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{maxKg}kg</span>}
+                        <span className="num" style={{ fontSize: 11, color: isActual ? (repsText === 'SKIPPED' ? UI.inkFaint : UI.gold) : UI.inkFaint, flexShrink: 0 }}>
+                          {isActual ? repsText : `${setsText}×${repsText}`}
+                        </span>
+                      </div>
+                      {i < activeDay.items.length - 1 && <div className="knurl" style={{ marginLeft: 30 }} />}
+                    </React.Fragment>
+                  );
+                })}
+
+              </div>
+            )}
+
+            {/* Fixed: bottom knurl closing THE WORK */}
+            {activeDay.items.length > 0 && <div className="knurl" style={{ flexShrink: 0, width: '100%' }} />}
           </div>
         )}
-
-        {/* Missed / skipped banner */}
-        {recentBannerDay && !store.inProgress && (
-          <RecentBannerDay
-            banner={recentBannerDay}
-            store={store} setStore={setStore} go={go} sch={sch}
-            onOpenSkipSheet={setSkipReasonModal}
-          />
-        )}
-
-        {/* last session strip */}
-        {lastSession && (
-          <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id })} />
-        )}
       </div>
+
+      {/* Last session + not-logged strip — fixed above tab bar */}
+      {(lastSession || (recentBannerDay && !store.inProgress)) && (
+        <div style={{ flexShrink: 0, padding: '10px 22px' }}>
+          {lastSession && recentBannerDay && !store.inProgress ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Frame onClick={() => go({ name: 'session', sessionId: lastSession.id, back: { name: 'home' } })} style={{ flex: 1, minWidth: 0, padding: '10px 12px', cursor: 'pointer' }}>
+                <div className="micro" style={{ marginBottom: 3 }}>LAST SESSION</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                  <span className="display" style={{ fontSize: 15, color: UI.ink, lineHeight: 1 }}>{lastSession.dayName}</span>
+                  <span className="num" style={{ color: UI.gold, fontSize: 10 }}>{LB.totalVolume(lastSession).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>kg</span></span>
+                </div>
+              </Frame>
+              <Frame onClick={() => setNotLoggedModalOpen(true)} style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: 'rgba(var(--danger-rgb),0.05)', border: '0.5px solid rgba(var(--danger-rgb),0.2)', cursor: 'pointer' }}>
+                <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>
+                  {recentBannerDay.dayName} · {recentBannerDay.daysAgo === 1 ? 'YESTERDAY' : `${recentBannerDay.daysAgo}D AGO`}
+                </div>
+                <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>Not logged</div>
+              </Frame>
+            </div>
+          ) : lastSession ? (
+            <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id, back: { name: 'home' } })} />
+          ) : (
+            <RecentBannerDay banner={recentBannerDay} store={store} setStore={setStore} go={go} sch={sch} onOpenSkipSheet={setSkipReasonModal} />
+          )}
+        </div>
+      )}
+
       <SkipReasonSheet
         modal={skipReasonModal}
         onClose={() => setSkipReasonModal(null)}
         setStore={setStore}
         userId={userId}
       />
+      {notLoggedModalOpen && recentBannerDay && (
+        <Sheet open={true} onClose={() => setNotLoggedModalOpen(false)}>
+          <div className="micro" style={{ color: UI.danger, textAlign: 'center', marginBottom: 4 }}>
+            {recentBannerDay.dayName} · {recentBannerDay.daysAgo === 1 ? 'YESTERDAY' : `${recentBannerDay.daysAgo}D AGO`}
+          </div>
+          <div style={{ fontSize: 18, fontFamily: UI.fontDisplay, fontWeight: 700, textTransform: 'uppercase', textAlign: 'center', color: UI.ink, marginBottom: 20 }}>Not logged</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <Btn onClick={() => {
+              setNotLoggedModalOpen(false);
+              const { dayData, dayId, dayName, date } = recentBannerDay;
+              const entries = (dayData?.items || []).map(it => {
+                const ex = LB.findExercise(store, it.exId);
+                const last = LB.lastSessionForExercise(store, it.exId, dayId);
+                const isUni = ex?.unilateral || false;
+                const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps);
+                const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
+                return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+              });
+              const session = { id: LB.uid(), scheduleId: sch.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
+              setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+              LB.broadcastSessionNav('start', session.id);
+              go({ name: 'train', sessionId: session.id });
+            }}>Log session</Btn>
+            <Btn kind="ghost" onClick={() => {
+              setNotLoggedModalOpen(false);
+              setSkipReasonModal({ mode: 'dismiss', data: { dateKey: recentBannerDay.dateKey, dayId: recentBannerDay.dayId, dayName: recentBannerDay.dayName } });
+            }}>Dismiss</Btn>
+          </div>
+        </Sheet>
+      )}
       {warmupPromptData && (() => {
         const { firstWorkingKg, firstName } = warmupPromptData;
         const ft10 = kg => Math.round(kg / 10) * 10;
@@ -963,7 +1101,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 22 }}>
               {preview.map(({ pct, kg, reps }) => (
-                <div key={pct} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hairStrong}` }}>
+                <div key={pct} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 14px', background: UI.bgInset, borderRadius: 4, border: `1px solid ${UI.hairStrong}` }}>
                   <span className="micro" style={{ color: UI.inkFaint }}>{pct}%</span>
                   <span className="num" style={{ fontSize: 14, color: kg != null ? UI.inkSoft : UI.inkFaint }}>
                     {kg != null ? `${kg}kg` : '—'} · {reps}

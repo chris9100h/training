@@ -7,75 +7,67 @@ const { useState: useStateT, useEffect: useEffectT, useRef: useRefT } = React;
 
 // ── Debug log ────────────────────────────────────────────────────────────────
 window._dbg = window._dbg || [];
-const _log = (msg) => {
+window._log = window._log || ((msg) => {
   const entry = { t: Date.now(), msg };
   window._dbg.push(entry);
   if (window._dbg.length > 1000) window._dbg.shift();
-};
+});
+const _log = window._log;
 
-function DebugPanel() {
-  const [open, setOpen] = useStateT(false);
-  const [entries, setEntries] = useStateT([]);
-  useEffectT(() => {
-    if (!open) return;
-    const refresh = () => setEntries([...window._dbg].reverse());
-    refresh();
-    const id = setInterval(refresh, 400);
-    return () => clearInterval(id);
-  }, [open]);
+// Patch console so DebugPanel captures it like DevTools
+if (!window._consolePatched) {
+  window._consolePatched = true;
 
-  const btnStyle = {
-    position: 'fixed', bottom: 260, right: 8, zIndex: 9990,
-    background: 'rgba(201,169,97,0.15)', border: '0.5px solid rgba(201,169,97,0.4)',
-    borderRadius: 6, color: '#c9a961', fontSize: 10, fontFamily: 'monospace',
-    padding: '3px 6px', cursor: 'pointer', letterSpacing: '0.05em',
+  // console.log / warn / error
+  ['log', 'warn', 'error'].forEach(level => {
+    const orig = console[level];
+    console[level] = (...args) => {
+      window._log(`[${level.toUpperCase()}] ${args.map(a => {
+        try { return typeof a === 'object' ? JSON.stringify(a) : String(a); } catch (_) { return String(a); }
+      }).join(' ')}`);
+      orig.apply(console, args);
+    };
+  });
+
+  // Uncaught JS exceptions
+  window.addEventListener('error', e => {
+    window._log(`[UNCAUGHT] ${e.message} @ ${(e.filename || '').split('/').pop()}:${e.lineno}`);
+  });
+
+  // Unhandled promise rejections
+  window.addEventListener('unhandledrejection', e => {
+    const reason = e.reason instanceof Error ? e.reason.message : String(e.reason ?? 'unknown');
+    window._log(`[PROMISE] ${reason}`);
+  });
+
+  // Fetch — log every request and its response
+  const origFetch = window.fetch;
+  window.fetch = async (...args) => {
+    const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '?');
+    const method = (args[1]?.method || 'GET').toUpperCase();
+    const short = url.replace(/^https?:\/\/[^/]+/, '').slice(0, 80);
+    window._log(`[FETCH →] ${method} ${short}`);
+    try {
+      const res = await origFetch(...args);
+      window._log(`[FETCH ${res.ok ? '✓' : '✗'}] ${res.status} ${method} ${short}`);
+      return res;
+    } catch (err) {
+      window._log(`[FETCH ERR] ${method} ${short} — ${err.message}`);
+      throw err;
+    }
   };
 
-  if (!open) return (
-    <button style={btnStyle} onClick={() => setOpen(true)}>DBG</button>
-  );
-
-  const copyLog = () => {
-    const text = [...window._dbg].reverse().map((e, idx, arr) => {
-      const prev = arr[idx + 1];
-      const delta = prev ? `+${e.t - prev.t}ms` : '      ';
-      return `${delta.padStart(8)}  ${e.msg}`;
-    }).join('\n');
-    navigator.clipboard?.writeText(text).catch(() => {});
+  // WebSocket — log Realtime connection state changes
+  const _OrigWS = window.WebSocket;
+  window.WebSocket = function(url, protocols) {
+    const short = String(url).replace(/^wss?:\/\/[^/]+/, '').slice(0, 70);
+    window._log(`[WS] connect → ${short}`);
+    const ws = protocols !== undefined ? new _OrigWS(url, protocols) : new _OrigWS(url);
+    ws.addEventListener('open',  ()  => window._log('[WS] open'));
+    ws.addEventListener('close', e   => window._log(`[WS] close code=${e.code} reason=${e.reason || '-'}`));
+    ws.addEventListener('error', ()  => window._log('[WS] error'));
+    return ws;
   };
-
-  const toolbarStyle = { background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 4, color: '#888', fontSize: 10, padding: '4px 8px', cursor: 'pointer' };
-
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 9991,
-      background: 'rgba(8,6,3,0.96)', display: 'flex', flexDirection: 'column',
-      fontFamily: 'monospace', fontSize: 11,
-    }}>
-      {/* Scrollable log — fills top space, safe area inset respected via padding-bottom */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 0 6px' }}>
-        {entries.length === 0 && <div style={{ color: '#444', padding: '12px 12px', fontSize: 12 }}>— no entries —</div>}
-        {entries.map((e, idx) => {
-          const prev = entries[idx + 1];
-          const delta = prev ? e.t - prev.t : 0;
-          const color = e.msg.includes('BLOCK') ? '#e87' : e.msg.includes('UNCHECK') ? '#f96' : e.msg.includes('complete') ? '#c9a961' : e.msg.includes('NULL') ? '#f55' : '#9db';
-          return (
-            <div key={idx} style={{ padding: '3px 10px', borderBottom: '0.5px solid rgba(255,255,255,0.04)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
-              <span style={{ color: '#444', flexShrink: 0, width: 52, textAlign: 'right' }}>{prev ? `+${delta}ms` : '      '}</span>
-              <span style={{ color }}>{e.msg}</span>
-            </div>
-          );
-        })}
-      </div>
-      {/* Toolbar at bottom — well clear of iOS status bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: `10px 12px calc(env(safe-area-inset-bottom, 0px) + 12px)`, borderTop: '0.5px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
-        <span style={{ color: '#c9a961', fontWeight: 700, flex: 1, fontSize: 10 }}>DEBUG LOG</span>
-        <button onClick={copyLog} style={toolbarStyle}>COPY</button>
-        <button onClick={() => { window._dbg = []; setEntries([]); }} style={toolbarStyle}>CLEAR</button>
-        <button onClick={() => setOpen(false)} style={{ ...toolbarStyle, fontSize: 16, padding: '2px 8px', border: 'none' }}>×</button>
-      </div>
-    </div>
-  );
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -168,10 +160,10 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
   return (
     <Sheet open={open} onClose={onClose} title="Plate Calculator">
       {/* Segmented control */}
-      <div style={{ display: 'flex', gap: 3, marginBottom: 24, background: UI.bgInset, borderRadius: 10, padding: 3 }}>
+      <div style={{ display: 'flex', gap: 3, marginBottom: 24, background: UI.bgInset, borderRadius: 4, padding: 3 }}>
         {['Dual side', 'Single'].map((l, i) => (
           <button key={i} onClick={() => setTab(i)} style={{
-            flex: 1, padding: '8px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
+            flex: 1, padding: '8px 0', borderRadius: 4, border: 'none', cursor: 'pointer',
             background: tab === i ? 'var(--accent)' : 'transparent',
             color: tab === i ? '#0a0805' : UI.inkFaint,
             fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.06em',
@@ -193,7 +185,7 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
             color: UI.ink, fontFamily: UI.fontNum, fontSize: 48, fontWeight: 300,
             letterSpacing: '-0.03em', textAlign: 'center',
             width: '100%', boxSizing: 'border-box',
-            borderBottom: `0.5px solid ${UI.hair}`, paddingBottom: 8,
+            paddingBottom: 8,
             caretColor: 'transparent', userSelect: 'none',
           }}
         />
@@ -202,6 +194,7 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
           fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.1em',
         }}>KG</span>
       </div>
+      <div className="knurl" style={{ marginBottom: 10 }} />
 
       {/* Per-side hint */}
       <div style={{ minHeight: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
@@ -265,7 +258,8 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
       )}
 
       {/* Inline numpad — avoids native keyboard / floating cursor */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 20, paddingTop: 16, borderTop: `0.5px solid ${UI.hair}` }}>
+      <div className="knurl" style={{ marginTop: 20 }} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 16 }}>
         {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
           <button key={k} onPointerDown={e => {
             e.preventDefault();
@@ -274,7 +268,7 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
             setRaw(fresh ? k : r => r + k);
             setFresh(false);
           }} style={{
-            height: 46, borderRadius: 8, border: 'none', cursor: 'pointer',
+            height: 46, borderRadius: 4, border: 'none', cursor: 'pointer',
             background: 'var(--bg-raised)', boxShadow: `0 0 0 0.5px var(--hair)`,
             color: k === '⌫' ? UI.inkSoft : UI.ink,
             fontFamily: UI.fontNum, fontSize: 20, fontWeight: 400,
@@ -654,7 +648,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
     updateSession(sess => {
       const now = new Date();
       const mins = sess.startedAt ? Math.round((now - new Date(sess.startedAt)) / 60000) : null;
-      return { ...sess, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }) };
+      // Seal all non-warmup sets that have recorded values as done — guards
+      // against a sync race where kbApply (done:false) lands in Supabase
+      // after completeSet (done:true) but before the session is ended.
+      const entries = sess.entries.map(e => ({
+        ...e,
+        sets: e.sets.map(st => {
+          if (st.done || st.warmup || st.skipped) return st;
+          const hasValue = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
+          return hasValue ? { ...st, done: true } : st;
+        }),
+      }));
+      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }) };
     });
     setStore(s => ({
       ...s,
@@ -1034,8 +1039,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       if (entry.exId !== planItem.exId) {
         const oldEx = LB.findExercise(store, planItem.exId);
         acc.push({ type: 'swap', idx: i, oldName: oldEx?.name || '?', newName: entry.name, newExId: entry.exId });
-      } else if (entry.sets.length !== planItem.sets) {
-        acc.push({ type: 'sets', idx: i, exName: entry.name, oldSets: planItem.sets, newSets: entry.sets.length });
+      } else if (entry.sets.filter(s => !s.warmup).length !== planItem.sets) {
+        acc.push({ type: 'sets', idx: i, exName: entry.name, oldSets: planItem.sets, newSets: entry.sets.filter(s => !s.warmup).length });
       }
       return acc;
     }, []);
@@ -1060,7 +1065,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         const diff = planDiff.find(d => d.idx === i);
         if (!diff) return item;
         if (diff.type === 'swap') return { ...item, exId: session.entries[i].exId };
-        if (diff.type === 'sets') return { ...item, sets: session.entries[i].sets.length };
+        if (diff.type === 'sets') return { ...item, sets: session.entries[i].sets.filter(s => !s.warmup).length };
         return item;
       });
       setStore(s => ({
@@ -1168,7 +1173,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 6,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8), 0 0 80px rgba(201,169,97,0.4)' }}>IMPROVEMENT</span>
           </div>
         </div>
@@ -1191,7 +1196,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 6,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(var(--danger-rgb),0.9), 0 0 70px rgba(var(--danger-rgb),0.5)' }}>↓</span>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--danger-rgb),0.9), 0 0 70px rgba(var(--danger-rgb),0.5)' }}>↓</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.danger, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(var(--danger-rgb),1), 0 0 40px rgba(var(--danger-rgb),0.8), 0 0 80px rgba(var(--danger-rgb),0.4)' }}>REGRESSION</span>
           </div>
         </div>
@@ -1207,9 +1212,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           gap: 8,
         }}>
           <div style={{ animation: 'improvedBorderPulse 0.8s ease-in-out infinite', position: 'absolute', inset: 0 }} />
-          <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontStyle: 'italic', fontWeight: 300, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
+          <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
           <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8)' }}>PROGRESSION UNLOCKED</span>
-          <span style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontStyle: 'italic', fontWeight: 400, marginTop: 4 }}>You've earned the next load.</span>
+          <span style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, marginTop: 4 }}>You've earned the next load.</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
             <span className="num" style={{ fontSize: 22, color: UI.inkSoft }}>{progressionUnlocked.currentKg}kg</span>
             <span style={{ color: UI.gold, fontSize: 20, lineHeight: 1 }}>→</span>
@@ -1222,8 +1227,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       {/* Top: close + session timer */}
       <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 8px', display: 'flex', alignItems: 'center', gap: 14 }}>
         <button onClick={abandon} style={{
-          width: 32, height: 32, borderRadius: '50%',
-          boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, background: 'transparent',
+          width: 32, height: 32, borderRadius: 4,
+          border: `1px solid ${UI.hairStrong}`, background: 'transparent',
           color: UI.danger, cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, lineHeight: 1,
         }}>×</button>
@@ -1256,8 +1261,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           </>)}
         </div>
         <button onClick={() => go({ name: 'home' })} style={{
-          width: 32, height: 32, borderRadius: '50%',
-          boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`, background: 'transparent',
+          width: 32, height: 32, borderRadius: 4,
+          border: `1px solid ${UI.hairStrong}`, background: 'transparent',
           color: UI.inkSoft, cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
@@ -1340,8 +1345,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
               onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
               style={{
                 flexShrink: 0, maxWidth: 110,
-                padding: '5px 11px 4px', borderRadius: 999,
-                border: `0.5px solid ${active ? UI.gold : done ? UI.goldSoft : UI.hairStrong}`,
+                padding: '5px 11px 4px', borderRadius: 4,
+                border: `1px solid ${active ? UI.gold : done ? UI.goldSoft : UI.hairStrong}`,
                 background: active ? UI.goldFaint : done ? 'rgba(201,169,97,0.05)' : 'transparent',
                 cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                 transition: 'all 0.15s',
@@ -1371,7 +1376,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         <div style={{ flexShrink: 0 }}>
           <div className="display" style={{
             fontSize: entry.name.length > 28 ? 16 : entry.name.length > 22 ? 20 : entry.name.length > 16 ? 26 : 32,
-            color: UI.ink, lineHeight: 1.05, letterSpacing: '-0.01em', fontWeight: 400,
+            color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>
             {entry.name}
@@ -1389,7 +1394,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         {allDone ? (
           <Frame accent style={{ padding: 28, textAlign: 'center' }}>
             <div className="micro-gold" style={{ marginBottom: 10 }}>ALL SETS</div>
-            <div className="display" style={{ fontSize: 28, color: UI.gold, fontStyle: 'italic', fontWeight: 300, marginBottom: 6 }}>Done.</div>
+            <div className="display" style={{ fontSize: 28, color: UI.gold, fontWeight: 900, marginBottom: 6 }}>Done.</div>
             <div style={{ color: UI.inkSoft, fontSize: 13 }}>Next exercise ready.</div>
             <Btn onClick={() => navigate(1)} style={{ marginTop: 18 }}>
               {exIdx === session.entries.length - 1 ? 'Finish session →' : 'Next exercise →'}
@@ -1448,7 +1453,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                   />
                   <div className="micro" style={{ marginTop: 2 }}>KILOGRAMS</div>
                 </div>
-                <div style={{ fontSize: 32, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 200, fontStyle: 'italic', alignSelf: 'flex-start', marginTop: 6 }}>×</div>
+                <div style={{ fontSize: 32, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 700, alignSelf: 'flex-start', marginTop: 6 }}>×</div>
                 {isUnilateral ? (
                   <div style={{ flex: 1, display: 'flex', gap: 4 }}>
                     <div style={{ flex: 1, textAlign: 'center' }}>
@@ -1500,9 +1505,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                   style={{
                     width: '100%', minHeight: 44,
                     background: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-                    border: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? `0.5px solid ${UI.hairStrong}` : `0.5px solid var(--accent-deep)`,
+                    border: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? `1px solid ${UI.hairStrong}` : `1px solid var(--accent-deep)`,
                     color: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? UI.inkFaint : '#0a0805',
-                    borderRadius: 999,
+                    borderRadius: 6,
                     fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em', textTransform: 'uppercase',
                     cursor: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'default' : 'pointer',
                     boxShadow: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'none' : '0 8px 30px rgba(var(--accent-rgb),0.30)',
@@ -1520,9 +1525,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
             <span className="micro">{warmupCount > 0 && warmupActive ? 'WARMUP' : 'ALL SETS'}</span>
             <button onClick={checkAllSets} disabled={anyMissingData && !allWorkingDone} style={{
-              padding: '4px 10px', borderRadius: 999,
+              padding: '4px 10px', borderRadius: 4,
               background: allWorkingDone ? UI.goldFaint : 'transparent',
-              border: `0.5px solid ${allWorkingDone ? UI.goldSoft : UI.hair}`,
+              border: `1px solid ${allWorkingDone ? UI.goldSoft : UI.hair}`,
               color: allWorkingDone ? UI.gold : UI.inkFaint,
               fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
               fontFamily: UI.fontUi, fontWeight: 500,
@@ -1536,8 +1541,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
             gap: 8, alignItems: 'baseline',
             padding: '0 4px 6px',
-            borderBottom: `0.5px solid ${UI.hair}`,
-            marginBottom: 2,
           }}>
             <div />
             <span className="micro" style={{ color: UI.inkFaint }}>Last time</span>
@@ -1552,6 +1555,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             )}
             <div /><div />
           </div>
+          <div className="knurl" style={{ marginBottom: 2 }} />
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {entry.sets.map((s, i) => {
@@ -1567,23 +1571,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
               return (
                 <React.Fragment key={i}>
                   {showWorkingSep && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 4px 4px', borderBottom: `0.5px solid ${UI.hairStrong}` }}>
-                      <span className="micro" style={{ color: UI.inkFaint }}>WORKING SETS</span>
-                    </div>
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 4px 4px' }}>
+                        <span className="micro" style={{ color: UI.inkFaint }}>WORKING SETS</span>
+                      </div>
+                      <div className="knurl" style={{ marginBottom: 2 }} />
+                    </>
                   )}
                   <div data-kb-row={i} style={{
                     display: 'grid',
                     gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
                     gap: 8, alignItems: 'center',
                     padding: '10px 4px',
-                    borderBottom: i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) ? `0.5px solid ${UI.hair}` : 'none',
                     opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
                     animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
                   }}>
                     <div style={{
-                      width: 24, height: 24, borderRadius: isWarmupRow ? 5 : '50%', flexShrink: 0,
+                      width: 24, height: 24, borderRadius: 3, flexShrink: 0,
                       background: isCurrent ? UI.goldFaint : 'transparent',
-                      boxShadow: `inset 0 0 0 0.5px ${isCurrent ? UI.gold : s.done ? UI.goldDeep : isWarmupRow ? UI.hair : UI.hairStrong}`,
+                      outline: `1px solid ${isCurrent ? UI.gold : s.done ? UI.goldDeep : isWarmupRow ? UI.hair : UI.hairStrong}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontFamily: UI.fontNum, fontSize: isWarmupRow ? 8 : 10, fontWeight: 500,
                       color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
@@ -1648,9 +1654,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                       }}
                       disabled={!s.done && !s.skipped && (s.kg == null || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)))}
                       style={{
-                        width: 26, height: 26, borderRadius: 5, border: 'none', cursor: 'pointer',
+                        width: 26, height: 26, borderRadius: 3, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
                         background: s.done ? UI.gold : 'transparent',
-                        outline: `0.5px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontSize: s.skipped ? 12 : 14, fontWeight: 700,
                         color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
@@ -1666,6 +1671,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                       }}>−</button>
                     ) : <span />}
                   </div>
+                  {i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) && <div className="knurl" />}
                 </React.Fragment>
               );
             })}
@@ -1674,22 +1680,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           {/* Add set / swap / note */}
           <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
             <button onClick={addSet} style={{
-              width: 32, height: 32, borderRadius: '50%',
-              background: 'transparent', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
+              width: 32, height: 32, borderRadius: 4,
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               color: UI.inkSoft, fontSize: 18, lineHeight: 1, cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>+</button>
             <button onClick={swapExercise} style={{
-              width: 32, height: 32, borderRadius: '50%',
-              background: 'transparent', boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
+              width: 32, height: 32, borderRadius: 4,
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>⇄</button>
             {store.settings?.tempoEnabled && (
               <button onClick={() => tempoActive ? stopTempo() : startTempo()} style={{
-                borderRadius: 999, padding: '6px 12px', cursor: 'pointer',
+                borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
                 background: tempoActive ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-                border: `0.5px solid ${tempoActive ? 'var(--accent)' : UI.hairStrong}`,
+                border: `1px solid ${tempoActive ? 'var(--accent)' : UI.hairStrong}`,
                 color: tempoActive ? 'var(--accent)' : UI.inkFaint,
                 fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
               }}>
@@ -1699,8 +1705,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             <div style={{ flex: 1 }} />
             <button onClick={() => entry.note ? setSessionNoteOpen(true) : setNotePicker(true)} style={{
               background: entry.note ? UI.goldFaint : 'transparent',
-              border: `0.5px solid ${entry.note ? UI.goldSoft : UI.hairStrong}`,
-              borderRadius: 999, padding: '6px 12px', cursor: 'pointer',
+              border: `1px solid ${entry.note ? UI.goldSoft : UI.hairStrong}`,
+              borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
               color: entry.note ? UI.gold : UI.inkFaint, fontSize: 10,
               fontFamily: UI.fontUi, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
             }}>
@@ -1712,10 +1718,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           {entry.note ? (
             <button onClick={() => setSessionNoteOpen(true)} style={{
               marginTop: 10, width: '100%', textAlign: 'left',
-              background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`,
-              borderRadius: 10, padding: '10px 12px', cursor: 'pointer',
+              background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
+              borderRadius: 6, padding: '10px 12px', cursor: 'pointer',
               fontFamily: UI.fontDisplay, fontSize: 15, color: UI.gold,
-              fontStyle: 'italic', lineHeight: 1.5, whiteSpace: 'pre-wrap',
+              lineHeight: 1.5, whiteSpace: 'pre-wrap',
               WebkitTapHighlightColor: 'transparent',
             }}>
               {entry.note}
@@ -1727,7 +1733,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         {exercise?.note && (
           <Frame style={{ padding: 14 }} onClick={() => { setExNoteVal(exercise?.note || ''); setExNoteOpen(true); }}>
             <div className="micro" style={{ marginBottom: 6 }}>NOTE · {entry.name.toUpperCase()}</div>
-            <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.inkSoft, lineHeight: 1.5, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.inkSoft, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
               {exercise.note}
             </div>
           </Frame>
@@ -1736,15 +1742,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       </div>
 
       {/* Footer nav */}
+      <div className="knurl" />
       <div style={{
         flexShrink: 0,
         padding: `10px 22px calc(env(safe-area-inset-bottom, 8px) + 10px)`,
-        borderTop: `0.5px solid ${UI.hair}`,
         display: 'flex', gap: 10,
       }}>
         <button onClick={() => navigate(-1)} disabled={exIdx === 0} style={{
-          width: 56, minHeight: 50, borderRadius: 999,
-          background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+          width: 44, minHeight: 44, borderRadius: 6,
+          background: 'transparent', border: `1px solid ${UI.hairStrong}`,
           color: UI.inkSoft, cursor: exIdx === 0 ? 'default' : 'pointer',
           opacity: exIdx === 0 ? 0.3 : 1,
           display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
@@ -1752,14 +1758,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
         {allDone ? (
-          <Btn onClick={() => navigate(1)} style={{ flex: 1 }}>
+          <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>
             {exIdx === session.entries.length - 1 ? 'Finish →' : 'Next exercise →'}
           </Btn>
         ) : (<>
-          <Btn onClick={skipSet} style={{ flex: 1 }}>Skip set</Btn>
-          <Btn onClick={skipExercise} style={{ flex: 1 }}>Skip exercise</Btn>
-          {exIdx === session.entries.length - 1 && (
-            <Btn onClick={() => navigate(1)} style={{ flex: 1 }}>Finish →</Btn>
+          <Btn onClick={skipSet} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Skip set</Btn>
+          {exIdx === session.entries.length - 1 ? (
+            <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Finish →</Btn>
+          ) : (
+            <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Skip exercise</Btn>
           )}
         </>)}
       </div>
@@ -1773,7 +1780,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
               .filter(e => e.remaining > 0);
             if (!incomplete.length) return null;
             return (
-              <div style={{ background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 10, padding: '10px 12px', marginBottom: 14 }}>
+              <div style={{ background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '10px 12px', marginBottom: 14 }}>
                 <div className="label" style={{ color: 'var(--accent)', marginBottom: 8 }}>Incomplete sets</div>
                 {incomplete.map(e => (
                   <div key={e.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 4 }}>
@@ -1784,18 +1791,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
               </div>
             );
           })()}
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
             <span>Sets</span>
             <span className="num" style={{ color: UI.ink }}>
               {session.entries.reduce((c, e) => c + e.sets.filter(s => s.done).length, 0)} / {session.entries.reduce((c, e) => c + e.sets.length, 0)}
             </span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+          <div className="knurl" />
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
             <span>Volume</span>
             <span className="num" style={{ color: UI.gold }}>
               {Math.round(LB.totalVolume(session)).toLocaleString('en-US')} kg
             </span>
           </div>
+          <div className="knurl" />
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
             <span>Duration</span>
             <span className="num" style={{ color: UI.ink }}>{sessionTimeStr}</span>
@@ -1811,14 +1820,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       <Sheet open={notePicker} onClose={() => setNotePicker(false)} title="Which note?">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button onClick={() => { setNotePicker(false); setSessionNoteOpen(true); }} style={{
-            background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 12,
+            background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
             padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
           }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Session note</div>
             <div style={{ fontSize: 12, color: UI.inkSoft }}>Only for this workout — e.g. how the set felt.</div>
           </button>
           <button onClick={() => { setNotePicker(false); setExNoteVal(exercise?.note || ''); setExNoteOpen(true); }} style={{
-            background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 12,
+            background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
             padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
           }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Exercise note</div>
@@ -1836,8 +1845,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           rows={4}
           style={{
             width: '100%', boxSizing: 'border-box',
-            background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-            borderRadius: 10, padding: 12, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
+            background: UI.bgInset, border: `1px solid ${UI.hair}`,
+            borderRadius: 6, padding: 12, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
             resize: 'vertical', outline: 'none',
           }}
         />
@@ -1853,8 +1862,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           rows={4}
           style={{
             width: '100%', boxSizing: 'border-box',
-            background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-            borderRadius: 10, padding: 12, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
+            background: UI.bgInset, border: `1px solid ${UI.hair}`,
+            borderRadius: 6, padding: 12, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
             resize: 'vertical', outline: 'none',
           }}
         />
@@ -1867,7 +1876,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
           {planDiff.map((d, i) => (
             <div key={i} style={{
-              background: UI.bgInset, borderRadius: 10, padding: '10px 14px',
+              background: UI.bgInset, borderRadius: 4, padding: '10px 14px', border: `1px solid ${UI.hair}`,
               fontSize: 13, color: UI.ink, display: 'flex', alignItems: 'center', gap: 8,
             }}>
               {d.type === 'swap' ? (
@@ -1923,18 +1932,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           {/* controls */}
           <div style={{ display: 'flex', gap: 10, width: '100%' }}>
             <button onClick={() => { cancelPushover(); persistRestStart(null); setRestModalOpen(false); }} style={{
-              flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-              color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
+              flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
             }}>Skip</button>
             <button onClick={() => persistRestStart(restStart - 30000, activeRestDef)} style={{
-              flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-              color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
+              flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
             }}>−30s</button>
             <button onClick={() => persistRestStart(restStart + 30000, activeRestDef)} style={{
-              flex: 1, padding: '12px 0', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-              color: UI.inkSoft, borderRadius: 999, cursor: 'pointer',
+              flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
             }}>+30s</button>
           </div>
@@ -1950,8 +1959,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           <div style={{
             position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 61,
             background: 'var(--bg, #080603)',
-            borderRadius: '20px 20px 0 0',
-            boxShadow: `0 -0.5px 0 ${UI.hairStrong}, 0 -24px 60px rgba(0,0,0,0.7)`,
+            borderRadius: '8px 8px 0 0',
+            boxShadow: `0 -1px 0 ${UI.hairStrong}, 0 -24px 60px rgba(0,0,0,0.7)`,
             padding: `18px 22px calc(env(safe-area-inset-bottom, 0px) + 24px)`,
           }}>
             {/* Header */}
@@ -1961,8 +1970,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                 <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>WARMUP</span>
               </div>
               <button onClick={skipWarmup} style={{
-                padding: '6px 14px', borderRadius: 999,
-                background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+                padding: '6px 14px', borderRadius: 4,
+                background: 'transparent', border: `1px solid ${UI.hairStrong}`,
                 color: UI.inkSoft, cursor: 'pointer',
                 fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500,
               }}>Skip</button>
@@ -1987,7 +1996,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                     }
                     <div className="micro" style={{ marginTop: 4 }}>{warmupOverlayHasKg ? 'KILOGRAMS' : 'NO SEED WEIGHT'}</div>
                   </div>
-                  <div style={{ fontSize: 28, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 200, fontStyle: 'italic', alignSelf: 'flex-start', marginTop: 4 }}>×</div>
+                  <div style={{ fontSize: 28, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 700, alignSelf: 'flex-start', marginTop: 4 }}>×</div>
                   <div style={{ flex: 1, textAlign: 'center' }}>
                     <div className="num" style={{ fontSize: 52, fontWeight: 300, color: UI.gold, letterSpacing: '-0.02em', lineHeight: 1 }}>{warmupOverlaySet.reps}</div>
                     <div className="micro" style={{ marginTop: 4 }}>REPETITIONS</div>
@@ -2001,9 +2010,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                     style={{
                       width: '100%', minHeight: 46,
                       background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-                      border: `0.5px solid var(--accent-deep)`,
-                      color: '#0a0805', borderRadius: 999,
-                      fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em',
+                      border: `1px solid var(--accent-deep)`,
+                      color: '#0a0805', borderRadius: 6,
+                      fontFamily: UI.fontUi, fontWeight: 700, fontSize: 13, letterSpacing: '0.14em',
                       cursor: 'pointer', boxShadow: '0 8px 30px rgba(var(--accent-rgb),0.30)',
                       WebkitTapHighlightColor: 'transparent',
                     }}>✓  Check warmup set</button>
@@ -2078,9 +2087,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             marginTop: 52,
             padding: '18px 56px',
             background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-            border: `0.5px solid var(--accent-deep)`,
-            color: '#0a0805', borderRadius: 999,
-            fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em',
+            border: `1px solid var(--accent-deep)`,
+            color: '#0a0805', borderRadius: 6,
+            fontFamily: UI.fontUi, fontWeight: 700, fontSize: 13, letterSpacing: '0.14em',
             cursor: 'pointer',
             boxShadow: '0 8px 40px rgba(var(--accent-rgb),0.40)',
             animation: 'pulseGold 2.2s ease-in-out infinite',
@@ -2120,7 +2129,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           : (session.entries[exIdx]?.sets[kbField?.setIdx]?.kg ?? null)}
       />
 
-      {localStorage.getItem('logbook-debug-panel') === 'true' && <DebugPanel />}
     </Screen>
   );
 }
@@ -2128,8 +2136,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
 function setInputStyle(done, current) {
   return {
     background: done ? 'transparent' : current ? 'rgba(201,169,97,0.06)' : UI.bgInset,
-    border: `0.5px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.hair}`,
-    borderRadius: 8, outline: 'none',
+    border: `1px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.hair}`,
+    borderRadius: 3, outline: 'none',
     color: done ? UI.inkSoft : UI.ink,
     fontFamily: UI.fontNum, fontSize: 15, fontWeight: 500,
     fontVariantNumeric: 'tabular-nums',

@@ -124,14 +124,14 @@ function LibraryScreen({ store, setStore, go }) {
     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
       {store.exercises.length > 0 && (
         <button onClick={() => { setTab('all'); setSelecting(true); }} style={{
-          background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-          borderRadius: 999, padding: '6px 12px', cursor: 'pointer',
+          background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+          borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
           color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
         }}>Select</button>
       )}
       <button onClick={() => setCreating(true)} style={{
-        width: 32, height: 32, borderRadius: '50%',
-        boxShadow: `inset 0 0 0 0.5px ${UI.goldSoft}`, background: UI.goldFaint,
+        width: 32, height: 32, borderRadius: 4,
+        border: `1px solid ${UI.goldSoft}`, background: UI.goldFaint,
         color: UI.gold, cursor: 'pointer', fontSize: 20, lineHeight: 1,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>+</button>
@@ -171,8 +171,8 @@ function LibraryScreen({ store, setStore, go }) {
                 </div>
                 <button onClick={() => setFiltersOpen(true)} style={{
                   flexShrink: 0, background: activeCount > 0 ? UI.goldFaint : 'transparent',
-                  border: `0.5px solid ${activeCount > 0 ? UI.goldSoft : UI.hairStrong}`,
-                  borderRadius: 999, padding: '6px 12px', cursor: 'pointer',
+                  border: `1px solid ${activeCount > 0 ? UI.goldSoft : UI.hairStrong}`,
+                  borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
                   color: activeCount > 0 ? UI.gold : UI.inkSoft,
                   fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
                   display: 'flex', alignItems: 'center', gap: 5,
@@ -195,12 +195,12 @@ function LibraryScreen({ store, setStore, go }) {
           const trendColor = trend === 'up' ? UI.ok : trend === 'down' ? UI.danger : UI.inkFaint;
           const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : trend === 'same' ? '→' : null;
           return (
-            <div key={ex.id}
+            <React.Fragment key={ex.id}>
+            <div
               onClick={() => go({ name: 'exercise', exId: ex.id })}
               style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
                 padding: '13px 0',
-                borderBottom: ri < recent.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
                 cursor: 'pointer',
               }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -224,18 +224,20 @@ function LibraryScreen({ store, setStore, go }) {
                 <ChevronRight />
               </div>
             </div>
+            {ri < recent.length - 1 && <div className="knurl" />}
+            </React.Fragment>
           );
         })}
 
         {tab === 'all' && filtered.map((e, fi) => {
           const isSelected = selected.has(e.id);
           return (
-            <div key={e.id}
+            <React.Fragment key={e.id}>
+            <div
               onClick={() => selecting ? toggleSelect(e.id) : go({ name: 'exercise', exId: e.id })}
               style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
                 padding: '13px 0',
-                borderBottom: fi < filtered.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
                 cursor: 'pointer',
                 background: isSelected ? 'rgba(var(--danger-rgb),0.04)' : 'transparent',
               }}>
@@ -251,8 +253,8 @@ function LibraryScreen({ store, setStore, go }) {
               </div>
               {selecting ? (
                 <div style={{
-                  width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
-                  boxShadow: `inset 0 0 0 0.5px ${isSelected ? UI.danger : UI.hairStrong}`,
+                  width: 20, height: 20, borderRadius: 3, flexShrink: 0,
+                  border: `1px solid ${isSelected ? UI.danger : UI.hairStrong}`,
                   background: isSelected ? UI.danger : 'transparent',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
@@ -262,6 +264,8 @@ function LibraryScreen({ store, setStore, go }) {
                 <ChevronRight />
               )}
             </div>
+            {fi < filtered.length - 1 && <div className="knurl" />}
+            </React.Fragment>
           );
         })}
         {tab === 'all' && filtered.length === 0 && (
@@ -552,9 +556,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             {editMode ? (
               autoEdit && (
                 <button onClick={() => go(back || { name: 'lib' })} style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  width: 30, height: 30, borderRadius: '50%',
-                  boxShadow: `inset 0 0 0 0.5px ${UI.hairStrong}`,
+                  background: 'none', border: `1px solid ${UI.hairStrong}`, cursor: 'pointer',
+                  width: 30, height: 30, borderRadius: 4,
                   color: UI.inkSoft, fontSize: 16, lineHeight: 1,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>×</button>
@@ -567,9 +570,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                   letterSpacing: '0.1em', textTransform: 'uppercase',
                 }}>Edit</button>
                 <button onClick={deleteExercise} style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  width: 30, height: 30, borderRadius: '50%',
-                  boxShadow: `inset 0 0 0 0.5px rgba(var(--danger-rgb),0.3)`,
+                  background: 'none', border: `1px solid rgba(var(--danger-rgb),0.3)`, cursor: 'pointer',
+                  width: 30, height: 30, borderRadius: 4,
                   color: UI.danger, fontSize: 16, lineHeight: 1,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>×</button>
@@ -701,12 +703,12 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
               const sessionBest = h.entry.sets.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
               const isPR = pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01;
               return (
-                <div key={h.session.id}
+                <React.Fragment key={h.session.id}>
+                <div
                   onClick={() => go({ name: 'session', sessionId: h.session.id })}
                   style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
                     padding: '12px 0',
-                    borderBottom: hi < Math.min(history.length, 10) - 1 ? `0.5px solid ${UI.hair}` : 'none',
                     cursor: 'pointer',
                   }}>
                   <div>
@@ -735,6 +737,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                   </div>
                   <span className="micro" style={{ color: UI.inkFaint }}>{h.session.dayName}</span>
                 </div>
+                {hi < Math.min(history.length, 10) - 1 && <div className="knurl" />}
+                </React.Fragment>
               );
             })}
             {history.length === 0 && <Empty title="Never trained" />}
@@ -946,7 +950,7 @@ function StatsTab({ store, sessions, go }) {
   const maxWeekVol = Math.max(...weeklyVolume.map(w => w.vol), 1);
 
   const StatCard = ({ label, value, sub, gold }) => (
-    <div style={{ background: gold ? UI.goldFaint : UI.bgInset, borderRadius: 12, padding: '12px 14px', textAlign: 'center', border: gold ? `0.5px solid ${UI.goldSoft}` : 'none' }}>
+    <div style={{ background: gold ? UI.goldFaint : UI.bgInset, borderRadius: 4, padding: '12px 14px', textAlign: 'center', border: gold ? `1px solid ${UI.goldSoft}` : `1px solid ${UI.hair}` }}>
       <div className="micro" style={{ color: gold ? UI.gold : UI.inkFaint, marginBottom: 6 }}>{label}</div>
       <div className="num" style={{ fontSize: 22, color: gold ? UI.gold : UI.ink, lineHeight: 1 }}>{value}</div>
       {sub && <div className="micro" style={{ color: gold ? UI.gold : UI.inkFaint, marginTop: 3, opacity: gold ? 0.7 : 1 }}>{sub}</div>}
@@ -1013,7 +1017,7 @@ function StatsTab({ store, sessions, go }) {
           <StatCard label="Avg Volume" value={avgVol.toLocaleString('en-US')} sub="kg / session" />
           <StatCard label="Avg Duration" value={avgDuration || '—'} sub={avgDuration ? 'min' : ''} />
           <StatCard label="Longest Session" value={maxDuration || '—'} sub={maxDuration ? 'min' : ''} />
-          <div style={{ gridColumn: '1 / -1', background: UI.bgInset, borderRadius: 12, padding: '12px 14px', textAlign: 'center' }}>
+          <div style={{ gridColumn: '1 / -1', background: UI.bgInset, borderRadius: 4, padding: '12px 14px', textAlign: 'center', border: `1px solid ${UI.hair}` }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Total Time Trained</div>
             <div className="num" style={{ fontSize: 22, color: UI.ink, lineHeight: 1 }}>{totalTrainingMins ? totalTrainingStr : '—'}</div>
           </div>
@@ -1063,10 +1067,10 @@ function StatsTab({ store, sessions, go }) {
           <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>TOP EXERCISES</div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {topExercises.map(({ id, name, count }, i) => (
-              <div key={id} onClick={() => go({ name: 'exercise', exId: id, back: { name: 'hist', initialTab: 'stats' } })} style={{
+              <React.Fragment key={id}>
+              <div onClick={() => go({ name: 'exercise', exId: id, back: { name: 'hist', initialTab: 'stats' } })} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '11px 0',
-                borderBottom: i < topExercises.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
                 cursor: 'pointer',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1075,6 +1079,8 @@ function StatsTab({ store, sessions, go }) {
                 </div>
                 <span className="num" style={{ fontSize: 13, color: i === 0 ? UI.gold : UI.inkSoft }}>{count}×</span>
               </div>
+              {i < topExercises.length - 1 && <div className="knurl" />}
+              </React.Fragment>
             ))}
           </div>
         </div>
@@ -1150,12 +1156,13 @@ function HistoryScreen({ store, go, initialTab }) {
               const days = Math.round((Date.now() - date) / 86400000);
               const isToday = days === 0;
               return (
-                <div key={item.key}
+                <React.Fragment key={item.key}>
+                {!item.firstInGroup && <div className="knurl" />}
+                <div
                   onClick={() => go({ name: 'session', sessionId: s.id })}
                   style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
                     padding: '16px 0',
-                    borderTop: !item.firstInGroup ? `0.5px solid ${UI.hair}` : 'none',
                     cursor: 'pointer',
                   }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -1174,6 +1181,7 @@ function HistoryScreen({ store, go, initialTab }) {
                     <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>kg</div>
                   </div>
                 </div>
+                </React.Fragment>
               );
             });
           })()}
@@ -1320,18 +1328,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         right={
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <button onClick={takeScreenshot} disabled={capturing} style={{
-              background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-              borderRadius: 999, padding: '5px 10px', cursor: 'pointer',
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 4, padding: '5px 10px', cursor: 'pointer',
               color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase',
             }}>{capturing ? '…' : '↓'}</button>
             <button onClick={() => setEditing(true)} style={{
-              background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-              borderRadius: 999, padding: '5px 10px', cursor: 'pointer',
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 4, padding: '5px 10px', cursor: 'pointer',
               color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase',
             }}>Edit</button>
             <button onClick={deleteSession} style={{
-              width: 28, height: 28, borderRadius: '50%',
-              boxShadow: `inset 0 0 0 0.5px rgba(var(--danger-rgb),0.25)`, background: 'transparent',
+              width: 28, height: 28, borderRadius: 4,
+              border: `1px solid rgba(var(--danger-rgb),0.25)`, background: 'transparent',
               color: UI.danger, cursor: 'pointer', fontSize: 16, lineHeight: 1,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>×</button>
@@ -1355,7 +1363,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               </div>
               <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
             </div>
-            <div style={{ height: '0.5px', background: UI.hair, marginBottom: 0 }} />
+            <div className="knurl" />
           </div>
         )}
 
@@ -1366,7 +1374,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               <div style={{ textAlign: 'center', padding: '6px 0 10px' }}>
                 <div className="micro-gold" style={{ letterSpacing: '0.24em', marginBottom: 16 }}>SESSION COMPLETE</div>
                 <div className="display-it" style={{ fontSize: 28, color: UI.gold, marginBottom: 18 }}>Well done.</div>
-                <div style={{ display: 'flex', borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16, gap: 0 }}>
+                <div className="knurl" style={{ marginBottom: 16 }} />
+                <div style={{ display: 'flex', gap: 0 }}>
                   {[
                     { label: 'Volume', value: `${Math.round(vol).toLocaleString('en-US')} kg`, gold: true },
                     ...(duration ? [{ label: 'Duration', value: `${duration} min`, gold: false }] : []),
@@ -1474,12 +1483,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       const highlight = !isWarm && (pr || isImprovement(st, prevSet));
                       const anyImprovementBefore = !isWarm && filteredSets.slice(0, j).some((s, k) => !s.warmup && (isPR(s, e.exId) || isImprovement(s, prevWorkingFor(k))));
                       const decline = !isWarm && !anyImprovementBefore && isDecline(st, prevSet);
+                      const hasData = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
                       return (
                         <span key={j} style={{
-                          opacity: st.done ? (isWarm ? 0.5 : 1) : 0.3,
+                          opacity: (st.done || hasData) ? (isWarm ? 0.5 : 1) : 0.3,
                           background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent',
-                          border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
-                          borderRadius: 6, padding: '3px 8px',
+                          border: `1px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
+                          borderRadius: 3, padding: '3px 8px',
                           fontFamily: UI.fontNum, fontSize: 12,
                           color: isWarm ? UI.inkFaint : highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,
                         }}>
@@ -1489,7 +1499,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       );
                     })}
                     {(() => { const n = e.sets.filter(st => st.skipped).length; return n > 0 && (
-                      <span style={{ border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.05em' }}>
+                      <span style={{ border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.05em' }}>
                         {n} SET{n > 1 ? 'S' : ''} SKIPPED
                       </span>
                     ); })()}
@@ -1572,14 +1582,14 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   };
 
   const inputStyle = {
-    background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-    borderRadius: 10, padding: '11px 14px', color: UI.ink,
+    background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+    borderRadius: 4, padding: '11px 14px', color: UI.ink,
     fontFamily: UI.fontNum, fontSize: 16, outline: 'none',
     width: '100%', boxSizing: 'border-box', display: 'block',
   };
   const numInputStyle = {
-    width: 64, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-    borderRadius: 8, color: UI.ink, padding: '9px 6px', textAlign: 'center',
+    width: 64, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+    borderRadius: 4, color: UI.ink, padding: '9px 6px', textAlign: 'center',
     fontFamily: UI.fontNum, fontSize: 15, outline: 'none', flexShrink: 0,
   };
 
@@ -1588,7 +1598,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 160 }}>
         <div>
           <span className="label">Date</span>
-          <div style={{ width: '100%', overflow: 'hidden', borderRadius: 10, marginTop: 6 }}>
+          <div style={{ width: '100%', overflow: 'hidden', borderRadius: 4, marginTop: 6 }}>
             <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} style={{ ...inputStyle, textAlign: 'center', textAlignLast: 'center' }} />
           </div>
         </div>
@@ -1600,7 +1610,8 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
             ))}
           </select>
         </div>
-        <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="knurl" style={{ marginBottom: 16 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {draftEntries.map((e, eIdx) => {
             const isUnilateral = !!(exercises?.find(ex => ex.id === e.exId)?.unilateral)
               || e.sets.some(st => st.repsL != null || st.repsR != null);
@@ -1611,7 +1622,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
                   {e.sets.map((st, sIdx) => {
                     const isEmpty = st.kg == null && st.reps == null && st.repsL == null && st.repsR == null;
                     return (
-                      <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: UI.bgInset, borderRadius: 10, padding: '8px 12px', opacity: st.skipped ? 0.5 : 1 }}>
+                      <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: UI.bgInset, borderRadius: 4, padding: '8px 12px', opacity: st.skipped ? 0.5 : 1, border: `1px solid ${UI.hair}` }}>
                         <span className="num" style={{ width: 20, fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{sIdx + 1}</span>
                         {st.skipped ? (
                           <>
@@ -1854,8 +1865,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
         display: 'flex', alignItems: 'center', gap: 12,
       }}>
         <button onClick={() => go({ name: 'settings' })} style={{
-          width: 32, height: 32, borderRadius: '50%',
-          border: `0.5px solid ${UI.hairStrong}`, background: 'transparent',
+          width: 32, height: 32, borderRadius: 4,
+          border: `1px solid ${UI.hairStrong}`, background: 'transparent',
           color: UI.gold, cursor: 'pointer', flexShrink: 0,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
@@ -1887,8 +1898,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
           const isCurrent = i === exIdx;
           return (
             <button key={i} onClick={() => setExIdx(i)} style={{
-              flexShrink: 0, padding: '6px 12px', borderRadius: 999,
-              border: `${isCurrent ? '1.5px' : '0.5px'} solid ${isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.hair}`,
+              flexShrink: 0, padding: '6px 12px', borderRadius: 4,
+              border: `${isCurrent ? '1.5px' : '1px'} solid ${isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.hair}`,
               background: isCurrent ? UI.goldFaint : allDone ? 'rgba(201,169,97,0.06)' : 'transparent',
               color: isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.inkSoft,
               fontFamily: UI.fontUi, fontSize: 12, fontWeight: isCurrent ? 600 : 400,
@@ -1924,10 +1935,10 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
               const done = s.done || s.skipped;
               const unilateral = s.repsL != null || s.repsR != null;
               return (
-                <div key={i} style={{
+                <React.Fragment key={i}>
+                <div style={{
                   display: 'grid', gridTemplateColumns: '20px 1fr 1fr 20px',
                   alignItems: 'center', gap: 10, padding: '13px 0',
-                  borderBottom: i < entry.sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
                   opacity: done ? 1 : 0.35,
                   transition: 'opacity 0.3s',
                 }}>
@@ -1962,6 +1973,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                     )}
                   </div>
                 </div>
+                {i < entry.sets.length - 1 && <div className="knurl" />}
+                </React.Fragment>
               );
             })}
           </Frame>
@@ -1984,10 +1997,10 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                     const icon     = curr?.skipped && prevDone ? '↓' : improved ? '↑' : declined ? '↓' : '—';
                     const iconColor = improved ? 'var(--accent)' : declined ? UI.danger : UI.inkFaint;
                     return (
-                      <div key={i} style={{
+                      <React.Fragment key={i}>
+                      <div style={{
                         display: 'grid', gridTemplateColumns: '20px 1fr 1fr 20px',
                         alignItems: 'center', gap: 10, padding: '10px 0',
-                        borderBottom: i < lastEntry.sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
                       }}>
                         <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{i + 1}</span>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
@@ -2007,6 +2020,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                           {showIcon ? icon : ''}
                         </div>
                       </div>
+                      {i < lastEntry.sets.length - 1 && <div className="knurl" />}
+                      </React.Fragment>
                     );
                   })}
                 </Frame>
@@ -2038,11 +2053,12 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
         })();
 
         return (
+          <>
+          <div className="knurl" />
           <div style={{
             flexShrink: 0,
             padding: '14px 22px',
             paddingBottom: `calc(14px + env(safe-area-inset-bottom, 0px))`,
-            borderTop: `0.5px solid ${UI.hair}`,
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
               <span className="micro" style={{ color: UI.inkFaint }}>ESTIMATED REMAINING</span>
@@ -2103,6 +2119,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
               </>
             )}
           </div>
+          </>
         );
       })()}
     </Screen>
