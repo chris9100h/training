@@ -225,6 +225,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [skipReasonModal, setSkipReasonModal] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(dayIdx);
   const [warmupPromptData, setWarmupPromptData] = useState(null);
+  const [notLoggedModalOpen, setNotLoggedModalOpen] = useState(false);
 
   const minOffset = (() => {
     if (weekdayMode) {
@@ -1034,29 +1035,11 @@ function HomeScreen({ store, setStore, go, userId }) {
                   <span className="num" style={{ color: UI.gold, fontSize: 10 }}>{LB.totalVolume(lastSession).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>kg</span></span>
                 </div>
               </Frame>
-              <Frame style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: 'rgba(var(--danger-rgb),0.05)', border: '0.5px solid rgba(var(--danger-rgb),0.2)' }}>
+              <Frame onClick={() => setNotLoggedModalOpen(true)} style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: 'rgba(var(--danger-rgb),0.05)', border: '0.5px solid rgba(var(--danger-rgb),0.2)', cursor: 'pointer' }}>
                 <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>
                   {recentBannerDay.dayName} · {recentBannerDay.daysAgo === 1 ? 'YESTERDAY' : `${recentBannerDay.daysAgo}D AGO`}
                 </div>
-                <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 8 }}>Not logged</div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={() => {
-                    const { dayData, dayId, dayName, date } = recentBannerDay;
-                    const entries = (dayData?.items || []).map(it => {
-                      const ex = LB.findExercise(store, it.exId);
-                      const last = LB.lastSessionForExercise(store, it.exId, dayId);
-                      const isUni = ex?.unilateral || false;
-                      const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps);
-                      const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
-                      return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
-                    });
-                    const session = { id: LB.uid(), scheduleId: sch.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
-                    setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
-                    LB.broadcastSessionNav('start', session.id);
-                    go({ name: 'train', sessionId: session.id });
-                  }} style={{ flex: 1, padding: '5px 4px', borderRadius: 4, background: 'transparent', border: `1px solid ${UI.hairStrong}`, cursor: 'pointer', fontSize: 10, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', textTransform: 'uppercase' }}>LOG</button>
-                  <button onClick={() => setSkipReasonModal({ mode: 'dismiss', data: { dateKey: recentBannerDay.dateKey, dayId: recentBannerDay.dayId, dayName: recentBannerDay.dayName } })} style={{ flex: 1, padding: '5px 4px', borderRadius: 4, background: 'transparent', border: `1px solid rgba(var(--danger-rgb),0.25)`, cursor: 'pointer', fontSize: 10, fontFamily: UI.fontUi, color: 'rgba(var(--danger-rgb),0.7)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>DISMISS</button>
-                </div>
+                <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>Not logged</div>
               </Frame>
             </div>
           ) : lastSession ? (
@@ -1073,6 +1056,36 @@ function HomeScreen({ store, setStore, go, userId }) {
         setStore={setStore}
         userId={userId}
       />
+      {notLoggedModalOpen && recentBannerDay && (
+        <Sheet open={true} onClose={() => setNotLoggedModalOpen(false)}>
+          <div className="micro" style={{ color: UI.danger, textAlign: 'center', marginBottom: 4 }}>
+            {recentBannerDay.dayName} · {recentBannerDay.daysAgo === 1 ? 'YESTERDAY' : `${recentBannerDay.daysAgo}D AGO`}
+          </div>
+          <div style={{ fontSize: 18, fontFamily: UI.fontDisplay, fontWeight: 700, textTransform: 'uppercase', textAlign: 'center', color: UI.ink, marginBottom: 20 }}>Not logged</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <Btn onClick={() => {
+              setNotLoggedModalOpen(false);
+              const { dayData, dayId, dayName, date } = recentBannerDay;
+              const entries = (dayData?.items || []).map(it => {
+                const ex = LB.findExercise(store, it.exId);
+                const last = LB.lastSessionForExercise(store, it.exId, dayId);
+                const isUni = ex?.unilateral || false;
+                const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps);
+                const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
+                return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+              });
+              const session = { id: LB.uid(), scheduleId: sch.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
+              setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+              LB.broadcastSessionNav('start', session.id);
+              go({ name: 'train', sessionId: session.id });
+            }}>Log session</Btn>
+            <Btn kind="ghost" onClick={() => {
+              setNotLoggedModalOpen(false);
+              setSkipReasonModal({ mode: 'dismiss', data: { dateKey: recentBannerDay.dateKey, dayId: recentBannerDay.dayId, dayName: recentBannerDay.dayName } });
+            }}>Dismiss</Btn>
+          </div>
+        </Sheet>
+      )}
       {warmupPromptData && (() => {
         const { firstWorkingKg, firstName } = warmupPromptData;
         const ft10 = kg => Math.round(kg / 10) * 10;
