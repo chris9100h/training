@@ -1763,9 +1763,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           </Btn>
         ) : (<>
           <Btn onClick={skipSet} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Skip set</Btn>
-          <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Skip exercise</Btn>
-          {exIdx === session.entries.length - 1 && (
+          {exIdx === session.entries.length - 1 ? (
             <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Finish →</Btn>
+          ) : (
+            <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Skip exercise</Btn>
           )}
         </>)}
       </div>
