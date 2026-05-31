@@ -1020,7 +1020,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             )}
 
             {/* Fixed: bottom knurl closing THE WORK */}
-            {activeDay.items.length > 0 && <div className="knurl" style={{ flexShrink: 0 }} />}
+            {activeDay.items.length > 0 && <div className="knurl" style={{ flexShrink: 0, width: '100%' }} />}
           </div>
         )}
       </div>
