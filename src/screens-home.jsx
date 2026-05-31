@@ -699,7 +699,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         ) : null;
       })()}
 
-      <div style={{ flex: 1, minHeight: 0, padding: '16px 22px 0', display: 'flex', flexDirection: 'column', gap: 12, overflow: 'hidden', position: 'relative', zIndex: 1 }}>
+      <div style={{ flex: 1, minHeight: 0, padding: '16px 22px 0', display: 'flex', flexDirection: 'column', gap: 12, position: 'relative', zIndex: 1 }}>
 
         {/* Period navigation */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -833,7 +833,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             </div>
           </BracketFrame>
         ) : (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', overflow: 'hidden' }}>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
             {/* Fixed: label, name, stats, CTAs */}
             <div style={{ flexShrink: 0, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 4 }}>
             <div className="micro-gold" style={{ marginBottom: 6 }}>{cardLabel}</div>
