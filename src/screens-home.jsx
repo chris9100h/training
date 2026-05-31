@@ -632,12 +632,18 @@ function HomeScreen({ store, setStore, go, userId }) {
             <span style={{ fontFamily: UI.fontDisplay, fontSize: 34, fontWeight: 900, letterSpacing: '0.10em', color: UI.gold, lineHeight: 1 }}>ZANE</span>
             <i className="fa-solid fa-dumbbell" style={{ fontSize: 18, color: UI.inkFaint }} />
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ textAlign: 'right' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <div style={{ textAlign: 'right', minWidth: 0 }}>
               <div className="micro" style={{ marginBottom: 3 }}>{new Date().toLocaleDateString('en-US', { weekday:'long', day:'2-digit', month:'long' }).toUpperCase()}</div>
-              <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 900, letterSpacing: '0.06em', color: UI.ink, lineHeight: 1, textTransform: 'uppercase' }}>
-                HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span>
-              </div>
+              {(() => {
+                const greetLen = ('HEY, ' + (store.user.name || '')).length;
+                const fs = greetLen > 16 ? 14 : greetLen > 13 ? 17 : greetLen > 10 ? 20 : 22;
+                return (
+                  <div style={{ fontFamily: UI.fontDisplay, fontSize: fs, fontWeight: 900, letterSpacing: '0.06em', color: UI.ink, lineHeight: 1, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                    HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span>
+                  </div>
+                );
+              })()}
             </div>
             <button onClick={() => go({ name: 'settings' })} style={{
               width: 34, height: 34, borderRadius: 4, flexShrink: 0,
