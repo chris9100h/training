@@ -210,7 +210,16 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
   const planActions = fromPlan && (
     <>
       {!isActivePlan && <Btn kind="ghost" onClick={activate} style={{ flex: 1, fontSize: 12 }}>Activate</Btn>}
-      {isActivePlan && <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pill gold>active</Pill></div>}
+      {isActivePlan && (
+        <div style={{
+          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          border: `1px solid ${UI.goldSoft}`, borderRadius: 4, background: UI.goldFaint,
+          padding: '10px 14px', minHeight: 44,
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: 2, background: UI.gold, flexShrink: 0 }} />
+          <span className="label" style={{ color: UI.gold, marginBottom: 0 }}>Active</span>
+        </div>
+      )}
       <Btn kind="ghost" onClick={duplicate} style={{ flex: 1, fontSize: 12 }}>Duplicate</Btn>
     </>
   );
