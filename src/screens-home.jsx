@@ -1028,7 +1028,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         <div style={{ flexShrink: 0, padding: '10px 22px' }}>
           {lastSession && recentBannerDay && !store.inProgress ? (
             <div style={{ display: 'flex', gap: 8 }}>
-              <Frame onClick={() => go({ name: 'session', sessionId: lastSession.id })} style={{ flex: 1, minWidth: 0, padding: '10px 12px', cursor: 'pointer' }}>
+              <Frame onClick={() => go({ name: 'session', sessionId: lastSession.id, back: { name: 'home' } })} style={{ flex: 1, minWidth: 0, padding: '10px 12px', cursor: 'pointer' }}>
                 <div className="micro" style={{ marginBottom: 3 }}>LAST SESSION</div>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
                   <span className="display" style={{ fontSize: 15, color: UI.ink, lineHeight: 1 }}>{lastSession.dayName}</span>
@@ -1043,7 +1043,7 @@ function HomeScreen({ store, setStore, go, userId }) {
               </Frame>
             </div>
           ) : lastSession ? (
-            <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id })} />
+            <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id, back: { name: 'home' } })} />
           ) : (
             <RecentBannerDay banner={recentBannerDay} store={store} setStore={setStore} go={go} sch={sch} onOpenSkipSheet={setSkipReasonModal} />
           )}
