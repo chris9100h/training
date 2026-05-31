@@ -184,7 +184,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
           </div>
           {isQsUser && otherEmail && (
             <div style={{ padding: '0 14px' }}>
-              <div style={{ height: 1, background: UI.hairStrong, marginBottom: 12 }} />
+              <div className="knurl" style={{ marginBottom: 12 }} />
               <button onClick={() => setSwitchModal(true)} style={{
                 display: 'flex', alignItems: 'center', gap: 12,
                 width: '100%', padding: '12px 14px', borderRadius: 6,
@@ -597,13 +597,10 @@ function useConfirm() {
 // ─── Primitives ─────────────────────────────────────────────────────
 
 function Hairline({ vertical = false, color, style = {} }) {
-  return <div style={{
-    background: color || UI.hairStrong,
-    width: vertical ? '1px' : '100%',
-    height: vertical ? '100%' : '1px',
-    flexShrink: 0,
-    ...style,
-  }} />;
+  if (vertical) {
+    return <div style={{ background: color || UI.hairStrong, width: '1px', height: '100%', flexShrink: 0, ...style }} />;
+  }
+  return <div className="knurl" style={{ flexShrink: 0, ...style }} />;
 }
 
 // Heavy corner brackets — industrial equipment aesthetic
@@ -686,13 +683,13 @@ function SubDial({ label, value, sub, size = 110, gold = false, style = {} }) {
 function Bezel({ children, style = {} }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 4px', ...style }}>
-      <div style={{ flex: 1, height: 2, background: UI.hairStrong }} />
+      <div className="knurl" style={{ flex: 1 }} />
       <span style={{
         fontFamily: UI.fontUi, fontSize: 10,
         letterSpacing: '0.20em', color: UI.inkFaint,
         textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap',
       }}>{children}</span>
-      <div style={{ flex: 1, height: 2, background: UI.hairStrong }} />
+      <div className="knurl" style={{ flex: 1 }} />
     </div>
   );
 }

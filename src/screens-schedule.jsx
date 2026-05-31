@@ -957,17 +957,20 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
       </div>
       <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', maxHeight: 240, overflow: 'auto' }}>
         {list.map((e, ei) => (
-          <button key={e.id} onClick={() => onPick(e.id)} style={{
+          <React.Fragment key={e.id}>
+          <button onClick={() => onPick(e.id)} style={{
             background: 'transparent', border: 'none', textAlign: 'left',
             padding: '11px 0', cursor: 'pointer',
-            borderBottom: ei < list.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+            width: '100%',
           }}>
             <span className="display" style={{ fontSize: 17, color: UI.ink }}>{e.name}</span>
             <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
               {(e.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
             </div>
           </button>
+          {ei < list.length - 1 && <div className="knurl" />}
+          </React.Fragment>
         ))}
         {list.length === 0 && <div className="micro" style={{ padding: '20px 0', textAlign: 'center', color: UI.inkFaint }}>No exercises found</div>}
       </div>

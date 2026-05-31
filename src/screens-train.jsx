@@ -265,7 +265,8 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
       )}
 
       {/* Inline numpad — avoids native keyboard / floating cursor */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 20, paddingTop: 16, borderTop: `0.5px solid ${UI.hair}` }}>
+      <div className="knurl" style={{ marginTop: 20 }} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 16 }}>
         {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
           <button key={k} onPointerDown={e => {
             e.preventDefault();

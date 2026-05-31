@@ -195,12 +195,12 @@ function LibraryScreen({ store, setStore, go }) {
           const trendColor = trend === 'up' ? UI.ok : trend === 'down' ? UI.danger : UI.inkFaint;
           const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : trend === 'same' ? '→' : null;
           return (
-            <div key={ex.id}
+            <React.Fragment key={ex.id}>
+            <div
               onClick={() => go({ name: 'exercise', exId: ex.id })}
               style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
                 padding: '13px 0',
-                borderBottom: ri < recent.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
                 cursor: 'pointer',
               }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -224,18 +224,20 @@ function LibraryScreen({ store, setStore, go }) {
                 <ChevronRight />
               </div>
             </div>
+            {ri < recent.length - 1 && <div className="knurl" />}
+            </React.Fragment>
           );
         })}
 
         {tab === 'all' && filtered.map((e, fi) => {
           const isSelected = selected.has(e.id);
           return (
-            <div key={e.id}
+            <React.Fragment key={e.id}>
+            <div
               onClick={() => selecting ? toggleSelect(e.id) : go({ name: 'exercise', exId: e.id })}
               style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
                 padding: '13px 0',
-                borderBottom: fi < filtered.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
                 cursor: 'pointer',
                 background: isSelected ? 'rgba(var(--danger-rgb),0.04)' : 'transparent',
               }}>
@@ -262,6 +264,8 @@ function LibraryScreen({ store, setStore, go }) {
                 <ChevronRight />
               )}
             </div>
+            {fi < filtered.length - 1 && <div className="knurl" />}
+            </React.Fragment>
           );
         })}
         {tab === 'all' && filtered.length === 0 && (
@@ -699,12 +703,12 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
               const sessionBest = h.entry.sets.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
               const isPR = pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01;
               return (
-                <div key={h.session.id}
+                <React.Fragment key={h.session.id}>
+                <div
                   onClick={() => go({ name: 'session', sessionId: h.session.id })}
                   style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
                     padding: '12px 0',
-                    borderBottom: hi < Math.min(history.length, 10) - 1 ? `0.5px solid ${UI.hair}` : 'none',
                     cursor: 'pointer',
                   }}>
                   <div>
@@ -733,6 +737,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                   </div>
                   <span className="micro" style={{ color: UI.inkFaint }}>{h.session.dayName}</span>
                 </div>
+                {hi < Math.min(history.length, 10) - 1 && <div className="knurl" />}
+                </React.Fragment>
               );
             })}
             {history.length === 0 && <Empty title="Never trained" />}
@@ -1061,10 +1067,10 @@ function StatsTab({ store, sessions, go }) {
           <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>TOP EXERCISES</div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {topExercises.map(({ id, name, count }, i) => (
-              <div key={id} onClick={() => go({ name: 'exercise', exId: id, back: { name: 'hist', initialTab: 'stats' } })} style={{
+              <React.Fragment key={id}>
+              <div onClick={() => go({ name: 'exercise', exId: id, back: { name: 'hist', initialTab: 'stats' } })} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '11px 0',
-                borderBottom: i < topExercises.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
                 cursor: 'pointer',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1073,6 +1079,8 @@ function StatsTab({ store, sessions, go }) {
                 </div>
                 <span className="num" style={{ fontSize: 13, color: i === 0 ? UI.gold : UI.inkSoft }}>{count}×</span>
               </div>
+              {i < topExercises.length - 1 && <div className="knurl" />}
+              </React.Fragment>
             ))}
           </div>
         </div>
