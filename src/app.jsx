@@ -165,7 +165,7 @@ function DebugPanel() {
   if (!open) {
     return (
       <button onClick={() => setOpen(true)} style={{
-        position: 'fixed', top: 'calc(env(safe-area-inset-top, 0px) + 14px)', right: 80, zIndex: 9990,
+        position: 'fixed', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 56px)', left: 8, zIndex: 9990,
         background: 'rgba(201,169,97,0.15)', border: '0.5px solid rgba(201,169,97,0.4)',
         borderRadius: 6, color: '#c9a961', fontSize: 10, fontFamily: 'monospace',
         padding: '3px 7px', cursor: 'pointer', letterSpacing: '0.05em',
