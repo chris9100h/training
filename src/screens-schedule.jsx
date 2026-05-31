@@ -476,8 +476,8 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
         ...d,
         mode: undefined,
         days: [...d.days]
-          .sort((a, b) => (a.weekday ?? 0) - (b.weekday ?? 0))
-          .map(({ weekday, ...rest }) => rest),
+          .sort((a, b) => (a.weekday != null ? a.weekday : 0) - (b.weekday != null ? b.weekday : 0))
+          .map(function(day) { var nd = Object.assign({}, day); delete nd.weekday; return nd; }),
       }));
     }
   };
