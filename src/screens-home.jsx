@@ -915,9 +915,9 @@ function HomeScreen({ store, setStore, go, userId }) {
                   <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
                     <button onClick={startSession} disabled={!!store.inProgress} style={{
                       opacity: store.inProgress ? 0.35 : 1,
-                      flex: 1, minHeight: 48, borderRadius: 6, border: 'none', cursor: 'pointer',
+                      flex: 1, minHeight: 48, borderRadius: 6, border: '1px solid rgba(var(--accent-rgb),0.6)', cursor: 'pointer',
                       background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-                      boxShadow: '0 8px 28px rgba(var(--accent-rgb),0.35), 0 0 0 1px rgba(var(--accent-rgb),0.6)',
+                      boxShadow: '0 8px 28px rgba(var(--accent-rgb),0.35)',
                       animation: 'pulseGold 3.5s ease-out infinite',
                       display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
                       WebkitTapHighlightColor: 'transparent',
