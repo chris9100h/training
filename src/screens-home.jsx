@@ -908,28 +908,27 @@ function HomeScreen({ store, setStore, go, userId }) {
                   <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
                     <button onClick={startSession} disabled={!!store.inProgress} style={{
                       opacity: store.inProgress ? 0.35 : 1,
-                      flex: 1, minHeight: 90, borderRadius: 6, border: 'none', cursor: 'pointer',
+                      flex: 1, minHeight: 48, borderRadius: 6, border: 'none', cursor: 'pointer',
                       background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-                      boxShadow: '0 12px 40px rgba(var(--accent-rgb),0.35), 0 0 0 1px rgba(var(--accent-rgb),0.6)',
+                      boxShadow: '0 8px 28px rgba(var(--accent-rgb),0.35), 0 0 0 1px rgba(var(--accent-rgb),0.6)',
                       animation: 'pulseGold 3.5s ease-out infinite',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
+                      display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
                       WebkitTapHighlightColor: 'transparent',
                     }}>
-                      <span style={{ color: 'rgba(10,8,5,0.75)', letterSpacing: '0.18em', fontWeight: 700, fontSize: 15, fontFamily: UI.fontUi }}>
+                      <i className="fa-solid fa-dumbbell" style={{ fontSize: 13, color: 'rgba(10,8,5,0.55)' }} />
+                      <span style={{ color: 'rgba(10,8,5,0.75)', letterSpacing: '0.18em', fontWeight: 700, fontSize: 13, fontFamily: UI.fontUi }}>
                         {isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION'}
                       </span>
-                      <i className="fa-solid fa-dumbbell" style={{ fontSize: 22, color: 'rgba(10,8,5,0.55)' }} />
                     </button>
                     {!weekdayMode && isViewingToday && (
                       <button onClick={() => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
-                        flex: 1, minHeight: 90, borderRadius: 6, cursor: 'pointer',
+                        flexShrink: 0, width: 80, minHeight: 48, borderRadius: 6, cursor: 'pointer',
                         background: 'transparent',
                         border: `1px solid ${UI.hairStrong}`,
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
                         WebkitTapHighlightColor: 'transparent',
                       }}>
-                        <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.22em', fontWeight: 600 }}>DAY</span>
-                        <span style={{ fontSize: 28, color: UI.inkSoft, fontFamily: UI.fontDisplay, fontWeight: 700, lineHeight: 1 }}>→</span>
+                        <span style={{ fontSize: 16, color: UI.inkSoft, fontFamily: UI.fontDisplay, fontWeight: 700, lineHeight: 1 }}>→</span>
                         <span className="micro" style={{ color: UI.inkFaint }}>SKIP</span>
                       </button>
                     )}
