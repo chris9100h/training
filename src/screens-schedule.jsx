@@ -714,7 +714,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy }) {
   const otherSchedules = store.schedules.filter(s => schedule ? s.id !== schedule.id : true);
 
   const DayBtn = ({ d, migrateId }) => (
-    <button key={d.id} onClick={() => onCopy(d.items, migrateId)} style={{
+    <button key={d.id} onClick={() => onCopy(d, migrateId)} style={{
       background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
       borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
       textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
@@ -842,11 +842,11 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
       return { ...d, items: normalizeSupersets(items) };
     });
   };
-  const copyItemsFromDay = (items, migrateId) => {
-    // Deep-copy each item and remap superset group ids — a shallow [...items]
+  const copyItemsFromDay = (sourceDay, migrateId) => {
+    // Deep-copy each item and remap superset group ids — a shallow spread
     // would share item objects (and group ids) with the source day.
     const gidMap = {};
-    const copied = items.map(it => {
+    const copied = sourceDay.items.map(it => {
       const next = { ...it };
       if (it.supersetGroup) {
         gidMap[it.supersetGroup] = gidMap[it.supersetGroup] || LB.uid();
@@ -1074,10 +1074,13 @@ function ScheduleNewScreen({ store, setStore, go }) {
   const [step, setStep] = useStateS(0);
   const [name, setName] = useStateS('');
   const [mode, setMode] = useStateS('cycle');
+  // pattern: Array<string | { id, name, items }> — strings are empty new days,
+  // objects are days imported from existing plans (id preserved for history).
   const [pattern, setPattern] = useStateS(['PUSH','PULL','REST']);
   const [weekdayDays, setWeekdayDays] = useStateS([]);
   const [pickingType, setPickingType] = useStateS(false);
   const [pickingWeekday, setPickingWeekday] = useStateS(null);
+  const [importingFromPlan, setImportingFromPlan] = useStateS(false);
 
   const presets = [
     { label: 'Push · Pull · Rest', val: ['PUSH','PULL','REST'] },
@@ -1097,11 +1100,16 @@ function ScheduleNewScreen({ store, setStore, go }) {
     const newSch = {
       id: LB.uid(),
       name: name.trim() || 'My Plan',
-      days: pattern.map(p => ({ id: LB.uid(), name: p, items: [] })),
+      days: pattern.map(p =>
+        typeof p === 'object'
+          ? { id: p.id, name: p.name, items: p.items }   // imported: keep id + exercises
+          : { id: LB.uid(), name: p, items: [] }          // new: fresh id
+      ),
       archived: false,
     };
     setStore(s => {
-      const withTypes = ensureCustomTypes(s, pattern);
+      const typeNames = pattern.map(p => typeof p === 'object' ? p.name : p);
+      const withTypes = ensureCustomTypes(s, typeNames);
       return { ...withTypes, schedules: [...withTypes.schedules, newSch] };
     });
     go({ name: 'schedule-edit', scheduleId: newSch.id });
@@ -1188,19 +1196,33 @@ function ScheduleNewScreen({ store, setStore, go }) {
                     )}
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: 12, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, minHeight: 54, marginTop: 8 }}>
-                    {pattern.map((p, i) => (
-                      <button key={i} onClick={() => setPattern(pat => pat.filter((_,j) => j !== i))} style={{
-                        padding: '5px 10px', borderRadius: 4,
-                        background: p === 'REST' ? 'transparent' : UI.goldFaint,
-                        border: `1px ${p === 'REST' ? 'dashed' : 'solid'} ${p === 'REST' ? UI.hairStrong : UI.goldSoft}`,
-                        color: p === 'REST' ? UI.inkFaint : UI.gold,
-                        fontSize: 11, fontFamily: UI.fontNum, letterSpacing: '0.06em', cursor: 'pointer',
-                      }} title="Tap to remove">{p} ×</button>
-                    ))}
+                    {pattern.map((p, i) => {
+                      const isObj = typeof p === 'object';
+                      const label = isObj ? p.name : p;
+                      const isRest = label === 'REST';
+                      return (
+                        <button key={i} onClick={() => setPattern(pat => pat.filter((_,j) => j !== i))} style={{
+                          padding: '5px 10px', borderRadius: 4,
+                          background: isRest ? 'transparent' : UI.goldFaint,
+                          border: `1px ${isRest ? 'dashed' : 'solid'} ${isRest ? UI.hairStrong : UI.goldSoft}`,
+                          color: isRest ? UI.inkFaint : UI.gold,
+                          fontSize: 11, fontFamily: UI.fontNum, letterSpacing: '0.06em', cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', gap: 4,
+                        }} title="Tap to remove">
+                          {isObj && <span style={{ opacity: 0.7, fontSize: 10 }}>↩</span>}
+                          {label} ×
+                        </button>
+                      );
+                    })}
                     {pattern.length === 0 && <div className="micro" style={{ color: UI.inkFaint, alignSelf: 'center' }}>empty — add a day</div>}
                   </div>
                 </div>
-                <Btn kind="ghost" onClick={() => setPickingType(true)} style={{ borderStyle: 'dashed', fontSize: 12 }}>+ Add day</Btn>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Btn kind="ghost" onClick={() => setPickingType(true)} style={{ flex: 1, borderStyle: 'dashed', fontSize: 12 }}>+ Add day</Btn>
+                  {store.schedules.some(s => s.days.some(d => d.items.length > 0)) && (
+                    <Btn kind="ghost" onClick={() => setImportingFromPlan(true)} style={{ flex: 1, borderStyle: 'dashed', fontSize: 12, color: UI.gold, borderColor: UI.goldSoft }}>↩ From plan</Btn>
+                  )}
+                </div>
                 <div>
                   <span className="label">Quick select</span>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
@@ -1295,6 +1317,18 @@ function ScheduleNewScreen({ store, setStore, go }) {
           onPick={(t) => {
             setWeekdayDays(days => days.map(d => d.weekday === pickingWeekday ? { ...d, name: t } : d));
             setPickingWeekday(null);
+          }}
+        />
+      )}
+      {importingFromPlan && (
+        <DayCopyPicker
+          store={store}
+          schedule={null}
+          currentDayId={null}
+          onClose={() => setImportingFromPlan(false)}
+          onCopy={(day, migrateId) => {
+            setPattern(pat => [...pat, { id: migrateId || LB.uid(), name: day.name, items: day.items }]);
+            setImportingFromPlan(false);
           }}
         />
       )}
