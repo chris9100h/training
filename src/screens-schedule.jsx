@@ -461,6 +461,27 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
 
   const dayActionLabel = (day) => (day.name === 'REST' || !day.items.length) ? 'edit' : `${day.items.length} ex · edit`;
 
+  const switchMode = async () => {
+    if (!isWeekday) {
+      // Cycle → Weekday: days have no weekday assignment, must clear them
+      const hasDays = draft.days.some(d => d.items.length > 0);
+      const msg = hasDays
+        ? 'Switching to weekday mode requires clearing all days. Your exercises stay in the library.'
+        : 'Switch this plan to weekday mode?';
+      if (!await confirm(msg, { title: 'Switch to Weekday mode?', ok: 'Switch' })) return;
+      setDraft(d => ({ ...d, mode: 'weekday', days: [] }));
+    } else {
+      // Weekday → Cycle: just strip weekday assignments, keep exercises
+      setDraft(d => ({
+        ...d,
+        mode: undefined,
+        days: [...d.days]
+          .sort((a, b) => (a.weekday ?? 0) - (b.weekday ?? 0))
+          .map(({ weekday, ...rest }) => rest),
+      }));
+    }
+  };
+
   return (
     <Screen>
       <TopBar
@@ -481,6 +502,24 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
       <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Field label="Name">
           <TextInput value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v.toUpperCase() }))} />
+        </Field>
+
+        <Field label="Mode">
+          <div style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: 3 }}>
+            {[
+              { key: 'cycle',   label: 'Cycle',    active: !isWeekday },
+              { key: 'weekday', label: 'Weekdays', active: isWeekday  },
+            ].map(m => (
+              <button key={m.key} onClick={m.active ? undefined : switchMode} style={{
+                flex: 1, padding: '8px 0', border: 'none', borderRadius: 4,
+                cursor: m.active ? 'default' : 'pointer',
+                background: m.active ? UI.bgRaised : 'transparent',
+                color: m.active ? UI.ink : UI.inkFaint,
+                fontFamily: UI.fontUi, fontSize: 12, fontWeight: m.active ? 600 : 400,
+                letterSpacing: '0.06em',
+              }}>{m.label}</button>
+            ))}
+          </div>
         </Field>
 
         {isActive && !isWeekday && (
