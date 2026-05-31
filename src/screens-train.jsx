@@ -193,7 +193,7 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
             color: UI.ink, fontFamily: UI.fontNum, fontSize: 48, fontWeight: 300,
             letterSpacing: '-0.03em', textAlign: 'center',
             width: '100%', boxSizing: 'border-box',
-            borderBottom: `0.5px solid ${UI.hair}`, paddingBottom: 8,
+            paddingBottom: 8,
             caretColor: 'transparent', userSelect: 'none',
           }}
         />
@@ -202,6 +202,7 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
           fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.1em',
         }}>KG</span>
       </div>
+      <div className="knurl" style={{ marginBottom: 10 }} />
 
       {/* Per-side hint */}
       <div style={{ minHeight: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
@@ -1548,8 +1549,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
             gap: 8, alignItems: 'baseline',
             padding: '0 4px 6px',
-            borderBottom: `1px solid ${UI.hair}`,
-            marginBottom: 2,
           }}>
             <div />
             <span className="micro" style={{ color: UI.inkFaint }}>Last time</span>
@@ -1564,6 +1563,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             )}
             <div /><div />
           </div>
+          <div className="knurl" style={{ marginBottom: 2 }} />
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {entry.sets.map((s, i) => {
@@ -1579,16 +1579,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
               return (
                 <React.Fragment key={i}>
                   {showWorkingSep && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 4px 4px', borderBottom: `1px solid ${UI.hairStrong}` }}>
-                      <span className="micro" style={{ color: UI.inkFaint }}>WORKING SETS</span>
-                    </div>
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 4px 4px' }}>
+                        <span className="micro" style={{ color: UI.inkFaint }}>WORKING SETS</span>
+                      </div>
+                      <div className="knurl" style={{ marginBottom: 2 }} />
+                    </>
                   )}
                   <div data-kb-row={i} style={{
                     display: 'grid',
                     gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
                     gap: 8, alignItems: 'center',
                     padding: '10px 4px',
-                    borderBottom: i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) ? `1px solid ${UI.hair}` : 'none',
                     opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
                     animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
                   }}>
@@ -1677,6 +1679,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                       }}>−</button>
                     ) : <span />}
                   </div>
+                  {i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) && <div className="knurl" />}
                 </React.Fragment>
               );
             })}
@@ -1747,10 +1750,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       </div>
 
       {/* Footer nav */}
+      <div className="knurl" />
       <div style={{
         flexShrink: 0,
         padding: `10px 22px calc(env(safe-area-inset-bottom, 8px) + 10px)`,
-        borderTop: `1px solid ${UI.hair}`,
         display: 'flex', gap: 10,
       }}>
         <button onClick={() => navigate(-1)} disabled={exIdx === 0} style={{
@@ -1795,18 +1798,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
               </div>
             );
           })()}
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${UI.hair}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
             <span>Sets</span>
             <span className="num" style={{ color: UI.ink }}>
               {session.entries.reduce((c, e) => c + e.sets.filter(s => s.done).length, 0)} / {session.entries.reduce((c, e) => c + e.sets.length, 0)}
             </span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${UI.hair}` }}>
+          <div className="knurl" />
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
             <span>Volume</span>
             <span className="num" style={{ color: UI.gold }}>
               {Math.round(LB.totalVolume(session)).toLocaleString('en-US')} kg
             </span>
           </div>
+          <div className="knurl" />
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
             <span>Duration</span>
             <span className="num" style={{ color: UI.ink }}>{sessionTimeStr}</span>

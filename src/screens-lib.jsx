@@ -1156,12 +1156,13 @@ function HistoryScreen({ store, go, initialTab }) {
               const days = Math.round((Date.now() - date) / 86400000);
               const isToday = days === 0;
               return (
-                <div key={item.key}
+                <React.Fragment key={item.key}>
+                {!item.firstInGroup && <div className="knurl" />}
+                <div
                   onClick={() => go({ name: 'session', sessionId: s.id })}
                   style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
                     padding: '16px 0',
-                    borderTop: !item.firstInGroup ? `0.5px solid ${UI.hair}` : 'none',
                     cursor: 'pointer',
                   }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -1180,6 +1181,7 @@ function HistoryScreen({ store, go, initialTab }) {
                     <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>kg</div>
                   </div>
                 </div>
+                </React.Fragment>
               );
             });
           })()}
@@ -1361,7 +1363,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               </div>
               <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
             </div>
-            <div style={{ height: '0.5px', background: UI.hair, marginBottom: 0 }} />
+            <div className="knurl" />
           </div>
         )}
 
@@ -1372,7 +1374,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               <div style={{ textAlign: 'center', padding: '6px 0 10px' }}>
                 <div className="micro-gold" style={{ letterSpacing: '0.24em', marginBottom: 16 }}>SESSION COMPLETE</div>
                 <div className="display-it" style={{ fontSize: 28, color: UI.gold, marginBottom: 18 }}>Well done.</div>
-                <div style={{ display: 'flex', borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16, gap: 0 }}>
+                <div className="knurl" style={{ marginBottom: 16 }} />
+                <div style={{ display: 'flex', gap: 0 }}>
                   {[
                     { label: 'Volume', value: `${Math.round(vol).toLocaleString('en-US')} kg`, gold: true },
                     ...(duration ? [{ label: 'Duration', value: `${duration} min`, gold: false }] : []),
@@ -1607,7 +1610,8 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
             ))}
           </select>
         </div>
-        <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="knurl" style={{ marginBottom: 16 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {draftEntries.map((e, eIdx) => {
             const isUnilateral = !!(exercises?.find(ex => ex.id === e.exId)?.unilateral)
               || e.sets.some(st => st.repsL != null || st.repsR != null);
@@ -1931,10 +1935,10 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
               const done = s.done || s.skipped;
               const unilateral = s.repsL != null || s.repsR != null;
               return (
-                <div key={i} style={{
+                <React.Fragment key={i}>
+                <div style={{
                   display: 'grid', gridTemplateColumns: '20px 1fr 1fr 20px',
                   alignItems: 'center', gap: 10, padding: '13px 0',
-                  borderBottom: i < entry.sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
                   opacity: done ? 1 : 0.35,
                   transition: 'opacity 0.3s',
                 }}>
@@ -1969,6 +1973,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                     )}
                   </div>
                 </div>
+                {i < entry.sets.length - 1 && <div className="knurl" />}
+                </React.Fragment>
               );
             })}
           </Frame>
@@ -1991,10 +1997,10 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                     const icon     = curr?.skipped && prevDone ? '↓' : improved ? '↑' : declined ? '↓' : '—';
                     const iconColor = improved ? 'var(--accent)' : declined ? UI.danger : UI.inkFaint;
                     return (
-                      <div key={i} style={{
+                      <React.Fragment key={i}>
+                      <div style={{
                         display: 'grid', gridTemplateColumns: '20px 1fr 1fr 20px',
                         alignItems: 'center', gap: 10, padding: '10px 0',
-                        borderBottom: i < lastEntry.sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
                       }}>
                         <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{i + 1}</span>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
@@ -2014,6 +2020,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                           {showIcon ? icon : ''}
                         </div>
                       </div>
+                      {i < lastEntry.sets.length - 1 && <div className="knurl" />}
+                      </React.Fragment>
                     );
                   })}
                 </Frame>
@@ -2045,11 +2053,12 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
         })();
 
         return (
+          <>
+          <div className="knurl" />
           <div style={{
             flexShrink: 0,
             padding: '14px 22px',
             paddingBottom: `calc(14px + env(safe-area-inset-bottom, 0px))`,
-            borderTop: `0.5px solid ${UI.hair}`,
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
               <span className="micro" style={{ color: UI.inkFaint }}>ESTIMATED REMAINING</span>
@@ -2110,6 +2119,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
               </>
             )}
           </div>
+          </>
         );
       })()}
     </Screen>
