@@ -737,67 +737,109 @@ function dayTypeChip(dashed) {
   };
 }
 
-// ─── Day copy / migrate picker ───────────────────────────────────────
-// onCopy(items, migrateId?) — migrateId is the source day's id when
-// copying from another plan; passing it preserves the day id so all
-// historical sessions automatically carry over to the new plan.
+// ─── Day copy / migrate picker — two-level: plan list → day list ─────
+// onCopy(day, migrateId?) — migrateId preserves the source day's id so
+// all historical sessions automatically carry over to the new plan.
 function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy }) {
-  const thisScheduleDays = (schedule?.days || []).filter(d => d.id !== currentDayId && d.items.length > 0);
-  const otherSchedules = store.schedules.filter(s => schedule ? s.id !== schedule.id : true);
+  const [selectedPlan, setSelectedPlan] = useStateS(null);
 
-  const DayBtn = ({ d, migrateId }) => (
-    <button key={d.id} onClick={() => onCopy(d, migrateId)} style={{
-      background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-      borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
-      textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
-    }}
-    onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
-    onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.hairStrong}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div className="display" style={{ fontSize: 16 }}>{d.name}</div>
-        {migrateId && (
-          <div className="micro" style={{ color: UI.gold, marginLeft: 8, flexShrink: 0, marginTop: 1 }}>↩ history</div>
-        )}
-      </div>
-      <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 4 }}>
-        {d.items.map(it => LB.findExercise(store, it.exId)?.name || '—').join(' · ')}
-      </div>
-      <div className="num" style={{ fontSize: 10, color: UI.inkFaint, marginTop: 4 }}>
-        {d.items.length} exercise{d.items.length !== 1 ? 's' : ''}
-      </div>
-    </button>
+  // Plans that have at least one day with exercises, excluding same-plan same-day
+  const plans = store.schedules.filter(s =>
+    s.days.some(d => d.items.length > 0 && (s.id !== schedule?.id || d.id !== currentDayId))
   );
 
-  const hasAny = thisScheduleDays.length > 0 || otherSchedules.some(s => s.days.some(d => d.items.length > 0));
+  const lastTrainedDate = (s) => {
+    const dates = store.sessions
+      .filter(sess => sess.scheduleId === s.id && sess.ended)
+      .map(sess => sess.date)
+      .sort()
+      .reverse();
+    return dates[0] || null;
+  };
 
+  const formatDate = (iso) => {
+    if (!iso) return null;
+    const d = LB.parseDate(iso);
+    const now = new Date(); now.setHours(12,0,0,0);
+    const diff = Math.round((now - d) / 86400000);
+    if (diff === 0) return 'today';
+    if (diff === 1) return 'yesterday';
+    if (diff < 7) return `${diff}d ago`;
+    if (diff < 30) return `${Math.round(diff/7)}w ago`;
+    return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  };
+
+  if (!selectedPlan) {
+    return (
+      <Sheet open={true} onClose={onClose} title="Import exercises from">
+        {plans.length === 0 ? (
+          <div style={{ padding: '24px 0', textAlign: 'center', color: UI.inkFaint, fontSize: 13 }}>
+            No plans with exercises yet.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+            {plans.map(s => {
+              const isSame = s.id === schedule?.id;
+              const last = lastTrainedDate(s);
+              const dayCount = s.days.filter(d => d.items.length > 0 && (isSame ? d.id !== currentDayId : true)).length;
+              return (
+                <button key={s.id} onClick={() => setSelectedPlan(s)} style={{
+                  background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+                  borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+                  textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
+                }}
+                onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
+                onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.hairStrong}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="display" style={{ fontSize: 16 }}>{s.name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      {s.archived && <span className="micro" style={{ color: UI.inkFaint }}>archived</span>}
+                      {!isSame && <span className="micro" style={{ color: UI.gold }}>↩ history</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, marginTop: 5 }}>
+                    <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{dayCount} day{dayCount !== 1 ? 's' : ''}</span>
+                    {last && <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>last: {formatDate(last)}</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </Sheet>
+    );
+  }
+
+  // Day list for selected plan
+  const isSamePlan = selectedPlan.id === schedule?.id;
+  const days = selectedPlan.days.filter(d => d.items.length > 0 && (!isSamePlan || d.id !== currentDayId));
   return (
-    <Sheet open={true} onClose={onClose} title="Import exercises from">
-      {!hasAny ? (
-        <div style={{ padding: '24px 0', textAlign: 'center', color: UI.inkFaint, fontSize: 13 }}>
-          No days with exercises available.
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-          {thisScheduleDays.length > 0 && (
-            <>
-              <div className="micro" style={{ paddingLeft: 2, marginBottom: 2 }}>THIS PLAN</div>
-              {thisScheduleDays.map(d => <DayBtn key={d.id} d={d} migrateId={undefined} />)}
-            </>
-          )}
-          {otherSchedules.map(s => {
-            const days = s.days.filter(d => d.items.length > 0);
-            if (!days.length) return null;
-            return (
-              <React.Fragment key={s.id}>
-                <div className="micro" style={{ paddingLeft: 2, marginTop: thisScheduleDays.length > 0 ? 8 : 2, marginBottom: 2 }}>
-                  {s.name}{s.archived ? ' · ARCHIVED' : ''}
-                </div>
-                {days.map(d => <DayBtn key={d.id} d={d} migrateId={d.id} />)}
-              </React.Fragment>
-            );
-          })}
-        </div>
-      )}
+    <Sheet open={true} onClose={() => setSelectedPlan(null)} title={selectedPlan.name}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+        {days.map(d => {
+          const migrateId = isSamePlan ? undefined : d.id;
+          return (
+            <button key={d.id} onClick={() => onCopy(d, migrateId)} style={{
+              background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+              textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
+            }}
+            onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
+            onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.hairStrong}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div className="display" style={{ fontSize: 16 }}>{d.name}</div>
+                {migrateId && <div className="micro" style={{ color: UI.gold, marginLeft: 8, flexShrink: 0, marginTop: 1 }}>↩ history</div>}
+              </div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 4, lineHeight: 1.5 }}>
+                {d.items.map(it => LB.findExercise(store, it.exId)?.name || '—').join(' · ')}
+              </div>
+              <div className="num" style={{ fontSize: 10, color: UI.inkFaint, marginTop: 4 }}>
+                {d.items.length} exercise{d.items.length !== 1 ? 's' : ''}
+              </div>
+            </button>
+          );
+        })}
+      </div>
     </Sheet>
   );
 }
