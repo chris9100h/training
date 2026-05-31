@@ -1749,7 +1749,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         display: 'flex', gap: 10,
       }}>
         <button onClick={() => navigate(-1)} disabled={exIdx === 0} style={{
-          width: 56, minHeight: 50, borderRadius: 6,
+          width: 44, minHeight: 44, borderRadius: 6,
           background: 'transparent', border: `1px solid ${UI.hairStrong}`,
           color: UI.inkSoft, cursor: exIdx === 0 ? 'default' : 'pointer',
           opacity: exIdx === 0 ? 0.3 : 1,
@@ -1758,14 +1758,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
         {allDone ? (
-          <Btn onClick={() => navigate(1)} style={{ flex: 1 }}>
+          <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>
             {exIdx === session.entries.length - 1 ? 'Finish →' : 'Next exercise →'}
           </Btn>
         ) : (<>
-          <Btn onClick={skipSet} style={{ flex: 1 }}>Skip set</Btn>
-          <Btn onClick={skipExercise} style={{ flex: 1 }}>Skip exercise</Btn>
+          <Btn onClick={skipSet} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Skip set</Btn>
+          <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Skip exercise</Btn>
           {exIdx === session.entries.length - 1 && (
-            <Btn onClick={() => navigate(1)} style={{ flex: 1 }}>Finish →</Btn>
+            <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Finish →</Btn>
           )}
         </>)}
       </div>
