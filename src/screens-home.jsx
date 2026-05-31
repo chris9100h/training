@@ -943,9 +943,9 @@ function HomeScreen({ store, setStore, go, userId }) {
             {activeDay.items.length > 0 && (
               <div style={{ width: '100%', marginTop: 18 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <div style={{ flex: 1, height: 1, background: UI.hair }} />
+                  <div className="knurl" style={{ flex: 1 }} />
                   <span style={{ fontFamily: UI.fontDisplay, fontSize: 10, fontWeight: 700, letterSpacing: '0.30em', color: UI.inkFaint }}>THE WORK</span>
-                  <div style={{ flex: 1, height: 1, background: UI.hair }} />
+                  <div className="knurl" style={{ flex: 1 }} />
                 </div>
                 {activeDay.items.map((item, i) => {
                   const ex = LB.findExercise(store, item.exId);
@@ -989,7 +989,8 @@ function HomeScreen({ store, setStore, go, userId }) {
                     }
                   }
                   return (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${UI.hair}` }}>
+                    <React.Fragment key={i}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0' }}>
                       <span className="num" style={{ fontSize: 10, color: UI.inkGhost, minWidth: 20, textAlign: 'right', flexShrink: 0 }}>{String(i + 1).padStart(2, '0')}</span>
                       <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: isActual ? UI.ink : UI.inkSoft, fontWeight: isActual ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || '?'}</span>
                       {maxKg != null && <span className="num" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{maxKg}kg</span>}
@@ -997,6 +998,8 @@ function HomeScreen({ store, setStore, go, userId }) {
                         {isActual ? repsText : `${setsText}×${repsText}`}
                       </span>
                     </div>
+                    <div className="knurl" style={{ marginLeft: 30 }} />
+                    </React.Fragment>
                   );
                 })}
               </div>
