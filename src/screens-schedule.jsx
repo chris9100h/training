@@ -84,14 +84,17 @@ function PlanScreen({ store, setStore, go }) {
                 <span className="micro" style={{ color: UI.inkFaint }}>ARCHIVED</span>
                 <span style={{
                   background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-                  borderRadius: 10, padding: '1px 7px',
+                  borderRadius: 4, padding: '1px 7px',
                   fontSize: 10, fontFamily: UI.fontNum, color: UI.inkFaint, lineHeight: 1.6,
                 }}>{archived.length}</span>
                 <span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>{archivedOpen ? '▲' : '▼'}</span>
               </button>
               {archivedOpen && archived.map(s => (
                 <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px', opacity: 0.55 }}>
-                  <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1, marginBottom: 6 }}>{s.name}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1 }}>{s.name}</div>
+                    <Pill>archived</Pill>
+                  </div>
                   <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>
                     {LB.isWeekdayPlan(s)
                       ? `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`
