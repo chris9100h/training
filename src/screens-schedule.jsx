@@ -734,7 +734,10 @@ function DayTypePicker({ store, setStore, title, onClose, onPick, onImport }) {
           schedule={null}
           currentDayId={null}
           onClose={() => setImportOpen(false)}
-          onCopy={(day, migrateId) => { onImport(day, migrateId); setImportOpen(false); }}
+          onCopy={(selections) => {
+            selections.forEach(({ day, migrateId }) => onImport(day, migrateId));
+            setImportOpen(false);
+          }}
         />
       )}
     </Sheet>
@@ -752,12 +755,13 @@ function dayTypeChip(dashed) {
 }
 
 // ─── Day copy / migrate picker — two-level: plan list → day list ─────
-// onCopy(day, migrateId?) — migrateId preserves the source day's id so
-// all historical sessions automatically carry over to the new plan.
-function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy }) {
+// multiSelect=true (default): day level shows checkboxes + confirm button,
+//   onCopy(Array<{day, migrateId}>) called with all selected days.
+// multiSelect=false: single-click immediately calls onCopy(day, migrateId).
+function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSelect = true }) {
   const [selectedPlan, setSelectedPlan] = useStateS(null);
+  const [selectedIds, setSelectedIds] = useStateS(new Set());
 
-  // Plans that have at least one day with exercises, excluding same-plan same-day
   const plans = store.schedules.filter(s =>
     s.days.some(d => d.items.length > 0 && (s.id !== schedule?.id || d.id !== currentDayId))
   );
@@ -783,6 +787,8 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy }) {
     return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
   };
 
+  const goBack = () => { setSelectedPlan(null); setSelectedIds(new Set()); };
+
   if (!selectedPlan) {
     return (
       <Sheet open={true} onClose={onClose} title="Import exercises from">
@@ -797,7 +803,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy }) {
               const last = lastTrainedDate(s);
               const dayCount = s.days.filter(d => d.items.length > 0 && (isSame ? d.id !== currentDayId : true)).length;
               return (
-                <button key={s.id} onClick={() => setSelectedPlan(s)} style={{
+                <button key={s.id} onClick={() => { setSelectedPlan(s); setSelectedIds(new Set()); }} style={{
                   background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
                   borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
                   textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
@@ -827,33 +833,91 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy }) {
   // Day list for selected plan
   const isSamePlan = selectedPlan.id === schedule?.id;
   const days = selectedPlan.days.filter(d => d.items.length > 0 && (!isSamePlan || d.id !== currentDayId));
+
+  const confirmMulti = () => {
+    const selections = days
+      .filter(d => selectedIds.has(d.id))
+      .map(d => ({ day: d, migrateId: isSamePlan ? undefined : d.id }));
+    if (selections.length) onCopy(selections);
+  };
+
   return (
-    <Sheet open={true} onClose={() => setSelectedPlan(null)} title={selectedPlan.name}>
+    <Sheet open={true} onClose={goBack} title={selectedPlan.name}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
         {days.map(d => {
           const migrateId = isSamePlan ? undefined : d.id;
+          const sel = selectedIds.has(d.id);
+
+          if (!multiSelect) {
+            return (
+              <button key={d.id} onClick={() => onCopy(d, migrateId)} style={{
+                background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+                borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+                textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
+              }}
+              onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
+              onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.hairStrong}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div className="display" style={{ fontSize: 16 }}>{d.name}</div>
+                  {migrateId && <div className="micro" style={{ color: UI.gold, marginLeft: 8, flexShrink: 0, marginTop: 1 }}>↩ history</div>}
+                </div>
+                <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 4, lineHeight: 1.5 }}>
+                  {d.items.map(it => LB.findExercise(store, it.exId)?.name || '—').join(' · ')}
+                </div>
+                <div className="num" style={{ fontSize: 10, color: UI.inkFaint, marginTop: 4 }}>
+                  {d.items.length} exercise{d.items.length !== 1 ? 's' : ''}
+                </div>
+              </button>
+            );
+          }
+
           return (
-            <button key={d.id} onClick={() => onCopy(d, migrateId)} style={{
-              background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+            <button key={d.id} onClick={() => setSelectedIds(prev => {
+              const next = new Set(prev);
+              if (next.has(d.id)) next.delete(d.id); else next.add(d.id);
+              return next;
+            })} style={{
+              background: sel ? UI.goldFaint : UI.bgInset,
+              border: `1px solid ${sel ? UI.goldSoft : UI.hairStrong}`,
               borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
               textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
-            }}
-            onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
-            onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.hairStrong}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div className="display" style={{ fontSize: 16 }}>{d.name}</div>
-                {migrateId && <div className="micro" style={{ color: UI.gold, marginLeft: 8, flexShrink: 0, marginTop: 1 }}>↩ history</div>}
+              display: 'flex', alignItems: 'flex-start', gap: 12,
+            }}>
+              <div style={{
+                width: 18, height: 18, borderRadius: 4, flexShrink: 0, marginTop: 2,
+                border: `1.5px solid ${sel ? UI.gold : UI.hairStrong}`,
+                background: sel ? UI.gold : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {sel && <span style={{ color: UI.bg, fontSize: 11, lineHeight: 1, fontWeight: 700 }}>✓</span>}
               </div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 4, lineHeight: 1.5 }}>
-                {d.items.map(it => LB.findExercise(store, it.exId)?.name || '—').join(' · ')}
-              </div>
-              <div className="num" style={{ fontSize: 10, color: UI.inkFaint, marginTop: 4 }}>
-                {d.items.length} exercise{d.items.length !== 1 ? 's' : ''}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div className="display" style={{ fontSize: 16 }}>{d.name}</div>
+                  {migrateId && <div className="micro" style={{ color: UI.gold, marginLeft: 8, flexShrink: 0, marginTop: 1 }}>↩ history</div>}
+                </div>
+                <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 4, lineHeight: 1.5 }}>
+                  {d.items.map(it => LB.findExercise(store, it.exId)?.name || '—').join(' · ')}
+                </div>
+                <div className="num" style={{ fontSize: 10, color: UI.inkFaint, marginTop: 4 }}>
+                  {d.items.length} exercise{d.items.length !== 1 ? 's' : ''}
+                </div>
               </div>
             </button>
           );
         })}
       </div>
+      {multiSelect && (
+        <Btn
+          onClick={confirmMulti}
+          disabled={selectedIds.size === 0}
+          style={{ width: '100%', marginTop: 16, opacity: selectedIds.size ? 1 : 0.4 }}
+        >
+          {selectedIds.size === 0
+            ? 'Select days to import'
+            : `Import ${selectedIds.size} day${selectedIds.size !== 1 ? 's' : ''} →`}
+        </Btn>
+      )}
     </Sheet>
   );
 }
@@ -1075,6 +1139,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
           schedule={schedule}
           currentDayId={draft.id}
           onClose={() => setCopyingFrom(false)}
+          multiSelect={false}
           onCopy={copyItemsFromDay}
         />
       )}

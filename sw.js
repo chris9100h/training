@@ -1,4 +1,4 @@
-const CACHE = 'zane-v1.809';
+const CACHE = 'zane-v1.810';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 const ASSETS = [
   '/training/',
