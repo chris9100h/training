@@ -1000,7 +1000,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                         {isActual ? repsText : `${setsText}×${repsText}`}
                       </span>
                     </div>
-                    <div className="knurl" style={{ marginLeft: 30 }} />
+                    <div className="knurl" style={i < activeDay.items.length - 1 ? { marginLeft: 30 } : {}} />
                     </React.Fragment>
                   );
                 })}
@@ -1023,7 +1023,6 @@ function HomeScreen({ store, setStore, go, userId }) {
       {/* Last session strip — fixed above tab bar */}
       {lastSession && (
         <div style={{ flexShrink: 0 }}>
-          <div className="knurl" />
           <div style={{ padding: '10px 22px 10px' }}>
             <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id })} />
           </div>
