@@ -40,19 +40,33 @@ if (!window._consolePatched) {
     window._log(`[PROMISE] ${reason}`);
   });
 
-  // Fetch — log non-2xx responses and network errors (skip successes to stay lean)
+  // Fetch — log every request and its response
   const origFetch = window.fetch;
   window.fetch = async (...args) => {
     const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '?');
+    const method = (args[1]?.method || 'GET').toUpperCase();
     const short = url.replace(/^https?:\/\/[^/]+/, '').slice(0, 80);
+    window._log(`[FETCH →] ${method} ${short}`);
     try {
       const res = await origFetch(...args);
-      if (!res.ok) window._log(`[FETCH] ${res.status} ${res.statusText} — ${short}`);
+      window._log(`[FETCH ${res.ok ? '✓' : '✗'}] ${res.status} ${method} ${short}`);
       return res;
     } catch (err) {
-      window._log(`[FETCH] ERR ${short} — ${err.message}`);
+      window._log(`[FETCH ERR] ${method} ${short} — ${err.message}`);
       throw err;
     }
+  };
+
+  // WebSocket — log Realtime connection state changes
+  const _OrigWS = window.WebSocket;
+  window.WebSocket = function(url, protocols) {
+    const short = String(url).replace(/^wss?:\/\/[^/]+/, '').slice(0, 70);
+    window._log(`[WS] connect → ${short}`);
+    const ws = protocols !== undefined ? new _OrigWS(url, protocols) : new _OrigWS(url);
+    ws.addEventListener('open',  ()  => window._log('[WS] open'));
+    ws.addEventListener('close', e   => window._log(`[WS] close code=${e.code} reason=${e.reason || '-'}`));
+    ws.addEventListener('error', ()  => window._log('[WS] error'));
+    return ws;
   };
 }
 // ─────────────────────────────────────────────────────────────────────────────
