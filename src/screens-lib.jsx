@@ -949,11 +949,11 @@ function StatsTab({ store, sessions, go }) {
   const maxSets = Math.max(...setsPerMuscle.map(x => x.sets), 1);
   const maxWeekVol = Math.max(...weeklyVolume.map(w => w.vol), 1);
 
-  const StatCard = ({ label, value, sub, gold }) => (
-    <div style={{ background: gold ? UI.goldFaint : UI.bgInset, borderRadius: 4, padding: '12px 14px', textAlign: 'center', border: gold ? `1px solid ${UI.goldSoft}` : `1px solid ${UI.hair}` }}>
-      <div className="micro" style={{ color: gold ? UI.gold : UI.inkFaint, marginBottom: 6 }}>{label}</div>
-      <div className="num" style={{ fontSize: 22, color: gold ? UI.gold : UI.ink, lineHeight: 1 }}>{value}</div>
-      {sub && <div className="micro" style={{ color: gold ? UI.gold : UI.inkFaint, marginTop: 3, opacity: gold ? 0.7 : 1 }}>{sub}</div>}
+  const StatCard = ({ label, value, sub, gold, compact, style: extraStyle = {} }) => (
+    <div style={{ background: gold ? UI.goldFaint : UI.bgInset, borderRadius: 4, padding: compact ? '8px 12px' : '12px 14px', textAlign: 'center', border: gold ? `1px solid ${UI.goldSoft}` : `1px solid ${UI.hair}`, ...extraStyle }}>
+      <div className="micro" style={{ color: gold ? UI.gold : UI.inkFaint, marginBottom: compact ? 4 : 6 }}>{label}</div>
+      <div className="num" style={{ fontSize: compact ? 18 : 22, color: gold ? UI.gold : UI.ink, lineHeight: 1 }}>{value}</div>
+      {sub && <div className="micro" style={{ color: gold ? UI.gold : UI.inkFaint, marginTop: compact ? 2 : 3, opacity: gold ? 0.7 : 1 }}>{sub}</div>}
     </div>
   );
 
@@ -1015,11 +1015,11 @@ function StatsTab({ store, sessions, go }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <StatCard label="Sessions" value={sessions.length} />
           <StatCard label="Avg Volume" value={avgVol.toLocaleString('en-US')} sub="kg / session" />
-          <StatCard label="Avg Duration" value={avgDuration || '—'} sub={avgDuration ? 'min' : ''} />
-          <StatCard label="Longest Session" value={maxDuration || '—'} sub={maxDuration ? 'min' : ''} />
-          <div style={{ gridColumn: '1 / -1', background: UI.bgInset, borderRadius: 4, padding: '12px 14px', textAlign: 'center', border: `1px solid ${UI.hair}` }}>
-            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Total Time Trained</div>
-            <div className="num" style={{ fontSize: 22, color: UI.ink, lineHeight: 1 }}>{totalTrainingMins ? totalTrainingStr : '—'}</div>
+          <StatCard label="Avg Duration" value={avgDuration || '—'} sub={avgDuration ? 'min' : ''} compact />
+          <StatCard label="Longest Session" value={maxDuration || '—'} sub={maxDuration ? 'min' : ''} compact />
+          <div style={{ gridColumn: '1 / -1', background: UI.bgInset, borderRadius: 4, padding: '16px 14px', textAlign: 'center', border: `1px solid ${UI.hair}` }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>TOTAL TIME TRAINED</div>
+            <div className="num" style={{ fontSize: 32, color: UI.ink, lineHeight: 1 }}>{totalTrainingMins ? totalTrainingStr : '—'}</div>
           </div>
         </div>
       </div>
@@ -1028,12 +1028,17 @@ function StatsTab({ store, sessions, go }) {
       <div>
         <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>CONSISTENCY</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <StatCard label="Current Streak" value={currentStreak} sub={currentStreak === 1 ? 'day' : 'days'} gold />
+          {/* Hero: current streak */}
+          <div style={{ gridColumn: '1 / -1', background: UI.goldFaint, borderRadius: 4, padding: '22px 14px', textAlign: 'center', border: `1px solid ${UI.goldSoft}` }}>
+            <div className="micro" style={{ color: UI.gold, marginBottom: 10 }}>CURRENT STREAK</div>
+            <div className="num" style={{ fontSize: 52, color: UI.gold, lineHeight: 1 }}>{currentStreak}</div>
+            <div className="micro" style={{ color: UI.gold, marginTop: 8, opacity: 0.7 }}>{currentStreak === 1 ? 'DAY' : 'DAYS'}</div>
+          </div>
           <StatCard label="Longest Streak" value={longestStreak} sub={longestStreak === 1 ? 'day' : 'days'} gold />
-          <StatCard label="This Year" value={thisYearSessions.length} sub="sessions" />
-          <StatCard label="This Month" value={thisMonthSessions.length} sub="sessions" />
-          <StatCard label="This Week" value={thisWeekSessions.length} sub="sessions" />
-          <StatCard label="Avg / Week" value={avgSessionsPerWeek} sub="sessions" />
+          <StatCard label="Avg / Week" value={avgSessionsPerWeek} sub="sessions" compact />
+          <StatCard label="This Year" value={thisYearSessions.length} sub="sessions" compact />
+          <StatCard label="This Month" value={thisMonthSessions.length} sub="sessions" compact />
+          <StatCard label="This Week" value={thisWeekSessions.length} sub="sessions" compact />
         </div>
       </div>
 
