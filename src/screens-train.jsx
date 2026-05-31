@@ -12,71 +12,6 @@ const _log = (msg) => {
   window._dbg.push(entry);
   if (window._dbg.length > 1000) window._dbg.shift();
 };
-
-function DebugPanel() {
-  const [open, setOpen] = useStateT(false);
-  const [entries, setEntries] = useStateT([]);
-  useEffectT(() => {
-    if (!open) return;
-    const refresh = () => setEntries([...window._dbg].reverse());
-    refresh();
-    const id = setInterval(refresh, 400);
-    return () => clearInterval(id);
-  }, [open]);
-
-  const btnStyle = {
-    position: 'fixed', bottom: 260, right: 8, zIndex: 9990,
-    background: 'rgba(201,169,97,0.15)', border: '0.5px solid rgba(201,169,97,0.4)',
-    borderRadius: 6, color: '#c9a961', fontSize: 10, fontFamily: 'monospace',
-    padding: '3px 6px', cursor: 'pointer', letterSpacing: '0.05em',
-  };
-
-  if (!open) return (
-    <button style={btnStyle} onClick={() => setOpen(true)}>DBG</button>
-  );
-
-  const copyLog = () => {
-    const text = [...window._dbg].reverse().map((e, idx, arr) => {
-      const prev = arr[idx + 1];
-      const delta = prev ? `+${e.t - prev.t}ms` : '      ';
-      return `${delta.padStart(8)}  ${e.msg}`;
-    }).join('\n');
-    navigator.clipboard?.writeText(text).catch(() => {});
-  };
-
-  const toolbarStyle = { background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 4, color: '#888', fontSize: 10, padding: '4px 8px', cursor: 'pointer' };
-
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 9991,
-      background: 'rgba(8,6,3,0.96)', display: 'flex', flexDirection: 'column',
-      fontFamily: 'monospace', fontSize: 11,
-    }}>
-      {/* Scrollable log — fills top space, safe area inset respected via padding-bottom */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 0 6px' }}>
-        {entries.length === 0 && <div style={{ color: '#444', padding: '12px 12px', fontSize: 12 }}>— no entries —</div>}
-        {entries.map((e, idx) => {
-          const prev = entries[idx + 1];
-          const delta = prev ? e.t - prev.t : 0;
-          const color = e.msg.includes('BLOCK') ? '#e87' : e.msg.includes('UNCHECK') ? '#f96' : e.msg.includes('complete') ? '#c9a961' : e.msg.includes('NULL') ? '#f55' : '#9db';
-          return (
-            <div key={idx} style={{ padding: '3px 10px', borderBottom: '0.5px solid rgba(255,255,255,0.04)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
-              <span style={{ color: '#444', flexShrink: 0, width: 52, textAlign: 'right' }}>{prev ? `+${delta}ms` : '      '}</span>
-              <span style={{ color }}>{e.msg}</span>
-            </div>
-          );
-        })}
-      </div>
-      {/* Toolbar at bottom — well clear of iOS status bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: `10px 12px calc(env(safe-area-inset-bottom, 0px) + 12px)`, borderTop: '0.5px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
-        <span style={{ color: '#c9a961', fontWeight: 700, flex: 1, fontSize: 10 }}>DEBUG LOG</span>
-        <button onClick={copyLog} style={toolbarStyle}>COPY</button>
-        <button onClick={() => { window._dbg = []; setEntries([]); }} style={toolbarStyle}>CLEAR</button>
-        <button onClick={() => setOpen(false)} style={{ ...toolbarStyle, fontSize: 16, padding: '2px 8px', border: 'none' }}>×</button>
-      </div>
-    </div>
-  );
-}
 // ─────────────────────────────────────────────────────────────────────────────
 
 function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }) {
@@ -2136,7 +2071,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           : (session.entries[exIdx]?.sets[kbField?.setIdx]?.kg ?? null)}
       />
 
-      {localStorage.getItem('logbook-debug-panel') === 'true' && <DebugPanel />}
     </Screen>
   );
 }
