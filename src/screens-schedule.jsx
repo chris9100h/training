@@ -1233,266 +1233,53 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
 
 // ─── Create new schedule ─────────────────────────────────────────────
 function ScheduleNewScreen({ store, setStore, go }) {
-  const [step, setStep] = useStateS(0);
   const [name, setName] = useStateS('');
   const [mode, setMode] = useStateS('cycle');
-  // pattern: Array<string | { id, name, items }> — strings are empty new days,
-  // objects are days imported from existing plans (id preserved for history).
-  const [pattern, setPattern] = useStateS(['PUSH','PULL','REST']);
-  const [weekdayDays, setWeekdayDays] = useStateS([]);
-  const [pickingType, setPickingType] = useStateS(false);
-  const [pickingWeekday, setPickingWeekday] = useStateS(null);
 
-  const presets = [
-    { label: 'Push · Pull · Rest', val: ['PUSH','PULL','REST'] },
-    { label: '2 on 1 off · PPL', val: ['PUSH','PULL','REST','LEGS','PUSH','REST'] },
-    { label: 'Upper · Lower', val: ['UPPER','LOWER','REST'] },
-    { label: 'Variations-PPL (9d)', val: ['PUSH1','PULL1','REST','LEGS1','PUSH2','REST','PULL2','LEGS2','REST'] },
-  ];
-
-  const ensureCustomTypes = (s, types) => {
-    const std = new Set(STANDARD_DAY_TYPES);
-    const cur = new Set(s.customDayTypes || []);
-    const add = types.filter(t => !std.has(t) && !cur.has(t));
-    return add.length ? { ...s, customDayTypes: [...(s.customDayTypes || []), ...add] } : s;
-  };
-
-  const finish = () => {
+  const create = () => {
     const newSch = {
       id: LB.uid(),
       name: name.trim() || 'My Plan',
-      days: pattern.map(p =>
-        typeof p === 'object'
-          ? { id: p.id, name: p.name, items: p.items }   // imported: keep id + exercises
-          : { id: LB.uid(), name: p, items: [] }          // new: fresh id
-      ),
+      days: [],
       archived: false,
+      ...(mode === 'weekday' ? { mode: 'weekday' } : {}),
     };
-    setStore(s => {
-      const typeNames = pattern.map(p => typeof p === 'object' ? p.name : p);
-      const withTypes = ensureCustomTypes(s, typeNames);
-      return { ...withTypes, schedules: [...withTypes.schedules, newSch] };
-    });
-    go({ name: 'schedule-edit', scheduleId: newSch.id });
-  };
-
-  const toggleWeekday = (idx) => {
-    setWeekdayDays(days => {
-      if (days.some(d => d.weekday === idx)) return days.filter(d => d.weekday !== idx);
-      return [...days, { weekday: idx, name: 'FULL' }];
-    });
-  };
-
-  const finishWeekday = () => {
-    const sorted = [...weekdayDays].sort((a,b) => a.weekday - b.weekday);
-    const newSch = {
-      id: LB.uid(),
-      name: name.trim() || 'My Plan',
-      mode: 'weekday',
-      days: sorted.map(d => d.items
-        ? { id: d.id, name: d.name, weekday: d.weekday, items: d.items }
-        : { id: LB.uid(), name: d.name, weekday: d.weekday, items: [] }
-      ),
-      archived: false,
-    };
-    setStore(s => {
-      const withTypes = ensureCustomTypes(s, sorted.map(d => d.name));
-      return { ...withTypes, schedules: [...withTypes.schedules, newSch] };
-    });
+    setStore(s => ({ ...s, schedules: [...s.schedules, newSch] }));
     go({ name: 'schedule-edit', scheduleId: newSch.id });
   };
 
   return (
     <Screen>
-      <TopBar title="New plan" onBack={() => step > 0 ? setStep(step - 1) : go({ name: 'plan' })} />
-      <div style={{ padding: '14px 22px 22px' }}>
+      <TopBar title="New plan" onBack={() => go({ name: 'plan' })} />
+      <div style={{ padding: '22px 22px', display: 'flex', flexDirection: 'column', gap: 22 }}>
+        <Field label="Plan name">
+          <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. YEEZUSCREW" autoFocus />
+        </Field>
 
-        {/* Step progress bars */}
-        <div style={{ display: 'flex', gap: 4, marginBottom: 24 }}>
-          {[0,1].map(i => (
-            <div key={i} style={{ flex: 1, height: 2, borderRadius: 1, background: i <= step ? UI.gold : UI.hair, transition: 'background 0.3s' }} />
-          ))}
-        </div>
-
-        {step === 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-            <div>
-              <div className="display" style={{ fontSize: 26, color: UI.ink, lineHeight: 1.1, marginBottom: 6 }}>What's your plan called?</div>
-              <div style={{ fontSize: 13, color: UI.inkSoft }}>You can change this later.</div>
-            </div>
-            <Field label="Plan name">
-              <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. 2 ON 1 OFF PPL" autoFocus />
-            </Field>
-            <Btn onClick={() => setStep(1)} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Next →</Btn>
+        <Field label="Type">
+          <div style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: 3 }}>
+            {[
+              { key: 'cycle',   label: 'Cycle',    sub: 'repeating N-day cycle' },
+              { key: 'weekday', label: 'Weekdays', sub: 'fixed days of the week' },
+            ].map(m => (
+              <button key={m.key} onClick={() => setMode(m.key)} style={{
+                flex: 1, padding: '10px 8px', border: 'none', borderRadius: 4, cursor: 'pointer',
+                background: mode === m.key ? UI.bgRaised : 'transparent',
+                color: mode === m.key ? UI.ink : UI.inkFaint,
+                fontFamily: UI.fontUi, fontSize: 12, fontWeight: mode === m.key ? 600 : 400,
+                letterSpacing: '0.06em', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+              }}>
+                <span>{m.label}</span>
+                <span className="micro" style={{ color: mode === m.key ? UI.inkFaint : UI.inkGhost, fontStyle: 'normal', textTransform: 'none', letterSpacing: 0, fontSize: 10 }}>{m.sub}</span>
+              </button>
+            ))}
           </div>
-        )}
+        </Field>
 
-        {step === 1 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* Mode toggle */}
-            <div style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: 3 }}>
-              {[{key:'cycle',label:'Cycle'},{key:'weekday',label:'Weekdays'}].map(m => (
-                <button key={m.key} onClick={() => setMode(m.key)} style={{
-                  flex: 1, padding: '8px 0', border: 'none', borderRadius: 4, cursor: 'pointer',
-                  background: mode === m.key ? UI.bgRaised : 'transparent',
-                  color: mode === m.key ? UI.ink : UI.inkFaint,
-                  fontFamily: UI.fontUi, fontSize: 12, fontWeight: mode === m.key ? 600 : 400,
-                  letterSpacing: '0.06em',
-                }}>{m.label}</button>
-              ))}
-            </div>
-
-            {mode === 'cycle' && (
-              <>
-                <div>
-                  <div className="display" style={{ fontSize: 22, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>Build your cycle</div>
-                  <div style={{ fontSize: 12, color: UI.inkSoft }}>Append day types — cycle repeats endlessly.</div>
-                </div>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span className="label">Your cycle · {pattern.length} days</span>
-                    {pattern.length > 0 && (
-                      <button onClick={() => setPattern([])} style={{
-                        background: 'transparent', border: 'none', cursor: 'pointer',
-                        color: UI.danger, fontSize: 10, fontFamily: UI.fontUi, padding: '2px 0',
-                        letterSpacing: '0.1em', textTransform: 'uppercase',
-                      }}>Clear all</button>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: 12, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, minHeight: 54, marginTop: 8 }}>
-                    {pattern.map((p, i) => {
-                      const isObj = typeof p === 'object';
-                      const label = isObj ? p.name : p;
-                      const isRest = label === 'REST';
-                      return (
-                        <button key={i} onClick={() => setPattern(pat => pat.filter((_,j) => j !== i))} style={{
-                          padding: '5px 10px', borderRadius: 4,
-                          background: isRest ? 'transparent' : UI.goldFaint,
-                          border: `1px ${isRest ? 'dashed' : 'solid'} ${isRest ? UI.hairStrong : UI.goldSoft}`,
-                          color: isRest ? UI.inkFaint : UI.gold,
-                          fontSize: 11, fontFamily: UI.fontNum, letterSpacing: '0.06em', cursor: 'pointer',
-                          display: 'flex', alignItems: 'center', gap: 4,
-                        }} title="Tap to remove">
-                          {isObj && <span style={{ opacity: 0.7, fontSize: 10 }}>↩</span>}
-                          {label} ×
-                        </button>
-                      );
-                    })}
-                    {pattern.length === 0 && <div className="micro" style={{ color: UI.inkFaint, alignSelf: 'center' }}>empty — add a day</div>}
-                  </div>
-                </div>
-                <Btn kind="ghost" onClick={() => setPickingType(true)} style={{ borderStyle: 'dashed', fontSize: 12 }}>+ Add day</Btn>
-                <div>
-                  <span className="label">Quick select</span>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-                    {presets.map(p => (
-                      <button key={p.label} onClick={() => setPattern(p.val)} style={{
-                        background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-                        padding: '10px 14px', borderRadius: 4, cursor: 'pointer',
-                        color: UI.ink, textAlign: 'left', fontFamily: UI.fontUi, fontSize: 13,
-                        display: 'flex', justifyContent: 'space-between',
-                      }}>
-                        <span>{p.label}</span>
-                        <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>{p.val.length}d</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <Btn onClick={finish} style={{ opacity: pattern.length ? 1 : 0.4 }} disabled={!pattern.length}>Create plan →</Btn>
-                <div className="micro" style={{ textAlign: 'center', marginTop: -8 }}>
-                  You can add exercises to each day right after.
-                </div>
-              </>
-            )}
-
-            {mode === 'weekday' && (
-              <>
-                <div>
-                  <div className="display" style={{ fontSize: 22, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>Select training days</div>
-                  <div style={{ fontSize: 12, color: UI.inkSoft }}>Which days of the week do you train?</div>
-                </div>
-                <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                  {WEEKDAYS.map((wd, i) => {
-                    const sel = weekdayDays.some(d => d.weekday === i);
-                    return (
-                      <button key={i} onClick={() => toggleWeekday(i)} style={{
-                        width: 42, height: 42, borderRadius: 6,
-                        border: `1px solid ${sel ? UI.goldSoft : UI.hairStrong}`,
-                        background: sel ? UI.goldFaint : 'transparent',
-                        color: sel ? UI.gold : UI.inkFaint,
-                        fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', fontWeight: sel ? 600 : 400,
-                      }}>{wd}</button>
-                    );
-                  })}
-                </div>
-                {weekdayDays.length > 0 && (
-                  <div>
-                    <span className="label">Type per day</span>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-                      {[...weekdayDays].sort((a,b)=>a.weekday-b.weekday).map(d => (
-                        <div key={d.weekday} style={{
-                          display: 'flex', alignItems: 'center', gap: 10,
-                          background: UI.bgInset, border: `1px solid ${d.items ? UI.goldSoft : UI.hairStrong}`,
-                          padding: '8px 12px', borderRadius: 4,
-                        }}>
-                          <div className="num" style={{ width: 30, color: UI.inkFaint, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[d.weekday]}</div>
-                          <button onClick={() => setPickingWeekday(d.weekday)} style={{
-                            flex: 1, textAlign: 'left', background: 'transparent', border: 'none',
-                            cursor: 'pointer', color: d.name === 'REST' ? UI.inkFaint : UI.gold,
-                            fontSize: 13, fontWeight: 600, fontFamily: UI.fontUi, padding: 0,
-                            display: 'flex', alignItems: 'center', gap: 6,
-                          }}>
-                            {d.items && <span style={{ fontSize: 10, opacity: 0.7 }}>↩</span>}
-                            {d.name} <span className="micro" style={{ fontStyle: 'normal' }}>change</span>
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <Btn onClick={finishWeekday} disabled={weekdayDays.length === 0} style={{ opacity: weekdayDays.length ? 1 : 0.4 }}>
-                  Create plan →
-                </Btn>
-                <div className="micro" style={{ textAlign: 'center', marginTop: -8 }}>
-                  You can add exercises to each day right after.
-                </div>
-              </>
-            )}
-          </div>
-        )}
+        <Btn onClick={create} disabled={!name.trim()} style={{ opacity: name.trim() ? 1 : 0.4 }}>
+          Create plan →
+        </Btn>
       </div>
-
-      {pickingType && (
-        <DayTypePicker
-          store={store} setStore={setStore}
-          title="Choose day type"
-          onClose={() => setPickingType(false)}
-          onPick={(t) => { setPattern(pat => [...pat, t]); setPickingType(false); }}
-          onImport={(day, migrateId) => {
-            setPattern(pat => [...pat, { id: migrateId || LB.uid(), name: day.name, items: day.items }]);
-            setPickingType(false);
-          }}
-        />
-      )}
-      {pickingWeekday != null && (
-        <DayTypePicker
-          store={store} setStore={setStore}
-          title={`${WEEKDAYS_FULL[pickingWeekday]} — choose type`}
-          onClose={() => setPickingWeekday(null)}
-          onPick={(t) => {
-            setWeekdayDays(days => days.map(d => d.weekday === pickingWeekday ? { ...d, name: t, id: undefined, items: undefined } : d));
-            setPickingWeekday(null);
-          }}
-          onImport={(day, migrateId) => {
-            setWeekdayDays(days => days.map(d =>
-              d.weekday === pickingWeekday
-                ? { ...d, name: day.name, id: migrateId || LB.uid(), items: day.items }
-                : d
-            ));
-            setPickingWeekday(null);
-          }}
-        />
-      )}
     </Screen>
   );
 }
