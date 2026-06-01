@@ -138,6 +138,9 @@ async function importFromBackup(backup, userId) {
     backup.sessions?.length && _supabase.from('zane_sessions').upsert(
       backup.sessions.filter(s => s.id).map(s => sessionToRow(s, userId))
     ),
+    ...(backup.sessions?.length
+      ? _buildEntryOps(backup.sessions.filter(s => s.id), userId, null)
+      : []),
     _supabase.from('zane_user_settings').upsert({
       user_id: userId,
       active_schedule_id: backup.activeScheduleId ?? null,
@@ -174,7 +177,7 @@ async function setupNewUser(userId, name) {
 // ─── LOAD ────────────────────────────────────────────────────────────────
 
 async function loadFromSupabase(userId, _depth = 0) {
-  const [profileRes, exRes, schRes, sessRes, settRes, skipsRes] = await Promise.all([
+  const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes] = await Promise.all([
     _supabase.from('zane_profiles').select('id, name').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived').eq('user_id', userId),
@@ -182,6 +185,10 @@ async function loadFromSupabase(userId, _depth = 0) {
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
+    _supabase.from('zane_session_entries')
+      .select('*, sets:zane_sets(*)')
+      .eq('user_id', userId)
+      .order('entry_idx'),
   ]);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
@@ -212,22 +219,53 @@ async function loadFromSupabase(userId, _depth = 0) {
 
   const { data: { user: authUser } } = await _supabase.auth.getUser();
 
+  // Build a lookup map: session_id → entry rows (sorted by entry_idx, already ordered)
+  const entriesBySession = {};
+  for (const e of (entriesRes.data || [])) {
+    if (!entriesBySession[e.session_id]) entriesBySession[e.session_id] = [];
+    entriesBySession[e.session_id].push(e);
+  }
+
   const result = {
     user: { name: profileRes.data.name, email: authUser?.email || '' },
     exercises: exRes.data || [],
     schedules: schRes.data || [],
     // map snake_case DB columns → camelCase store fields
-    sessions: (sessRes.data || []).map(s => ({
-      id: s.id,
-      scheduleId: s.schedule_id,
-      dayId: s.day_id,
-      dayName: s.day_name,
-      date: s.date,
-      startedAt: s.started_at ?? null,
-      ended: s.ended,
-      entries: s.entries,
-      durationMinutes: s.duration_minutes ?? null,
-    })),
+    sessions: (sessRes.data || []).map(s => {
+      const entryRows = entriesBySession[s.id];
+      const entries = entryRows && entryRows.length > 0
+        ? entryRows.map(e => ({
+            exId: e.ex_id,
+            name: e.name,
+            plannedSets: e.planned_sets,
+            plannedReps: e.planned_reps,
+            note: e.note || '',
+            supersetGroup: e.superset_group || null,
+            sets: (e.sets || [])
+              .sort((a, b) => a.set_idx - b.set_idx)
+              .map(st => ({
+                kg: st.kg,
+                reps: st.reps,
+                repsL: st.reps_l,
+                repsR: st.reps_r,
+                done: st.done,
+                skipped: st.skipped,
+                warmup: st.warmup,
+              })),
+          }))
+        : s.entries; // JSONB fallback for sessions that predate the migration
+      return {
+        id: s.id,
+        scheduleId: s.schedule_id,
+        dayId: s.day_id,
+        dayName: s.day_name,
+        date: s.date,
+        startedAt: s.started_at ?? null,
+        ended: s.ended,
+        entries,
+        durationMinutes: s.duration_minutes ?? null,
+      };
+    }),
     skips: (skipsRes.data || []).map(s => ({
       id: s.id, date: s.date, dayId: s.day_id, dayName: s.day_name,
       skipReason: s.skip_reason, skippedAt: s.skipped_at,
@@ -318,6 +356,67 @@ async function autoArchiveMissedDays(userId, state) {
 
 // ─── SYNC ────────────────────────────────────────────────────────────────
 
+// Build and fire upserts for zane_session_entries + zane_sets for the given sessions.
+// Returns an array of Supabase promise ops to be awaited by the caller.
+function _buildEntryOps(sessions, userId, prevSessions) {
+  const ops = [];
+  const now = new Date().toISOString();
+
+  for (const s of sessions) {
+    const entries = s.entries || [];
+    if (!entries.length) continue;
+
+    const prevSession = prevSessions ? prevSessions.find(x => x.id === s.id) : null;
+
+    const entriesPayload = entries.map((e, ei) => ({
+      id: `${s.id}_e${ei}`,
+      session_id: s.id,
+      user_id: userId,
+      entry_idx: ei,
+      ex_id: e.exId || null,
+      name: e.name || '',
+      planned_sets: e.plannedSets || null,
+      planned_reps: e.plannedReps || null,
+      note: e.note || '',
+      superset_group: e.supersetGroup || null,
+    }));
+
+    const setsPayload = [];
+    entries.forEach((e, ei) => {
+      const prevEntry = prevSession ? (prevSession.entries || [])[ei] : null;
+      (e.sets || []).forEach((set, si) => {
+        const prevSet = prevEntry ? (prevEntry.sets || [])[si] : null;
+        if (!prevSessions || !prevSet || JSON.stringify(prevSet) !== JSON.stringify(set)) {
+          setsPayload.push({
+            id: `${s.id}_e${ei}_s${si}`,
+            session_id: s.id,
+            entry_id: `${s.id}_e${ei}`,
+            user_id: userId,
+            set_idx: si,
+            kg: set.kg ?? null,
+            reps: set.reps ?? null,
+            reps_l: set.repsL ?? null,
+            reps_r: set.repsR ?? null,
+            done: set.done ?? false,
+            skipped: set.skipped ?? false,
+            warmup: set.warmup ?? false,
+            updated_at: now,
+          });
+        }
+      });
+    });
+
+    if (entriesPayload.length > 0) {
+      ops.push(_supabase.from('zane_session_entries').upsert(entriesPayload));
+    }
+    if (setsPayload.length > 0) {
+      ops.push(_supabase.rpc('sync_sets_batch', { p_sets: setsPayload }));
+    }
+  }
+
+  return ops;
+}
+
 function sessionToRow(s, userId) {
   // eslint-disable-next-line no-unused-vars
   const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, ...rest } = s;
@@ -357,7 +456,11 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(s);
     });
     const removed = prev.sessions.filter(s => !next.sessions.find(x => x.id === s.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
+    if (upsert.length) {
+      ops.push(_supabase.from('zane_sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
+      // Dual-write: also update the relational entry/set tables (changed sets only)
+      for (const op of _buildEntryOps(upsert, userId, prev.sessions)) ops.push(op);
+    }
     if (removed.length) ops.push(_supabase.from('zane_sessions').delete().in('id', removed.map(s => s.id)));
   }
 
