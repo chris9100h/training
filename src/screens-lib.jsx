@@ -1714,8 +1714,8 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px 22px' }}>
         {entries.map((entry, ei) => {
           const lastEntry = lastEntries.find(e => e.name === entry.name);
-          const sets      = entry.sets || [];
-          const lastSets  = lastEntry?.sets || [];
+          const sets      = (entry.sets || []).filter(s => !s.warmup);
+          const lastSets  = (lastEntry?.sets || []).filter(s => !s.warmup);
           const maxLen    = Math.max(sets.length, lastSets.length);
           const fmtSet = s => {
             if (!s) return '—';
