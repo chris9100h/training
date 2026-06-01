@@ -17,17 +17,65 @@ const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','
 // ─── PlanScreen ────────────────────────────────────────────────────
 function PlanScreen({ store, setStore, go }) {
   const [archivedOpen, setArchivedOpen] = useStateS(false);
+  const importRef = React.useRef(null);
+
+  const importPlan = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (data.type !== 'zane-plan' || !data.schedule) { alert('Invalid plan file.'); return; }
+        const idMap = {};
+        const newExercises = [];
+        (data.exercises || []).forEach(ex => {
+          const existing = store.exercises.find(x => x.name.trim().toLowerCase() === ex.name.trim().toLowerCase());
+          if (existing) {
+            idMap[ex.id] = existing.id;
+          } else {
+            const newId = LB.uid();
+            idMap[ex.id] = newId;
+            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null });
+          }
+        });
+        const sch = {
+          ...data.schedule,
+          id: LB.uid(),
+          archived: false,
+          days: (data.schedule.days || []).map(d => ({
+            ...d,
+            id: LB.uid(),
+            items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })),
+          })),
+        };
+        setStore(s => ({ ...s, exercises: [...s.exercises, ...newExercises], schedules: [...s.schedules, sch] }));
+        go({ name: 'plan-view', scheduleId: sch.id, fromPlan: true });
+      } catch (_) { alert('Could not read plan file.'); }
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <Screen>
       <TopBar
         title="Plan"
         right={
-          <button onClick={() => go({ name: 'schedule-new' })} style={{
-            width: 32, height: 32, borderRadius: 4,
-            border: `1px solid ${UI.goldSoft}`, background: UI.goldFaint,
-            color: UI.gold, cursor: 'pointer', fontSize: 20, lineHeight: 1,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>+</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input ref={importRef} type="file" accept=".json" style={{ display: 'none' }} onChange={importPlan} />
+            <button onClick={() => importRef.current?.click()} style={{
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 4, padding: '5px 10px', cursor: 'pointer',
+              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+            }}>Import</button>
+            <button onClick={() => go({ name: 'schedule-new' })} style={{
+              width: 32, height: 32, borderRadius: 4,
+              border: `1px solid ${UI.goldSoft}`, background: UI.goldFaint,
+              color: UI.gold, cursor: 'pointer', fontSize: 20, lineHeight: 1,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>+</button>
+          </div>
         }
       />
       <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -207,6 +255,20 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
     go({ name: 'plan-view', scheduleId: copy.id, fromPlan: true });
   };
 
+  const exportPlan = () => {
+    const exIds = new Set();
+    sch.days.forEach(d => d.items.forEach(it => { if (it.exId) exIds.add(it.exId); }));
+    const exercises = store.exercises.filter(e => exIds.has(e.id));
+    const payload = { type: 'zane-plan', version: 1, schedule: sch, exercises };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
   const planActions = fromPlan && (
     <>
       {!isActivePlan && <Btn kind="ghost" onClick={activate} style={{ flex: 1, fontSize: 12 }}>Activate</Btn>}
@@ -221,6 +283,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
         </div>
       )}
       <Btn kind="ghost" onClick={duplicate} style={{ flex: 1, fontSize: 12 }}>Duplicate</Btn>
+      <Btn kind="ghost" onClick={exportPlan} style={{ flex: 1, fontSize: 12 }}>Export</Btn>
     </>
   );
 
