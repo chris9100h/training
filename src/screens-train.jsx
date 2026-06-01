@@ -579,6 +579,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
     if (willBeAllDone) navigate(1);
   };
 
+  const checkSet = () => {
+    const idx = entry.sets.findIndex(s => !s.done && !s.skipped);
+    if (idx < 0) return;
+    updateSet(idx, { done: true });
+    const willBeAllDone = entry.sets.every((s, i) => i === idx || s.done || s.skipped);
+    if (willBeAllDone) navigate(1);
+  };
+
   const skipExercise = () => {
     updateSession(sess => ({
       ...sess,
@@ -648,17 +656,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
     updateSession(sess => {
       const now = new Date();
       const mins = sess.startedAt ? Math.round((now - new Date(sess.startedAt)) / 60000) : null;
-      // Seal all non-warmup sets that have recorded values as done — guards
-      // against a sync race where kbApply (done:false) lands in Supabase
-      // after completeSet (done:true) but before the session is ended.
-      const entries = sess.entries.map(e => ({
-        ...e,
-        sets: e.sets.map(st => {
-          if (st.done || st.warmup || st.skipped) return st;
-          const hasValue = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
-          return hasValue ? { ...st, done: true } : st;
-        }),
-      }));
+      // Seal non-warmup sets that have values as done — guards against a sync
+      // race where kbApply (done:false) lands in Supabase after completeSet
+      // (done:true). Only seal exercises where at least one set is done; if no
+      // set was ever confirmed the exercise was skipped/not started.
+      const entries = sess.entries.map(e => {
+        const hasDone = e.sets.some(st => st.done);
+        return {
+          ...e,
+          sets: e.sets.map(st => {
+            if (st.done || st.warmup || st.skipped) return st;
+            if (!hasDone) return st;
+            const hasValue = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
+            return hasValue ? { ...st, done: true } : st;
+          }),
+        };
+      });
       return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }) };
     });
     setStore(s => ({
@@ -960,7 +973,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
     const { setIdx, field } = kbFieldRef.current;
     if (field === 'kg') {
       const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
-      const next = Math.max(0, Math.round((cur + dir * 1.25) * 100) / 100);
+      const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
+      const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
       const newRaw = String(next).replace('.', ',');
       kbRawRef.current = newRaw;
       setKbRaw(newRaw);
@@ -1762,11 +1776,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             {exIdx === session.entries.length - 1 ? 'Finish →' : 'Next exercise →'}
           </Btn>
         ) : (<>
-          <Btn onClick={skipSet} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Skip set</Btn>
-          {exIdx === session.entries.length - 1 ? (
-            <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Finish →</Btn>
-          ) : (
-            <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Skip exercise</Btn>
+          {(() => {
+            const pending = entry.sets.find(s => !s.done && !s.skipped);
+            const hasVal = pending && (pending.kg != null || pending.reps != null || pending.repsL != null || pending.repsR != null);
+            return <Btn onClick={checkSet} disabled={!hasVal} style={{ flex: 2, minHeight: 44, padding: '10px 16px' }}>Check set</Btn>;
+          })()}
+          <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '6px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+            <span>Skip</span>
+            <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.6, textTransform: 'none', letterSpacing: 0 }}>remaining sets</span>
+          </Btn>
+          {exIdx === session.entries.length - 1 && (
+            <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 8px' }}>Finish →</Btn>
           )}
         </>)}
       </div>
