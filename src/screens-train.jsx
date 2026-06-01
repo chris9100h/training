@@ -579,6 +579,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
     if (willBeAllDone) navigate(1);
   };
 
+  const checkSet = () => {
+    const idx = entry.sets.findIndex(s => !s.done && !s.skipped);
+    if (idx < 0) return;
+    updateSet(idx, { done: true });
+    const willBeAllDone = entry.sets.every((s, i) => i === idx || s.done || s.skipped);
+    if (willBeAllDone) navigate(1);
+  };
+
   const skipExercise = () => {
     updateSession(sess => ({
       ...sess,
@@ -1768,9 +1776,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             {exIdx === session.entries.length - 1 ? 'Finish →' : 'Next exercise →'}
           </Btn>
         ) : (<>
-          <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Skip exercise</Btn>
+          {(() => {
+            const pending = entry.sets.find(s => !s.done && !s.skipped);
+            const hasVal = pending && (pending.kg != null || pending.reps != null || pending.repsL != null || pending.repsR != null);
+            return <Btn onClick={checkSet} disabled={!hasVal} style={{ flex: 2, minHeight: 44, padding: '10px 16px' }}>Check set</Btn>;
+          })()}
+          <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '10px 8px' }}>Skip ex</Btn>
           {exIdx === session.entries.length - 1 && (
-            <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Finish →</Btn>
+            <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 8px' }}>Finish →</Btn>
           )}
         </>)}
       </div>
