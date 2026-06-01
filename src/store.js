@@ -127,6 +127,7 @@ async function deleteSkip(id) {
 async function importFromBackup(backup, userId) {
   await deleteAllData(userId);
   const sett = backup.settings ?? {};
+  const importSessions = backup.sessions?.filter(s => s.id) ?? [];
   await Promise.all([
     backup.user?.name && _supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name }),
     backup.exercises?.length && _supabase.from('zane_exercises').upsert(
@@ -135,12 +136,9 @@ async function importFromBackup(backup, userId) {
     backup.schedules?.length && _supabase.from('zane_schedules').upsert(
       backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
     ),
-    backup.sessions?.length && _supabase.from('zane_sessions').upsert(
-      backup.sessions.filter(s => s.id).map(s => sessionToRow(s, userId))
+    importSessions.length && _supabase.from('zane_sessions').upsert(
+      importSessions.map(s => sessionToRow(s, userId))
     ),
-    ...(backup.sessions?.length
-      ? _buildEntryOps(backup.sessions.filter(s => s.id), userId, null)
-      : []),
     _supabase.from('zane_user_settings').upsert({
       user_id: userId,
       active_schedule_id: backup.activeScheduleId ?? null,
@@ -163,6 +161,8 @@ async function importFromBackup(backup, userId) {
       reminder_time: sett.reminderTime ?? '07:00',
     }),
   ].filter(Boolean));
+  // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
+  if (importSessions.length) await _syncEntryRelational(importSessions, userId, null);
 }
 
 // ─── SETUP NEW USER ──────────────────────────────────────────────────────
@@ -356,11 +356,12 @@ async function autoArchiveMissedDays(userId, state) {
 
 // ─── SYNC ────────────────────────────────────────────────────────────────
 
-// Build and fire upserts for zane_session_entries + zane_sets for the given sessions.
-// Returns an array of Supabase promise ops to be awaited by the caller.
-function _buildEntryOps(sessions, userId, prevSessions) {
-  const ops = [];
+// Dual-write entries then sets sequentially (sets FK-depend on entries existing first).
+// prevSessions: pass prev store sessions to skip unchanged sets; pass null to write all.
+async function _syncEntryRelational(sessions, userId, prevSessions) {
   const now = new Date().toISOString();
+  const allEntries = [];
+  const allSets = [];
 
   for (const s of sessions) {
     const entries = s.entries || [];
@@ -368,26 +369,26 @@ function _buildEntryOps(sessions, userId, prevSessions) {
 
     const prevSession = prevSessions ? prevSessions.find(x => x.id === s.id) : null;
 
-    const entriesPayload = entries.map((e, ei) => ({
-      id: `${s.id}_e${ei}`,
-      session_id: s.id,
-      user_id: userId,
-      entry_idx: ei,
-      ex_id: e.exId || null,
-      name: e.name || '',
-      planned_sets: e.plannedSets || null,
-      planned_reps: e.plannedReps || null,
-      note: e.note || '',
-      superset_group: e.supersetGroup || null,
-    }));
+    for (let ei = 0; ei < entries.length; ei++) {
+      const e = entries[ei];
+      allEntries.push({
+        id: `${s.id}_e${ei}`,
+        session_id: s.id,
+        user_id: userId,
+        entry_idx: ei,
+        ex_id: e.exId || null,
+        name: e.name || '',
+        planned_sets: e.plannedSets || null,
+        planned_reps: e.plannedReps || null,
+        note: e.note || '',
+        superset_group: e.supersetGroup || null,
+      });
 
-    const setsPayload = [];
-    entries.forEach((e, ei) => {
       const prevEntry = prevSession ? (prevSession.entries || [])[ei] : null;
       (e.sets || []).forEach((set, si) => {
         const prevSet = prevEntry ? (prevEntry.sets || [])[si] : null;
         if (!prevSessions || !prevSet || JSON.stringify(prevSet) !== JSON.stringify(set)) {
-          setsPayload.push({
+          allSets.push({
             id: `${s.id}_e${ei}_s${si}`,
             session_id: s.id,
             entry_id: `${s.id}_e${ei}`,
@@ -404,17 +405,15 @@ function _buildEntryOps(sessions, userId, prevSessions) {
           });
         }
       });
-    });
-
-    if (entriesPayload.length > 0) {
-      ops.push(_supabase.from('zane_session_entries').upsert(entriesPayload));
-    }
-    if (setsPayload.length > 0) {
-      ops.push(_supabase.rpc('sync_sets_batch', { p_sets: setsPayload }));
     }
   }
 
-  return ops;
+  if (allEntries.length) {
+    await _supabase.from('zane_session_entries').upsert(allEntries, { onConflict: 'id' });
+  }
+  if (allSets.length) {
+    await _supabase.rpc('sync_sets_batch', { p_sets: allSets });
+  }
 }
 
 function sessionToRow(s, userId) {
@@ -450,6 +449,7 @@ async function syncStore(prev, next, userId) {
     if (removed.length) ops.push(_supabase.from('zane_schedules').delete().in('id', removed.map(s => s.id)));
   }
 
+  let sessionUpserts = [];
   if (prev.sessions !== next.sessions) {
     const upsert = next.sessions.filter(s => {
       const p = prev.sessions.find(x => x.id === s.id);
@@ -458,8 +458,7 @@ async function syncStore(prev, next, userId) {
     const removed = prev.sessions.filter(s => !next.sessions.find(x => x.id === s.id));
     if (upsert.length) {
       ops.push(_supabase.from('zane_sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
-      // Dual-write: also update the relational entry/set tables (changed sets only)
-      for (const op of _buildEntryOps(upsert, userId, prev.sessions)) ops.push(op);
+      sessionUpserts = upsert;
     }
     if (removed.length) ops.push(_supabase.from('zane_sessions').delete().in('id', removed.map(s => s.id)));
   }
@@ -531,6 +530,8 @@ async function syncStore(prev, next, userId) {
   }
 
   await Promise.all(ops);
+  // Dual-write entries then sets after sessions are committed (FK order: sessions → entries → sets)
+  if (sessionUpserts.length) await _syncEntryRelational(sessionUpserts, userId, prev.sessions);
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────
