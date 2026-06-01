@@ -882,7 +882,7 @@ function progressionSuggestion(store, exId, dayId, plannedReps) {
 
   const baseReps = ex?.progression_reps ?? plannedReps;
   const targetRepsTop = (baseReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
-  const doneSets = (last.entry.sets || []).filter(s => !s.skipped && s.kg != null);
+  const doneSets = (last.entry.sets || []).filter(s => !s.skipped && !s.warmup && s.kg != null);
   if (!doneSets.length) return null;
 
   const allHitTop = doneSets.every(s => (effReps(s) ?? 0) >= targetRepsTop);
