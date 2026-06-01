@@ -458,7 +458,10 @@ async function syncStore(prev, next, userId) {
     const removed = prev.sessions.filter(s => !next.sessions.find(x => x.id === s.id));
     if (upsert.length) {
       ops.push(_supabase.from('zane_sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
-      sessionUpserts = upsert;
+      // Only sync relational tables for sessions that already existed in prev —
+      // filters out initial load (prev.sessions empty) and session creation events.
+      // On the first real set change, the session will be in prev and gets written.
+      sessionUpserts = upsert.filter(s => prev.sessions?.find(x => x.id === s.id));
     }
     if (removed.length) ops.push(_supabase.from('zane_sessions').delete().in('id', removed.map(s => s.id)));
   }
