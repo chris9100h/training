@@ -310,7 +310,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
         const isUni = !!ex?.unilateral;
         const last = LB.lastSessionForExercise(store, it.exId, day.id);
         const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps);
-        const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression).filter(s => !s.warmup);
+        const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
         return (
           <Frame key={k} style={{ padding: '12px 16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>

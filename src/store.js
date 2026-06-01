@@ -716,8 +716,9 @@ function calcBlended(startedAt, avgDurSec, avgSetsTotal, setsDone, setsTotal, no
 // Compute the seed-sets array when starting/logging a session for a planned item.
 // Honors smart-progression suggestions and falls back to last-session values.
 function buildSeedSets(it, last, suggestion, isUni, smartProgression) {
+  const workingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
   return Array.from({ length: it.sets }).map((_, i) => {
-    const prev = last?.entry?.sets?.[i];
+    const prev = workingSets[i];
     if (suggestion) {
       return isUni
         ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false }
