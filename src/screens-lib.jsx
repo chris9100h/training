@@ -721,7 +721,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      {h.entry.sets.filter(s => s.kg != null).map((s, i) => {
+                      {h.entry.sets.filter(s => s.kg != null && !s.warmup).map((s, i) => {
                         const isBest = sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01;
                         const repsStr = (s.repsL != null || s.repsR != null)
                           ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
