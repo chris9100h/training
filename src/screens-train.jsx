@@ -648,17 +648,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
     updateSession(sess => {
       const now = new Date();
       const mins = sess.startedAt ? Math.round((now - new Date(sess.startedAt)) / 60000) : null;
-      // Seal all non-warmup sets that have recorded values as done — guards
-      // against a sync race where kbApply (done:false) lands in Supabase
-      // after completeSet (done:true) but before the session is ended.
-      const entries = sess.entries.map(e => ({
-        ...e,
-        sets: e.sets.map(st => {
-          if (st.done || st.warmup || st.skipped) return st;
-          const hasValue = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
-          return hasValue ? { ...st, done: true } : st;
-        }),
-      }));
+      // Seal non-warmup sets that have values as done — guards against a sync
+      // race where kbApply (done:false) lands in Supabase after completeSet
+      // (done:true). Only seal exercises where at least one set is done; if no
+      // set was ever confirmed the exercise was skipped/not started.
+      const entries = sess.entries.map(e => {
+        const hasDone = e.sets.some(st => st.done);
+        return {
+          ...e,
+          sets: e.sets.map(st => {
+            if (st.done || st.warmup || st.skipped) return st;
+            if (!hasDone) return st;
+            const hasValue = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
+            return hasValue ? { ...st, done: true } : st;
+          }),
+        };
+      });
       return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }) };
     });
     setStore(s => ({
@@ -1763,11 +1768,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             {exIdx === session.entries.length - 1 ? 'Finish →' : 'Next exercise →'}
           </Btn>
         ) : (<>
-          <Btn onClick={skipSet} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Skip set</Btn>
-          {exIdx === session.entries.length - 1 ? (
+          <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Skip exercise</Btn>
+          {exIdx === session.entries.length - 1 && (
             <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Finish →</Btn>
-          ) : (
-            <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>Skip exercise</Btn>
           )}
         </>)}
       </div>
