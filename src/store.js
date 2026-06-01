@@ -363,6 +363,11 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
   const allEntries = [];
   const allSets = [];
 
+  // Normalize set fields for comparison — guards against null vs undefined and missing
+  // keys when comparing sets from an old (pre-migration) store format with new format.
+  const normSet = s => [s.kg ?? null, s.reps ?? null, s.repsL ?? null, s.repsR ?? null,
+                        s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0].join('|');
+
   for (const s of sessions) {
     const entries = s.entries || [];
     if (!entries.length) continue;
@@ -387,7 +392,7 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
       const prevEntry = prevSession ? (prevSession.entries || [])[ei] : null;
       (e.sets || []).forEach((set, si) => {
         const prevSet = prevEntry ? (prevEntry.sets || [])[si] : null;
-        if (!prevSessions || !prevSet || JSON.stringify(prevSet) !== JSON.stringify(set)) {
+        if (!prevSessions || !prevSet || normSet(prevSet) !== normSet(set)) {
           allSets.push({
             id: `${s.id}_e${ei}_s${si}`,
             session_id: s.id,
