@@ -960,7 +960,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
     const { setIdx, field } = kbFieldRef.current;
     if (field === 'kg') {
       const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
-      const next = Math.max(0, Math.round((cur + dir * 1.25) * 100) / 100);
+      const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
+      const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
       const newRaw = String(next).replace('.', ',');
       kbRawRef.current = newRaw;
       setKbRaw(newRaw);
