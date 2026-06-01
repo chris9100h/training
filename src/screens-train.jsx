@@ -1781,7 +1781,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
             const hasVal = pending && (pending.kg != null || pending.reps != null || pending.repsL != null || pending.repsR != null);
             return <Btn onClick={checkSet} disabled={!hasVal} style={{ flex: 2, minHeight: 44, padding: '10px 16px' }}>Check set</Btn>;
           })()}
-          <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '10px 8px' }}>Skip ex</Btn>
+          <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '10px 8px' }}>Skip exercise</Btn>
           {exIdx === session.entries.length - 1 && (
             <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 8px' }}>Finish →</Btn>
           )}
