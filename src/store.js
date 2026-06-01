@@ -535,9 +535,16 @@ function e1rm(kg, reps) {
 }
 
 // Total volume (kg) of all completed working sets in a session (warm-ups excluded).
+// For ended sessions we don't require done:true — a kbApply race can leave sets as
+// done:false in Supabase even though the user actually performed them.
 function totalVolume(session) {
+  const ended = !!session.ended;
   return (session.entries || []).reduce((sum, ex) =>
-    sum + (ex.sets || []).filter(st => st.done && !st.warmup).reduce((s, st) => {
+    sum + (ex.sets || []).filter(st => {
+      if (st.warmup || st.skipped) return false;
+      if (ended) return st.kg != null && (st.reps != null || st.repsL != null || st.repsR != null);
+      return st.done;
+    }).reduce((s, st) => {
       const reps = effReps(st) ?? 0;
       return s + (+st.kg || 0) * reps;
     }, 0), 0
@@ -546,8 +553,13 @@ function totalVolume(session) {
 
 // Count of completed working sets in a session (warm-ups excluded).
 function doneSetCount(session) {
+  const ended = !!session.ended;
   return (session.entries || []).reduce((c, e) =>
-    c + (e.sets || []).filter(st => st.done && !st.warmup).length, 0);
+    c + (e.sets || []).filter(st => {
+      if (st.warmup || st.skipped) return false;
+      if (ended) return st.kg != null && (st.reps != null || st.repsL != null || st.repsR != null);
+      return st.done;
+    }).length, 0);
 }
 
 // Index of the latest exercise whose entry has at least one completed set —
