@@ -16,6 +16,7 @@ const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','
 
 // ─── PlanScreen ────────────────────────────────────────────────────
 function PlanScreen({ store, setStore, go }) {
+  const [archivedOpen, setArchivedOpen] = useStateS(false);
   return (
     <Screen>
       <TopBar
@@ -36,7 +37,7 @@ function PlanScreen({ store, setStore, go }) {
             action={<Btn onClick={() => go({ name: 'schedule-new' })}>Create plan</Btn>}
             icon={ICON_CALENDAR} />
         )}
-        {store.schedules.map(s => {
+        {store.schedules.filter(s => !s.archived).map(s => {
           const isActive = s.id === store.activeScheduleId;
           return isActive ? (
             <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer' }}>
@@ -71,6 +72,42 @@ function PlanScreen({ store, setStore, go }) {
             </Frame>
           );
         })}
+        {(() => {
+          const archived = store.schedules.filter(s => s.archived);
+          if (!archived.length) return null;
+          return (
+            <>
+              <button onClick={() => setArchivedOpen(o => !o)} style={{
+                display: 'flex', alignItems: 'center', gap: 8, marginTop: 8,
+                background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 2px',
+              }}>
+                <span className="micro" style={{ color: UI.inkFaint }}>ARCHIVED</span>
+                <span style={{
+                  background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+                  borderRadius: 4, padding: '1px 7px',
+                  fontSize: 10, fontFamily: UI.fontNum, color: UI.inkFaint, lineHeight: 1.6,
+                }}>{archived.length}</span>
+                <span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>{archivedOpen ? '▲' : '▼'}</span>
+              </button>
+              {archivedOpen && archived.map(s => (
+                <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px', opacity: 0.55 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1 }}>{s.name}</div>
+                    <Pill>archived</Pill>
+                  </div>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>
+                    {LB.isWeekdayPlan(s)
+                      ? `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`
+                      : `${s.days.length}-day cycle · ${s.days.filter(d => d.items.length).length} training days`}
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {s.days.map((d) => <Pill key={d.id}>{d.name}</Pill>)}
+                  </div>
+                </Frame>
+              ))}
+            </>
+          );
+        })()}
       </div>
     </Screen>
   );
@@ -165,6 +202,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
     copy.id = LB.uid();
     copy.name = copy.name + ' (Copy)';
     copy.days = copy.days.map(d => ({ ...d, id: LB.uid() }));
+    copy.archived = false;
     setStore(s => ({ ...s, schedules: [...s.schedules, copy] }));
     go({ name: 'plan-view', scheduleId: copy.id, fromPlan: true });
   };
@@ -172,7 +210,16 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
   const planActions = fromPlan && (
     <>
       {!isActivePlan && <Btn kind="ghost" onClick={activate} style={{ flex: 1, fontSize: 12 }}>Activate</Btn>}
-      {isActivePlan && <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pill gold>active</Pill></div>}
+      {isActivePlan && (
+        <div style={{
+          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          border: `1px solid ${UI.goldSoft}`, borderRadius: 4, background: UI.goldFaint,
+          padding: '10px 14px', minHeight: 44,
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: 2, background: UI.gold, flexShrink: 0 }} />
+          <span className="label" style={{ color: UI.gold, marginBottom: 0 }}>Active</span>
+        </div>
+      )}
       <Btn kind="ghost" onClick={duplicate} style={{ flex: 1, fontSize: 12 }}>Duplicate</Btn>
     </>
   );
@@ -391,6 +438,18 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
     }));
     go({ name: 'plan' });
   };
+  const toggleArchive = async () => {
+    const willArchive = !draft.archived;
+    if (willArchive && isActive) {
+      if (!await confirm('Archiving will deactivate this plan.', { title: `Archive "${draft.name}"?`, ok: 'Archive' })) return;
+    }
+    setStore(s => ({
+      ...s,
+      schedules: s.schedules.map(x => x.id === draft.id ? { ...x, archived: willArchive } : x),
+      activeScheduleId: (willArchive && s.activeScheduleId === draft.id) ? null : s.activeScheduleId,
+    }));
+    go({ name: 'plan' });
+  };
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(original);
   const dateInputStyle = {
@@ -401,6 +460,27 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
   };
 
   const dayActionLabel = (day) => (day.name === 'REST' || !day.items.length) ? 'edit' : `${day.items.length} ex · edit`;
+
+  const switchMode = async () => {
+    if (!isWeekday) {
+      // Cycle → Weekday: days have no weekday assignment, must clear them
+      const hasDays = draft.days.some(d => d.items.length > 0);
+      const msg = hasDays
+        ? 'Switching to weekday mode requires clearing all days. Your exercises stay in the library.'
+        : 'Switch this plan to weekday mode?';
+      if (!await confirm(msg, { title: 'Switch to Weekday mode?', ok: 'Switch' })) return;
+      setDraft(d => ({ ...d, mode: 'weekday', days: [] }));
+    } else {
+      // Weekday → Cycle: just strip weekday assignments, keep exercises
+      setDraft(d => ({
+        ...d,
+        mode: undefined,
+        days: [...d.days]
+          .sort((a, b) => (a.weekday != null ? a.weekday : 0) - (b.weekday != null ? b.weekday : 0))
+          .map(function(day) { var nd = Object.assign({}, day); delete nd.weekday; return nd; }),
+      }));
+    }
+  };
 
   return (
     <Screen>
@@ -422,6 +502,24 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
       <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Field label="Name">
           <TextInput value={draft.name} onChange={(v) => setDraft(d => ({ ...d, name: v.toUpperCase() }))} />
+        </Field>
+
+        <Field label="Mode">
+          <div style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: 3 }}>
+            {[
+              { key: 'cycle',   label: 'Cycle',    active: !isWeekday },
+              { key: 'weekday', label: 'Weekdays', active: isWeekday  },
+            ].map(m => (
+              <button key={m.key} onClick={m.active ? undefined : switchMode} style={{
+                flex: 1, padding: '8px 0', border: 'none', borderRadius: 4,
+                cursor: m.active ? 'default' : 'pointer',
+                background: m.active ? UI.bgRaised : 'transparent',
+                color: m.active ? UI.ink : UI.inkFaint,
+                fontFamily: UI.fontUi, fontSize: 12, fontWeight: m.active ? 600 : 400,
+                letterSpacing: '0.06em',
+              }}>{m.label}</button>
+            ))}
+          </div>
         </Field>
 
         {isActive && !isWeekday && (
@@ -529,7 +627,12 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
           Tap a day to edit its type and exercises.
         </div>
 
-        <Btn kind="ghost" onClick={deleteSch} style={{ marginTop: 4, color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)', fontSize: 12 }}>Delete plan</Btn>
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <Btn kind="ghost" onClick={toggleArchive} style={{ flex: 1, fontSize: 12, color: UI.inkSoft, borderColor: UI.hairStrong }}>
+            {draft.archived ? 'Unarchive' : 'Archive plan'}
+          </Btn>
+          <Btn kind="ghost" onClick={deleteSch} style={{ flex: 1, fontSize: 12, color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)' }}>Delete plan</Btn>
+        </div>
       </div>
 
       {editingDay && (
@@ -550,6 +653,10 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
           title="Choose day type"
           onClose={() => setPickingType(false)}
           onPick={addDayType}
+          onImport={(day, migrateId) => {
+            setDraft(d => ({ ...d, days: [...d.days, { id: migrateId || LB.uid(), name: day.name, items: day.items }] }));
+            setPickingType(false);
+          }}
         />
       )}
       {confirmEl}
@@ -564,11 +671,13 @@ const dayEditIconBtn = {
 };
 
 // ─── Day-type picker (sheet) ─────────────────────────────────────────
-function DayTypePicker({ store, setStore, title, onClose, onPick }) {
+function DayTypePicker({ store, setStore, title, onClose, onPick, onImport }) {
   const [confirmEl, confirm] = useConfirm();
   const [creating, setCreating] = useStateS(false);
   const [newName, setNewName] = useStateS('');
+  const [importOpen, setImportOpen] = useStateS(false);
   const custom = store.customDayTypes || [];
+  const hasImportable = onImport && store.schedules.some(s => s.days.some(d => d.items.length > 0));
 
   const createCustom = () => {
     const name = newName.trim().toUpperCase();
@@ -649,7 +758,36 @@ function DayTypePicker({ store, setStore, title, onClose, onPick }) {
       <div className="micro" style={{ marginTop: 18, color: UI.inkFaint, lineHeight: 1.7 }}>
         For plans like PUSH1 / PULL1 / REST / LEGS1, create several custom types.
       </div>
+
+      {hasImportable && (
+        <>
+          <div style={{ height: 1, background: UI.hair, margin: '18px 0 14px' }} />
+          <span className="label">From existing plan</span>
+          <button onClick={() => setImportOpen(true)} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            width: '100%', marginTop: 8, padding: '12px 14px', borderRadius: 4,
+            background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
+            cursor: 'pointer', color: UI.gold, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+          }}>
+            <span>↩ Import day with history</span>
+            <span className="micro" style={{ color: UI.gold, opacity: 0.7 }}>exercises + progression →</span>
+          </button>
+        </>
+      )}
+
       {confirmEl}
+      {importOpen && (
+        <DayCopyPicker
+          store={store}
+          schedule={null}
+          currentDayId={null}
+          onClose={() => setImportOpen(false)}
+          onCopy={(selections) => {
+            selections.forEach(({ day, migrateId }) => onImport(day, migrateId));
+            setImportOpen(false);
+          }}
+        />
+      )}
     </Sheet>
   );
 }
@@ -664,36 +802,169 @@ function dayTypeChip(dashed) {
   };
 }
 
-// ─── Day copy picker ─────────────────────────────────────────────────
-function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy }) {
-  const copyableDays = schedule.days.filter(d => d.id !== currentDayId && d.items.length > 0);
+// ─── Day copy / migrate picker — two-level: plan list → day list ─────
+// multiSelect=true (default): day level shows checkboxes + confirm button,
+//   onCopy(Array<{day, migrateId}>) called with all selected days.
+// multiSelect=false: single-click immediately calls onCopy(day, migrateId).
+function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSelect = true }) {
+  const [selectedPlan, setSelectedPlan] = useStateS(null);
+  const [selectedIds, setSelectedIds] = useStateS(new Set());
+
+  const plans = store.schedules.filter(s =>
+    s.days.some(d => d.items.length > 0 && (s.id !== schedule?.id || d.id !== currentDayId))
+  );
+
+  const lastTrainedDate = (s) => {
+    const dates = store.sessions
+      .filter(sess => sess.scheduleId === s.id && sess.ended)
+      .map(sess => sess.date)
+      .sort()
+      .reverse();
+    return dates[0] || null;
+  };
+
+  const formatDate = (iso) => {
+    if (!iso) return null;
+    const d = LB.parseDate(iso);
+    const now = new Date(); now.setHours(12,0,0,0);
+    const diff = Math.round((now - d) / 86400000);
+    if (diff === 0) return 'today';
+    if (diff === 1) return 'yesterday';
+    if (diff < 7) return `${diff}d ago`;
+    if (diff < 30) return `${Math.round(diff/7)}w ago`;
+    return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  };
+
+  const goBack = () => { setSelectedPlan(null); setSelectedIds(new Set()); };
+
+  if (!selectedPlan) {
+    return (
+      <Sheet open={true} onClose={onClose} title="Import exercises from">
+        {plans.length === 0 ? (
+          <div style={{ padding: '24px 0', textAlign: 'center', color: UI.inkFaint, fontSize: 13 }}>
+            No plans with exercises yet.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+            {plans.map(s => {
+              const isSame = s.id === schedule?.id;
+              const last = lastTrainedDate(s);
+              const dayCount = s.days.filter(d => d.items.length > 0 && (isSame ? d.id !== currentDayId : true)).length;
+              return (
+                <button key={s.id} onClick={() => { setSelectedPlan(s); setSelectedIds(new Set()); }} style={{
+                  background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+                  borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+                  textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
+                }}
+                onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
+                onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.hairStrong}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="display" style={{ fontSize: 16 }}>{s.name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      {s.archived && <span className="micro" style={{ color: UI.inkFaint }}>archived</span>}
+                      {!isSame && <span className="micro" style={{ color: UI.gold }}>↩ history</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, marginTop: 5 }}>
+                    <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{dayCount} day{dayCount !== 1 ? 's' : ''}</span>
+                    {last && <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>last: {formatDate(last)}</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </Sheet>
+    );
+  }
+
+  // Day list for selected plan
+  const isSamePlan = selectedPlan.id === schedule?.id;
+  const days = selectedPlan.days.filter(d => d.items.length > 0 && (!isSamePlan || d.id !== currentDayId));
+
+  const confirmMulti = () => {
+    const selections = days
+      .filter(d => selectedIds.has(d.id))
+      .map(d => ({ day: d, migrateId: isSamePlan ? undefined : d.id }));
+    if (selections.length) onCopy(selections);
+  };
 
   return (
-    <Sheet open={true} onClose={onClose} title="Copy exercises from">
-      {copyableDays.length === 0 ? (
-        <div style={{ padding: '24px 0', textAlign: 'center', color: UI.inkFaint, fontSize: 13 }}>
-          No other days with exercises.
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-          {copyableDays.map(d => (
-            <button key={d.id} onClick={() => onCopy(d.items)} style={{
-              background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+    <Sheet open={true} onClose={goBack} title={selectedPlan.name}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+        {days.map(d => {
+          const migrateId = isSamePlan ? undefined : d.id;
+          const sel = selectedIds.has(d.id);
+
+          if (!multiSelect) {
+            return (
+              <button key={d.id} onClick={() => onCopy(d, migrateId)} style={{
+                background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+                borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+                textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
+              }}
+              onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
+              onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.hairStrong}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div className="display" style={{ fontSize: 16 }}>{d.name}</div>
+                  {migrateId && <div className="micro" style={{ color: UI.gold, marginLeft: 8, flexShrink: 0, marginTop: 1 }}>↩ history</div>}
+                </div>
+                <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 4, lineHeight: 1.5 }}>
+                  {d.items.map(it => LB.findExercise(store, it.exId)?.name || '—').join(' · ')}
+                </div>
+                <div className="num" style={{ fontSize: 10, color: UI.inkFaint, marginTop: 4 }}>
+                  {d.items.length} exercise{d.items.length !== 1 ? 's' : ''}
+                </div>
+              </button>
+            );
+          }
+
+          return (
+            <button key={d.id} onClick={() => setSelectedIds(prev => {
+              const next = new Set(prev);
+              if (next.has(d.id)) next.delete(d.id); else next.add(d.id);
+              return next;
+            })} style={{
+              background: sel ? UI.goldFaint : UI.bgInset,
+              border: `1px solid ${sel ? UI.goldSoft : UI.hairStrong}`,
               borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
-              textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi,
-            }}
-            onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
-            onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.hairStrong}>
-              <div className="display" style={{ fontSize: 16, marginBottom: 4 }}>{d.name}</div>
-              <div style={{ fontSize: 12, color: UI.inkSoft }}>
-                {d.items.map(it => LB.findExercise(store, it.exId)?.name || '—').join(' · ')}
+              textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
+              display: 'flex', alignItems: 'flex-start', gap: 12,
+            }}>
+              <div style={{
+                width: 18, height: 18, borderRadius: 4, flexShrink: 0, marginTop: 2,
+                border: `1.5px solid ${sel ? UI.gold : UI.hairStrong}`,
+                background: sel ? UI.gold : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {sel && <span style={{ color: UI.bg, fontSize: 11, lineHeight: 1, fontWeight: 700 }}>✓</span>}
               </div>
-              <div className="num" style={{ fontSize: 10, color: UI.inkFaint, marginTop: 4 }}>
-                {d.items.length} exercise{d.items.length !== 1 ? 's' : ''}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div className="display" style={{ fontSize: 16 }}>{d.name}</div>
+                  {migrateId && <div className="micro" style={{ color: UI.gold, marginLeft: 8, flexShrink: 0, marginTop: 1 }}>↩ history</div>}
+                </div>
+                <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 4, lineHeight: 1.5 }}>
+                  {d.items.map(it => LB.findExercise(store, it.exId)?.name || '—').join(' · ')}
+                </div>
+                <div className="num" style={{ fontSize: 10, color: UI.inkFaint, marginTop: 4 }}>
+                  {d.items.length} exercise{d.items.length !== 1 ? 's' : ''}
+                </div>
               </div>
             </button>
-          ))}
-        </div>
+          );
+        })}
+      </div>
+      {multiSelect && (
+        <Btn
+          onClick={confirmMulti}
+          disabled={selectedIds.size === 0}
+          style={{ width: '100%', marginTop: 16, opacity: selectedIds.size ? 1 : 0.4 }}
+        >
+          {selectedIds.size === 0
+            ? 'Select days to import'
+            : `Import ${selectedIds.size} day${selectedIds.size !== 1 ? 's' : ''} →`}
+        </Btn>
       )}
     </Sheet>
   );
@@ -771,11 +1042,11 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
       return { ...d, items: normalizeSupersets(items) };
     });
   };
-  const copyItemsFromDay = (items) => {
-    // Deep-copy each item and remap superset group ids — a shallow [...items]
+  const copyItemsFromDay = (sourceDay, migrateId) => {
+    // Deep-copy each item and remap superset group ids — a shallow spread
     // would share item objects (and group ids) with the source day.
     const gidMap = {};
-    const copied = items.map(it => {
+    const copied = sourceDay.items.map(it => {
       const next = { ...it };
       if (it.supersetGroup) {
         gidMap[it.supersetGroup] = gidMap[it.supersetGroup] || LB.uid();
@@ -783,7 +1054,9 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
       }
       return next;
     });
-    setDraft(d => ({ ...d, items: copied }));
+    // migrateId: preserve the source day's id so historical sessions for that
+    // day carry over to this new plan automatically (sessions reference day_id).
+    setDraft(d => ({ ...d, items: copied, ...(migrateId ? { id: migrateId } : {}) }));
     setCopyingFrom(false);
   };
 
@@ -803,7 +1076,9 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     });
   };
 
-  const otherDaysWithExercises = schedule ? schedule.days.filter(d => d.id !== draft.id && d.items.length > 0) : [];
+  const canImportFromPlan = store.schedules.some(s =>
+    s.days.some(d => d.items.length > 0 && (s.id !== schedule?.id || d.id !== draft.id))
+  );
 
   return (
     <Sheet open={true} onClose={onClose} title="Edit day">
@@ -828,12 +1103,12 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
         <div style={{ marginTop: 18 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <span className="label" style={{ marginBottom: 0 }}>Exercises</span>
-            {otherDaysWithExercises.length > 0 && (
+            {canImportFromPlan && (
               <button onClick={() => setCopyingFrom(true)} style={{
                 background: 'transparent', border: 'none', cursor: 'pointer',
                 color: UI.gold, fontSize: 10, fontFamily: UI.fontUi, padding: '2px 0',
                 letterSpacing: '0.1em', textTransform: 'uppercase',
-              }}>Copy from day</button>
+              }}>Import from plan</button>
             )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -912,6 +1187,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
           schedule={schedule}
           currentDayId={draft.id}
           onClose={() => setCopyingFrom(false)}
+          multiSelect={false}
           onCopy={copyItemsFromDay}
         />
       )}
@@ -996,231 +1272,53 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
 
 // ─── Create new schedule ─────────────────────────────────────────────
 function ScheduleNewScreen({ store, setStore, go }) {
-  const [step, setStep] = useStateS(0);
   const [name, setName] = useStateS('');
   const [mode, setMode] = useStateS('cycle');
-  const [pattern, setPattern] = useStateS(['PUSH','PULL','REST']);
-  const [weekdayDays, setWeekdayDays] = useStateS([]);
-  const [pickingType, setPickingType] = useStateS(false);
-  const [pickingWeekday, setPickingWeekday] = useStateS(null);
 
-  const presets = [
-    { label: 'Push · Pull · Rest', val: ['PUSH','PULL','REST'] },
-    { label: '2 on 1 off · PPL', val: ['PUSH','PULL','REST','LEGS','PUSH','REST'] },
-    { label: 'Upper · Lower', val: ['UPPER','LOWER','REST'] },
-    { label: 'Variations-PPL (9d)', val: ['PUSH1','PULL1','REST','LEGS1','PUSH2','REST','PULL2','LEGS2','REST'] },
-  ];
-
-  const ensureCustomTypes = (s, types) => {
-    const std = new Set(STANDARD_DAY_TYPES);
-    const cur = new Set(s.customDayTypes || []);
-    const add = types.filter(t => !std.has(t) && !cur.has(t));
-    return add.length ? { ...s, customDayTypes: [...(s.customDayTypes || []), ...add] } : s;
-  };
-
-  const finish = () => {
+  const create = () => {
     const newSch = {
       id: LB.uid(),
       name: name.trim() || 'My Plan',
-      days: pattern.map(p => ({ id: LB.uid(), name: p, items: [] })),
+      days: [],
+      archived: false,
+      ...(mode === 'weekday' ? { mode: 'weekday' } : {}),
     };
-    setStore(s => {
-      const withTypes = ensureCustomTypes(s, pattern);
-      return { ...withTypes, schedules: [...withTypes.schedules, newSch] };
-    });
-    go({ name: 'schedule-edit', scheduleId: newSch.id });
-  };
-
-  const toggleWeekday = (idx) => {
-    setWeekdayDays(days => {
-      if (days.some(d => d.weekday === idx)) return days.filter(d => d.weekday !== idx);
-      return [...days, { weekday: idx, name: 'FULL' }];
-    });
-  };
-
-  const finishWeekday = () => {
-    const sorted = [...weekdayDays].sort((a,b) => a.weekday - b.weekday);
-    const newSch = {
-      id: LB.uid(),
-      name: name.trim() || 'My Plan',
-      mode: 'weekday',
-      days: sorted.map(d => ({ id: LB.uid(), name: d.name, weekday: d.weekday, items: [] })),
-    };
-    setStore(s => {
-      const withTypes = ensureCustomTypes(s, sorted.map(d => d.name));
-      return { ...withTypes, schedules: [...withTypes.schedules, newSch] };
-    });
+    setStore(s => ({ ...s, schedules: [...s.schedules, newSch] }));
     go({ name: 'schedule-edit', scheduleId: newSch.id });
   };
 
   return (
     <Screen>
-      <TopBar title="New plan" onBack={() => step > 0 ? setStep(step - 1) : go({ name: 'plan' })} />
-      <div style={{ padding: '14px 22px 22px' }}>
+      <TopBar title="New plan" onBack={() => go({ name: 'plan' })} />
+      <div style={{ padding: '22px 22px', display: 'flex', flexDirection: 'column', gap: 22 }}>
+        <Field label="Plan name">
+          <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. YEEZUSCREW" autoFocus />
+        </Field>
 
-        {/* Step progress bars */}
-        <div style={{ display: 'flex', gap: 4, marginBottom: 24 }}>
-          {[0,1].map(i => (
-            <div key={i} style={{ flex: 1, height: 2, borderRadius: 1, background: i <= step ? UI.gold : UI.hair, transition: 'background 0.3s' }} />
-          ))}
-        </div>
-
-        {step === 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-            <div>
-              <div className="display" style={{ fontSize: 26, color: UI.ink, lineHeight: 1.1, marginBottom: 6 }}>What's your plan called?</div>
-              <div style={{ fontSize: 13, color: UI.inkSoft }}>You can change this later.</div>
-            </div>
-            <Field label="Plan name">
-              <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. 2 ON 1 OFF PPL" autoFocus />
-            </Field>
-            <Btn onClick={() => setStep(1)} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Next →</Btn>
+        <Field label="Type">
+          <div style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: 3 }}>
+            {[
+              { key: 'cycle',   label: 'Cycle',    sub: 'repeating N-day cycle' },
+              { key: 'weekday', label: 'Weekdays', sub: 'fixed days of the week' },
+            ].map(m => (
+              <button key={m.key} onClick={() => setMode(m.key)} style={{
+                flex: 1, padding: '10px 8px', border: 'none', borderRadius: 4, cursor: 'pointer',
+                background: mode === m.key ? UI.bgRaised : 'transparent',
+                color: mode === m.key ? UI.ink : UI.inkFaint,
+                fontFamily: UI.fontUi, fontSize: 12, fontWeight: mode === m.key ? 600 : 400,
+                letterSpacing: '0.06em', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+              }}>
+                <span>{m.label}</span>
+                <span className="micro" style={{ color: mode === m.key ? UI.inkFaint : UI.inkGhost, fontStyle: 'normal', textTransform: 'none', letterSpacing: 0, fontSize: 10 }}>{m.sub}</span>
+              </button>
+            ))}
           </div>
-        )}
+        </Field>
 
-        {step === 1 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* Mode toggle */}
-            <div style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: 3 }}>
-              {[{key:'cycle',label:'Cycle'},{key:'weekday',label:'Weekdays'}].map(m => (
-                <button key={m.key} onClick={() => setMode(m.key)} style={{
-                  flex: 1, padding: '8px 0', border: 'none', borderRadius: 4, cursor: 'pointer',
-                  background: mode === m.key ? UI.bgRaised : 'transparent',
-                  color: mode === m.key ? UI.ink : UI.inkFaint,
-                  fontFamily: UI.fontUi, fontSize: 12, fontWeight: mode === m.key ? 600 : 400,
-                  letterSpacing: '0.06em',
-                }}>{m.label}</button>
-              ))}
-            </div>
-
-            {mode === 'cycle' && (
-              <>
-                <div>
-                  <div className="display" style={{ fontSize: 22, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>Build your cycle</div>
-                  <div style={{ fontSize: 12, color: UI.inkSoft }}>Append day types — cycle repeats endlessly.</div>
-                </div>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span className="label">Your cycle · {pattern.length} days</span>
-                    {pattern.length > 0 && (
-                      <button onClick={() => setPattern([])} style={{
-                        background: 'transparent', border: 'none', cursor: 'pointer',
-                        color: UI.danger, fontSize: 10, fontFamily: UI.fontUi, padding: '2px 0',
-                        letterSpacing: '0.1em', textTransform: 'uppercase',
-                      }}>Clear all</button>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: 12, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, minHeight: 54, marginTop: 8 }}>
-                    {pattern.map((p, i) => (
-                      <button key={i} onClick={() => setPattern(pat => pat.filter((_,j) => j !== i))} style={{
-                        padding: '5px 10px', borderRadius: 4,
-                        background: p === 'REST' ? 'transparent' : UI.goldFaint,
-                        border: `1px ${p === 'REST' ? 'dashed' : 'solid'} ${p === 'REST' ? UI.hairStrong : UI.goldSoft}`,
-                        color: p === 'REST' ? UI.inkFaint : UI.gold,
-                        fontSize: 11, fontFamily: UI.fontNum, letterSpacing: '0.06em', cursor: 'pointer',
-                      }} title="Tap to remove">{p} ×</button>
-                    ))}
-                    {pattern.length === 0 && <div className="micro" style={{ color: UI.inkFaint, alignSelf: 'center' }}>empty — add a day</div>}
-                  </div>
-                </div>
-                <Btn kind="ghost" onClick={() => setPickingType(true)} style={{ borderStyle: 'dashed', fontSize: 12 }}>+ Add day</Btn>
-                <div>
-                  <span className="label">Quick select</span>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-                    {presets.map(p => (
-                      <button key={p.label} onClick={() => setPattern(p.val)} style={{
-                        background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-                        padding: '10px 14px', borderRadius: 4, cursor: 'pointer',
-                        color: UI.ink, textAlign: 'left', fontFamily: UI.fontUi, fontSize: 13,
-                        display: 'flex', justifyContent: 'space-between',
-                      }}>
-                        <span>{p.label}</span>
-                        <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>{p.val.length}d</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <Btn onClick={finish} style={{ opacity: pattern.length ? 1 : 0.4 }} disabled={!pattern.length}>Create plan →</Btn>
-                <div className="micro" style={{ textAlign: 'center', marginTop: -8 }}>
-                  You can add exercises to each day right after.
-                </div>
-              </>
-            )}
-
-            {mode === 'weekday' && (
-              <>
-                <div>
-                  <div className="display" style={{ fontSize: 22, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>Select training days</div>
-                  <div style={{ fontSize: 12, color: UI.inkSoft }}>Which days of the week do you train?</div>
-                </div>
-                <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                  {WEEKDAYS.map((wd, i) => {
-                    const sel = weekdayDays.some(d => d.weekday === i);
-                    return (
-                      <button key={i} onClick={() => toggleWeekday(i)} style={{
-                        width: 42, height: 42, borderRadius: 6,
-                        border: `1px solid ${sel ? UI.goldSoft : UI.hairStrong}`,
-                        background: sel ? UI.goldFaint : 'transparent',
-                        color: sel ? UI.gold : UI.inkFaint,
-                        fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', fontWeight: sel ? 600 : 400,
-                      }}>{wd}</button>
-                    );
-                  })}
-                </div>
-                {weekdayDays.length > 0 && (
-                  <div>
-                    <span className="label">Type per day</span>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-                      {[...weekdayDays].sort((a,b)=>a.weekday-b.weekday).map(d => (
-                        <div key={d.weekday} style={{
-                          display: 'flex', alignItems: 'center', gap: 10,
-                          background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-                          padding: '8px 12px', borderRadius: 4,
-                        }}>
-                          <div className="num" style={{ width: 30, color: UI.inkFaint, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[d.weekday]}</div>
-                          <button onClick={() => setPickingWeekday(d.weekday)} style={{
-                            flex: 1, textAlign: 'left', background: 'transparent', border: 'none',
-                            cursor: 'pointer', color: d.name === 'REST' ? UI.inkFaint : UI.gold,
-                            fontSize: 13, fontWeight: 600, fontFamily: UI.fontUi, padding: 0,
-                          }}>
-                            {d.name} <span className="micro" style={{ fontStyle: 'normal' }}>change</span>
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <Btn onClick={finishWeekday} disabled={weekdayDays.length === 0} style={{ opacity: weekdayDays.length ? 1 : 0.4 }}>
-                  Create plan →
-                </Btn>
-                <div className="micro" style={{ textAlign: 'center', marginTop: -8 }}>
-                  You can add exercises to each day right after.
-                </div>
-              </>
-            )}
-          </div>
-        )}
+        <Btn onClick={create} disabled={!name.trim()} style={{ opacity: name.trim() ? 1 : 0.4 }}>
+          Create plan →
+        </Btn>
       </div>
-
-      {pickingType && (
-        <DayTypePicker
-          store={store} setStore={setStore}
-          title="Choose day type"
-          onClose={() => setPickingType(false)}
-          onPick={(t) => { setPattern(pat => [...pat, t]); }}
-        />
-      )}
-      {pickingWeekday != null && (
-        <DayTypePicker
-          store={store} setStore={setStore}
-          title={`${WEEKDAYS_FULL[pickingWeekday]} — choose type`}
-          onClose={() => setPickingWeekday(null)}
-          onPick={(t) => {
-            setWeekdayDays(days => days.map(d => d.weekday === pickingWeekday ? { ...d, name: t } : d));
-            setPickingWeekday(null);
-          }}
-        />
-      )}
     </Screen>
   );
 }

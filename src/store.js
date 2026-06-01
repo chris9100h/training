@@ -165,20 +165,9 @@ async function importFromBackup(backup, userId) {
 // ─── SETUP NEW USER ──────────────────────────────────────────────────────
 
 async function setupNewUser(userId, name) {
-  const seeded = seedStarter({
-    user: { name }, exercises: [], schedules: [], sessions: [],
-    activeScheduleId: null, cycleIndex: 0, lastAdvancedDate: null,
-    inProgress: null, customDayTypes: [], settings: { unit: 'kg', restDefault: 120 },
-  });
   await Promise.all([
     _supabase.from('zane_profiles').upsert({ id: userId, name }),
-    _supabase.from('zane_exercises').insert(seeded.exercises.map(e => ({ ...e, user_id: userId }))),
-    _supabase.from('zane_schedules').insert(seeded.schedules.map(s => ({ ...s, user_id: userId }))),
-    _supabase.from('zane_user_settings').upsert({
-      user_id: userId,
-      active_schedule_id: seeded.activeScheduleId,
-      cycle_index: 0, unit: 'kg', rest_default: 120,
-    }),
+    _supabase.from('zane_user_settings').upsert({ user_id: userId, unit: 'kg', rest_default: 120 }),
   ]);
 }
 
@@ -188,7 +177,7 @@ async function loadFromSupabase(userId, _depth = 0) {
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes] = await Promise.all([
     _supabase.from('zane_profiles').select('id, name').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps').eq('user_id', userId),
-    _supabase.from('zane_schedules').select('id, name, days').eq('user_id', userId),
+    _supabase.from('zane_schedules').select('id, name, days, archived').eq('user_id', userId),
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries, duration_minutes')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
@@ -439,68 +428,6 @@ async function syncStore(prev, next, userId) {
   }
 
   await Promise.all(ops);
-}
-
-// ─── SEED ────────────────────────────────────────────────────────────────
-
-function seedStarter(state) {
-  const exNames = [
-    ['Back squat',        ['legs','compound','barbell']],
-    ['Bench press',       ['push','compound','barbell']],
-    ['Deadlift',          ['pull','compound','barbell']],
-    ['OHP',               ['push','compound','barbell']],
-    ['Pull-up',           ['pull','compound','bodyweight']],
-    ['Barbell row',       ['pull','compound','barbell']],
-    ['RDL',               ['legs','compound','barbell']],
-    ['Leg press',         ['legs','machine']],
-    ['Standing calves',   ['legs','machine']],
-    ['Hammer curl',       ['pull','isolation','dumbbell']],
-    ['Triceps pushdown',  ['push','isolation','cable']],
-    ['Lateral raise',     ['push','isolation','dumbbell']],
-  ];
-  const exercises = exNames.map(([name, tags]) => ({ id: uid(), name, tags }));
-  const byName = (n) => exercises.find(e => e.name === n).id;
-
-  const sched = {
-    id: uid(),
-    name: '2 on 1 off · PPL',
-    days: [
-      { id: uid(), name: 'PUSH', items: [
-        { exId: byName('Bench press'),      sets: 4, reps: 5  },
-        { exId: byName('OHP'),              sets: 3, reps: 8  },
-        { exId: byName('Lateral raise'),    sets: 3, reps: 12 },
-        { exId: byName('Triceps pushdown'), sets: 3, reps: 12 },
-      ]},
-      { id: uid(), name: 'PULL', items: [
-        { exId: byName('Deadlift'),    sets: 3, reps: 5  },
-        { exId: byName('Barbell row'), sets: 4, reps: 6  },
-        { exId: byName('Pull-up'),     sets: 3, reps: 8  },
-        { exId: byName('Hammer curl'), sets: 3, reps: 10 },
-      ]},
-      { id: uid(), name: 'REST', items: [] },
-      { id: uid(), name: 'LEGS', items: [
-        { exId: byName('Back squat'),     sets: 4, reps: 5  },
-        { exId: byName('RDL'),            sets: 3, reps: 8  },
-        { exId: byName('Leg press'),      sets: 3, reps: 10 },
-        { exId: byName('Standing calves'),sets: 4, reps: 12 },
-      ]},
-      { id: uid(), name: 'PUSH', items: [
-        { exId: byName('OHP'),           sets: 4, reps: 6  },
-        { exId: byName('Bench press'),   sets: 3, reps: 8  },
-        { exId: byName('Lateral raise'), sets: 4, reps: 12 },
-      ]},
-      { id: uid(), name: 'REST', items: [] },
-    ],
-  };
-
-  return {
-    ...state,
-    exercises: [...state.exercises, ...exercises],
-    schedules: [...state.schedules, sched],
-    activeScheduleId: sched.id,
-    cycleIndex: 0,
-    cycleStartDate: todayISO(),
-  };
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────
