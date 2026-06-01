@@ -311,6 +311,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
         const last = LB.lastSessionForExercise(store, it.exId, day.id);
         const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps);
         const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
+        const workingLast = (last?.entry?.sets || []).filter(s => !s.warmup);
         return (
           <Frame key={k} style={{ padding: '12px 16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
@@ -324,10 +325,16 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
                   const reps = isUni
                     ? `L${st.repsL ?? it.reps}/R${st.repsR ?? it.reps}`
                     : `${st.reps ?? it.reps}`;
+                  const prevSet = workingLast[si];
+                  const isBumped = !suggestion && !!store.settings?.smartProgression && prevSet != null && (
+                    (st.reps != null && prevSet.reps != null && st.reps > prevSet.reps) ||
+                    (st.repsL != null && prevSet.repsL != null && st.repsL > prevSet.repsL)
+                  );
+                  const highlight = suggestion || isBumped;
                   return (
-                    <span key={si} className="num" style={{ fontSize: 13, color: suggestion ? UI.gold : UI.inkSoft }}>
+                    <span key={si} className="num" style={{ fontSize: 13, color: highlight ? UI.gold : UI.inkSoft }}>
                       {kg} · {reps}
-                      {suggestion && si === 0 && <i className="fa-solid fa-arrow-up" style={{ fontSize: 9, marginLeft: 4, color: UI.gold }} />}
+                      {highlight && <i className="fa-solid fa-arrow-up" style={{ fontSize: 9, marginLeft: 4, color: UI.gold }} />}
                     </span>
                   );
                 })}
