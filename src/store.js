@@ -1038,6 +1038,37 @@ async function deleteCoachingThread(threadId) {
   if (error) throw error;
 }
 
+async function loadCoachingMacros(coachingId) {
+  const { data, error } = await _supabase
+    .from('zane_coaching_macros')
+    .select('*')
+    .eq('coaching_id', coachingId)
+    .order('set_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(r => ({
+    id: r.id, coachingId: r.coaching_id, setBy: r.set_by, setAt: r.set_at,
+    caloriesTraining: r.calories_training, proteinTraining: r.protein_training,
+    carbsTraining: r.carbs_training, fatTraining: r.fat_training,
+    caloriesRest: r.calories_rest, proteinRest: r.protein_rest,
+    carbsRest: r.carbs_rest, fatRest: r.fat_rest,
+  }));
+}
+
+async function addCoachingMacros(coachingId, macros, userId) {
+  const { error } = await _supabase.from('zane_coaching_macros').insert({
+    id: uid(), coaching_id: coachingId, set_by: userId,
+    calories_training: macros.caloriesTraining ?? null,
+    protein_training: macros.proteinTraining ?? null,
+    carbs_training: macros.carbsTraining ?? null,
+    fat_training: macros.fatTraining ?? null,
+    calories_rest: macros.caloriesRest ?? null,
+    protein_rest: macros.proteinRest ?? null,
+    carbs_rest: macros.carbsRest ?? null,
+    fat_rest: macros.fatRest ?? null,
+  });
+  if (error) throw error;
+}
+
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
@@ -1052,4 +1083,5 @@ window.LB = {
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,
   loadClientStore, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
+  loadCoachingMacros, addCoachingMacros,
 };

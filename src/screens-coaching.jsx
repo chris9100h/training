@@ -632,10 +632,11 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
   };
 
   const TABS = [
-    { id: 'overview', icon: 'fa-chart-bar', label: 'Overview' },
-    { id: 'plan', icon: 'fa-calendar-days', label: 'Plan' },
-    { id: 'sessions', icon: 'fa-dumbbell', label: 'Sessions' },
-    { id: 'notes', icon: 'fa-comment', label: 'Notes' },
+    { id: 'overview',   icon: 'fa-chart-bar',      label: 'Overview' },
+    { id: 'plan',       icon: 'fa-calendar-days',   label: 'Plan' },
+    { id: 'sessions',   icon: 'fa-dumbbell',        label: 'Sessions' },
+    { id: 'nutrition',  icon: 'fa-utensils',        label: 'Nutrition' },
+    { id: 'notes',      icon: 'fa-comment',         label: 'Notes' },
   ];
 
   return (
@@ -679,10 +680,11 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
               <ChevronRight color={'var(--accent)'} />
             </div>
           )}
-          {tab === 'overview' && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} onSelectSession={openSession} />}
-          {tab === 'plan' && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
-          {tab === 'sessions' && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
-          {tab === 'notes' && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
+          {tab === 'overview'   && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} onSelectSession={openSession} />}
+          {tab === 'plan'       && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
+          {tab === 'sessions'   && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
+          {tab === 'nutrition'  && <ClientNutritionTab coachingId={coachingId} userId={userId} />}
+          {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
       )}
     </Screen>
@@ -1286,6 +1288,136 @@ function ClientNotesTab({ coachingId, userId, clientName, store, setStore }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       <ThreadList coachingId={coachingId} userId={userId} otherName={clientName} unreadNotes={unreadNotes} setStore={setStore} canDelete={true} />
+    </div>
+  );
+}
+
+// ─── Tab: Nutrition ───────────────────────────────────────────────────────────
+
+function ClientNutritionTab({ coachingId, userId }) {
+  const [macros, setMacros] = useStateC([]);
+  const [loading, setLoading] = useStateC(true);
+  const [saving, setSaving] = useStateC(false);
+  const [historyOpen, setHistoryOpen] = useStateC(false);
+  const emptyForm = { caloriesTraining: '', proteinTraining: '', carbsTraining: '', fatTraining: '', caloriesRest: '', proteinRest: '', carbsRest: '', fatRest: '' };
+  const [form, setForm] = useStateC(emptyForm);
+
+  const reload = () => {
+    setLoading(true);
+    LB.loadCoachingMacros(coachingId).then(data => {
+      setMacros(data);
+      if (data.length > 0) {
+        const l = data[0];
+        setForm({
+          caloriesTraining: l.caloriesTraining?.toString() ?? '',
+          proteinTraining:  l.proteinTraining?.toString()  ?? '',
+          carbsTraining:    l.carbsTraining?.toString()    ?? '',
+          fatTraining:      l.fatTraining?.toString()      ?? '',
+          caloriesRest:     l.caloriesRest?.toString()     ?? '',
+          proteinRest:      l.proteinRest?.toString()      ?? '',
+          carbsRest:        l.carbsRest?.toString()        ?? '',
+          fatRest:          l.fatRest?.toString()          ?? '',
+        });
+      }
+    }).finally(() => setLoading(false));
+  };
+
+  useEffectC(() => { reload(); }, [coachingId]);
+
+  const save = async () => {
+    const macro = {
+      caloriesTraining: form.caloriesTraining ? parseInt(form.caloriesTraining) : null,
+      proteinTraining:  form.proteinTraining  ? parseInt(form.proteinTraining)  : null,
+      carbsTraining:    form.carbsTraining    ? parseInt(form.carbsTraining)    : null,
+      fatTraining:      form.fatTraining      ? parseInt(form.fatTraining)      : null,
+      caloriesRest:     form.caloriesRest     ? parseInt(form.caloriesRest)     : null,
+      proteinRest:      form.proteinRest      ? parseInt(form.proteinRest)      : null,
+      carbsRest:        form.carbsRest        ? parseInt(form.carbsRest)        : null,
+      fatRest:          form.fatRest          ? parseInt(form.fatRest)          : null,
+    };
+    setSaving(true);
+    try {
+      await LB.addCoachingMacros(coachingId, macro, userId);
+      const fmtDay = (cal, pro, car, fat) => [cal && `${cal} kcal`, pro && `${pro}g protein`, car && `${car}g carbs`, fat && `${fat}g fat`].filter(Boolean).join(' · ');
+      const td = fmtDay(macro.caloriesTraining, macro.proteinTraining, macro.carbsTraining, macro.fatTraining);
+      const rd = fmtDay(macro.caloriesRest, macro.proteinRest, macro.carbsRest, macro.fatRest);
+      const lines = [td && `Training day: ${td}`, rd && `Rest day: ${rd}`].filter(Boolean);
+      if (lines.length) {
+        const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Nutrition', userId);
+        await LB.addCoachingNote(coachingId, 'general', null, null, lines.join('\n'), userId, threadId);
+      }
+      reload();
+    } catch (e) { alert(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const MacroField = ({ fieldKey, label, unit }) => (
+    <div style={{ flex: 1 }}>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{label}</div>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+        <input
+          type="number" inputMode="numeric"
+          value={form[fieldKey]}
+          onChange={e => setForm(f => ({ ...f, [fieldKey]: e.target.value }))}
+          placeholder="—"
+          style={{ width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '9px 32px 9px 10px', fontFamily: UI.fontNum, fontSize: 16, color: UI.ink, outline: 'none', boxSizing: 'border-box' }}
+        />
+        <span style={{ position: 'absolute', right: 8, fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, pointerEvents: 'none' }}>{unit}</span>
+      </div>
+    </div>
+  );
+
+  const MacroSection = ({ prefix, label }) => (
+    <div style={{ marginBottom: 20 }}>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{label}</div>
+      <div style={{ background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <MacroField fieldKey={`calories${prefix}`} label="CALORIES" unit="kcal" />
+          <MacroField fieldKey={`protein${prefix}`}  label="PROTEIN"  unit="g" />
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <MacroField fieldKey={`carbs${prefix}`} label="CARBS" unit="g" />
+          <MacroField fieldKey={`fat${prefix}`}   label="FAT"   unit="g" />
+        </div>
+      </div>
+    </div>
+  );
+
+  if (loading) return <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>;
+
+  return (
+    <div style={{ overflowY: 'auto', flex: 1, padding: '16px 12px 32px' }}>
+      <MacroSection prefix="Training" label="TRAINING DAY" />
+      <MacroSection prefix="Rest" label="REST DAY" />
+
+      <Btn onClick={save} disabled={saving} style={{ marginBottom: 24, width: '100%' }}>
+        {saving ? 'Saving…' : 'Save Macros'}
+      </Btn>
+
+      {macros.length > 0 && (
+        <>
+          <button
+            onClick={() => setHistoryOpen(o => !o)}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 0', marginBottom: 8 }}
+          >
+            <span className="micro" style={{ color: UI.inkFaint }}>HISTORY ({macros.length})</span>
+            <i className={`fa-solid fa-chevron-${historyOpen ? 'up' : 'down'}`} style={{ fontSize: 8, color: UI.inkGhost }} />
+          </button>
+          {historyOpen && macros.map(m => {
+            const td = [m.caloriesTraining && `${m.caloriesTraining} kcal`, m.proteinTraining && `${m.proteinTraining}g P`, m.carbsTraining && `${m.carbsTraining}g C`, m.fatTraining && `${m.fatTraining}g F`].filter(Boolean).join(' · ');
+            const rd = [m.caloriesRest && `${m.caloriesRest} kcal`, m.proteinRest && `${m.proteinRest}g P`, m.carbsRest && `${m.carbsRest}g C`, m.fatRest && `${m.fatRest}g F`].filter(Boolean).join(' · ');
+            return (
+              <div key={m.id} style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 8 }}>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>
+                  {fmtDate(m.setAt)} · {new Date(m.setAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                </div>
+                {td && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 2 }}>Train: {td}</div>}
+                {rd && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>Rest: {rd}</div>}
+              </div>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }
