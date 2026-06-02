@@ -1167,6 +1167,7 @@ function ClientNotesTab({ coachingId, userId, clientName, store, setStore }) {
 function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, clientId, clientName, scheduleId }) {
   const [clientStore, setClientStoreRaw] = useStateC(null);
   const prevClientStore = useRefC(null);
+  const latestClientStore = useRefC(null);  // updated synchronously for diff; prevClientStore only after confirmed sync
   const initialSchedule = useRefC(null);
   const isDirty = useRefC(false);
 
@@ -1174,6 +1175,7 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
     LB.loadClientStore(clientId).then(data => {
       setClientStoreRaw(data);
       prevClientStore.current = data;
+      latestClientStore.current = data;
       const sch = data.schedules?.find(s => s.id === scheduleId);
       initialSchedule.current = sch ? JSON.parse(JSON.stringify(sch)) : null;
     });
@@ -1185,6 +1187,7 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
       setClientStoreRaw(prev => {
         const next = typeof updater === 'function' ? updater(prev) : updater;
         isDirty.current = true;
+        latestClientStore.current = next;
         LB.syncStore(prevClientStore.current, next, clientId)
           .then(() => { prevClientStore.current = next; })
           .catch(e => console.error('Coach sync failed', e));
@@ -1199,7 +1202,7 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
       if (isDirty.current) {
         isDirty.current = false;
         try {
-          const finalSch = prevClientStore.current?.schedules?.find(s => s.id === scheduleId);
+          const finalSch = latestClientStore.current?.schedules?.find(s => s.id === scheduleId);
           const schName  = finalSch?.name || scheduleId;
           const diff     = diffSchedule(initialSchedule.current, finalSch);
           const body     = diff ? `Updated plan: ${schName}\n\n${diff}` : `Updated plan: ${schName}`;
