@@ -721,7 +721,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      {h.entry.sets.filter(s => s.kg != null).map((s, i) => {
+                      {h.entry.sets.filter(s => s.kg != null && !s.warmup).map((s, i) => {
                         const isBest = sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01;
                         const repsStr = (s.repsL != null || s.repsR != null)
                           ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
@@ -1217,7 +1217,7 @@ function isDecline(curr, prev) {
   if (!curr.done || curr.kg == null || prev.kg == null) return false;
   const rA = LB.effReps(curr); const rB = LB.effReps(prev);
   if (rA == null || rB == null) return false;
-  return curr.kg < prev.kg || (curr.kg === prev.kg && rA < rB);
+  return (curr.kg < prev.kg && rA <= rB) || (curr.kg === prev.kg && rA < rB);
 }
 
 // ─── SESSION DETAIL ──────────────────────────────────────────────────
@@ -1714,8 +1714,8 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px 22px' }}>
         {entries.map((entry, ei) => {
           const lastEntry = lastEntries.find(e => e.name === entry.name);
-          const sets      = entry.sets || [];
-          const lastSets  = lastEntry?.sets || [];
+          const sets      = (entry.sets || []).filter(s => !s.warmup);
+          const lastSets  = (lastEntry?.sets || []).filter(s => !s.warmup);
           const maxLen    = Math.max(sets.length, lastSets.length);
           const fmtSet = s => {
             if (!s) return '—';

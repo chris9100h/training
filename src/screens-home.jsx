@@ -412,7 +412,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       if (repsA == null || repsB == null) return false;
       return better
         ? (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB)
-        : st.kg < prevSet.kg || (st.kg === prevSet.kg && repsA < repsB);
+        : (st.kg < prevSet.kg && repsA <= repsB) || (st.kg === prevSet.kg && repsA < repsB);
     };
     let improvements = 0, regressions = 0;
     doneSession.entries.forEach(e => {
@@ -854,6 +854,24 @@ function HomeScreen({ store, setStore, go, userId }) {
               <SubDial size={80} label="SETS" value={activeDay.items.reduce((a,b) => a + b.sets, 0)} />
             </div>
 
+            {/* Exercise name strip */}
+            {activeDay.items.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, overflowX: 'auto', width: '100%', marginBottom: 16, scrollbarWidth: 'none' }}>
+                {activeDay.items.map((it, i) => {
+                  const ex = LB.findExercise(store, it.exId);
+                  return (
+                    <span key={i} style={{
+                      flexShrink: 0, fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint,
+                      background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+                      borderRadius: 4, padding: '3px 7px', whiteSpace: 'nowrap',
+                    }}>
+                      {(ex?.name || '?').toUpperCase()}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
             {/* CTAs — above exercise list so the action is always immediately visible */}
             {isSlotDone ? (
               <Frame
@@ -946,79 +964,6 @@ function HomeScreen({ store, setStore, go, userId }) {
 
             </div>{/* end fixed header */}
 
-            {/* Fixed: THE WORK headline */}
-            {activeDay.items.length > 0 && (
-              <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, marginTop: 18, width: '100%' }}>
-                <div className="knurl" style={{ flex: 1 }} />
-                <span style={{ fontFamily: UI.fontDisplay, fontSize: 10, fontWeight: 700, letterSpacing: '0.30em', color: UI.inkFaint }}>THE WORK</span>
-                <div className="knurl" style={{ flex: 1 }} />
-              </div>
-            )}
-
-            {/* Scrollable: exercise rows only */}
-            {activeDay.items.length > 0 && (
-              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', width: '100%', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                {activeDay.items.map((item, i) => {
-                  const ex = LB.findExercise(store, item.exId);
-                  let setsText, repsText, isActual = false, maxKg = null;
-
-                  if (isSlotDone && doneSession) {
-                    const entry = doneSession.entries.find(e => e.exId === item.exId);
-                    if (entry) {
-                      const workingSets = entry.sets.filter(s => !s.warmup);
-                      const doneSets = workingSets.filter(s => !s.skipped && (s.done || s.kg != null || s.reps != null || s.repsL != null || s.repsR != null));
-                      const allSkipped = workingSets.length > 0 && workingSets.every(s => s.skipped);
-                      setsText = null;
-                      if (allSkipped) {
-                        repsText = 'SKIPPED'; maxKg = null;
-                      } else if (doneSets.length > 0) {
-                        const repsArr = doneSets.map(s => s.reps ?? s.repsL ?? '?');
-                        repsText = repsArr.join('/');
-                        const kgs = doneSets.map(s => s.kg).filter(k => k != null);
-                        maxKg = kgs.length > 0 ? kgs[0] : null;
-                      } else {
-                        repsText = '—'; maxKg = null;
-                      }
-                      isActual = true;
-                    }
-                  }
-
-                  if (!isActual) {
-                    setsText = item.sets;
-                    const suggestion = LB.progressionSuggestion(store, item.exId, activeDay.id, item.reps);
-                    const last = LB.lastSessionForExercise(store, item.exId, activeDay.id);
-                    const prev = last?.entry?.sets?.find(s => !s.warmup);
-                    const smart = !!store.settings?.smartProgression;
-                    if (suggestion) {
-                      repsText = suggestion.reps; maxKg = suggestion.kg;
-                    } else if (smart && prev) {
-                      repsText = prev.reps != null ? prev.reps + 1 : item.reps; maxKg = prev.kg ?? null;
-                    } else if (prev) {
-                      repsText = prev.reps ?? item.reps; maxKg = prev.kg ?? null;
-                    } else {
-                      repsText = item.reps;
-                    }
-                  }
-                  return (
-                    <React.Fragment key={i}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0' }}>
-                        <span className="num" style={{ fontSize: 10, color: UI.inkGhost, minWidth: 20, textAlign: 'right', flexShrink: 0 }}>{String(i + 1).padStart(2, '0')}</span>
-                        <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: isActual ? UI.ink : UI.inkSoft, fontWeight: isActual ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || '?'}</span>
-                        {maxKg != null && <span className="num" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{maxKg}kg</span>}
-                        <span className="num" style={{ fontSize: 11, color: isActual ? (repsText === 'SKIPPED' ? UI.inkFaint : UI.gold) : UI.inkFaint, flexShrink: 0 }}>
-                          {isActual ? repsText : `${setsText}×${repsText}`}
-                        </span>
-                      </div>
-                      {i < activeDay.items.length - 1 && <div className="knurl" style={{ marginLeft: 30 }} />}
-                    </React.Fragment>
-                  );
-                })}
-
-              </div>
-            )}
-
-            {/* Fixed: bottom knurl closing THE WORK */}
-            {activeDay.items.length > 0 && <div className="knurl" style={{ flexShrink: 0, width: '100%' }} />}
           </div>
         )}
       </div>
