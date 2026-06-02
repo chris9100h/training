@@ -787,6 +787,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
 function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession }) {
   const sessions = clientStore.sessions || [];
   const ended = sessions.filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+  const [chartOpen, setChartOpen] = useStateC(null);
 
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   const trainingDayCount = activeSch ? (activeSch.days || []).filter(d => d.items?.length > 0).length : 0;
@@ -801,6 +802,8 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
   const avgVol = last30.length > 0
     ? Math.round(last30.reduce((s, x) => s + LB.totalVolume(x), 0) / last30.length)
     : null;
+
+  const chartTitles = { adherence: 'Adherence (6w)', volume: 'Avg Volume Trend', sessions: 'Sessions per Week' };
 
   // Sessions to show: current week (weekday plan) or current cycle window (cycle plan)
   const recentSessions = useMemoC(() => {
@@ -823,10 +826,18 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
     <div style={{ overflowY: 'auto', flex: 1, padding: '16px 12px 32px' }}>
       {/* Top stats */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, padding: '0 4px' }}>
-        <StatBox label="Adherence (6w)" value={overallAdherence != null ? `${overallAdherence}%` : '—'} gold={overallAdherence >= 80} />
-        <StatBox label="Avg Volume" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}kg` : '—'} />
-        <StatBox label="Sessions (30d)" value={last30.length} />
+        <StatBox label="Adherence (6w)" value={overallAdherence != null ? `${overallAdherence}%` : '—'} gold={overallAdherence >= 80} onClick={() => setChartOpen('adherence')} />
+        <StatBox label="Avg Volume" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}kg` : '—'} onClick={() => setChartOpen('volume')} />
+        <StatBox label="Sessions (30d)" value={last30.length} onClick={() => setChartOpen('sessions')} />
       </div>
+
+      <Sheet open={!!chartOpen} onClose={() => setChartOpen(null)} title={chartTitles[chartOpen] || ''}>
+        <div style={{ paddingBottom: 8 }}>
+          {chartOpen === 'adherence' && <AdherenceChart weeks={weeks} />}
+          {chartOpen === 'volume' && <RollingVolumeChart sessions={ended} />}
+          {chartOpen === 'sessions' && <SessionsWeekChart sessions={ended} />}
+        </div>
+      </Sheet>
 
       {/* Weekly adherence table */}
       {weeks.length > 0 && (
@@ -893,11 +904,130 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
   );
 }
 
-function StatBox({ label, value, gold }) {
+// ─── Metric charts ────────────────────────────────────────────────────────────
+
+function AdherenceChart({ weeks }) {
+  const data = weeks.filter(w => w.planned > 0);
+  if (!data.length) return <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No adherence data yet.</div>;
+  const W = 300, H = 110, gap = 4;
+  const barW = Math.max(6, Math.floor((W - gap * (data.length + 1)) / data.length));
   return (
-    <div style={{ flex: 1, background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, padding: '12px 10px', textAlign: 'center' }}>
+    <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`} style={{ overflow: 'visible' }}>
+      {data.map((w, i) => {
+        const x = gap + i * (barW + gap);
+        const h = w.pct > 0 ? Math.max(2, (w.pct / 100) * H) : 0;
+        const color = w.pct >= 80 ? '#7bc47b' : w.pct >= 50 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.7)';
+        const labelText = w.label.length > 8 ? w.label.slice(0, 6) : w.label;
+        return (
+          <g key={i}>
+            <rect x={x} y={0} width={barW} height={H} rx={2} style={{ fill: UI.bgRaised }} />
+            {h > 0 && <rect x={x} y={H - h} width={barW} height={h} rx={2} fill={color} />}
+            {w.pct > 0 && <text x={x + barW / 2} y={H - h - 3} textAnchor="middle" fontSize={7} style={{ fill: color, fontFamily: UI.fontUi }}>{w.pct}%</text>}
+            <text x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{labelText}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function RollingVolumeChart({ sessions }) {
+  const ended = (sessions || []).filter(s => s.ended).sort((a, b) => a.ended.localeCompare(b.ended));
+  const points = ended.map(s => {
+    const d = new Date(s.ended);
+    const from = new Date(d); from.setDate(from.getDate() - 30);
+    const win = ended.filter(x => { const xd = new Date(x.ended); return xd >= from && xd <= d; });
+    return { avg: win.length ? Math.round(win.reduce((sum, x) => sum + LB.totalVolume(x), 0) / win.length) : 0, date: s.ended.slice(0, 10) };
+  }).slice(-40);
+
+  if (points.length < 2) return <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Not enough sessions yet.</div>;
+
+  const W = 300, H = 110;
+  const maxV = Math.max(...points.map(p => p.avg));
+  const minV = Math.min(...points.map(p => p.avg));
+  const vRange = maxV - minV || 1;
+  const px = i => (i / (points.length - 1)) * W;
+  const py = v => H - 8 - ((v - minV) / vRange) * (H - 16);
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(p.avg).toFixed(1)}`).join(' ');
+  const areaPath = `${linePath} L${W},${H} L0,${H} Z`;
+  const trend = points[points.length - 1].avg - points[0].avg;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
+        <span style={{ fontSize: 11, color: trend >= 0 ? '#7bc47b' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>
+          <i className={`fa-solid fa-arrow-trend-${trend >= 0 ? 'up' : 'down'}`} style={{ marginRight: 4 }} />
+          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}kg since first session
+        </span>
+      </div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`}>
+        <defs>
+          <linearGradient id="volGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.2" />
+            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={areaPath} fill="url(#volGrad)" />
+        <path d={linePath} fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx={px(0)} cy={py(points[0].avg)} r={3} fill="var(--accent)" />
+        <circle cx={px(points.length - 1)} cy={py(points[points.length - 1].avg)} r={3} fill="var(--accent)" />
+        <text x={0} y={H + 14} fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(points[0].date)}</text>
+        <text x={W} y={H + 14} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(points[points.length - 1].date)}</text>
+        <text x={W - 2} y={Math.max(py(maxV) - 3, 8)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{maxV.toLocaleString('en-US')}kg</text>
+        <text x={W - 2} y={Math.min(py(minV) + 10, H - 2)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{minV.toLocaleString('en-US')}kg</text>
+      </svg>
+    </div>
+  );
+}
+
+function SessionsWeekChart({ sessions }) {
+  const ended = (sessions || []).filter(s => s.ended);
+  const byWeek = {};
+  ended.forEach(s => {
+    const d = new Date(s.ended); d.setHours(12, 0, 0, 0);
+    const wd = (d.getDay() + 6) % 7;
+    const mon = new Date(d); mon.setDate(d.getDate() - wd); mon.setHours(0, 0, 0, 0);
+    const key = localDateKey(mon);
+    byWeek[key] = (byWeek[key] || 0) + 1;
+  });
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const todayWd = (today.getDay() + 6) % 7;
+  const thisMonday = new Date(today); thisMonday.setDate(today.getDate() - todayWd); thisMonday.setHours(0, 0, 0, 0);
+  const weeks = Array.from({ length: 12 }, (_, i) => {
+    const mon = new Date(thisMonday); mon.setDate(thisMonday.getDate() - (11 - i) * 7);
+    const key = localDateKey(mon);
+    return { key, count: byWeek[key] || 0, label: mon.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) };
+  });
+
+  const W = 300, H = 110, gap = 3;
+  const barW = Math.floor((W - gap * 13) / 12);
+  const maxCount = Math.max(...weeks.map(w => w.count), 1);
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`}>
+      {weeks.map((w, i) => {
+        const x = gap + i * (barW + gap);
+        const h = (w.count / maxCount) * H;
+        const showLabel = i === 0 || i === 5 || i === 11;
+        return (
+          <g key={i}>
+            <rect x={x} y={0} width={barW} height={H} rx={2} style={{ fill: UI.bgRaised }} />
+            {h > 0 && <rect x={x} y={H - h} width={barW} height={h} rx={2} fill="var(--accent)" />}
+            {w.count > 0 && <text x={x + barW / 2} y={H - h - 3} textAnchor="middle" fontSize={7} style={{ fill: 'var(--accent)', fontFamily: UI.fontUi }}>{w.count}</text>}
+            {showLabel && <text x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{w.label}</text>}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function StatBox({ label, value, gold, onClick }) {
+  return (
+    <div onClick={onClick} style={{ flex: 1, background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, padding: '12px 10px', textAlign: 'center', cursor: onClick ? 'pointer' : 'default' }}>
       <div className="num" style={{ fontSize: 20, color: gold ? UI.gold : UI.ink, lineHeight: 1, marginBottom: 4 }}>{value}</div>
       <div className="micro" style={{ color: UI.inkFaint }}>{label}</div>
+      {onClick && <div style={{ marginTop: 5 }}><i className="fa-solid fa-chart-line" style={{ fontSize: 7, color: UI.inkGhost }} /></div>}
     </div>
   );
 }
