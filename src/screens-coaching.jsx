@@ -793,6 +793,9 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
 
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   const trainingDayCount = activeSch ? (activeSch.days || []).filter(d => d.items?.length > 0).length : 0;
+  const planStartDate = activeSch
+    ? (LB.isWeekdayPlan(activeSch) ? clientStore.weekPlanStartDate : clientStore.cycleStartDate) || null
+    : null;
 
   const weeks = useMemoC(() => computeWeeklyAdherence(clientStore), [clientStore]);
   const completedWeeks = weeks.filter(w => w.planned > 0 && w.pct !== null);
@@ -836,7 +839,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       <Sheet open={!!chartOpen} onClose={() => setChartOpen(null)} title={chartTitles[chartOpen] || ''}>
         <div style={{ paddingBottom: 8 }}>
           {chartOpen === 'adherence' && <AdherenceChart weeks={weeks} />}
-          {chartOpen === 'volume' && <RollingVolumeChart sessions={ended} />}
+          {chartOpen === 'volume' && <RollingVolumeChart sessions={ended} planStartDate={planStartDate} />}
           {chartOpen === 'sessions' && <SessionsWeekChart sessions={ended} />}
         </div>
       </Sheet>
@@ -933,8 +936,9 @@ function AdherenceChart({ weeks }) {
   );
 }
 
-function RollingVolumeChart({ sessions }) {
-  const ended = (sessions || []).filter(s => s.ended && s.date).sort((a, b) => a.date.localeCompare(b.date));
+function RollingVolumeChart({ sessions, planStartDate }) {
+  const cutoff = planStartDate ? planStartDate.slice(0, 10) : null;
+  const ended = (sessions || []).filter(s => s.ended && s.date && (!cutoff || s.date >= cutoff)).sort((a, b) => a.date.localeCompare(b.date));
   const allPoints = ended.map(s => {
     const d = new Date(s.date + 'T12:00:00');
     const from = new Date(d); from.setDate(from.getDate() - 30);
