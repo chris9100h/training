@@ -934,12 +934,12 @@ function AdherenceChart({ weeks }) {
 }
 
 function RollingVolumeChart({ sessions }) {
-  const ended = (sessions || []).filter(s => s.ended).sort((a, b) => a.ended.localeCompare(b.ended));
+  const ended = (sessions || []).filter(s => s.ended && s.date).sort((a, b) => a.date.localeCompare(b.date));
   const points = ended.map(s => {
-    const d = new Date(s.ended);
+    const d = new Date(s.date + 'T12:00:00');
     const from = new Date(d); from.setDate(from.getDate() - 30);
-    const win = ended.filter(x => { const xd = new Date(x.ended); return xd >= from && xd <= d; });
-    return { avg: win.length ? Math.round(win.reduce((sum, x) => sum + LB.totalVolume(x), 0) / win.length) : 0, date: s.ended.slice(0, 10) };
+    const win = ended.filter(x => { const xd = new Date(x.date + 'T12:00:00'); return xd >= from && xd <= d; });
+    return { avg: win.length ? Math.round(win.reduce((sum, x) => sum + LB.totalVolume(x), 0) / win.length) : 0, date: s.date };
   }).slice(-40);
 
   if (points.length < 2) return <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Not enough sessions yet.</div>;
@@ -959,7 +959,7 @@ function RollingVolumeChart({ sessions }) {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
         <span style={{ fontSize: 11, color: trend >= 0 ? '#7bc47b' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>
           <i className={`fa-solid fa-arrow-trend-${trend >= 0 ? 'up' : 'down'}`} style={{ marginRight: 4 }} />
-          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}kg since first session
+          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}kg rolling avg ({fmtDate(points[0].date)} – {fmtDate(points[points.length - 1].date)})
         </span>
       </div>
       <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`}>
