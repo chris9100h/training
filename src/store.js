@@ -1023,6 +1023,7 @@ async function createCoachingThread(coachingId, name, userId) {
 }
 
 async function deleteCoachingThread(threadId) {
+  await _supabase.from('zane_coaching_notes').delete().eq('thread_id', threadId);
   const { error } = await _supabase.from('zane_coaching_threads').delete().eq('id', threadId);
   if (error) throw error;
 }

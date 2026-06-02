@@ -225,7 +225,25 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
 
   const reload = () => {
     setLoading(true);
-    LB.loadCoachingThreads(coachingId).then(setThreads).finally(() => setLoading(false));
+    LB.loadCoachingThreads(coachingId).then(loaded => {
+      setThreads(loaded);
+      if (setStore && (unreadNotes || []).length) {
+        const validThreadIds = new Set(loaded.map(t => t.id));
+        const orphanedIds = (unreadNotes || [])
+          .filter(n => n.threadId && !validThreadIds.has(n.threadId))
+          .map(n => n.id);
+        if (orphanedIds.length) {
+          setStore(s => ({
+            ...s,
+            coaching: {
+              ...s.coaching,
+              unreadNotes: (s.coaching?.unreadNotes || []).filter(n => !orphanedIds.includes(n.id)),
+            },
+          }));
+          LB.markCoachingNotesRead(orphanedIds).catch(() => {});
+        }
+      }
+    }).finally(() => setLoading(false));
   };
 
   useEffectC(() => { reload(); }, [coachingId]);
