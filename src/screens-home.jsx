@@ -854,6 +854,24 @@ function HomeScreen({ store, setStore, go, userId }) {
               <SubDial size={80} label="SETS" value={activeDay.items.reduce((a,b) => a + b.sets, 0)} />
             </div>
 
+            {/* Exercise name strip */}
+            {activeDay.items.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, overflowX: 'auto', width: '100%', paddingBottom: 2, marginBottom: 4 }}>
+                {activeDay.items.map((it, i) => {
+                  const ex = LB.findExercise(store, it.exId);
+                  return (
+                    <span key={i} style={{
+                      flexShrink: 0, fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint,
+                      background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+                      borderRadius: 4, padding: '3px 7px', whiteSpace: 'nowrap',
+                    }}>
+                      {(ex?.name || '?').toUpperCase()}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
             {/* CTAs — above exercise list so the action is always immediately visible */}
             {isSlotDone ? (
               <Frame
