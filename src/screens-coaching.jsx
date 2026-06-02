@@ -835,9 +835,6 @@ function StatBox({ label, value, gold }) {
 function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, userId, go, onReload }) {
   const schedules = (clientStore.schedules || []).filter(s => !s.archived);
   const active = clientStore.activeScheduleId;
-  const [noteOpen, setNoteOpen] = useStateC(false);
-  const [noteBody, setNoteBody] = useStateC('');
-  const [noteSaving, setNoteSaving] = useStateC(false);
 
   const activate = async (scheduleId) => {
     try {
@@ -852,24 +849,8 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
     } catch (e) { alert(e.message); }
   };
 
-  const saveNote = async () => {
-    if (!noteBody.trim()) return;
-    setNoteSaving(true);
-    try {
-      const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Changes', userId);
-      await LB.addCoachingNote(coachingId, 'plan', null, null, noteBody.trim(), userId, threadId);
-      setNoteBody('');
-      setNoteOpen(false);
-    } catch (e) { alert(e.message); } finally { setNoteSaving(false); }
-  };
-
   return (
     <div style={{ overflowY: 'auto', flex: 1, padding: '16px 0 32px' }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12, paddingRight: 2 }}>
-        <button onClick={() => setNoteOpen(true)} style={{ background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, letterSpacing: '0.08em' }}>
-          + NOTE
-        </button>
-      </div>
       {schedules.length === 0 ? (
         <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '12px 14px' }}>No plans yet.</div>
       ) : schedules.map(sch => (
@@ -900,12 +881,6 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
           </div>
         </div>
       ))}
-      <Sheet open={noteOpen} onClose={() => setNoteOpen(false)} title="Plan Note">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <textarea value={noteBody} onChange={e => setNoteBody(e.target.value)} placeholder="Write a note about the plan…" rows={4} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', resize: 'none', width: '100%', boxSizing: 'border-box' }} />
-          <Btn onClick={saveNote} disabled={noteSaving || !noteBody.trim()}>{noteSaving ? 'Saving…' : 'Save Note'}</Btn>
-        </div>
-      </Sheet>
     </div>
   );
 }
@@ -923,7 +898,8 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName }) {
     if (!noteBody.trim() || !selected) return;
     setNoteSaving(true);
     try {
-      await LB.addCoachingNote(coachingId, 'session', selected.id, selected.dayName, noteBody.trim(), userId);
+      const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Changes', userId);
+      await LB.addCoachingNote(coachingId, 'session', selected.id, selected.dayName, noteBody.trim(), userId, threadId);
       setNoteBody('');
       setNoteOpen(false);
     } catch (e) { alert(e.message); } finally { setNoteSaving(false); }
