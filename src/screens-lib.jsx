@@ -1217,7 +1217,7 @@ function isDecline(curr, prev) {
   if (!curr.done || curr.kg == null || prev.kg == null) return false;
   const rA = LB.effReps(curr); const rB = LB.effReps(prev);
   if (rA == null || rB == null) return false;
-  return curr.kg < prev.kg || (curr.kg === prev.kg && rA < rB);
+  return (curr.kg < prev.kg && rA <= rB) || (curr.kg === prev.kg && rA < rB);
 }
 
 // ─── SESSION DETAIL ──────────────────────────────────────────────────
