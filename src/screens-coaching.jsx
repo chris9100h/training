@@ -780,8 +780,8 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
     }
 
     const pct = planned > 0 ? Math.min(100, Math.round((done / planned) * 100)) : null;
-    const label = w === 0 ? 'This week' : w === 1 ? 'Last week'
-      : `${monday.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}`;
+    const isoWeek = (() => { const t = new Date(monday); t.setDate(t.getDate() + 4 - (t.getDay() || 7)); return Math.ceil((((t - new Date(t.getFullYear(), 0, 1)) / 86400000) + 1) / 7); })();
+    const label = w === 0 ? 'This week' : w === 1 ? 'Last week' : `W${isoWeek}`;
     return { label, planned, done, pct };
   }).filter(Boolean);
 }
