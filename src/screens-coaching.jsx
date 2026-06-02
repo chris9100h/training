@@ -909,7 +909,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
 // ─── Metric charts ────────────────────────────────────────────────────────────
 
 function AdherenceChart({ weeks }) {
-  const data = weeks.filter(w => w.planned > 0);
+  const data = weeks.filter(w => w.planned > 0).slice().reverse();
   if (!data.length) return <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No adherence data yet.</div>;
   const W = 300, H = 110, gap = 4;
   const barW = Math.max(6, Math.floor((W - gap * (data.length + 1)) / data.length));
