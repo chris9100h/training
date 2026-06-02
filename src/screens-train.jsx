@@ -398,7 +398,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
     if (st.kg == null || prevSet.kg == null) return false;
     const rA = LB.effReps(st); const rB = LB.effReps(prevSet);
     if (rA == null || rB == null) return false;
-    return st.kg < prevSet.kg || (st.kg === prevSet.kg && rA < rB);
+    return (st.kg < prevSet.kg && rA <= rB) || (st.kg === prevSet.kg && rA < rB);
   };
 
   const completeSet = (setIdx) => {
