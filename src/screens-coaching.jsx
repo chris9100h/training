@@ -884,9 +884,8 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName }) {
 
   if (selected) {
     const vol = LB.totalVolume(selected);
-    // Build a store-like object excluding the selected session so lastSessionForExercise
-    // returns the *previous* session for each exercise, not the selected one.
-    const storeWithoutSelected = { ...clientStore, sessions: clientStore.sessions.filter(s => s.id !== selected.id) };
+    // Only sessions that ended strictly before the selected session — prev must be in the past.
+    const storeWithoutSelected = { ...clientStore, sessions: clientStore.sessions.filter(s => s.ended && s.ended < selected.ended) };
     return (
       <div style={{ overflowY: 'auto', flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
