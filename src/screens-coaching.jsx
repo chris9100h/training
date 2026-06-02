@@ -935,12 +935,13 @@ function AdherenceChart({ weeks }) {
 
 function RollingVolumeChart({ sessions }) {
   const ended = (sessions || []).filter(s => s.ended && s.date).sort((a, b) => a.date.localeCompare(b.date));
-  const points = ended.map(s => {
+  const allPoints = ended.map(s => {
     const d = new Date(s.date + 'T12:00:00');
     const from = new Date(d); from.setDate(from.getDate() - 30);
     const win = ended.filter(x => { const xd = new Date(x.date + 'T12:00:00'); return xd >= from && xd <= d; });
     return { avg: win.length ? Math.round(win.reduce((sum, x) => sum + LB.totalVolume(x), 0) / win.length) : 0, date: s.date };
-  }).slice(-40);
+  });
+  const points = allPoints.slice(-40);
 
   if (points.length < 2) return <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Not enough sessions yet.</div>;
 
@@ -952,14 +953,14 @@ function RollingVolumeChart({ sessions }) {
   const py = v => H - 8 - ((v - minV) / vRange) * (H - 16);
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(p.avg).toFixed(1)}`).join(' ');
   const areaPath = `${linePath} L${W},${H} L0,${H} Z`;
-  const trend = points[points.length - 1].avg - points[0].avg;
+  const trend = allPoints[allPoints.length - 1].avg - allPoints[0].avg;
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
         <span style={{ fontSize: 11, color: trend >= 0 ? '#7bc47b' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>
           <i className={`fa-solid fa-arrow-trend-${trend >= 0 ? 'up' : 'down'}`} style={{ marginRight: 4 }} />
-          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}kg rolling avg ({fmtDate(points[0].date)} – {fmtDate(points[points.length - 1].date)})
+          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}kg since plan start
         </span>
       </div>
       <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`}>
