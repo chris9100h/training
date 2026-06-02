@@ -920,9 +920,8 @@ function progressionSuggestion(store, exId, dayId, plannedReps) {
   if (!store.settings?.smartProgression) return null;
   const ex = findExercise(store, exId);
   const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
-  const increment = catCfg.increment ?? null;
+  const increment = catCfg.increment ?? 2.5;
   const maxKg = catCfg.maxKg ?? null;
-  if (!increment) return null;
 
   const last = lastSessionForExercise(store, exId, dayId);
   if (!last) return null;
