@@ -532,7 +532,7 @@ function CoachingDashboard({ store, setStore, userId, go }) {
           No active clients yet.<br />Invite clients from Settings → Coaching.
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 0 24px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 12px 24px' }}>
           {clients.map(c => (
             <ClientCard key={c.id} client={c} go={go} />
           ))}
@@ -773,7 +773,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
   }, [clientStore]);
 
   return (
-    <div style={{ overflowY: 'auto', flex: 1, padding: '16px 0 32px' }}>
+    <div style={{ overflowY: 'auto', flex: 1, padding: '16px 12px 32px' }}>
       {/* Top stats */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, padding: '0 4px' }}>
         <StatBox label="Adherence (6w)" value={overallAdherence != null ? `${overallAdherence}%` : '—'} gold={overallAdherence >= 80} />
@@ -875,7 +875,7 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
   };
 
   return (
-    <div style={{ overflowY: 'auto', flex: 1, padding: '16px 0 32px' }}>
+    <div style={{ overflowY: 'auto', flex: 1, padding: '16px 12px 32px' }}>
       {schedules.length === 0 ? (
         <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '12px 14px' }}>No plans yet.</div>
       ) : schedules.map(sch => (
@@ -945,8 +945,8 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
           </div>
           <button onClick={() => setNoteOpen(true)} style={{ background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>+ NOTE</button>
         </div>
-        <div style={{ padding: '12px 0 32px' }}>
-          <div style={{ display: 'flex', gap: 12, marginBottom: 16, padding: '0 4px' }}>
+        <div style={{ padding: '12px 12px 32px' }}>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
             <StatBox label="Volume" value={`${Math.round(vol).toLocaleString('en-US')}kg`} />
             <StatBox label="Sets" value={LB.doneSetCount(selected)} />
             <StatBox label="Duration" value={selected.durationMinutes ? `${selected.durationMinutes}m` : '—'} />
@@ -992,7 +992,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
   }
 
   return (
-    <div style={{ overflowY: 'auto', flex: 1, padding: '8px 0 32px' }}>
+    <div style={{ overflowY: 'auto', flex: 1, padding: '8px 12px 32px' }}>
       {sessions.length === 0 ? (
         <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '32px 14px', textAlign: 'center' }}>No sessions yet.</div>
       ) : sessions.map(s => {
