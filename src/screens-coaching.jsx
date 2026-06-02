@@ -639,7 +639,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
             </div>
           )}
           {tab === 'overview' && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} onSelectSession={openSession} />}
-          {tab === 'plan' && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} />}
+          {tab === 'plan' && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
           {tab === 'sessions' && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
           {tab === 'notes' && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
@@ -863,9 +863,14 @@ function StatBox({ label, value, gold }) {
 
 // ─── Tab: Plan ────────────────────────────────────────────────────────────────
 
-function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, userId, go, onReload }) {
+function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, userId, go, onReload, clientName }) {
   const schedules = (clientStore.schedules || []).filter(s => !s.archived);
   const active = clientStore.activeScheduleId;
+  const [copiedId, setCopiedId] = useStateC(null);
+  const [importOpen, setImportOpen] = useStateC(false);
+  const [importText, setImportText] = useStateC('');
+  const [importing, setImporting] = useStateC(false);
+  const [importError, setImportError] = useStateC('');
 
   const activate = async (scheduleId) => {
     try {
@@ -880,8 +885,57 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
     } catch (e) { alert(e.message); }
   };
 
+  const exportPlan = (sch) => {
+    const data = { name: sch.name, days: sch.days };
+    if (sch.mode) data.mode = sch.mode;
+    const json = JSON.stringify(data, null, 2);
+    navigator.clipboard.writeText(json)
+      .then(() => { setCopiedId(sch.id); setTimeout(() => setCopiedId(null), 2000); })
+      .catch(() => alert('Could not access clipboard'));
+  };
+
+  const doImport = async () => {
+    setImportError('');
+    let parsed;
+    try { parsed = JSON.parse(importText.trim()); }
+    catch (_) { setImportError('Invalid JSON — paste a valid exported plan.'); return; }
+    if (!parsed.name || !Array.isArray(parsed.days)) {
+      setImportError('Expected { name, days } — export a plan first to get the right format.');
+      return;
+    }
+    setImporting(true);
+    try {
+      const newSch = { id: LB.uid(), name: parsed.name, days: parsed.days, archived: false, ...(parsed.mode ? { mode: parsed.mode } : {}) };
+      await LB.supabase.from('zane_schedules').insert({ id: newSch.id, user_id: clientId, name: newSch.name, days: newSch.days, archived: false });
+      setClientStore(s => ({ ...s, schedules: [...(s.schedules || []), newSch] }));
+      setImportText('');
+      setImportOpen(false);
+    } catch (e) { setImportError(e.message); }
+    finally { setImporting(false); }
+  };
+
+  const name = clientName || clientStore.user?.name || '?';
+
   return (
     <div style={{ overflowY: 'auto', flex: 1, padding: '16px 12px 32px' }}>
+      {/* Actions row */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button
+          onClick={() => go({ name: 'coaching-new-plan', coachingId, clientId, clientName: name })}
+          style={{ flex: 1, padding: '10px 0', borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.3)`, background: `rgba(var(--accent-rgb),0.06)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+        >
+          <i className="fa-solid fa-plus" style={{ fontSize: 10 }} />
+          NEW PLAN
+        </button>
+        <button
+          onClick={() => setImportOpen(true)}
+          style={{ flex: 1, padding: '10px 0', borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+        >
+          <i className="fa-solid fa-file-import" style={{ fontSize: 10 }} />
+          IMPORT
+        </button>
+      </div>
+
       {schedules.length === 0 ? (
         <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '12px 14px' }}>No plans yet.</div>
       ) : schedules.map(sch => (
@@ -896,22 +950,49 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
                 {(sch.days || []).filter(d => d.items?.length > 0).length} workout days
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               {sch.id !== active && (
                 <button onClick={() => activate(sch.id)} style={{ background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.5)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.08em' }}>
                   ACTIVATE
                 </button>
               )}
               <button
-                onClick={() => go({ name: 'coaching-edit-plan', coachingId, clientId, scheduleId: sch.id, clientName: clientStore.user?.name || '?' })}
+                onClick={() => go({ name: 'coaching-edit-plan', coachingId, clientId, scheduleId: sch.id, clientName: name })}
                 style={{ background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, letterSpacing: '0.08em' }}
               >
                 EDIT
+              </button>
+              <button
+                onClick={() => exportPlan(sch)}
+                style={{ width: 30, height: 30, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                title="Export plan"
+              >
+                {copiedId === sch.id
+                  ? <i className="fa-solid fa-check" style={{ fontSize: 10, color: '#7bc47b' }} />
+                  : <i className="fa-solid fa-share-from-square" style={{ fontSize: 10, color: UI.inkSoft }} />
+                }
               </button>
             </div>
           </div>
         </div>
       ))}
+
+      <Sheet open={importOpen} onClose={() => { setImportOpen(false); setImportText(''); setImportError(''); }} title="Import Plan">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+            Paste the JSON of an exported plan below.
+          </div>
+          <textarea
+            value={importText}
+            onChange={e => { setImportText(e.target.value); setImportError(''); }}
+            placeholder={'{\n  "name": "PLAN NAME",\n  "days": [...]\n}'}
+            rows={8}
+            style={{ background: UI.bgInset, border: `0.5px solid ${importError ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 8, padding: '10px 12px', fontFamily: 'monospace', fontSize: 12, color: UI.ink, outline: 'none', resize: 'none', width: '100%', boxSizing: 'border-box' }}
+          />
+          {importError && <div style={{ fontSize: 11, color: 'rgba(var(--danger-rgb),0.85)', fontFamily: UI.fontUi }}>{importError}</div>}
+          <Btn onClick={doImport} disabled={importing || !importText.trim()}>{importing ? 'Importing…' : 'Import Plan'}</Btn>
+        </div>
+      </Sheet>
     </div>
   );
 }
@@ -1089,6 +1170,62 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
   );
 }
 
+// ─── CoachNewPlanScreen ───────────────────────────────────────────────────────
+// Wraps ScheduleNewScreen with client store + syncing so a coach can create
+// a brand-new plan for a client.
+
+function CoachNewPlanScreen({ store, setStore, go, userId, coachingId, clientId, clientName }) {
+  const [clientStore, setClientStoreRaw] = useStateC(null);
+  const prevClientStore = useRefC(null);
+
+  useEffectC(() => {
+    LB.loadClientStore(clientId).then(data => {
+      setClientStoreRaw(data);
+      prevClientStore.current = data;
+    });
+  }, [clientId]);
+
+  const setClientStore = useRefC(null);
+  if (!setClientStore.current) {
+    setClientStore.current = (updater) => {
+      setClientStoreRaw(prev => {
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        LB.syncStore(prevClientStore.current, next, clientId)
+          .then(() => { prevClientStore.current = next; })
+          .catch(e => console.error('Coach sync failed', e));
+        return next;
+      });
+    };
+  }
+
+  const coachGo = (route) => {
+    if (route.name === 'plan') {
+      go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' });
+    } else if (route.name === 'schedule-edit') {
+      go({ name: 'coaching-edit-plan', coachingId, clientId, clientName, scheduleId: route.scheduleId });
+    } else {
+      go(route);
+    }
+  };
+
+  if (!clientStore) {
+    return (
+      <Screen>
+        <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' })} />
+        <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+      </Screen>
+    );
+  }
+
+  return (
+    <window.Screens.ScheduleNewScreen
+      store={clientStore}
+      setStore={setClientStore.current}
+      go={coachGo}
+    />
+  );
+}
+
 // ─── CoachingBannerGroup ──────────────────────────────────────────────────────
 // Renders unread banner + notes sheet; mounted in HomeScreen.
 
@@ -1138,4 +1275,5 @@ Object.assign(window.Screens, {
   CoachingDashboard,
   CoachClientScreen,
   CoachPlanEditorScreen,
+  CoachNewPlanScreen,
 });
