@@ -823,8 +823,8 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
   const todayDay = useMemoC(() => getTodayDay(clientStore), [clientStore]);
   const todayStr = localDateKey(new Date());
   const trainedToday = useMemoC(() =>
-    (clientStore.sessions || []).some(s => s.ended && s.date?.slice(0, 10) === todayStr && s.dayId === todayDay?.id),
-    [clientStore, todayDay]
+    (clientStore.sessions || []).some(s => s.ended && s.date?.slice(0, 10) === todayStr && s.scheduleId === activeSch?.id),
+    [clientStore, activeSch]
   );
   const planStartDate = activeSch
     ? (LB.isWeekdayPlan(activeSch) ? clientStore.weekPlanStartDate : clientStore.cycleStartDate) || null
