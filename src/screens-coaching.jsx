@@ -884,6 +884,9 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName }) {
 
   if (selected) {
     const vol = LB.totalVolume(selected);
+    // Build a store-like object excluding the selected session so lastSessionForExercise
+    // returns the *previous* session for each exercise, not the selected one.
+    const storeWithoutSelected = { ...clientStore, sessions: clientStore.sessions.filter(s => s.id !== selected.id) };
     return (
       <div style={{ overflowY: 'auto', flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
@@ -900,18 +903,35 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName }) {
             <StatBox label="Sets" value={LB.doneSetCount(selected)} />
             <StatBox label="Duration" value={selected.durationMinutes ? `${selected.durationMinutes}m` : '—'} />
           </div>
-          {(selected.entries || []).map((e, i) => (
-            <div key={i} style={{ padding: '10px 14px', borderBottom: `0.5px solid ${UI.hair}` }}>
-              <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>{e.name}</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {(e.sets || []).filter(s => !s.warmup).map((s, j) => (
-                  <span key={j} className="num" style={{ fontSize: 12, color: s.done ? UI.ink : UI.inkFaint, background: UI.bgInset, borderRadius: 4, padding: '2px 8px', border: `0.5px solid ${UI.hair}` }}>
-                    {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
-                  </span>
-                ))}
+          {(selected.entries || []).map((e, i) => {
+            const lastResult = e.exId
+              ? LB.lastSessionForExercise(storeWithoutSelected, e.exId)
+              : null;
+            const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null));
+            return (
+              <div key={i} style={{ padding: '10px 14px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>{e.name}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: lastSets.length ? 5 : 0 }}>
+                  {(e.sets || []).filter(s => !s.warmup).map((s, j) => (
+                    <span key={j} className="num" style={{ fontSize: 12, color: s.done ? UI.ink : UI.inkFaint, background: UI.bgInset, borderRadius: 4, padding: '2px 8px', border: `0.5px solid ${UI.hair}` }}>
+                      {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                    </span>
+                  ))}
+                </div>
+                {lastSets.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+                    <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
+                    {lastSets.map((s, j) => (
+                      <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `0.5px solid ${UI.hair}` }}>
+                        {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                      </span>
+                    ))}
+                    <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <Sheet open={noteOpen} onClose={() => setNoteOpen(false)} title="Session Note">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
