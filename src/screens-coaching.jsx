@@ -905,7 +905,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName }) {
           </div>
           {(selected.entries || []).map((e, i) => {
             const lastResult = e.exId
-              ? LB.lastSessionForExercise(storeWithoutSelected, e.exId)
+              ? LB.lastSessionForExercise(storeWithoutSelected, e.exId, selected.dayId)
               : null;
             const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null));
             return (
