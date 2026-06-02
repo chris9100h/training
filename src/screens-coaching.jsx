@@ -1349,8 +1349,9 @@ function ClientNutritionTab({ coachingId, userId }) {
       const rd = fmtDay(macro.caloriesRest,     macro.proteinRest,     macro.carbsRest,     macro.fatRest);
       const parts = [td && `Training day\n${td}`, rd && `Rest day\n${rd}`].filter(Boolean);
       if (parts.length) {
+        const body = `Your macros have been updated.\n\n${parts.join('\n\n')}`;
         const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Nutrition', userId);
-        await LB.addCoachingNote(coachingId, 'general', null, null, parts.join('\n\n'), userId, threadId);
+        await LB.addCoachingNote(coachingId, 'general', null, null, body, userId, threadId);
       }
       reload();
     } catch (e) { alert(e.message); }
