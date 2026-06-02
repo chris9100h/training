@@ -565,6 +565,9 @@ function ClientCard({ client, go }) {
 
 function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName, initialTab }) {
   const [tab, setTab] = useStateC(initialTab || 'overview');
+  const [selectedSession, setSelectedSession] = useStateC(null);
+
+  const openSession = (session) => { setSelectedSession(session); setTab('sessions'); };
   const [clientStore, setClientStore] = useStateC(null);
   const [loadError, setLoadError] = useStateC(null);
 
@@ -629,9 +632,9 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
               <ChevronRight color={'var(--accent)'} />
             </div>
           )}
-          {tab === 'overview' && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} />}
+          {tab === 'overview' && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} onSelectSession={openSession} />}
           {tab === 'plan' && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} />}
-          {tab === 'sessions' && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} />}
+          {tab === 'sessions' && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
           {tab === 'notes' && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
       )}
@@ -734,7 +737,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   }).filter(Boolean);
 }
 
-function ClientOverviewTab({ clientStore, coachingId, userId }) {
+function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession }) {
   const sessions = clientStore.sessions || [];
   const ended = sessions.filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
 
@@ -751,6 +754,23 @@ function ClientOverviewTab({ clientStore, coachingId, userId }) {
   const avgVol = last30.length > 0
     ? Math.round(last30.reduce((s, x) => s + LB.totalVolume(x), 0) / last30.length)
     : null;
+
+  // Sessions to show: current week (weekday plan) or current cycle window (cycle plan)
+  const recentSessions = useMemoC(() => {
+    if (!activeSch) return ended.slice(0, 5);
+    if (LB.isWeekdayPlan(activeSch)) {
+      const today = new Date(); today.setHours(23, 59, 59, 0);
+      const todayWd = (today.getDay() + 6) % 7;
+      const monday = new Date(today);
+      monday.setDate(today.getDate() - todayWd);
+      monday.setHours(0, 0, 0, 0);
+      return ended.filter(s => new Date(s.ended) >= monday);
+    } else {
+      const cycleLen = activeSch.days?.length || 7;
+      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - cycleLen);
+      return ended.filter(s => new Date(s.ended) >= cutoff);
+    }
+  }, [clientStore]);
 
   return (
     <div style={{ overflowY: 'auto', flex: 1, padding: '16px 0 32px' }}>
@@ -806,17 +826,22 @@ function ClientOverviewTab({ clientStore, coachingId, userId }) {
       )}
 
       {/* Recent sessions */}
-      <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>RECENT SESSIONS</div>
-      {ended.slice(0, 5).map(s => (
-        <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 8 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{fmtDate(s.date)}</div>
+      <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>
+        {activeSch && LB.isWeekdayPlan(activeSch) ? 'THIS WEEK' : activeSch ? 'THIS CYCLE' : 'RECENT SESSIONS'}
+      </div>
+      {recentSessions.length === 0
+        ? <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '12px 14px' }}>No sessions yet.</div>
+        : recentSessions.map(s => (
+          <div key={s.id} onClick={() => onSelectSession?.(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 8, cursor: 'pointer' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{fmtDate(s.date)}</div>
+            </div>
+            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(LB.totalVolume(s)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span></span>
+            <ChevronRight />
           </div>
-          <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(LB.totalVolume(s)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span></span>
-        </div>
-      ))}
-      {ended.length === 0 && <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '12px 14px' }}>No sessions yet.</div>}
+        ))
+      }
     </div>
   );
 }
@@ -887,8 +912,8 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
 
 // ─── Tab: Sessions ────────────────────────────────────────────────────────────
 
-function ClientSessionsTab({ clientStore, coachingId, userId, clientName }) {
-  const [selected, setSelected] = useStateC(null);
+function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initialSelected, onClearSelected }) {
+  const [selected, setSelected] = useStateC(initialSelected || null);
   const [noteOpen, setNoteOpen] = useStateC(false);
   const [noteBody, setNoteBody] = useStateC('');
   const [noteSaving, setNoteSaving] = useStateC(false);
@@ -898,7 +923,8 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName }) {
     if (!noteBody.trim() || !selected) return;
     setNoteSaving(true);
     try {
-      const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Changes', userId);
+      const threadName = `Notes for ${selected.dayName} on ${fmtDate(selected.date)}`;
+      const threadId = await LB.getOrCreateCoachingThread(coachingId, threadName, userId);
       await LB.addCoachingNote(coachingId, 'session', selected.id, selected.dayName, noteBody.trim(), userId, threadId);
       setNoteBody('');
       setNoteOpen(false);
@@ -912,7 +938,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName }) {
     return (
       <div style={{ overflowY: 'auto', flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
-          <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, padding: 0 }}>← Back</button>
+          <button onClick={() => { setSelected(null); onClearSelected?.(); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, padding: 0 }}>← Back</button>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{selected.dayName}</div>
             <div style={{ fontSize: 11, color: UI.inkFaint }}>{fmtDate(selected.date)}</div>
