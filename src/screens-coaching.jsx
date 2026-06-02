@@ -899,29 +899,26 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
               {(todayDay?.items || []).filter(i => i.exId).map((item, idx) => {
                 const ex = (clientStore.exercises || []).find(e => e.id === item.exId);
                 const last = LB.lastSessionForExercise(clientStore, item.exId, todayDay.id);
-                const lastSets = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped && s.kg != null);
+                const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps);
+                const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore.smartProgression);
+                const hasWeight = seeds.some(s => s.kg != null);
                 return (
                   <div key={idx} style={{ padding: '12px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: lastSets.length ? 6 : 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
                       <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{ex?.name || item.exId}</div>
-                      {(item.plannedSets || item.sets) && (item.plannedReps || item.reps) && (
-                        <span className="micro" style={{ color: UI.inkFaint }}>
-                          {item.plannedSets || item.sets} × {item.plannedReps || item.reps}
-                        </span>
+                      {item.sets && item.reps && (
+                        <span className="micro" style={{ color: UI.inkFaint }}>{item.sets} × {item.reps}</span>
                       )}
                     </div>
-                    {lastSets.length > 0 && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                        {lastSets.slice(0, 4).map((s, j) => (
-                          <span key={j} className="num" style={{ fontSize: 11, color: UI.inkSoft, background: UI.bgInset, borderRadius: 4, padding: '2px 7px', border: `0.5px solid ${UI.hair}` }}>
-                            {s.kg}kg × {s.reps ?? s.repsL ?? '—'}
-                          </span>
-                        ))}
-                        {lastSets.length > 4 && (
-                          <span style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, alignSelf: 'center' }}>+{lastSets.length - 4}</span>
-                        )}
-                      </div>
-                    )}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {hasWeight ? seeds.map((s, j) => (
+                        <span key={j} className="num" style={{ fontSize: 12, color: UI.ink, background: UI.bgInset, borderRadius: 4, padding: '3px 8px', border: `0.5px solid ${UI.hairStrong}` }}>
+                          {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                        </span>
+                      )) : (
+                        <span style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi }}>First time — no weight data yet</span>
+                      )}
+                    </div>
                   </div>
                 );
               })}
