@@ -788,6 +788,64 @@ function ClientNotesTab({ coachingId, userId, clientName }) {
   );
 }
 
+// ─── CoachPlanEditorScreen ────────────────────────────────────────────────────
+// Wraps the existing ScheduleEditScreen with client store + syncing.
+
+function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, clientId, clientName, scheduleId }) {
+  const [clientStore, setClientStoreRaw] = useStateC(null);
+  const prevClientStore = useRefC(null);
+
+  useEffectC(() => {
+    LB.loadClientStore(clientId).then(data => {
+      setClientStoreRaw(data);
+      prevClientStore.current = data;
+    });
+  }, [clientId]);
+
+  const setClientStore = useRefC(null);
+  // Stable wrapper: updates local state and syncs to DB as clientId
+  if (!setClientStore.current) {
+    setClientStore.current = (updater) => {
+      setClientStoreRaw(prev => {
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        // Fire-and-forget sync to client's data
+        LB.syncStore(prevClientStore.current, next, clientId)
+          .then(() => { prevClientStore.current = next; })
+          .catch(e => console.error('Coach sync failed', e));
+        return next;
+      });
+    };
+  }
+
+  // Intercept go: after save/delete, return to coaching-client tab
+  const coachGo = (route) => {
+    if (route.name === 'plan-view' || route.name === 'plan') {
+      go({ name: 'coaching-client', coachingId, clientId, clientName });
+    } else {
+      go(route);
+    }
+  };
+
+  if (!clientStore) {
+    return (
+      <Screen>
+        <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName })} />
+        <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+      </Screen>
+    );
+  }
+
+  return (
+    <window.Screens.ScheduleEditScreen
+      store={clientStore}
+      setStore={setClientStore.current}
+      go={coachGo}
+      userId={clientId}
+      scheduleId={scheduleId}
+    />
+  );
+}
+
 // ─── CoachingBannerGroup ──────────────────────────────────────────────────────
 // Renders unread banner + notes sheet; mounted in HomeScreen.
 
@@ -816,4 +874,5 @@ Object.assign(window.Screens, {
   CoachingSettingsSection,
   CoachingDashboard,
   CoachClientScreen,
+  CoachPlanEditorScreen,
 });

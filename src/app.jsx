@@ -583,8 +583,9 @@ function App() {
     case 'session':       screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'settings':          screen = <window.Screens.SettingsScreen {...props} />; break;
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
-    case 'coaching-dashboard': screen = <window.Screens.CoachingDashboard {...props} />; break;
-    case 'coaching-client':   screen = <window.Screens.CoachClientScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} />; break;
+    case 'coaching-dashboard':  screen = <window.Screens.CoachingDashboard {...props} />; break;
+    case 'coaching-client':     screen = <window.Screens.CoachClientScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} />; break;
+    case 'coaching-edit-plan':  screen = <window.Screens.CoachPlanEditorScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} scheduleId={route.scheduleId} />; break;
     default:                  screen = <window.Screens.HomeScreen {...props} />; break;
   }
 
