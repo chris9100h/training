@@ -170,7 +170,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   return (
     <>
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px 8px', borderBottom: `0.5px solid ${UI.hair}` }}>
-        <button onClick={onBack} style={{ width: 32, height: 32, borderRadius: 6, border: `0.5px solid ${UI.hair}`, background: UI.bgElevated, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <button onClick={onBack} style={{ width: 32, height: 32, borderRadius: 6, border: `0.5px solid ${UI.hair}`, background: UI.bgRaised, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <i className="fa-solid fa-chevron-left" style={{ fontSize: 12, color: UI.inkSoft }} />
         </button>
         <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{thread.name}</div>
@@ -482,7 +482,7 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
             <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, cursor: c.status === 'active' ? 'pointer' : 'default' }}
               onClick={() => c.status === 'active' && go({ name: 'coaching-client', coachingId: c.id, clientId: c.clientId, clientName: c.clientName })}
             >
-              <div style={{ width: 32, height: 32, borderRadius: 16, background: UI.bgElevated, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: 32, height: 32, borderRadius: 16, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, fontWeight: 700 }}>{(c.clientName || '?')[0].toUpperCase()}</span>
               </div>
               <div style={{ flex: 1 }}>
@@ -554,7 +554,7 @@ function ClientCard({ client, go }) {
       onClick={() => go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName })}
       style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}
     >
-      <div style={{ width: 44, height: 44, borderRadius: 22, background: UI.bgElevated, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <div style={{ width: 44, height: 44, borderRadius: 22, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.inkSoft, fontWeight: 700 }}>{(client.clientName || '?')[0].toUpperCase()}</span>
       </div>
       <div style={{ flex: 1 }}>
@@ -795,7 +795,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
             {weeks.map((w, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}` }}>
                 <div style={{ width: 72, flexShrink: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{w.label}</div>
-                <div style={{ flex: 1, height: 4, background: UI.bgElevated, borderRadius: 2, overflow: 'hidden' }}>
+                <div style={{ flex: 1, height: 4, background: UI.bgRaised, borderRadius: 2, overflow: 'hidden' }}>
                   {w.planned > 0 && (
                     <div style={{
                       height: '100%', borderRadius: 2,
@@ -944,7 +944,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
     return (
       <div style={{ overflowY: 'auto', flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
-          <button onClick={() => { setSelected(null); onClearSelected?.(); }} style={{ width: 32, height: 32, borderRadius: 6, border: `0.5px solid ${UI.hair}`, background: UI.bgElevated, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <button onClick={() => { setSelected(null); onClearSelected?.(); }} style={{ width: 32, height: 32, borderRadius: 6, border: `0.5px solid ${UI.hair}`, background: UI.bgRaised, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <i className="fa-solid fa-chevron-left" style={{ fontSize: 12, color: UI.inkSoft }} />
           </button>
           <div style={{ flex: 1 }}>
