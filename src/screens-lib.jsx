@@ -1014,7 +1014,7 @@ function StatsTab({ store, sessions, go }) {
         <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>ALL TIME</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <StatCard label="Sessions" value={sessions.length} />
-          <StatCard label="Avg Volume" value={avgVol.toLocaleString('en-US')} sub="kg / session" />
+          <StatCard label="Avg Volume" value={Math.round(avgVol).toLocaleString('en-US')} sub="kg / session" />
           <StatCard label="Avg Duration" value={avgDuration || '—'} sub={avgDuration ? 'min' : ''} compact />
           <StatCard label="Longest Session" value={maxDuration || '—'} sub={maxDuration ? 'min' : ''} compact />
           <div style={{ gridColumn: '1 / -1', background: UI.bgInset, borderRadius: 4, padding: '16px 14px', textAlign: 'center', border: `1px solid ${UI.hair}` }}>
@@ -1186,7 +1186,7 @@ function HistoryScreen({ store, go, initialTab }) {
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
                     <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
-                      {vol.toLocaleString('en-US')}
+                      {Math.round(vol).toLocaleString('en-US')}
                     </div>
                     <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>kg</div>
                   </div>
