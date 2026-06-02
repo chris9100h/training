@@ -1125,6 +1125,7 @@ function ClientNotesTab({ coachingId, userId, clientName, store, setStore }) {
 function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, clientId, clientName, scheduleId }) {
   const [clientStore, setClientStoreRaw] = useStateC(null);
   const prevClientStore = useRefC(null);
+  const isDirty = useRefC(false);
 
   useEffectC(() => {
     LB.loadClientStore(clientId).then(data => {
@@ -1134,12 +1135,11 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
   }, [clientId]);
 
   const setClientStore = useRefC(null);
-  // Stable wrapper: updates local state and syncs to DB as clientId
   if (!setClientStore.current) {
     setClientStore.current = (updater) => {
       setClientStoreRaw(prev => {
         const next = typeof updater === 'function' ? updater(prev) : updater;
-        // Fire-and-forget sync to client's data
+        isDirty.current = true;
         LB.syncStore(prevClientStore.current, next, clientId)
           .then(() => { prevClientStore.current = next; })
           .catch(e => console.error('Coach sync failed', e));
@@ -1148,10 +1148,18 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
     };
   }
 
-  // Intercept go: after save/delete, return to coaching-client tab
-  const coachGo = (route) => {
+  // Intercept go: notify client via Changes thread if plan was modified, then return to plan tab
+  const coachGo = async (route) => {
     if (route.name === 'plan-view' || route.name === 'plan') {
-      go({ name: 'coaching-client', coachingId, clientId, clientName });
+      if (isDirty.current) {
+        isDirty.current = false;
+        try {
+          const schName = prevClientStore.current?.schedules?.find(s => s.id === scheduleId)?.name || scheduleId;
+          const threadId = await LB.getOrCreateCoachingThread(coachingId, `Changes on ${schName}`, userId);
+          await LB.addCoachingNote(coachingId, 'plan', scheduleId, schName, `Updated plan: ${schName}`, userId, threadId);
+        } catch (e) { console.error('Failed to send plan change note', e); }
+      }
+      go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' });
     } else {
       go(route);
     }
@@ -1160,7 +1168,7 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
   if (!clientStore) {
     return (
       <Screen>
-        <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName })} />
+        <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' })} />
         <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
       </Screen>
     );
