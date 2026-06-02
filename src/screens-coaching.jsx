@@ -193,17 +193,17 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
         })}
         <div ref={bottomRef} />
       </div>
-      <div style={{ flexShrink: 0, padding: '10px 16px 12px', paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))', borderTop: `0.5px solid ${UI.hair}` }}>
-        <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ flexShrink: 0, padding: '10px 16px', paddingBottom: 'calc(10px + env(safe-area-inset-bottom, 0px))', borderTop: `0.5px solid ${UI.hair}`, background: UI.bg }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input
             value={body}
             onChange={e => setBody(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
             placeholder="Message…"
-            style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '9px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
+            style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 22, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }}
           />
-          <button onClick={send} disabled={sending || !body.trim()} style={{ padding: '9px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: sending || !body.trim() ? 'default' : 'pointer', opacity: sending || !body.trim() ? 0.5 : 1, flexShrink: 0 }}>
-            {sending ? '…' : 'SEND'}
+          <button onClick={send} disabled={sending || !body.trim()} style={{ width: 40, height: 40, borderRadius: 20, border: 'none', background: body.trim() && !sending ? 'var(--accent)' : UI.bgElevated, color: body.trim() && !sending ? '#0a0805' : UI.inkGhost, cursor: sending || !body.trim() ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, color 0.2s' }}>
+            {sending ? <span style={{ fontFamily: UI.fontUi, fontSize: 14 }}>…</span> : <i className="fa-solid fa-arrow-up" style={{ fontSize: 15 }} />}
           </button>
         </div>
       </div>
@@ -324,24 +324,25 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
           );
         })}
       </div>
-      <div style={{ flexShrink: 0, padding: '10px 16px 12px', paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))', borderTop: `0.5px solid ${UI.hair}` }}>
+      <div style={{ flexShrink: 0, padding: '10px 16px', paddingBottom: 'calc(10px + env(safe-area-inset-bottom, 0px))', borderTop: `0.5px solid ${UI.hair}`, background: UI.bg }}>
         {creating ? (
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input
               autoFocus
               value={newName}
               onChange={e => setNewName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') create(); if (e.key === 'Escape') { setCreating(false); setNewName(''); } }}
               placeholder="Thread name (e.g. Nutrition, Goals…)"
-              style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '9px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
+              style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 22, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
             />
-            <button onClick={create} disabled={saving || !newName.trim()} style={{ padding: '9px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: saving || !newName.trim() ? 'default' : 'pointer', opacity: saving || !newName.trim() ? 0.5 : 1, flexShrink: 0 }}>
+            <button onClick={create} disabled={saving || !newName.trim()} style={{ padding: '10px 18px', borderRadius: 22, border: 'none', background: newName.trim() && !saving ? 'var(--accent)' : UI.bgElevated, color: newName.trim() && !saving ? '#0a0805' : UI.inkGhost, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', cursor: saving || !newName.trim() ? 'default' : 'pointer', flexShrink: 0, transition: 'background 0.2s, color 0.2s' }}>
               {saving ? '…' : 'CREATE'}
             </button>
           </div>
         ) : (
-          <button onClick={() => setCreating(true)} style={{ width: '100%', padding: '9px 0', borderRadius: 8, border: `0.5px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, cursor: 'pointer' }}>
-            + New Thread
+          <button onClick={() => setCreating(true)} style={{ width: '100%', padding: '11px 0', borderRadius: 22, border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, background: `rgba(var(--accent-rgb), 0.06)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.04em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
+            New Thread
           </button>
         )}
       </div>
