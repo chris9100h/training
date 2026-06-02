@@ -238,7 +238,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   }
 
   const result = {
-    user: { name: profileRes.data.name, email: authUser?.email || '' },
+    user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || '') },
     exercises: exRes.data || [],
     schedules: schRes.data || [],
     // map snake_case DB columns → camelCase store fields
