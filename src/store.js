@@ -194,7 +194,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.rpc('get_coach_info'),
     isCoachLoad ? null : _supabase.rpc('get_coaching_clients'),
     isCoachLoad ? null : _supabase.from('zane_coaching_notes')
-      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at')
+      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
       .is('read_at', null)
       .neq('author_id', userId),
   ];
@@ -332,6 +332,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         type: n.type,
         entityId: n.entity_id,
         entityName: n.entity_name,
+        threadId: n.thread_id,
         body: n.body,
         createdAt: n.created_at,
       })),
@@ -958,11 +959,12 @@ async function endCoaching(coachingId) {
   if (error) throw error;
 }
 
-async function addCoachingNote(coachingId, type, entityId, entityName, body, authorId) {
+async function addCoachingNote(coachingId, type, entityId, entityName, body, authorId, threadId = null) {
   const id = 'cnote_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   const { error } = await _supabase.from('zane_coaching_notes').insert({
     id, coaching_id: coachingId, author_id: authorId,
     type, entity_id: entityId || null, entity_name: entityName || null, body,
+    thread_id: threadId || null,
   });
   if (error) throw error;
   return id;
@@ -976,17 +978,40 @@ async function markCoachingNotesRead(noteIds) {
   if (error) throw error;
 }
 
-async function loadCoachingNotes(coachingId) {
-  const { data, error } = await _supabase.from('zane_coaching_notes')
+async function loadCoachingNotes(coachingId, threadId = null) {
+  let q = _supabase.from('zane_coaching_notes')
     .select('*')
-    .eq('coaching_id', coachingId)
-    .order('created_at', { ascending: false });
+    .eq('coaching_id', coachingId);
+  if (threadId !== null) q = q.eq('thread_id', threadId);
+  else q = q.is('thread_id', null);
+  const { data, error } = await q.order('created_at', { ascending: false });
   if (error) throw error;
   return (data || []).map(n => ({
     id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
+    threadId: n.thread_id,
     type: n.type, entityId: n.entity_id, entityName: n.entity_name,
     body: n.body, createdAt: n.created_at, readAt: n.read_at,
   }));
+}
+
+async function loadCoachingThreads(coachingId) {
+  const { data, error } = await _supabase.from('zane_coaching_threads')
+    .select('*')
+    .eq('coaching_id', coachingId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data || []).map(t => ({
+    id: t.id, coachingId: t.coaching_id, name: t.name,
+    createdBy: t.created_by, createdAt: t.created_at,
+  }));
+}
+
+async function createCoachingThread(coachingId, name, userId) {
+  const id = 'cthr_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const { error } = await _supabase.from('zane_coaching_threads')
+    .insert({ id, coaching_id: coachingId, name: name.trim(), created_by: userId });
+  if (error) throw error;
+  return id;
 }
 
 window.LB = {
@@ -1002,5 +1027,5 @@ window.LB = {
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,
   loadClientStore, inviteClient, respondToCoachingInvite, endCoaching,
-  addCoachingNote, markCoachingNotesRead, loadCoachingNotes,
+  addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread,
 };

@@ -114,103 +114,219 @@ function CoachingUnreadBanner({ store, setStore, userId, onOpen }) {
   );
 }
 
-// ─── CoachingNotesSheet ───────────────────────────────────────────────────────
-// Chat thread between client and coach. Opens from home unread banner or settings.
+// ─── ChatThread ───────────────────────────────────────────────────────────────
+// Single named thread — message bubbles + compose input.
 
-function CoachingNotesSheet({ open, store, setStore, userId, onClose }) {
+function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack, setStore }) {
   const [notes, setNotes] = useStateC([]);
-  const [loading, setLoading] = useStateC(false);
+  const [loading, setLoading] = useStateC(true);
   const [body, setBody] = useStateC('');
   const [sending, setSending] = useStateC(false);
   const bottomRef = useRefC(null);
-  const coachingId = store.coaching?.asClient?.id;
-  const coachName = store.coaching?.asClient?.coachName || 'Coach';
 
-  const loadNotes = () => {
-    if (!coachingId) return;
+  const reload = () => {
     setLoading(true);
-    LB.loadCoachingNotes(coachingId)
-      .then(data => {
-        // oldest first for chat display
-        setNotes([...data].reverse());
-        const unread = data.filter(n => !n.readAt && n.authorId !== userId).map(n => n.id);
-        if (unread.length) {
-          LB.markCoachingNotesRead(unread).then(() => {
-            setStore(s => ({ ...s, coaching: { ...s.coaching, unreadNotes: [] } }));
-          });
-        }
-      })
+    LB.loadCoachingNotes(coachingId, thread.id)
+      .then(data => setNotes([...data].reverse()))
       .finally(() => setLoading(false));
   };
 
   useEffectC(() => {
-    if (!open) return;
-    loadNotes();
-  }, [open, coachingId]);
+    reload();
+    const unreadIds = (unreadNotes || []).filter(n => n.threadId === thread.id).map(n => n.id);
+    if (unreadIds.length) {
+      LB.markCoachingNotesRead(unreadIds).then(() => {
+        if (setStore) setStore(s => ({
+          ...s,
+          coaching: {
+            ...s.coaching,
+            unreadNotes: (s.coaching?.unreadNotes || []).filter(n => !unreadIds.includes(n.id)),
+          },
+        }));
+      });
+    }
+  }, [coachingId, thread.id]);
 
   useEffectC(() => {
-    if (notes.length && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'auto' });
-    }
+    if (notes.length && bottomRef.current) bottomRef.current.scrollIntoView({ behavior: 'auto' });
   }, [notes]);
 
   const send = async () => {
-    if (!body.trim() || !coachingId) return;
+    if (!body.trim()) return;
     setSending(true);
     try {
-      await LB.addCoachingNote(coachingId, 'general', null, null, body.trim(), userId);
+      await LB.addCoachingNote(coachingId, 'general', null, null, body.trim(), userId, thread.id);
       setBody('');
-      loadNotes();
+      reload();
     } catch (e) { alert(e.message); } finally { setSending(false); }
   };
 
-  const typeLabel = { session: 'SESSION', plan: 'PLAN', change: 'CHANGE' };
-
   return (
-    <Sheet open={open} onClose={onClose} title="Messages">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-        {/* Thread */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14, maxHeight: '55vh', overflowY: 'auto' }}>
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
-          ) : notes.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No messages yet.</div>
-          ) : notes.map(n => {
-            const isMe = n.authorId === userId;
-            return (
-              <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-                {n.type !== 'general' && n.entityName && (
-                  <div className="micro" style={{ color: UI.inkGhost, margin: '0 4px 3px' }}>{typeLabel[n.type]} · {n.entityName.toUpperCase()}</div>
-                )}
-                <div style={{ maxWidth: '82%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '12px 12px 2px 12px' : '12px 12px 12px 2px', padding: '9px 12px', border: isMe ? 'none' : `0.5px solid ${UI.hairStrong}` }}>
-                  <div style={{ fontSize: 13, color: isMe ? '#0a0805' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{n.body}</div>
-                </div>
-                <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, margin: '3px 4px 0' }}>
-                  {isMe ? 'You' : coachName} · {fmtRelative(n.createdAt)}
-                </div>
+    <>
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px 8px', borderBottom: `0.5px solid ${UI.hair}` }}>
+        <button onClick={onBack} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkSoft, padding: 0, fontFamily: UI.fontUi, fontSize: 13 }}>←</button>
+        <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{thread.name}</div>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 8px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+        ) : notes.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No messages yet.</div>
+        ) : notes.map(n => {
+          const isMe = n.authorId === userId;
+          return (
+            <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+              <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '12px 12px 2px 12px' : '12px 12px 12px 2px', padding: '9px 12px', border: isMe ? 'none' : `0.5px solid ${UI.hairStrong}` }}>
+                <div style={{ fontSize: 13, color: isMe ? '#0a0805' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{n.body}</div>
               </div>
-            );
-          })}
-          <div ref={bottomRef} />
-        </div>
-        {/* Reply input */}
-        <div style={{ display: 'flex', gap: 8, paddingTop: 10, borderTop: `0.5px solid ${UI.hair}` }}>
+              <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, margin: '3px 4px 0' }}>
+                {isMe ? 'You' : otherName} · {fmtRelative(n.createdAt)}
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+      <div style={{ flexShrink: 0, padding: '10px 16px 12px', borderTop: `0.5px solid ${UI.hair}` }}>
+        <div style={{ display: 'flex', gap: 8 }}>
           <input
             value={body}
             onChange={e => setBody(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
-            placeholder="Reply…"
+            placeholder="Message…"
             style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '9px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
           />
-          <button
-            onClick={send}
-            disabled={sending || !body.trim()}
-            style={{ padding: '9px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: sending || !body.trim() ? 'default' : 'pointer', opacity: sending || !body.trim() ? 0.5 : 1, flexShrink: 0 }}
-          >
+          <button onClick={send} disabled={sending || !body.trim()} style={{ padding: '9px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: sending || !body.trim() ? 'default' : 'pointer', opacity: sending || !body.trim() ? 0.5 : 1, flexShrink: 0 }}>
             {sending ? '…' : 'SEND'}
           </button>
         </div>
       </div>
+    </>
+  );
+}
+
+// ─── ThreadList ────────────────────────────────────────────────────────────────
+// Thread list + inline create — used in both coach Notes tab and client sheet.
+
+function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore }) {
+  const [threads, setThreads] = useStateC([]);
+  const [loading, setLoading] = useStateC(true);
+  const [selected, setSelected] = useStateC(null);
+  const [creating, setCreating] = useStateC(false);
+  const [newName, setNewName] = useStateC('');
+  const [saving, setSaving] = useStateC(false);
+
+  const reload = () => {
+    setLoading(true);
+    LB.loadCoachingThreads(coachingId).then(setThreads).finally(() => setLoading(false));
+  };
+
+  useEffectC(() => { reload(); }, [coachingId]);
+
+  const create = async () => {
+    if (!newName.trim()) return;
+    setSaving(true);
+    try {
+      await LB.createCoachingThread(coachingId, newName, userId);
+      setNewName('');
+      setCreating(false);
+      reload();
+    } catch (e) { alert(e.message); } finally { setSaving(false); }
+  };
+
+  // unread count per thread
+  const unreadByThread = {};
+  (unreadNotes || []).forEach(n => {
+    if (n.threadId) unreadByThread[n.threadId] = (unreadByThread[n.threadId] || 0) + 1;
+  });
+
+  if (selected) {
+    return (
+      <ChatThread
+        thread={selected}
+        coachingId={coachingId}
+        userId={userId}
+        otherName={otherName}
+        unreadNotes={unreadNotes}
+        setStore={setStore}
+        onBack={() => setSelected(null)}
+      />
+    );
+  }
+
+  return (
+    <>
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+        ) : threads.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No threads yet.</div>
+        ) : threads.map(t => {
+          const unread = unreadByThread[t.id] || 0;
+          return (
+            <div key={t.id} onClick={() => setSelected(t)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: `rgba(var(--accent-rgb),0.08)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <i className="fa-solid fa-comment" style={{ fontSize: 14, color: 'var(--accent)' }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{t.name}</div>
+              </div>
+              {unread > 0 && (
+                <div style={{ background: 'var(--accent)', color: '#0a0805', borderRadius: 10, fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, padding: '2px 7px', minWidth: 18, textAlign: 'center', flexShrink: 0 }}>
+                  {unread}
+                </div>
+              )}
+              <ChevronRight />
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ flexShrink: 0, padding: '10px 16px 12px', borderTop: `0.5px solid ${UI.hair}` }}>
+        {creating ? (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              autoFocus
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') create(); if (e.key === 'Escape') { setCreating(false); setNewName(''); } }}
+              placeholder="Thread name (e.g. Nutrition, Goals…)"
+              style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '9px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
+            />
+            <button onClick={create} disabled={saving || !newName.trim()} style={{ padding: '9px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: saving || !newName.trim() ? 'default' : 'pointer', opacity: saving || !newName.trim() ? 0.5 : 1, flexShrink: 0 }}>
+              {saving ? '…' : 'CREATE'}
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setCreating(true)} style={{ width: '100%', padding: '9px 0', borderRadius: 8, border: `0.5px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, cursor: 'pointer' }}>
+            + New Thread
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ─── CoachingNotesSheet ───────────────────────────────────────────────────────
+// Thread list sheet for clients — opens from home unread banner or settings.
+
+function CoachingNotesSheet({ open, store, setStore, userId, onClose }) {
+  const coachingId = store.coaching?.asClient?.id;
+  const coachName = store.coaching?.asClient?.coachName || 'Coach';
+  const unreadNotes = store.coaching?.unreadNotes || [];
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Messages">
+      {coachingId && (
+        <div style={{ display: 'flex', flexDirection: 'column', height: '65vh' }}>
+          <ThreadList
+            coachingId={coachingId}
+            userId={userId}
+            otherName={coachName}
+            unreadNotes={unreadNotes}
+            setStore={setStore}
+          />
+        </div>
+      )}
     </Sheet>
   );
 }
@@ -471,7 +587,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'overview' && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} />}
           {tab === 'plan' && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} />}
           {tab === 'sessions' && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} />}
-          {tab === 'notes' && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} />}
+          {tab === 'notes' && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} />}
         </div>
       )}
     </Screen>
@@ -804,85 +920,42 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName }) {
 
 // ─── Tab: Notes ───────────────────────────────────────────────────────────────
 
-function ClientNotesTab({ coachingId, userId, clientName }) {
-  const [notes, setNotes] = useStateC([]);
-  const [loading, setLoading] = useStateC(true);
-  const [body, setBody] = useStateC('');
-  const [saving, setSaving] = useStateC(false);
-  const bottomRef = useRefC(null);
-
-  const reload = () => {
-    setLoading(true);
-    LB.loadCoachingNotes(coachingId)
-      .then(data => setNotes([...data].reverse())) // oldest first
-      .finally(() => setLoading(false));
-  };
-
-  useEffectC(() => { reload(); }, [coachingId]);
+function ClientNotesTab({ coachingId, userId, clientName, store }) {
+  // Activity feed: threadless auto-generated notes (plan changes, session notes etc.)
+  const [activity, setActivity] = useStateC([]);
+  const [actLoading, setActLoading] = useStateC(true);
+  const unreadNotes = store?.coaching?.unreadNotes || [];
 
   useEffectC(() => {
-    if (notes.length && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'auto' });
-    }
-  }, [notes]);
-
-  const send = async () => {
-    if (!body.trim()) return;
-    setSaving(true);
-    try {
-      await LB.addCoachingNote(coachingId, 'general', null, null, body.trim(), userId);
-      setBody('');
-      reload();
-    } catch (e) { alert(e.message); } finally { setSaving(false); }
-  };
+    setActLoading(true);
+    LB.loadCoachingNotes(coachingId, null) // null = threadless notes
+      .then(data => setActivity([...data].reverse()))
+      .finally(() => setActLoading(false));
+  }, [coachingId]);
 
   const typeLabel = { session: 'SESSION', plan: 'PLAN', change: 'CHANGE' };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-      {/* Thread */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 8px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
-        ) : notes.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No messages yet.</div>
-        ) : notes.map(n => {
-          const isMe = n.authorId === userId;
-          return (
-            <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-              {n.type !== 'general' && n.entityName && (
-                <div className="micro" style={{ color: UI.inkGhost, margin: '0 4px 3px' }}>{typeLabel[n.type] || n.type.toUpperCase()} · {n.entityName.toUpperCase()}</div>
-              )}
-              <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '12px 12px 2px 12px' : '12px 12px 12px 2px', padding: '9px 12px', border: isMe ? 'none' : `0.5px solid ${UI.hairStrong}` }}>
-                <div style={{ fontSize: 13, color: isMe ? '#0a0805' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{n.body}</div>
+      <ThreadList coachingId={coachingId} userId={userId} otherName={clientName} unreadNotes={unreadNotes} />
+      {/* Auto-generated activity (plan activations, session notes not in threads) */}
+      {!actLoading && activity.length > 0 && (
+        <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}` }}>
+          <div className="micro" style={{ color: UI.inkFaint, padding: '10px 16px 6px' }}>ACTIVITY</div>
+          <div style={{ maxHeight: 180, overflowY: 'auto' }}>
+            {activity.map(n => (
+              <div key={n.id} style={{ padding: '8px 16px', borderBottom: `0.5px solid ${UI.hair}`, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <i className={`fa-solid ${n.type === 'session' ? 'fa-dumbbell' : n.type === 'plan' ? 'fa-calendar' : 'fa-pen'}`} style={{ fontSize: 10, color: UI.inkGhost, marginTop: 3, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {n.entityName && <div className="micro" style={{ color: UI.inkGhost, marginBottom: 1 }}>{typeLabel[n.type] || n.type.toUpperCase()} · {n.entityName.toUpperCase()}</div>}
+                  <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{n.body}</div>
+                </div>
+                <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, flexShrink: 0 }}>{fmtRelative(n.createdAt)}</div>
               </div>
-              <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, margin: '3px 4px 0' }}>
-                {isMe ? 'You' : clientName} · {fmtRelative(n.createdAt)}
-              </div>
-            </div>
-          );
-        })}
-        <div ref={bottomRef} />
-      </div>
-      {/* Compose */}
-      <div style={{ flexShrink: 0, padding: '10px 16px 12px', borderTop: `0.5px solid ${UI.hair}` }}>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <textarea
-            value={body}
-            onChange={e => setBody(e.target.value)}
-            placeholder={`Write a note for ${clientName}…`}
-            rows={2}
-            style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '9px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', resize: 'none', boxSizing: 'border-box' }}
-          />
-          <button
-            onClick={send}
-            disabled={saving || !body.trim()}
-            style={{ padding: '9px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: saving || !body.trim() ? 'default' : 'pointer', opacity: saving || !body.trim() ? 0.5 : 1, alignSelf: 'flex-end', flexShrink: 0 }}
-          >
-            {saving ? '…' : 'SEND'}
-          </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
