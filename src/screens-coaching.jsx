@@ -562,8 +562,8 @@ function ClientCard({ client, go }) {
 // ─── CoachClientScreen ────────────────────────────────────────────────────────
 // Full coach view for a single client — 4 tabs: Overview, Plan, Sessions, Notes.
 
-function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName }) {
-  const [tab, setTab] = useStateC('overview');
+function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName, initialTab }) {
+  const [tab, setTab] = useStateC(initialTab || 'overview');
   const [clientStore, setClientStore] = useStateC(null);
   const [loadError, setLoadError] = useStateC(null);
 
@@ -1084,19 +1084,19 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
 function CoachingBannerGroup({ store, setStore, userId, go }) {
   const [notesOpen, setNotesOpen] = useStateC(false);
   const notes = store.coaching?.unreadNotes || [];
-  if (!notes.length) return null;
 
-  // Coach sees unread client replies → tap navigates to settings (coaching section)
   const clientIds = new Set((store.coaching?.asCoach || []).map(c => c.clientId));
   const fromClient = notes.some(n => clientIds.has(n.authorId));
 
+  // Keep mounted while sheet is open so ChatThread isn't destroyed mid-read
+  if (!notes.length && !notesOpen) return null;
+
   const handleOpen = () => {
     if (fromClient && go) {
-      // Find which client sent the message and go directly to their screen
       const note = notes.find(n => clientIds.has(n.authorId));
       const client = note && (store.coaching?.asCoach || []).find(c => c.clientId === note.authorId);
       if (client) {
-        go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName });
+        go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName, initialTab: 'notes' });
         return;
       }
       go({ name: 'settings' });
@@ -1106,11 +1106,11 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
   };
 
   return (
-    <div style={{ flexShrink: 0, padding: '0 22px 10px' }}>
-      <CoachingUnreadBanner store={store} setStore={setStore} userId={userId} onOpen={handleOpen} />
-      {!fromClient && (
-        <CoachingNotesSheet open={notesOpen} store={store} setStore={setStore} userId={userId} onClose={() => setNotesOpen(false)} />
+    <div style={{ flexShrink: 0, padding: notes.length > 0 ? '0 22px 10px' : 0 }}>
+      {notes.length > 0 && (
+        <CoachingUnreadBanner store={store} setStore={setStore} userId={userId} onOpen={handleOpen} />
       )}
+      <CoachingNotesSheet open={notesOpen} store={store} setStore={setStore} userId={userId} onClose={() => setNotesOpen(false)} />
     </div>
   );
 }
