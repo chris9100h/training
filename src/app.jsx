@@ -581,9 +581,11 @@ function App() {
     case 'exercise':      screen = <window.Screens.ExerciseDetailScreen key={route.exId} {...props} exId={route.exId} back={route.back} editQueue={route.editQueue || []} editQueueTotal={route.editQueueTotal || 0} autoEdit={!!route.autoEdit} />; break;
     case 'hist':          screen = <window.Screens.HistoryScreen {...props} initialTab={route.initialTab} />; break;
     case 'session':       screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
-    case 'settings':      screen = <window.Screens.SettingsScreen {...props} />; break;
-    case 'spectator':     screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
-    default:              screen = <window.Screens.HomeScreen {...props} />; break;
+    case 'settings':          screen = <window.Screens.SettingsScreen {...props} />; break;
+    case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
+    case 'coaching-dashboard': screen = <window.Screens.CoachingDashboard {...props} />; break;
+    case 'coaching-client':   screen = <window.Screens.CoachClientScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} />; break;
+    default:                  screen = <window.Screens.HomeScreen {...props} />; break;
   }
 
   if (isPad && showTab) {
@@ -596,6 +598,7 @@ function App() {
           </ErrorBoundary>
         </div>
         {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
+        {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
       </div>
     );
   }
@@ -607,6 +610,7 @@ function App() {
       </ErrorBoundary>
       {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
       {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} />}
+      {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
     </>
   );
 }

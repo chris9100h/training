@@ -1,0 +1,729 @@
+/* Coaching screens — coach dashboard + client view + client-side invite handling */
+
+const { useState: useStateC, useEffect: useEffectC, useRef: useRefC, useMemo: useMemoC } = React;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
+}
+
+function fmtRelative(iso) {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+// ─── CoachingPendingBanner ────────────────────────────────────────────────────
+// Shown on app boot when the user has a pending coaching invite.
+
+function CoachingPendingBanner({ store, setStore, userId }) {
+  const pending = store.coaching?.asClient?.status === 'pending' ? store.coaching.asClient : null;
+  const [loading, setLoading] = useStateC(false);
+
+  if (!pending) return null;
+
+  const respond = async (accept) => {
+    setLoading(true);
+    try {
+      await LB.respondToCoachingInvite(pending.id, accept);
+      const fresh = await LB.loadFromSupabase(userId);
+      setStore(s => ({ ...s, ...fresh }));
+    } catch (e) {
+      alert('Error: ' + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(0,0,0,0.75)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+    }}>
+      <div style={{
+        background: UI.bg, border: `1px solid ${UI.hairStrong}`, borderRadius: 16,
+        padding: 28, maxWidth: 380, width: '100%',
+      }}>
+        <div className="micro-gold" style={{ marginBottom: 10, letterSpacing: '0.15em' }}>COACHING REQUEST</div>
+        <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, color: UI.ink, marginBottom: 6 }}>
+          {pending.coachName}
+        </div>
+        <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 24, lineHeight: 1.5 }}>
+          wants to coach you. They will be able to view your training data,
+          sessions and plans, and make adjustments on your behalf.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <button
+            disabled={loading}
+            onClick={() => respond(true)}
+            style={{ width: '100%', padding: '14px 0', borderRadius: 10, border: 'none', cursor: loading ? 'default' : 'pointer', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.08em', opacity: loading ? 0.6 : 1 }}
+          >
+            ACCEPT
+          </button>
+          <button
+            disabled={loading}
+            onClick={() => respond(false)}
+            style={{ width: '100%', padding: '14px 0', borderRadius: 10, border: `1px solid ${UI.hairStrong}`, cursor: loading ? 'default' : 'pointer', background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, opacity: loading ? 0.6 : 1 }}
+          >
+            DECLINE
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CoachingUnreadBanner ─────────────────────────────────────────────────────
+// Small banner on home screen when there are unread coach notes.
+
+function CoachingUnreadBanner({ store, setStore, userId, onOpen }) {
+  const notes = store.coaching?.unreadNotes || [];
+  if (!notes.length) return null;
+
+  return (
+    <div
+      onClick={onOpen}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        background: `rgba(var(--accent-rgb), 0.08)`,
+        border: `0.5px solid rgba(var(--accent-rgb), 0.35)`,
+        borderRadius: 10, padding: '10px 14px', cursor: 'pointer',
+      }}
+    >
+      <div style={{ width: 28, height: 28, borderRadius: 6, background: `rgba(var(--accent-rgb), 0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <i className="fa-solid fa-comment" style={{ fontSize: 12, color: 'var(--accent)' }} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="micro-gold" style={{ marginBottom: 1 }}>
+          {notes.length === 1 ? '1 NEW MESSAGE' : `${notes.length} NEW MESSAGES`} FROM COACH
+        </div>
+        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {notes[0].body}
+        </div>
+      </div>
+      <ChevronRight />
+    </div>
+  );
+}
+
+// ─── CoachingNotesSheet ───────────────────────────────────────────────────────
+// Sheet shown when client taps the unread banner — lists all notes, marks them read.
+
+function CoachingNotesSheet({ open, store, setStore, userId, onClose }) {
+  const [notes, setNotes] = useStateC([]);
+  const [loading, setLoading] = useStateC(false);
+  const coachingId = store.coaching?.asClient?.id;
+
+  useEffectC(() => {
+    if (!open || !coachingId) return;
+    setLoading(true);
+    LB.loadCoachingNotes(coachingId)
+      .then(data => {
+        setNotes(data);
+        const unread = data.filter(n => !n.readAt && n.authorId !== userId).map(n => n.id);
+        if (unread.length) {
+          LB.markCoachingNotesRead(unread).then(() => {
+            setStore(s => ({
+              ...s,
+              coaching: { ...s.coaching, unreadNotes: [] },
+            }));
+          });
+        }
+      })
+      .finally(() => setLoading(false));
+  }, [open, coachingId]);
+
+  const typeIcon = (type) => {
+    if (type === 'session') return 'fa-dumbbell';
+    if (type === 'plan') return 'fa-calendar';
+    if (type === 'change') return 'fa-pen';
+    return 'fa-comment';
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Coach Messages">
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+      ) : notes.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No messages yet.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8 }}>
+          {notes.map(n => (
+            <div key={n.id} style={{ background: UI.bgInset, borderRadius: 10, padding: '12px 14px', border: `0.5px solid ${UI.hair}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <i className={`fa-solid ${typeIcon(n.type)}`} style={{ fontSize: 10, color: UI.inkFaint }} />
+                {n.entityName && <span className="micro" style={{ color: UI.inkFaint }}>{n.entityName.toUpperCase()}</span>}
+                <span style={{ marginLeft: 'auto', fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtRelative(n.createdAt)}</span>
+              </div>
+              <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{n.body}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+// ─── CoachingSettingsSection ──────────────────────────────────────────────────
+// Section rendered inside SettingsScreen under "Coaching".
+
+function CoachingSettingsSection({ store, setStore, userId, go }) {
+  const asClient = store.coaching?.asClient;
+  const asCoach = store.coaching?.asCoach || [];
+  const [inviteEmail, setInviteEmail] = useStateC('');
+  const [inviting, setInviting] = useStateC(false);
+  const [inviteError, setInviteError] = useStateC('');
+  const [ending, setEnding] = useStateC(false);
+
+  const handleInvite = async () => {
+    if (!inviteEmail.trim()) return;
+    setInviting(true);
+    setInviteError('');
+    try {
+      const result = await LB.inviteClient(inviteEmail.trim());
+      if (result?.startsWith('ERROR:not_found')) { setInviteError('No user found with that email.'); return; }
+      if (result?.startsWith('ERROR:self')) { setInviteError('You cannot coach yourself.'); return; }
+      if (result?.startsWith('ERROR:exists')) { setInviteError('Invite already sent or coaching already active.'); return; }
+      setInviteEmail('');
+      const fresh = await LB.loadFromSupabase(userId);
+      setStore(s => ({ ...s, ...fresh }));
+    } catch (e) {
+      setInviteError(e.message);
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const handleEndCoaching = async (coachingId) => {
+    if (!confirm('End this coaching relationship?')) return;
+    setEnding(true);
+    try {
+      await LB.endCoaching(coachingId);
+      const fresh = await LB.loadFromSupabase(userId);
+      setStore(s => ({ ...s, ...fresh }));
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setEnding(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+
+      {/* As client */}
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, marginTop: 4 }}>MY COACH</div>
+      {asClient ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 14 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 18, background: `rgba(var(--accent-rgb),0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <i className="fa-solid fa-user" style={{ fontSize: 14, color: 'var(--accent)' }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{asClient.coachName}</div>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{asClient.coachEmail}</div>
+            {asClient.status === 'pending' && <div className="micro" style={{ color: 'var(--accent)', marginTop: 2 }}>PENDING YOUR RESPONSE</div>}
+          </div>
+          <button onClick={() => handleEndCoaching(asClient.id)} disabled={ending} style={{ background: 'transparent', border: `1px solid rgba(var(--danger-rgb),0.4)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 11 }}>
+            END
+          </button>
+        </div>
+      ) : (
+        <div style={{ padding: '12px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 14, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
+          No coach assigned.
+        </div>
+      )}
+
+      {/* As coach */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div className="micro" style={{ color: UI.inkFaint }}>MY CLIENTS</div>
+        {asCoach.length > 0 && (
+          <button
+            onClick={() => go({ name: 'coaching-dashboard' })}
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.08em', padding: 0 }}
+          >
+            OPEN DASHBOARD →
+          </button>
+        )}
+      </div>
+
+      {asCoach.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+          {asCoach.map(c => (
+            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}` }}>
+              <div style={{ width: 32, height: 32, borderRadius: 16, background: UI.bgElevated, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, fontWeight: 700 }}>{(c.clientName || '?')[0].toUpperCase()}</span>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{c.clientName}</div>
+                {c.status === 'pending' && <div className="micro" style={{ color: UI.inkFaint, marginTop: 1 }}>PENDING ACCEPTANCE</div>}
+              </div>
+              <button onClick={() => handleEndCoaching(c.id)} disabled={ending} style={{ background: 'transparent', border: `1px solid rgba(var(--danger-rgb),0.4)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 11 }}>
+                END
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Invite new client */}
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>INVITE CLIENT</div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          value={inviteEmail}
+          onChange={e => { setInviteEmail(e.target.value); setInviteError(''); }}
+          onKeyDown={e => e.key === 'Enter' && handleInvite()}
+          placeholder="client@email.com"
+          type="email"
+          autoCapitalize="none"
+          autoCorrect="off"
+          style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${inviteError ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 8, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
+        />
+        <button
+          onClick={handleInvite}
+          disabled={inviting || !inviteEmail.trim()}
+          style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: inviting || !inviteEmail.trim() ? 'default' : 'pointer', opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }}
+        >
+          {inviting ? '…' : 'INVITE'}
+        </button>
+      </div>
+      {inviteError && <div style={{ fontSize: 11, color: 'rgba(var(--danger-rgb),0.85)', fontFamily: UI.fontUi, marginTop: 5 }}>{inviteError}</div>}
+    </div>
+  );
+}
+
+// ─── CoachingDashboard ────────────────────────────────────────────────────────
+
+function CoachingDashboard({ store, setStore, userId, go }) {
+  const clients = (store.coaching?.asCoach || []).filter(c => c.status === 'active');
+
+  return (
+    <Screen scroll>
+      <TopBar title="Clients" onBack={() => go({ name: 'settings' })} />
+      {clients.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '60px 24px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
+          No active clients yet.<br />Invite clients from Settings → Coaching.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 0 24px' }}>
+          {clients.map(c => (
+            <ClientCard key={c.id} client={c} go={go} />
+          ))}
+        </div>
+      )}
+    </Screen>
+  );
+}
+
+function ClientCard({ client, go }) {
+  return (
+    <div
+      onClick={() => go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName })}
+      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}
+    >
+      <div style={{ width: 44, height: 44, borderRadius: 22, background: UI.bgElevated, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.inkSoft, fontWeight: 700 }}>{(client.clientName || '?')[0].toUpperCase()}</span>
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 2 }}>{client.clientName}</div>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{client.clientEmail}</div>
+      </div>
+      <ChevronRight />
+    </div>
+  );
+}
+
+// ─── CoachClientScreen ────────────────────────────────────────────────────────
+// Full coach view for a single client — 4 tabs: Overview, Plan, Sessions, Notes.
+
+function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName }) {
+  const [tab, setTab] = useStateC('overview');
+  const [clientStore, setClientStore] = useStateC(null);
+  const [loadError, setLoadError] = useStateC(null);
+
+  useEffectC(() => {
+    LB.loadClientStore(clientId)
+      .then(data => setClientStore(data))
+      .catch(e => setLoadError(e.message));
+  }, [clientId]);
+
+  const reloadClient = async () => {
+    try {
+      const fresh = await LB.loadClientStore(clientId);
+      setClientStore(fresh);
+    } catch (_) {}
+  };
+
+  const TABS = [
+    { id: 'overview', icon: 'fa-chart-bar', label: 'Overview' },
+    { id: 'plan', icon: 'fa-calendar-days', label: 'Plan' },
+    { id: 'sessions', icon: 'fa-dumbbell', label: 'Sessions' },
+    { id: 'notes', icon: 'fa-comment', label: 'Notes' },
+  ];
+
+  return (
+    <Screen scroll={false}>
+      <TopBar
+        title={clientName}
+        sub={<span className="micro" style={{ color: 'var(--accent)', letterSpacing: '0.12em' }}>COACHING</span>}
+        onBack={() => go({ name: 'coaching-dashboard' })}
+      />
+
+      {/* Tab bar */}
+      <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0 }}>
+        {TABS.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            style={{ flex: 1, padding: '10px 4px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent', WebkitTapHighlightColor: 'transparent' }}
+          >
+            <i className={`fa-solid ${t.icon}`} style={{ fontSize: 14, color: tab === t.id ? 'var(--accent)' : UI.inkFaint }} />
+            <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.08em', color: tab === t.id ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase' }}>{t.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {loadError ? (
+        <div style={{ padding: 32, textAlign: 'center', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 13 }}>
+          Failed to load client data: {loadError}
+        </div>
+      ) : !clientStore ? (
+        <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+      ) : (
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {tab === 'overview' && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} />}
+          {tab === 'plan' && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} />}
+          {tab === 'sessions' && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} />}
+          {tab === 'notes' && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} />}
+        </div>
+      )}
+    </Screen>
+  );
+}
+
+// ─── Tab: Overview ────────────────────────────────────────────────────────────
+
+function ClientOverviewTab({ clientStore, coachingId, userId }) {
+  const sessions = clientStore.sessions || [];
+  const ended = sessions.filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+  const last30 = ended.filter(s => {
+    const d = new Date(s.ended);
+    return (Date.now() - d.getTime()) < 30 * 86400000;
+  });
+
+  const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
+  const trainingDays = activeSch ? (activeSch.days || []).filter(d => d.items?.length > 0).length : 0;
+  const weeksLast30 = 4;
+  const expectedSessions = trainingDays * weeksLast30;
+  const adherence = expectedSessions > 0 ? Math.round((last30.length / expectedSessions) * 100) : null;
+
+  const avgVol = last30.length > 0
+    ? Math.round(last30.reduce((s, x) => s + LB.totalVolume(x), 0) / last30.length)
+    : null;
+
+  return (
+    <div style={{ overflowY: 'auto', flex: 1, padding: '16px 0 32px' }}>
+      {/* Stats row */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20, padding: '0 4px' }}>
+        <StatBox label="Sessions (30d)" value={last30.length} />
+        <StatBox label="Adherence" value={adherence != null ? `${adherence}%` : '—'} gold={adherence >= 80} />
+        <StatBox label="Avg Volume" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}kg` : '—'} />
+      </div>
+
+      {/* Active plan */}
+      <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>ACTIVE PLAN</div>
+      {activeSch ? (
+        <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 20 }}>
+          <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{activeSch.name}</div>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{trainingDays} training {trainingDays === 1 ? 'day' : 'days'}</div>
+        </div>
+      ) : (
+        <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 20, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No active plan</div>
+      )}
+
+      {/* Recent sessions */}
+      <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>RECENT SESSIONS</div>
+      {ended.slice(0, 5).map(s => (
+        <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 8 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{fmtDate(s.date)}</div>
+          </div>
+          <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(LB.totalVolume(s)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span></span>
+        </div>
+      ))}
+      {ended.length === 0 && <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '12px 14px' }}>No sessions yet.</div>}
+    </div>
+  );
+}
+
+function StatBox({ label, value, gold }) {
+  return (
+    <div style={{ flex: 1, background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, padding: '12px 10px', textAlign: 'center' }}>
+      <div className="num" style={{ fontSize: 20, color: gold ? UI.gold : UI.ink, lineHeight: 1, marginBottom: 4 }}>{value}</div>
+      <div className="micro" style={{ color: UI.inkFaint }}>{label}</div>
+    </div>
+  );
+}
+
+// ─── Tab: Plan ────────────────────────────────────────────────────────────────
+
+function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, userId, go, onReload }) {
+  const schedules = (clientStore.schedules || []).filter(s => !s.archived);
+  const active = clientStore.activeScheduleId;
+  const [noteOpen, setNoteOpen] = useStateC(false);
+  const [noteBody, setNoteBody] = useStateC('');
+  const [noteSaving, setNoteSaving] = useStateC(false);
+
+  const activate = async (scheduleId) => {
+    try {
+      await LB.supabase.from('zane_user_settings')
+        .update({ active_schedule_id: scheduleId })
+        .eq('user_id', clientId);
+      setClientStore(s => ({ ...s, activeScheduleId: scheduleId }));
+      await LB.addCoachingNote(coachingId, 'plan', scheduleId,
+        clientStore.schedules?.find(s => s.id === scheduleId)?.name || 'Plan',
+        `Activated plan: ${clientStore.schedules?.find(s => s.id === scheduleId)?.name || scheduleId}`, userId);
+    } catch (e) { alert(e.message); }
+  };
+
+  const saveNote = async () => {
+    if (!noteBody.trim()) return;
+    setNoteSaving(true);
+    try {
+      await LB.addCoachingNote(coachingId, 'plan', null, null, noteBody.trim(), userId);
+      setNoteBody('');
+      setNoteOpen(false);
+    } catch (e) { alert(e.message); } finally { setNoteSaving(false); }
+  };
+
+  return (
+    <div style={{ overflowY: 'auto', flex: 1, padding: '16px 0 32px' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12, paddingRight: 2 }}>
+        <button onClick={() => setNoteOpen(true)} style={{ background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, letterSpacing: '0.08em' }}>
+          + NOTE
+        </button>
+      </div>
+      {schedules.length === 0 ? (
+        <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '12px 14px' }}>No plans yet.</div>
+      ) : schedules.map(sch => (
+        <div key={sch.id} style={{ marginBottom: 10, background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${sch.id === active ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px' }}>
+            {sch.id === active && (
+              <div style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--accent)', flexShrink: 0 }} />
+            )}
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{sch.name}</div>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+                {(sch.days || []).filter(d => d.items?.length > 0).length} workout days
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {sch.id !== active && (
+                <button onClick={() => activate(sch.id)} style={{ background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.5)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.08em' }}>
+                  ACTIVATE
+                </button>
+              )}
+              <button
+                onClick={() => go({ name: 'coaching-edit-plan', coachingId, clientId, scheduleId: sch.id, clientName: clientStore.user?.name || '?' })}
+                style={{ background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, letterSpacing: '0.08em' }}
+              >
+                EDIT
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
+      <Sheet open={noteOpen} onClose={() => setNoteOpen(false)} title="Plan Note">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <textarea value={noteBody} onChange={e => setNoteBody(e.target.value)} placeholder="Write a note about the plan…" rows={4} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', resize: 'none', width: '100%', boxSizing: 'border-box' }} />
+          <Btn onClick={saveNote} disabled={noteSaving || !noteBody.trim()}>{noteSaving ? 'Saving…' : 'Save Note'}</Btn>
+        </div>
+      </Sheet>
+    </div>
+  );
+}
+
+// ─── Tab: Sessions ────────────────────────────────────────────────────────────
+
+function ClientSessionsTab({ clientStore, coachingId, userId, clientName }) {
+  const [selected, setSelected] = useStateC(null);
+  const [noteOpen, setNoteOpen] = useStateC(false);
+  const [noteBody, setNoteBody] = useStateC('');
+  const [noteSaving, setNoteSaving] = useStateC(false);
+  const sessions = (clientStore.sessions || []).filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+
+  const saveNote = async () => {
+    if (!noteBody.trim() || !selected) return;
+    setNoteSaving(true);
+    try {
+      await LB.addCoachingNote(coachingId, 'session', selected.id, selected.dayName, noteBody.trim(), userId);
+      setNoteBody('');
+      setNoteOpen(false);
+    } catch (e) { alert(e.message); } finally { setNoteSaving(false); }
+  };
+
+  if (selected) {
+    const vol = LB.totalVolume(selected);
+    return (
+      <div style={{ overflowY: 'auto', flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
+          <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, padding: 0 }}>← Back</button>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{selected.dayName}</div>
+            <div style={{ fontSize: 11, color: UI.inkFaint }}>{fmtDate(selected.date)}</div>
+          </div>
+          <button onClick={() => setNoteOpen(true)} style={{ background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>+ NOTE</button>
+        </div>
+        <div style={{ padding: '12px 0 32px' }}>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 16, padding: '0 4px' }}>
+            <StatBox label="Volume" value={`${Math.round(vol).toLocaleString('en-US')}kg`} />
+            <StatBox label="Sets" value={LB.doneSetCount(selected)} />
+            <StatBox label="Duration" value={selected.durationMinutes ? `${selected.durationMinutes}m` : '—'} />
+          </div>
+          {(selected.entries || []).map((e, i) => (
+            <div key={i} style={{ padding: '10px 14px', borderBottom: `0.5px solid ${UI.hair}` }}>
+              <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>{e.name}</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {(e.sets || []).filter(s => !s.warmup).map((s, j) => (
+                  <span key={j} className="num" style={{ fontSize: 12, color: s.done ? UI.ink : UI.inkFaint, background: UI.bgInset, borderRadius: 4, padding: '2px 8px', border: `0.5px solid ${UI.hair}` }}>
+                    {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <Sheet open={noteOpen} onClose={() => setNoteOpen(false)} title="Session Note">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <textarea value={noteBody} onChange={e => setNoteBody(e.target.value)} placeholder={`Note for ${selected.dayName}…`} rows={4} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', resize: 'none', width: '100%', boxSizing: 'border-box' }} />
+            <Btn onClick={saveNote} disabled={noteSaving || !noteBody.trim()}>{noteSaving ? 'Saving…' : 'Save Note'}</Btn>
+          </div>
+        </Sheet>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ overflowY: 'auto', flex: 1, padding: '8px 0 32px' }}>
+      {sessions.length === 0 ? (
+        <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '32px 14px', textAlign: 'center' }}>No sessions yet.</div>
+      ) : sessions.map(s => {
+        const vol = LB.totalVolume(s);
+        return (
+          <div key={s.id} onClick={() => setSelected(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
+              <div style={{ fontSize: 11, color: UI.inkFaint }}>{fmtDate(s.date)} · {LB.doneSetCount(s)} sets</div>
+            </div>
+            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(vol).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span></span>
+            <ChevronRight />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Tab: Notes ───────────────────────────────────────────────────────────────
+
+function ClientNotesTab({ coachingId, userId, clientName }) {
+  const [notes, setNotes] = useStateC([]);
+  const [loading, setLoading] = useStateC(true);
+  const [noteBody, setNoteBody] = useStateC('');
+  const [saving, setSaving] = useStateC(false);
+
+  const reload = () => {
+    setLoading(true);
+    LB.loadCoachingNotes(coachingId)
+      .then(setNotes)
+      .finally(() => setLoading(false));
+  };
+
+  useEffectC(() => { reload(); }, [coachingId]);
+
+  const save = async () => {
+    if (!noteBody.trim()) return;
+    setSaving(true);
+    try {
+      await LB.addCoachingNote(coachingId, 'general', null, null, noteBody.trim(), userId);
+      setNoteBody('');
+      reload();
+    } catch (e) { alert(e.message); } finally { setSaving(false); }
+  };
+
+  const typeLabel = { session: 'SESSION', plan: 'PLAN', general: 'GENERAL', change: 'CHANGE' };
+
+  return (
+    <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column' }}>
+      {/* Compose */}
+      <div style={{ padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          <textarea value={noteBody} onChange={e => setNoteBody(e.target.value)} placeholder={`Write a note for ${clientName}…`} rows={2} style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '9px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', resize: 'none', boxSizing: 'border-box' }} />
+          <button onClick={save} disabled={saving || !noteBody.trim()} style={{ padding: '9px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: saving || !noteBody.trim() ? 'default' : 'pointer', opacity: saving || !noteBody.trim() ? 0.5 : 1, flexShrink: 0 }}>
+            {saving ? '…' : 'SEND'}
+          </button>
+        </div>
+      </div>
+
+      {/* Note list */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0 32px' }}>
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+        ) : notes.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No notes yet.</div>
+        ) : notes.map(n => {
+          const isCoach = n.authorId === userId;
+          return (
+            <div key={n.id} style={{ padding: '10px 16px', borderBottom: `0.5px solid ${UI.hair}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span className="micro" style={{ color: isCoach ? 'var(--accent)' : UI.inkFaint }}>{isCoach ? 'YOU' : clientName.toUpperCase()}</span>
+                {n.entityName && <span className="micro" style={{ color: UI.inkFaint }}>· {n.entityName.toUpperCase()}</span>}
+                <span style={{ marginLeft: 'auto', fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtRelative(n.createdAt)}</span>
+                {n.type !== 'general' && <span className="micro" style={{ color: UI.inkGhost }}>{typeLabel[n.type]}</span>}
+              </div>
+              <div style={{ fontSize: 13, color: isCoach ? UI.ink : UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{n.body}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── CoachingBannerGroup ──────────────────────────────────────────────────────
+// Renders unread banner + notes sheet; mounted in HomeScreen.
+
+function CoachingBannerGroup({ store, setStore, userId }) {
+  const [notesOpen, setNotesOpen] = useStateC(false);
+  const notes = store.coaching?.unreadNotes || [];
+  if (!notes.length && !notesOpen) return null;
+  return (
+    <div style={{ flexShrink: 0, padding: '0 22px 10px' }}>
+      {notes.length > 0 && (
+        <CoachingUnreadBanner store={store} setStore={setStore} userId={userId} onOpen={() => setNotesOpen(true)} />
+      )}
+      <CoachingNotesSheet open={notesOpen} store={store} setStore={setStore} userId={userId} onClose={() => setNotesOpen(false)} />
+    </div>
+  );
+}
+
+// ─── Register ─────────────────────────────────────────────────────────────────
+
+window.Screens = window.Screens || {};
+Object.assign(window.Screens, {
+  CoachingPendingBanner,
+  CoachingUnreadBanner,
+  CoachingNotesSheet,
+  CoachingBannerGroup,
+  CoachingSettingsSection,
+  CoachingDashboard,
+  CoachClientScreen,
+});
