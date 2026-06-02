@@ -938,12 +938,13 @@ function AdherenceChart({ weeks }) {
 
 function RollingVolumeChart({ sessions, planStartDate }) {
   const cutoff = planStartDate ? planStartDate.slice(0, 10) : null;
-  const ended = (sessions || []).filter(s => s.ended && s.date && (!cutoff || s.date >= cutoff)).sort((a, b) => a.date.localeCompare(b.date));
+  const ended = (sessions || []).filter(s => s.ended && s.date && (!cutoff || s.date.slice(0, 10) >= cutoff)).sort((a, b) => a.date.slice(0, 10).localeCompare(b.date.slice(0, 10)));
   const allPoints = ended.map(s => {
-    const d = new Date(s.date + 'T12:00:00');
+    const dateKey = s.date.slice(0, 10);
+    const d = new Date(dateKey + 'T12:00:00');
     const from = new Date(d); from.setDate(from.getDate() - 30);
-    const win = ended.filter(x => { const xd = new Date(x.date + 'T12:00:00'); return xd >= from && xd <= d; });
-    return { avg: win.length ? Math.round(win.reduce((sum, x) => sum + LB.totalVolume(x), 0) / win.length) : 0, date: s.date };
+    const win = ended.filter(x => { const xd = new Date(x.date.slice(0, 10) + 'T12:00:00'); return xd >= from && xd <= d; });
+    return { avg: win.length ? Math.round(win.reduce((sum, x) => sum + LB.totalVolume(x), 0) / win.length) : 0, date: dateKey };
   });
   const points = allPoints.slice(-40);
 
