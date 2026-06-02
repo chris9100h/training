@@ -182,6 +182,7 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
   const [inviting, setInviting] = useStateC(false);
   const [inviteError, setInviteError] = useStateC('');
   const [ending, setEnding] = useStateC(false);
+  const [confirmEl, confirm] = useConfirm();
 
   const handleInvite = async () => {
     if (!inviteEmail.trim()) return;
@@ -203,7 +204,7 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
   };
 
   const handleEndCoaching = async (coachingId) => {
-    if (!confirm('End this coaching relationship?')) return;
+    if (!await confirm('This will immediately revoke access to training data.', { title: 'End coaching?', ok: 'End', danger: true })) return;
     setEnding(true);
     try {
       await LB.endCoaching(coachingId);
@@ -217,6 +218,8 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
   };
 
   return (
+    <>
+    {confirmEl}
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
 
       {/* As client */}
@@ -296,6 +299,7 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
       </div>
       {inviteError && <div style={{ fontSize: 11, color: 'rgba(var(--danger-rgb),0.85)', fontFamily: UI.fontUi, marginTop: 5 }}>{inviteError}</div>}
     </div>
+    </>
   );
 }
 
