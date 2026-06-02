@@ -577,8 +577,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <Btn onClick={() => { setProgressionSheet(false); setTimeout(() => setProgConfigOpen(true), 300); }}>Configure exercises</Btn>
             </>
           )}
+          <Btn onClick={() => setProgressionSheet(false)}>Done</Btn>
         </div>
-        <Btn onClick={() => setProgressionSheet(false)}>Done</Btn>
       </Sheet>
 
       {/* ══ Equipment config sheet ══ */}
