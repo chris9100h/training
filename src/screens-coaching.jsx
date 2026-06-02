@@ -202,7 +202,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
             placeholder="Message…"
             style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }}
           />
-          <button onClick={send} disabled={sending || !body.trim()} style={{ width: 40, height: 40, borderRadius: 6, border: 'none', background: body.trim() && !sending ? 'var(--accent)' : UI.bgElevated, color: body.trim() && !sending ? '#0a0805' : UI.inkGhost, cursor: sending || !body.trim() ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, color 0.2s' }}>
+          <button onClick={send} disabled={sending || !body.trim()} style={{ width: 40, height: 40, borderRadius: 6, border: body.trim() && !sending ? 'none' : `0.5px solid ${UI.hair}`, background: body.trim() && !sending ? 'var(--accent)' : 'transparent', color: body.trim() && !sending ? '#0a0805' : UI.inkFaint, cursor: sending || !body.trim() ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
             {sending ? <span style={{ fontFamily: UI.fontUi, fontSize: 14 }}>…</span> : <i className="fa-solid fa-arrow-up" style={{ fontSize: 15 }} />}
           </button>
         </div>
@@ -335,7 +335,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
               placeholder="Thread name (e.g. Nutrition, Goals…)"
               style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
             />
-            <button onClick={create} disabled={saving || !newName.trim()} style={{ padding: '10px 18px', borderRadius: 6, border: 'none', background: newName.trim() && !saving ? 'var(--accent)' : UI.bgElevated, color: newName.trim() && !saving ? '#0a0805' : UI.inkGhost, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', cursor: saving || !newName.trim() ? 'default' : 'pointer', flexShrink: 0, transition: 'background 0.2s, color 0.2s' }}>
+            <button onClick={create} disabled={saving || !newName.trim()} style={{ padding: '10px 18px', borderRadius: 6, border: newName.trim() && !saving ? 'none' : `0.5px solid ${UI.hair}`, background: newName.trim() && !saving ? 'var(--accent)' : 'transparent', color: newName.trim() && !saving ? '#0a0805' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', cursor: saving || !newName.trim() ? 'default' : 'pointer', flexShrink: 0, transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
               {saving ? '…' : 'CREATE'}
             </button>
           </div>
