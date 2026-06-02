@@ -618,7 +618,6 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
 
   // Only count sessions for the active plan — ignore old plan sessions.
   const planSessions = (clientStore.sessions || []).filter(s => s.ended && s.scheduleId === activeSch.id);
-  if (planSessions.length === 0) return [];
 
   // Session date set — both stored date field and local-time of ended timestamp.
   const sessionDates = new Set();
@@ -627,13 +626,25 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
     sessionDates.add(localDateKey(new Date(s.ended)));
   });
 
-  // Earliest week where this plan was used — don't penalize weeks before plan was active.
-  const earliestMs = Math.min(...planSessions.map(s => new Date(s.ended).getTime()));
-  const earliest = new Date(earliestMs); earliest.setHours(12, 0, 0, 0);
-  const earliestWd = (earliest.getDay() + 6) % 7;
-  const planStartMonday = new Date(earliest);
-  planStartMonday.setDate(earliest.getDate() - earliestWd);
-  planStartMonday.setHours(0, 0, 0, 0);
+  // Determine the Monday from which adherence starts — don't penalize weeks before the plan was active.
+  // Weekday plans: weekPlanStartDate is set when the plan was activated → most accurate.
+  // Cycle plans / fallback: earliest session for this plan.
+  let planStartMonday = null;
+  if (isWd && clientStore.weekPlanStartDate) {
+    const d = new Date(clientStore.weekPlanStartDate); d.setHours(12, 0, 0, 0);
+    const wd = (d.getDay() + 6) % 7;
+    planStartMonday = new Date(d);
+    planStartMonday.setDate(d.getDate() - wd);
+    planStartMonday.setHours(0, 0, 0, 0);
+  } else if (planSessions.length > 0) {
+    const earliestMs = Math.min(...planSessions.map(s => new Date(s.ended).getTime()));
+    const earliest = new Date(earliestMs); earliest.setHours(12, 0, 0, 0);
+    const earliestWd = (earliest.getDay() + 6) % 7;
+    planStartMonday = new Date(earliest);
+    planStartMonday.setDate(earliest.getDate() - earliestWd);
+    planStartMonday.setHours(0, 0, 0, 0);
+  }
+  if (!planStartMonday) return [];
 
   const today = new Date(); today.setHours(12, 0, 0, 0);
   const todayWd = (today.getDay() + 6) % 7; // 0=Mon
