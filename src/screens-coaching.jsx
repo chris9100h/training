@@ -25,9 +25,10 @@ function fmtRelative(iso) {
 // Returns a human-readable summary of what changed between two schedule
 // snapshots, or null if nothing relevant changed.
 
-function diffSchedule(before, after) {
+function diffSchedule(before, after, exercises) {
   if (!before || !after) return null;
   const lines = [];
+  const exName = (exId) => (exercises || []).find(e => e.id === exId)?.name || exId;
 
   if (before.name !== after.name) lines.push(`Renamed: ${before.name} → ${after.name}`);
 
@@ -50,12 +51,10 @@ function diffSchedule(before, after) {
   const exAdded = [], exRemoved = [];
   for (const afterDay of shared) {
     const beforeDay = beforeById[afterDay.id];
-    const bItems = beforeDay.items || [];
-    const aItems = afterDay.items  || [];
-    const bKeys  = new Set(bItems.map(i => i.exId || i.name));
-    const aKeys  = new Set(aItems.map(i => i.exId || i.name));
-    aItems.filter(i => !bKeys.has(i.exId || i.name)).forEach(i => exAdded.push(`${i.name} (${afterDay.name})`));
-    bItems.filter(i => !aKeys.has(i.exId || i.name)).forEach(i => exRemoved.push(`${i.name} (${beforeDay.name})`));
+    const bKeys = new Set((beforeDay.items || []).map(i => i.exId).filter(Boolean));
+    const aKeys = new Set((afterDay.items  || []).map(i => i.exId).filter(Boolean));
+    (afterDay.items  || []).filter(i => i.exId && !bKeys.has(i.exId)).forEach(i => exAdded.push(`${exName(i.exId)} (${afterDay.name})`));
+    (beforeDay.items || []).filter(i => i.exId && !aKeys.has(i.exId)).forEach(i => exRemoved.push(`${exName(i.exId)} (${beforeDay.name})`));
   }
   if (exAdded.length)   lines.push(`Exercises added: ${exAdded.join(', ')}`);
   if (exRemoved.length) lines.push(`Exercises removed: ${exRemoved.join(', ')}`);
@@ -1202,9 +1201,10 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
       if (isDirty.current) {
         isDirty.current = false;
         try {
-          const finalSch = latestClientStore.current?.schedules?.find(s => s.id === scheduleId);
-          const schName  = finalSch?.name || scheduleId;
-          const diff     = diffSchedule(initialSchedule.current, finalSch);
+          const finalSch  = latestClientStore.current?.schedules?.find(s => s.id === scheduleId);
+          const schName   = finalSch?.name || scheduleId;
+          const exercises = latestClientStore.current?.exercises || [];
+          const diff      = diffSchedule(initialSchedule.current, finalSch, exercises);
           const body     = diff ? `Updated plan: ${schName}\n\n${diff}` : `Updated plan: ${schName}`;
           const threadId = await LB.getOrCreateCoachingThread(coachingId, `Changes on ${schName}`, userId);
           await LB.addCoachingNote(coachingId, 'plan', scheduleId, schName, body, userId, threadId);
