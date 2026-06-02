@@ -229,8 +229,9 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
       setThreads(loaded);
       if (setStore && (unreadNotes || []).length) {
         const validThreadIds = new Set(loaded.map(t => t.id));
+        // Stale = threadless (no UI to show them) OR referencing a deleted thread
         const orphanedIds = (unreadNotes || [])
-          .filter(n => n.threadId && !validThreadIds.has(n.threadId))
+          .filter(n => !n.threadId || !validThreadIds.has(n.threadId))
           .map(n => n.id);
         if (orphanedIds.length) {
           setStore(s => ({
@@ -843,9 +844,10 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
         .update({ active_schedule_id: scheduleId })
         .eq('user_id', clientId);
       setClientStore(s => ({ ...s, activeScheduleId: scheduleId }));
-      await LB.addCoachingNote(coachingId, 'plan', scheduleId,
-        clientStore.schedules?.find(s => s.id === scheduleId)?.name || 'Plan',
-        `Activated plan: ${clientStore.schedules?.find(s => s.id === scheduleId)?.name || scheduleId}`, userId);
+      const planName = clientStore.schedules?.find(s => s.id === scheduleId)?.name || scheduleId;
+      const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Changes', userId);
+      await LB.addCoachingNote(coachingId, 'plan', scheduleId, planName,
+        `Activated plan: ${planName}`, userId, threadId);
     } catch (e) { alert(e.message); }
   };
 
@@ -853,7 +855,8 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
     if (!noteBody.trim()) return;
     setNoteSaving(true);
     try {
-      await LB.addCoachingNote(coachingId, 'plan', null, null, noteBody.trim(), userId);
+      const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Changes', userId);
+      await LB.addCoachingNote(coachingId, 'plan', null, null, noteBody.trim(), userId, threadId);
       setNoteBody('');
       setNoteOpen(false);
     } catch (e) { alert(e.message); } finally { setNoteSaving(false); }

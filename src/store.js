@@ -1022,6 +1022,16 @@ async function createCoachingThread(coachingId, name, userId) {
   return id;
 }
 
+async function getOrCreateCoachingThread(coachingId, name, userId) {
+  const { data } = await _supabase.from('zane_coaching_threads')
+    .select('id')
+    .eq('coaching_id', coachingId)
+    .eq('name', name)
+    .maybeSingle();
+  if (data) return data.id;
+  return createCoachingThread(coachingId, name, userId);
+}
+
 async function deleteCoachingThread(threadId) {
   await _supabase.from('zane_coaching_notes').delete().eq('thread_id', threadId);
   const { error } = await _supabase.from('zane_coaching_threads').delete().eq('id', threadId);
@@ -1041,5 +1051,5 @@ window.LB = {
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,
   loadClientStore, inviteClient, respondToCoachingInvite, endCoaching,
-  addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread,
+  addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
 };
