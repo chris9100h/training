@@ -616,13 +616,24 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
 
   const isWd = LB.isWeekdayPlan(activeSch);
 
-  // Build session date set using local time on both the stored date field and
-  // the ended timestamp — whichever is present — to survive any storage format.
+  // Only count sessions for the active plan — ignore old plan sessions.
+  const planSessions = (clientStore.sessions || []).filter(s => s.ended && s.scheduleId === activeSch.id);
+  if (planSessions.length === 0) return [];
+
+  // Session date set — both stored date field and local-time of ended timestamp.
   const sessionDates = new Set();
-  (clientStore.sessions || []).filter(s => s.ended).forEach(s => {
+  planSessions.forEach(s => {
     if (s.date) sessionDates.add(s.date.slice(0, 10));
     sessionDates.add(localDateKey(new Date(s.ended)));
   });
+
+  // Earliest week where this plan was used — don't penalize weeks before plan was active.
+  const earliestMs = Math.min(...planSessions.map(s => new Date(s.ended).getTime()));
+  const earliest = new Date(earliestMs); earliest.setHours(12, 0, 0, 0);
+  const earliestWd = (earliest.getDay() + 6) % 7;
+  const planStartMonday = new Date(earliest);
+  planStartMonday.setDate(earliest.getDate() - earliestWd);
+  planStartMonday.setHours(0, 0, 0, 0);
 
   const today = new Date(); today.setHours(12, 0, 0, 0);
   const todayWd = (today.getDay() + 6) % 7; // 0=Mon
@@ -632,6 +643,9 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   return Array.from({ length: weeksBack }, (_, w) => {
     const monday = new Date(thisMonday);
     monday.setDate(thisMonday.getDate() - w * 7);
+
+    // Skip weeks before the plan was in use.
+    if (monday < planStartMonday) return null;
 
     let planned = 0, done = 0;
     for (let d = 0; d < 7; d++) {
@@ -643,7 +657,8 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
       let isTrainingDay = false;
 
       if (isWd) {
-        const wd = date.getDay();
+        // App stores weekdays as 0=Mon … 6=Sun; convert from JS 0=Sun.
+        const wd = (date.getDay() + 6) % 7;
         isTrainingDay = (activeSch.days || []).some(day => day.weekday === wd && day.items?.length > 0);
       } else {
         const pos = cyclePosFn(clientStore, date);
@@ -660,7 +675,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
     const label = w === 0 ? 'This week' : w === 1 ? 'Last week'
       : `${monday.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}`;
     return { label, planned, done, pct };
-  });
+  }).filter(Boolean);
 }
 
 function ClientOverviewTab({ clientStore, coachingId, userId }) {
