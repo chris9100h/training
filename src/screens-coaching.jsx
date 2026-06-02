@@ -900,7 +900,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                 const ex = (clientStore.exercises || []).find(e => e.id === item.exId);
                 const last = LB.lastSessionForExercise(clientStore, item.exId, todayDay.id);
                 const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps);
-                const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore.smartProgression);
+                const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore.settings?.smartProgression);
                 const hasWeight = seeds.some(s => s.kg != null);
                 return (
                   <div key={idx} style={{ padding: '12px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
