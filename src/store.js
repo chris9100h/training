@@ -870,7 +870,7 @@ function clearLocal(userId) {
 
 let _realtimeChannel = null;
 
-function subscribeToChanges(userId, onSession, onExIdx, onSessionNav) {
+function subscribeToChanges(userId, onSession, onExIdx, onSessionNav, onCoachingNote) {
   const mapRow = row => ({
     id: row.id,
     scheduleId: row.schedule_id,
@@ -882,10 +882,18 @@ function subscribeToChanges(userId, onSession, onExIdx, onSessionNav) {
     entries: row.entries,
     durationMinutes: row.duration_minutes ?? null,
   });
+  const mapNote = n => ({
+    id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
+    type: n.type, entityId: n.entity_id, entityName: n.entity_name,
+    threadId: n.thread_id, body: n.body, createdAt: n.created_at,
+  });
   _realtimeChannel = _supabase
     .channel(`rt-${userId}`)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_sessions', filter: `user_id=eq.${userId}` }, p => onSession(mapRow(p.new)))
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'zane_sessions', filter: `user_id=eq.${userId}` }, p => onSession(mapRow(p.new)))
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_coaching_notes' }, p => {
+      if (p.new.author_id !== userId) onCoachingNote?.(mapNote(p.new));
+    })
     .on('broadcast', { event: 'ex_idx' }, ({ payload }) => onExIdx?.(payload))
     .on('broadcast', { event: 'session_nav' }, ({ payload }) => onSessionNav?.(payload))
     .subscribe();

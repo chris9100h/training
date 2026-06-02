@@ -612,7 +612,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'overview' && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} />}
           {tab === 'plan' && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} />}
           {tab === 'sessions' && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} />}
-          {tab === 'notes' && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} />}
+          {tab === 'notes' && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
       )}
     </Screen>
@@ -990,7 +990,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName }) {
 
 // ─── Tab: Notes ───────────────────────────────────────────────────────────────
 
-function ClientNotesTab({ coachingId, userId, clientName, store }) {
+function ClientNotesTab({ coachingId, userId, clientName, store, setStore }) {
   // Activity feed: threadless auto-generated notes (plan changes, session notes etc.)
   const [activity, setActivity] = useStateC([]);
   const [actLoading, setActLoading] = useStateC(true);
@@ -1007,7 +1007,7 @@ function ClientNotesTab({ coachingId, userId, clientName, store }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-      <ThreadList coachingId={coachingId} userId={userId} otherName={clientName} unreadNotes={unreadNotes} canDelete={true} />
+      <ThreadList coachingId={coachingId} userId={userId} otherName={clientName} unreadNotes={unreadNotes} setStore={setStore} canDelete={true} />
       {/* Auto-generated activity (plan activations, session notes not in threads) */}
       {!actLoading && activity.length > 0 && (
         <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}` }}>

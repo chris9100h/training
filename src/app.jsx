@@ -467,6 +467,16 @@ function App() {
           setRoute({ name: 'home' });
         }
       },
+      (note) => {
+        setStore(s => {
+          if (!s?.coaching) return s;
+          if ((s.coaching.unreadNotes || []).some(n => n.id === note.id)) return s;
+          return {
+            ...s,
+            coaching: { ...s.coaching, unreadNotes: [note, ...(s.coaching.unreadNotes || [])] },
+          };
+        });
+      },
     );
   }, [userId]);
 
