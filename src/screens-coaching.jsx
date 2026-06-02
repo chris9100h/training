@@ -1299,8 +1299,16 @@ function ClientNutritionTab({ coachingId, userId }) {
   const [loading, setLoading] = useStateC(true);
   const [saving, setSaving] = useStateC(false);
   const [historyOpen, setHistoryOpen] = useStateC(false);
-  const emptyForm = { caloriesTraining: '', proteinTraining: '', carbsTraining: '', fatTraining: '', caloriesRest: '', proteinRest: '', carbsRest: '', fatRest: '' };
+  const emptyForm = { proteinTraining: '', carbsTraining: '', fatTraining: '', proteinRest: '', carbsRest: '', fatRest: '' };
   const [form, setForm] = useStateC(emptyForm);
+
+  // Calories auto-computed: protein*4 + carbs*4 + fat*9
+  const calcCals = (pro, car, fat) => {
+    const total = (parseInt(pro) || 0) * 4 + (parseInt(car) || 0) * 4 + (parseInt(fat) || 0) * 9;
+    return total > 0 ? total : null;
+  };
+  const calsTraining = calcCals(form.proteinTraining, form.carbsTraining, form.fatTraining);
+  const calsRest     = calcCals(form.proteinRest,     form.carbsRest,     form.fatRest);
 
   const reload = () => {
     setLoading(true);
@@ -1309,14 +1317,12 @@ function ClientNutritionTab({ coachingId, userId }) {
       if (data.length > 0) {
         const l = data[0];
         setForm({
-          caloriesTraining: l.caloriesTraining?.toString() ?? '',
-          proteinTraining:  l.proteinTraining?.toString()  ?? '',
-          carbsTraining:    l.carbsTraining?.toString()    ?? '',
-          fatTraining:      l.fatTraining?.toString()      ?? '',
-          caloriesRest:     l.caloriesRest?.toString()     ?? '',
-          proteinRest:      l.proteinRest?.toString()      ?? '',
-          carbsRest:        l.carbsRest?.toString()        ?? '',
-          fatRest:          l.fatRest?.toString()          ?? '',
+          proteinTraining: l.proteinTraining?.toString() ?? '',
+          carbsTraining:   l.carbsTraining?.toString()   ?? '',
+          fatTraining:     l.fatTraining?.toString()     ?? '',
+          proteinRest:     l.proteinRest?.toString()     ?? '',
+          carbsRest:       l.carbsRest?.toString()       ?? '',
+          fatRest:         l.fatRest?.toString()         ?? '',
         });
       }
     }).finally(() => setLoading(false));
@@ -1326,21 +1332,21 @@ function ClientNutritionTab({ coachingId, userId }) {
 
   const save = async () => {
     const macro = {
-      caloriesTraining: form.caloriesTraining ? parseInt(form.caloriesTraining) : null,
-      proteinTraining:  form.proteinTraining  ? parseInt(form.proteinTraining)  : null,
-      carbsTraining:    form.carbsTraining    ? parseInt(form.carbsTraining)    : null,
-      fatTraining:      form.fatTraining      ? parseInt(form.fatTraining)      : null,
-      caloriesRest:     form.caloriesRest     ? parseInt(form.caloriesRest)     : null,
-      proteinRest:      form.proteinRest      ? parseInt(form.proteinRest)      : null,
-      carbsRest:        form.carbsRest        ? parseInt(form.carbsRest)        : null,
-      fatRest:          form.fatRest          ? parseInt(form.fatRest)          : null,
+      caloriesTraining: calsTraining,
+      proteinTraining:  form.proteinTraining ? parseInt(form.proteinTraining) : null,
+      carbsTraining:    form.carbsTraining   ? parseInt(form.carbsTraining)   : null,
+      fatTraining:      form.fatTraining     ? parseInt(form.fatTraining)     : null,
+      caloriesRest:     calsRest,
+      proteinRest:      form.proteinRest     ? parseInt(form.proteinRest)     : null,
+      carbsRest:        form.carbsRest       ? parseInt(form.carbsRest)       : null,
+      fatRest:          form.fatRest         ? parseInt(form.fatRest)         : null,
     };
     setSaving(true);
     try {
       await LB.addCoachingMacros(coachingId, macro, userId);
       const fmtDay = (cal, pro, car, fat) => [cal && `${cal} kcal`, pro && `${pro}g protein`, car && `${car}g carbs`, fat && `${fat}g fat`].filter(Boolean).join(' · ');
       const td = fmtDay(macro.caloriesTraining, macro.proteinTraining, macro.carbsTraining, macro.fatTraining);
-      const rd = fmtDay(macro.caloriesRest, macro.proteinRest, macro.carbsRest, macro.fatRest);
+      const rd = fmtDay(macro.caloriesRest,     macro.proteinRest,     macro.carbsRest,     macro.fatRest);
       const lines = [td && `Training day: ${td}`, rd && `Rest day: ${rd}`].filter(Boolean);
       if (lines.length) {
         const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Nutrition', userId);
@@ -1351,33 +1357,45 @@ function ClientNutritionTab({ coachingId, userId }) {
     finally { setSaving(false); }
   };
 
-  const MacroField = ({ fieldKey, label, unit }) => (
+  // Plain render helpers (not React components) — avoids remount-on-render keyboard bug
+  const inputStyle = { width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '9px 36px 9px 10px', fontFamily: UI.fontNum, fontSize: 16, color: UI.ink, outline: 'none', boxSizing: 'border-box' };
+  const unitStyle  = { position: 'absolute', right: 8, fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, pointerEvents: 'none' };
+
+  const renderInput = (fieldKey, label, unit) => (
     <div style={{ flex: 1 }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{label}</div>
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-        <input
-          type="number" inputMode="numeric"
-          value={form[fieldKey]}
+      <div style={{ position: 'relative' }}>
+        <input type="number" inputMode="numeric" value={form[fieldKey]}
           onChange={e => setForm(f => ({ ...f, [fieldKey]: e.target.value }))}
-          placeholder="—"
-          style={{ width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '9px 32px 9px 10px', fontFamily: UI.fontNum, fontSize: 16, color: UI.ink, outline: 'none', boxSizing: 'border-box' }}
-        />
-        <span style={{ position: 'absolute', right: 8, fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, pointerEvents: 'none' }}>{unit}</span>
+          placeholder="—" style={inputStyle} />
+        <span style={unitStyle}>{unit}</span>
       </div>
     </div>
   );
 
-  const MacroSection = ({ prefix, label }) => (
+  const renderCals = (cals) => (
+    <div style={{ flex: 1 }}>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>CALORIES</div>
+      <div style={{ position: 'relative' }}>
+        <div style={{ ...inputStyle, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, color: cals ? UI.ink : UI.inkGhost, display: 'flex', alignItems: 'center' }}>
+          {cals ?? '—'}
+        </div>
+        <span style={unitStyle}>kcal</span>
+      </div>
+    </div>
+  );
+
+  const renderSection = (prefix, label, cals) => (
     <div style={{ marginBottom: 20 }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{label}</div>
       <div style={{ background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', gap: 10 }}>
-          <MacroField fieldKey={`calories${prefix}`} label="CALORIES" unit="kcal" />
-          <MacroField fieldKey={`protein${prefix}`}  label="PROTEIN"  unit="g" />
+          {renderCals(cals)}
+          {renderInput(`protein${prefix}`, 'PROTEIN', 'g')}
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <MacroField fieldKey={`carbs${prefix}`} label="CARBS" unit="g" />
-          <MacroField fieldKey={`fat${prefix}`}   label="FAT"   unit="g" />
+          {renderInput(`carbs${prefix}`, 'CARBS', 'g')}
+          {renderInput(`fat${prefix}`, 'FAT', 'g')}
         </div>
       </div>
     </div>
@@ -1387,8 +1405,8 @@ function ClientNutritionTab({ coachingId, userId }) {
 
   return (
     <div style={{ overflowY: 'auto', flex: 1, padding: '16px 12px 32px' }}>
-      <MacroSection prefix="Training" label="TRAINING DAY" />
-      <MacroSection prefix="Rest" label="REST DAY" />
+      {renderSection('Training', 'TRAINING DAY', calsTraining)}
+      {renderSection('Rest', 'REST DAY', calsRest)}
 
       <Btn onClick={save} disabled={saving} style={{ marginBottom: 24, width: '100%' }}>
         {saving ? 'Saving…' : 'Save Macros'}
@@ -1396,10 +1414,8 @@ function ClientNutritionTab({ coachingId, userId }) {
 
       {macros.length > 0 && (
         <>
-          <button
-            onClick={() => setHistoryOpen(o => !o)}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 0', marginBottom: 8 }}
-          >
+          <button onClick={() => setHistoryOpen(o => !o)}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 0', marginBottom: 8 }}>
             <span className="micro" style={{ color: UI.inkFaint }}>HISTORY ({macros.length})</span>
             <i className={`fa-solid fa-chevron-${historyOpen ? 'up' : 'down'}`} style={{ fontSize: 8, color: UI.inkGhost }} />
           </button>
