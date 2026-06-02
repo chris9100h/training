@@ -412,7 +412,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       if (repsA == null || repsB == null) return false;
       return better
         ? (st.kg > prevSet.kg && repsA >= repsB - 2) || (st.kg >= prevSet.kg && repsA > repsB)
-        : st.kg < prevSet.kg || (st.kg === prevSet.kg && repsA < repsB);
+        : (st.kg < prevSet.kg && repsA <= repsB) || (st.kg === prevSet.kg && repsA < repsB);
     };
     let improvements = 0, regressions = 0;
     doneSession.entries.forEach(e => {
