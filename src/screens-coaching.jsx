@@ -200,9 +200,9 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
             onChange={e => setBody(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
             placeholder="Message…"
-            style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 22, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }}
+            style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }}
           />
-          <button onClick={send} disabled={sending || !body.trim()} style={{ width: 40, height: 40, borderRadius: 20, border: 'none', background: body.trim() && !sending ? 'var(--accent)' : UI.bgElevated, color: body.trim() && !sending ? '#0a0805' : UI.inkGhost, cursor: sending || !body.trim() ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, color 0.2s' }}>
+          <button onClick={send} disabled={sending || !body.trim()} style={{ width: 40, height: 40, borderRadius: 6, border: 'none', background: body.trim() && !sending ? 'var(--accent)' : UI.bgElevated, color: body.trim() && !sending ? '#0a0805' : UI.inkGhost, cursor: sending || !body.trim() ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, color 0.2s' }}>
             {sending ? <span style={{ fontFamily: UI.fontUi, fontSize: 14 }}>…</span> : <i className="fa-solid fa-arrow-up" style={{ fontSize: 15 }} />}
           </button>
         </div>
@@ -333,14 +333,14 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
               onChange={e => setNewName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') create(); if (e.key === 'Escape') { setCreating(false); setNewName(''); } }}
               placeholder="Thread name (e.g. Nutrition, Goals…)"
-              style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 22, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
+              style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
             />
-            <button onClick={create} disabled={saving || !newName.trim()} style={{ padding: '10px 18px', borderRadius: 22, border: 'none', background: newName.trim() && !saving ? 'var(--accent)' : UI.bgElevated, color: newName.trim() && !saving ? '#0a0805' : UI.inkGhost, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', cursor: saving || !newName.trim() ? 'default' : 'pointer', flexShrink: 0, transition: 'background 0.2s, color 0.2s' }}>
+            <button onClick={create} disabled={saving || !newName.trim()} style={{ padding: '10px 18px', borderRadius: 6, border: 'none', background: newName.trim() && !saving ? 'var(--accent)' : UI.bgElevated, color: newName.trim() && !saving ? '#0a0805' : UI.inkGhost, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', cursor: saving || !newName.trim() ? 'default' : 'pointer', flexShrink: 0, transition: 'background 0.2s, color 0.2s' }}>
               {saving ? '…' : 'CREATE'}
             </button>
           </div>
         ) : (
-          <button onClick={() => setCreating(true)} style={{ width: '100%', padding: '11px 0', borderRadius: 22, border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, background: `rgba(var(--accent-rgb), 0.06)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.04em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <button onClick={() => setCreating(true)} style={{ width: '100%', padding: '11px 0', borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, background: `rgba(var(--accent-rgb), 0.06)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.04em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
             New Thread
           </button>
