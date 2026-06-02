@@ -822,10 +822,11 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
   const trainingDayCount = activeSch ? (activeSch.days || []).filter(d => d.items?.length > 0).length : 0;
   const todayDay = useMemoC(() => getTodayDay(clientStore), [clientStore]);
   const todayStr = localDateKey(new Date());
-  const trainedToday = useMemoC(() =>
-    (clientStore.sessions || []).some(s => s.ended && s.date?.slice(0, 10) === todayStr && s.scheduleId === activeSch?.id),
+  const todaySession = useMemoC(() =>
+    (clientStore.sessions || []).find(s => s.ended && s.date?.slice(0, 10) === todayStr && s.scheduleId === activeSch?.id) || null,
     [clientStore, activeSch]
   );
+  const trainedToday = !!todaySession;
   const planStartDate = activeSch
     ? (LB.isWeekdayPlan(activeSch) ? clientStore.weekPlanStartDate : clientStore.cycleStartDate) || null
     : null;
@@ -904,40 +905,86 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
           )}
 
           <Sheet open={planOpen} onClose={() => setPlanOpen(false)} title={todayDay?.name || 'Today'}>
-            {trainedToday && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'rgba(123,196,123,0.1)', border: '0.5px solid rgba(123,196,123,0.3)', borderRadius: 8, marginBottom: 12 }}>
-                <i className="fa-solid fa-circle-check" style={{ fontSize: 12, color: '#7bc47b' }} />
-                <span style={{ fontSize: 12, color: '#7bc47b', fontFamily: UI.fontUi, fontWeight: 600 }}>Completed today</span>
+            {trainedToday && todaySession ? (
+              <div>
+                <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+                  <StatBox label="Volume" value={`${Math.round(LB.totalVolume(todaySession)).toLocaleString('en-US')}kg`} />
+                  <StatBox label="Sets" value={LB.doneSetCount(todaySession)} />
+                  <StatBox label="Duration" value={todaySession.durationMinutes ? `${todaySession.durationMinutes}m` : '—'} />
+                </div>
+                {(() => {
+                  const storeWithoutToday = { ...clientStore, sessions: clientStore.sessions.filter(s => s.ended && s.ended < todaySession.ended) };
+                  return (todaySession.entries || []).map((e, i) => {
+                    const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutToday, e.exId, todaySession.dayId) : null;
+                    const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null));
+                    return (
+                      <div key={i} style={{ padding: '10px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+                        <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>{e.name}</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: lastSets.length ? 5 : 0 }}>
+                          {(e.sets || []).filter(s => !s.warmup).map((s, j) => {
+                            const prev = lastSets[j];
+                            const anyImpBefore = (e.sets || []).filter(x => !x.warmup).slice(0, j).some((x, k) => isImprovement(x, lastSets[k]));
+                            const highlight = isImprovement(s, prev);
+                            const decline   = !anyImpBefore && isDecline(s, prev);
+                            return (
+                              <span key={j} className="num" style={{
+                                fontSize: 12,
+                                color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : s.done ? UI.ink : UI.inkFaint,
+                                background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : UI.bgInset,
+                                borderRadius: 4, padding: '2px 8px',
+                                border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
+                              }}>
+                                {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                              </span>
+                            );
+                          })}
+                        </div>
+                        {lastSets.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+                            <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
+                            {lastSets.map((s, j) => (
+                              <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `0.5px solid ${UI.hair}` }}>
+                                {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                              </span>
+                            ))}
+                            <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            ) : (
+              <div>
+                {(todayDay?.items || []).filter(i => i.exId).map((item, idx) => {
+                  const ex = (clientStore.exercises || []).find(e => e.id === item.exId);
+                  const last = LB.lastSessionForExercise(clientStore, item.exId, todayDay.id);
+                  const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps);
+                  const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore.settings?.smartProgression);
+                  const hasWeight = seeds.some(s => s.kg != null);
+                  return (
+                    <div key={idx} style={{ padding: '12px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{ex?.name || item.exId}</div>
+                        {item.sets && item.reps && (
+                          <span className="micro" style={{ color: UI.inkFaint }}>{item.sets} × {item.reps}</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                        {hasWeight ? seeds.map((s, j) => (
+                          <span key={j} className="num" style={{ fontSize: 12, color: UI.ink, background: UI.bgInset, borderRadius: 4, padding: '3px 8px', border: `0.5px solid ${UI.hairStrong}` }}>
+                            {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                          </span>
+                        )) : (
+                          <span style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi }}>First time — no weight data yet</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
-            <div>
-              {(todayDay?.items || []).filter(i => i.exId).map((item, idx) => {
-                const ex = (clientStore.exercises || []).find(e => e.id === item.exId);
-                const last = LB.lastSessionForExercise(clientStore, item.exId, todayDay.id);
-                const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps);
-                const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore.settings?.smartProgression);
-                const hasWeight = seeds.some(s => s.kg != null);
-                return (
-                  <div key={idx} style={{ padding: '12px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{ex?.name || item.exId}</div>
-                      {item.sets && item.reps && (
-                        <span className="micro" style={{ color: UI.inkFaint }}>{item.sets} × {item.reps}</span>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                      {hasWeight ? seeds.map((s, j) => (
-                        <span key={j} className="num" style={{ fontSize: 12, color: UI.ink, background: UI.bgInset, borderRadius: 4, padding: '3px 8px', border: `0.5px solid ${UI.hairStrong}` }}>
-                          {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
-                        </span>
-                      )) : (
-                        <span style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi }}>First time — no weight data yet</span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
           </Sheet>
         </>
       )}
