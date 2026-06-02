@@ -991,41 +991,10 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName }) {
 // ─── Tab: Notes ───────────────────────────────────────────────────────────────
 
 function ClientNotesTab({ coachingId, userId, clientName, store, setStore }) {
-  // Activity feed: threadless auto-generated notes (plan changes, session notes etc.)
-  const [activity, setActivity] = useStateC([]);
-  const [actLoading, setActLoading] = useStateC(true);
   const unreadNotes = store?.coaching?.unreadNotes || [];
-
-  useEffectC(() => {
-    setActLoading(true);
-    LB.loadCoachingNotes(coachingId, null) // null = threadless notes
-      .then(data => setActivity([...data].reverse()))
-      .finally(() => setActLoading(false));
-  }, [coachingId]);
-
-  const typeLabel = { session: 'SESSION', plan: 'PLAN', change: 'CHANGE' };
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       <ThreadList coachingId={coachingId} userId={userId} otherName={clientName} unreadNotes={unreadNotes} setStore={setStore} canDelete={true} />
-      {/* Auto-generated activity (plan activations, session notes not in threads) */}
-      {!actLoading && activity.length > 0 && (
-        <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}` }}>
-          <div className="micro" style={{ color: UI.inkFaint, padding: '10px 16px 6px' }}>ACTIVITY</div>
-          <div style={{ maxHeight: 180, overflowY: 'auto' }}>
-            {activity.map(n => (
-              <div key={n.id} style={{ padding: '8px 16px', borderBottom: `0.5px solid ${UI.hair}`, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                <i className={`fa-solid ${n.type === 'session' ? 'fa-dumbbell' : n.type === 'plan' ? 'fa-calendar' : 'fa-pen'}`} style={{ fontSize: 10, color: UI.inkGhost, marginTop: 3, flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {n.entityName && <div className="micro" style={{ color: UI.inkGhost, marginBottom: 1 }}>{typeLabel[n.type] || n.type.toUpperCase()} · {n.entityName.toUpperCase()}</div>}
-                  <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{n.body}</div>
-                </div>
-                <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, flexShrink: 0 }}>{fmtRelative(n.createdAt)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
