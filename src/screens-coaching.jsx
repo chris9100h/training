@@ -395,6 +395,17 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
         <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
       ) : (
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {/* Live training banner */}
+          {clientStore.inProgress && (
+            <div
+              onClick={() => go({ name: 'spectator', targetUserId: clientId, userName: clientName, sessionId: clientStore.inProgress })}
+              style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: `rgba(var(--accent-rgb), 0.08)`, borderBottom: `0.5px solid rgba(var(--accent-rgb), 0.25)`, cursor: 'pointer' }}
+            >
+              <div style={{ width: 8, height: 8, borderRadius: 4, background: 'var(--accent)', boxShadow: '0 0 6px rgba(var(--accent-rgb),0.8)', animation: 'pulseDot 1.5s ease-in-out infinite', flexShrink: 0 }} />
+              <span style={{ flex: 1, fontSize: 12, fontFamily: UI.fontUi, color: 'var(--accent)', letterSpacing: '0.08em', fontWeight: 600 }}>TRAINING NOW — TAP TO WATCH</span>
+              <ChevronRight color={'var(--accent)'} />
+            </div>
+          )}
           {tab === 'overview' && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} />}
           {tab === 'plan' && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} />}
           {tab === 'sessions' && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} />}
