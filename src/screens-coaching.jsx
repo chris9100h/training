@@ -427,14 +427,24 @@ function cyclePosFn(clientStore, date) {
   return (((clientStore.cycleIndex || 0) - daysAgo) % cycleLen + cycleLen) % cycleLen;
 }
 
+// Format a Date to "YYYY-MM-DD" using local time — avoids UTC off-by-one issues.
+function localDateKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   if (!activeSch) return [];
 
   const isWd = LB.isWeekdayPlan(activeSch);
-  const sessionDates = new Set(
-    (clientStore.sessions || []).filter(s => s.ended).map(s => s.date?.slice(0, 10))
-  );
+
+  // Build session date set using local time on both the stored date field and
+  // the ended timestamp — whichever is present — to survive any storage format.
+  const sessionDates = new Set();
+  (clientStore.sessions || []).filter(s => s.ended).forEach(s => {
+    if (s.date) sessionDates.add(s.date.slice(0, 10));
+    sessionDates.add(localDateKey(new Date(s.ended)));
+  });
 
   const today = new Date(); today.setHours(12, 0, 0, 0);
   const todayWd = (today.getDay() + 6) % 7; // 0=Mon
@@ -451,7 +461,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
       date.setDate(monday.getDate() + d);
       if (date > today) continue;
 
-      const dateStr = date.toISOString().slice(0, 10);
+      const dateStr = localDateKey(date);
       let isTrainingDay = false;
 
       if (isWd) {
