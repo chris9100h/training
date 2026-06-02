@@ -62,6 +62,21 @@ function diffSchedule(before, after, exercises) {
   return lines.length > 0 ? lines.join('\n') : null;
 }
 
+function isImprovement(curr, prev) {
+  if (!prev || !curr || !curr.done || curr.skipped || curr.kg == null || prev.kg == null) return false;
+  const rA = LB.effReps(curr); const rB = LB.effReps(prev);
+  if (rA == null || rB == null) return false;
+  return (curr.kg > prev.kg && rA >= rB - 2) || (curr.kg >= prev.kg && rA > rB);
+}
+function isDecline(curr, prev) {
+  if (!prev || !curr || curr.skipped) return false;
+  if (prev.skipped) return false;
+  if (!curr.done || curr.kg == null || prev.kg == null) return false;
+  const rA = LB.effReps(curr); const rB = LB.effReps(prev);
+  if (rA == null || rB == null) return false;
+  return (curr.kg < prev.kg && rA <= rB) || (curr.kg === prev.kg && rA < rB);
+}
+
 // ─── CoachingPendingBanner ────────────────────────────────────────────────────
 // Shown on app boot when the user has a pending coaching invite.
 
@@ -1318,11 +1333,23 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
               <div key={i} style={{ padding: '10px 14px', borderBottom: `0.5px solid ${UI.hair}` }}>
                 <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>{e.name}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: lastSets.length ? 5 : 0 }}>
-                  {(e.sets || []).filter(s => !s.warmup).map((s, j) => (
-                    <span key={j} className="num" style={{ fontSize: 12, color: s.done ? UI.ink : UI.inkFaint, background: UI.bgInset, borderRadius: 4, padding: '2px 8px', border: `0.5px solid ${UI.hair}` }}>
-                      {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
-                    </span>
-                  ))}
+                  {(e.sets || []).filter(s => !s.warmup).map((s, j) => {
+                    const prev = lastSets[j];
+                    const anyImpBefore = (e.sets || []).filter(x => !x.warmup).slice(0, j).some((x, k) => isImprovement(x, lastSets[k]));
+                    const highlight = isImprovement(s, prev);
+                    const decline   = !anyImpBefore && isDecline(s, prev);
+                    return (
+                      <span key={j} className="num" style={{
+                        fontSize: 12,
+                        color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : s.done ? UI.ink : UI.inkFaint,
+                        background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : UI.bgInset,
+                        borderRadius: 4, padding: '2px 8px',
+                        border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
+                      }}>
+                        {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                      </span>
+                    );
+                  })}
                 </div>
                 {lastSets.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
