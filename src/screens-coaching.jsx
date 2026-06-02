@@ -707,6 +707,17 @@ function localDateKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function getTodayDay(clientStore) {
+  const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
+  if (!activeSch) return null;
+  if (LB.isWeekdayPlan(activeSch)) {
+    const todayWd = (new Date().getDay() + 6) % 7;
+    return (activeSch.days || []).find(d => d.weekday === todayWd) || null;
+  }
+  const pos = cyclePosFn(clientStore, localDateKey(new Date()));
+  return (activeSch.days || [])[pos] || null;
+}
+
 function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   if (!activeSch) return [];
@@ -790,9 +801,16 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
   const sessions = clientStore.sessions || [];
   const ended = sessions.filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   const [chartOpen, setChartOpen] = useStateC(null);
+  const [planOpen, setPlanOpen] = useStateC(false);
 
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   const trainingDayCount = activeSch ? (activeSch.days || []).filter(d => d.items?.length > 0).length : 0;
+  const todayDay = useMemoC(() => getTodayDay(clientStore), [clientStore]);
+  const todayStr = localDateKey(new Date());
+  const trainedToday = useMemoC(() =>
+    (clientStore.sessions || []).some(s => s.ended && s.date?.slice(0, 10) === todayStr && s.dayId === todayDay?.id),
+    [clientStore, todayDay]
+  );
   const planStartDate = activeSch
     ? (LB.isWeekdayPlan(activeSch) ? clientStore.weekPlanStartDate : clientStore.cycleStartDate) || null
     : null;
@@ -843,6 +861,74 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
           {chartOpen === 'sessions' && <SessionsWeekChart sessions={ended} />}
         </div>
       </Sheet>
+
+      {/* Up Today */}
+      {activeSch && (
+        <>
+          <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>UP TODAY</div>
+          {todayDay?.items?.length > 0 ? (
+            <div
+              onClick={() => setPlanOpen(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, marginBottom: 20, cursor: 'pointer' }}
+            >
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{todayDay.name}</div>
+                <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>
+                  {todayDay.items.filter(i => i.exId).length} exercises
+                </div>
+              </div>
+              {trainedToday && (
+                <span className="micro" style={{ color: '#7bc47b', marginRight: 4 }}>DONE</span>
+              )}
+              <ChevronRight />
+            </div>
+          ) : (
+            <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, marginBottom: 20 }}>
+              <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi }}>Rest day</div>
+            </div>
+          )}
+
+          <Sheet open={planOpen} onClose={() => setPlanOpen(false)} title={todayDay?.name || 'Today'}>
+            {trainedToday && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'rgba(123,196,123,0.1)', border: '0.5px solid rgba(123,196,123,0.3)', borderRadius: 8, marginBottom: 12 }}>
+                <i className="fa-solid fa-circle-check" style={{ fontSize: 12, color: '#7bc47b' }} />
+                <span style={{ fontSize: 12, color: '#7bc47b', fontFamily: UI.fontUi, fontWeight: 600 }}>Completed today</span>
+              </div>
+            )}
+            <div>
+              {(todayDay?.items || []).filter(i => i.exId).map((item, idx) => {
+                const ex = (clientStore.exercises || []).find(e => e.id === item.exId);
+                const last = LB.lastSessionForExercise(clientStore, item.exId, todayDay.id);
+                const lastSets = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped && s.kg != null);
+                return (
+                  <div key={idx} style={{ padding: '12px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: lastSets.length ? 6 : 0 }}>
+                      <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{ex?.name || item.exId}</div>
+                      {(item.plannedSets || item.sets) && (item.plannedReps || item.reps) && (
+                        <span className="micro" style={{ color: UI.inkFaint }}>
+                          {item.plannedSets || item.sets} × {item.plannedReps || item.reps}
+                        </span>
+                      )}
+                    </div>
+                    {lastSets.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                        {lastSets.slice(0, 4).map((s, j) => (
+                          <span key={j} className="num" style={{ fontSize: 11, color: UI.inkSoft, background: UI.bgInset, borderRadius: 4, padding: '2px 7px', border: `0.5px solid ${UI.hair}` }}>
+                            {s.kg}kg × {s.reps ?? s.repsL ?? '—'}
+                          </span>
+                        ))}
+                        {lastSets.length > 4 && (
+                          <span style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, alignSelf: 'center' }}>+{lastSets.length - 4}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </Sheet>
+        </>
+      )}
 
       {/* Weekly adherence table */}
       {weeks.length > 0 && (
