@@ -115,59 +115,102 @@ function CoachingUnreadBanner({ store, setStore, userId, onOpen }) {
 }
 
 // ─── CoachingNotesSheet ───────────────────────────────────────────────────────
-// Sheet shown when client taps the unread banner — lists all notes, marks them read.
+// Chat thread between client and coach. Opens from home unread banner or settings.
 
 function CoachingNotesSheet({ open, store, setStore, userId, onClose }) {
   const [notes, setNotes] = useStateC([]);
   const [loading, setLoading] = useStateC(false);
+  const [body, setBody] = useStateC('');
+  const [sending, setSending] = useStateC(false);
+  const bottomRef = useRefC(null);
   const coachingId = store.coaching?.asClient?.id;
+  const coachName = store.coaching?.asClient?.coachName || 'Coach';
 
-  useEffectC(() => {
-    if (!open || !coachingId) return;
+  const loadNotes = () => {
+    if (!coachingId) return;
     setLoading(true);
     LB.loadCoachingNotes(coachingId)
       .then(data => {
-        setNotes(data);
+        // oldest first for chat display
+        setNotes([...data].reverse());
         const unread = data.filter(n => !n.readAt && n.authorId !== userId).map(n => n.id);
         if (unread.length) {
           LB.markCoachingNotesRead(unread).then(() => {
-            setStore(s => ({
-              ...s,
-              coaching: { ...s.coaching, unreadNotes: [] },
-            }));
+            setStore(s => ({ ...s, coaching: { ...s.coaching, unreadNotes: [] } }));
           });
         }
       })
       .finally(() => setLoading(false));
-  }, [open, coachingId]);
-
-  const typeIcon = (type) => {
-    if (type === 'session') return 'fa-dumbbell';
-    if (type === 'plan') return 'fa-calendar';
-    if (type === 'change') return 'fa-pen';
-    return 'fa-comment';
   };
 
+  useEffectC(() => {
+    if (!open) return;
+    loadNotes();
+  }, [open, coachingId]);
+
+  useEffectC(() => {
+    if (notes.length && bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'auto' });
+    }
+  }, [notes]);
+
+  const send = async () => {
+    if (!body.trim() || !coachingId) return;
+    setSending(true);
+    try {
+      await LB.addCoachingNote(coachingId, 'general', null, null, body.trim(), userId);
+      setBody('');
+      loadNotes();
+    } catch (e) { alert(e.message); } finally { setSending(false); }
+  };
+
+  const typeLabel = { session: 'SESSION', plan: 'PLAN', change: 'CHANGE' };
+
   return (
-    <Sheet open={open} onClose={onClose} title="Coach Messages">
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
-      ) : notes.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No messages yet.</div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8 }}>
-          {notes.map(n => (
-            <div key={n.id} style={{ background: UI.bgInset, borderRadius: 10, padding: '12px 14px', border: `0.5px solid ${UI.hair}` }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <i className={`fa-solid ${typeIcon(n.type)}`} style={{ fontSize: 10, color: UI.inkFaint }} />
-                {n.entityName && <span className="micro" style={{ color: UI.inkFaint }}>{n.entityName.toUpperCase()}</span>}
-                <span style={{ marginLeft: 'auto', fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtRelative(n.createdAt)}</span>
+    <Sheet open={open} onClose={onClose} title="Messages">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+        {/* Thread */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14, maxHeight: '55vh', overflowY: 'auto' }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+          ) : notes.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No messages yet.</div>
+          ) : notes.map(n => {
+            const isMe = n.authorId === userId;
+            return (
+              <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+                {n.type !== 'general' && n.entityName && (
+                  <div className="micro" style={{ color: UI.inkGhost, margin: '0 4px 3px' }}>{typeLabel[n.type]} · {n.entityName.toUpperCase()}</div>
+                )}
+                <div style={{ maxWidth: '82%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '12px 12px 2px 12px' : '12px 12px 12px 2px', padding: '9px 12px', border: isMe ? 'none' : `0.5px solid ${UI.hairStrong}` }}>
+                  <div style={{ fontSize: 13, color: isMe ? '#0a0805' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{n.body}</div>
+                </div>
+                <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, margin: '3px 4px 0' }}>
+                  {isMe ? 'You' : coachName} · {fmtRelative(n.createdAt)}
+                </div>
               </div>
-              <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{n.body}</div>
-            </div>
-          ))}
+            );
+          })}
+          <div ref={bottomRef} />
         </div>
-      )}
+        {/* Reply input */}
+        <div style={{ display: 'flex', gap: 8, paddingTop: 10, borderTop: `0.5px solid ${UI.hair}` }}>
+          <input
+            value={body}
+            onChange={e => setBody(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
+            placeholder="Reply…"
+            style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '9px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
+          />
+          <button
+            onClick={send}
+            disabled={sending || !body.trim()}
+            style={{ padding: '9px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: sending || !body.trim() ? 'default' : 'pointer', opacity: sending || !body.trim() ? 0.5 : 1, flexShrink: 0 }}
+          >
+            {sending ? '…' : 'SEND'}
+          </button>
+        </div>
+      </div>
     </Sheet>
   );
 }
@@ -182,6 +225,7 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
   const [inviting, setInviting] = useStateC(false);
   const [inviteError, setInviteError] = useStateC('');
   const [ending, setEnding] = useStateC(false);
+  const [threadOpen, setThreadOpen] = useStateC(false);
   const [confirmEl, confirm] = useConfirm();
 
   const handleInvite = async () => {
@@ -220,23 +264,41 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
   return (
     <>
     {confirmEl}
+    <CoachingNotesSheet open={threadOpen} store={store} setStore={setStore} userId={userId} onClose={() => setThreadOpen(false)} />
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
 
       {/* As client */}
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, marginTop: 4 }}>MY COACH</div>
       {asClient ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 14 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 18, background: `rgba(var(--accent-rgb),0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <i className="fa-solid fa-user" style={{ fontSize: 14, color: 'var(--accent)' }} />
+        <div style={{ background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 14, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px' }}>
+            <div style={{ width: 36, height: 36, borderRadius: 18, background: `rgba(var(--accent-rgb),0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <i className="fa-solid fa-user" style={{ fontSize: 14, color: 'var(--accent)' }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{asClient.coachName}</div>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{asClient.coachEmail}</div>
+              {asClient.status === 'pending' && <div className="micro" style={{ color: 'var(--accent)', marginTop: 2 }}>PENDING YOUR RESPONSE</div>}
+            </div>
+            <button onClick={() => handleEndCoaching(asClient.id)} disabled={ending} style={{ background: 'transparent', border: `1px solid rgba(var(--danger-rgb),0.4)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 11 }}>
+              END
+            </button>
           </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{asClient.coachName}</div>
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{asClient.coachEmail}</div>
-            {asClient.status === 'pending' && <div className="micro" style={{ color: 'var(--accent)', marginTop: 2 }}>PENDING YOUR RESPONSE</div>}
-          </div>
-          <button onClick={() => handleEndCoaching(asClient.id)} disabled={ending} style={{ background: 'transparent', border: `1px solid rgba(var(--danger-rgb),0.4)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 11 }}>
-            END
-          </button>
+          {asClient.status === 'active' && (
+            <div
+              onClick={() => setThreadOpen(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}
+            >
+              <i className="fa-solid fa-comment" style={{ fontSize: 12, color: 'var(--accent)' }} />
+              <span style={{ flex: 1, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Messages</span>
+              {(store.coaching?.unreadNotes?.length > 0) && (
+                <div style={{ background: 'var(--accent)', color: '#0a0805', borderRadius: 10, fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, padding: '1px 7px', minWidth: 18, textAlign: 'center' }}>
+                  {store.coaching.unreadNotes.length}
+                </div>
+              )}
+              <ChevronRight />
+            </div>
+          )}
         </div>
       ) : (
         <div style={{ padding: '12px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 14, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
@@ -370,7 +432,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
       <TopBar
         title={clientName}
         sub={<span className="micro" style={{ color: 'var(--accent)', letterSpacing: '0.12em' }}>COACHING</span>}
-        onBack={() => go({ name: 'coaching-dashboard' })}
+        onBack={() => go({ name: 'settings' })}
       />
 
       {/* Tab bar */}
@@ -745,62 +807,81 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName }) {
 function ClientNotesTab({ coachingId, userId, clientName }) {
   const [notes, setNotes] = useStateC([]);
   const [loading, setLoading] = useStateC(true);
-  const [noteBody, setNoteBody] = useStateC('');
+  const [body, setBody] = useStateC('');
   const [saving, setSaving] = useStateC(false);
+  const bottomRef = useRefC(null);
 
   const reload = () => {
     setLoading(true);
     LB.loadCoachingNotes(coachingId)
-      .then(setNotes)
+      .then(data => setNotes([...data].reverse())) // oldest first
       .finally(() => setLoading(false));
   };
 
   useEffectC(() => { reload(); }, [coachingId]);
 
-  const save = async () => {
-    if (!noteBody.trim()) return;
+  useEffectC(() => {
+    if (notes.length && bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'auto' });
+    }
+  }, [notes]);
+
+  const send = async () => {
+    if (!body.trim()) return;
     setSaving(true);
     try {
-      await LB.addCoachingNote(coachingId, 'general', null, null, noteBody.trim(), userId);
-      setNoteBody('');
+      await LB.addCoachingNote(coachingId, 'general', null, null, body.trim(), userId);
+      setBody('');
       reload();
     } catch (e) { alert(e.message); } finally { setSaving(false); }
   };
 
-  const typeLabel = { session: 'SESSION', plan: 'PLAN', general: 'GENERAL', change: 'CHANGE' };
+  const typeLabel = { session: 'SESSION', plan: 'PLAN', change: 'CHANGE' };
 
   return (
-    <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column' }}>
-      {/* Compose */}
-      <div style={{ padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-          <textarea value={noteBody} onChange={e => setNoteBody(e.target.value)} placeholder={`Write a note for ${clientName}…`} rows={2} style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '9px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', resize: 'none', boxSizing: 'border-box' }} />
-          <button onClick={save} disabled={saving || !noteBody.trim()} style={{ padding: '9px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: saving || !noteBody.trim() ? 'default' : 'pointer', opacity: saving || !noteBody.trim() ? 0.5 : 1, flexShrink: 0 }}>
-            {saving ? '…' : 'SEND'}
-          </button>
-        </div>
-      </div>
-
-      {/* Note list */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0 32px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+      {/* Thread */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 8px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
         ) : notes.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No notes yet.</div>
+          <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No messages yet.</div>
         ) : notes.map(n => {
-          const isCoach = n.authorId === userId;
+          const isMe = n.authorId === userId;
           return (
-            <div key={n.id} style={{ padding: '10px 16px', borderBottom: `0.5px solid ${UI.hair}` }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <span className="micro" style={{ color: isCoach ? 'var(--accent)' : UI.inkFaint }}>{isCoach ? 'YOU' : clientName.toUpperCase()}</span>
-                {n.entityName && <span className="micro" style={{ color: UI.inkFaint }}>· {n.entityName.toUpperCase()}</span>}
-                <span style={{ marginLeft: 'auto', fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtRelative(n.createdAt)}</span>
-                {n.type !== 'general' && <span className="micro" style={{ color: UI.inkGhost }}>{typeLabel[n.type]}</span>}
+            <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+              {n.type !== 'general' && n.entityName && (
+                <div className="micro" style={{ color: UI.inkGhost, margin: '0 4px 3px' }}>{typeLabel[n.type] || n.type.toUpperCase()} · {n.entityName.toUpperCase()}</div>
+              )}
+              <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '12px 12px 2px 12px' : '12px 12px 12px 2px', padding: '9px 12px', border: isMe ? 'none' : `0.5px solid ${UI.hairStrong}` }}>
+                <div style={{ fontSize: 13, color: isMe ? '#0a0805' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{n.body}</div>
               </div>
-              <div style={{ fontSize: 13, color: isCoach ? UI.ink : UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{n.body}</div>
+              <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, margin: '3px 4px 0' }}>
+                {isMe ? 'You' : clientName} · {fmtRelative(n.createdAt)}
+              </div>
             </div>
           );
         })}
+        <div ref={bottomRef} />
+      </div>
+      {/* Compose */}
+      <div style={{ flexShrink: 0, padding: '10px 16px 12px', borderTop: `0.5px solid ${UI.hair}` }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <textarea
+            value={body}
+            onChange={e => setBody(e.target.value)}
+            placeholder={`Write a note for ${clientName}…`}
+            rows={2}
+            style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '9px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', resize: 'none', boxSizing: 'border-box' }}
+          />
+          <button
+            onClick={send}
+            disabled={saving || !body.trim()}
+            style={{ padding: '9px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: saving || !body.trim() ? 'default' : 'pointer', opacity: saving || !body.trim() ? 0.5 : 1, alignSelf: 'flex-end', flexShrink: 0 }}
+          >
+            {saving ? '…' : 'SEND'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -870,12 +951,10 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
 function CoachingBannerGroup({ store, setStore, userId }) {
   const [notesOpen, setNotesOpen] = useStateC(false);
   const notes = store.coaching?.unreadNotes || [];
-  if (!notes.length && !notesOpen) return null;
+  if (!notes.length) return null;
   return (
     <div style={{ flexShrink: 0, padding: '0 22px 10px' }}>
-      {notes.length > 0 && (
-        <CoachingUnreadBanner store={store} setStore={setStore} userId={userId} onOpen={() => setNotesOpen(true)} />
-      )}
+      <CoachingUnreadBanner store={store} setStore={setStore} userId={userId} onOpen={() => setNotesOpen(true)} />
       <CoachingNotesSheet open={notesOpen} store={store} setStore={setStore} userId={userId} onClose={() => setNotesOpen(false)} />
     </div>
   );
