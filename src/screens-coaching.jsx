@@ -866,11 +866,7 @@ function StatBox({ label, value, gold }) {
 function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, userId, go, onReload, clientName }) {
   const schedules = (clientStore.schedules || []).filter(s => !s.archived);
   const active = clientStore.activeScheduleId;
-  const [copiedId, setCopiedId] = useStateC(null);
-  const [importOpen, setImportOpen] = useStateC(false);
-  const [importText, setImportText] = useStateC('');
-  const [importing, setImporting] = useStateC(false);
-  const [importError, setImportError] = useStateC('');
+  const importRef = useRefC(null);
 
   const activate = async (scheduleId) => {
     try {
@@ -886,32 +882,62 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
   };
 
   const exportPlan = (sch) => {
-    const data = { name: sch.name, days: sch.days };
-    if (sch.mode) data.mode = sch.mode;
-    const json = JSON.stringify(data, null, 2);
-    navigator.clipboard.writeText(json)
-      .then(() => { setCopiedId(sch.id); setTimeout(() => setCopiedId(null), 2000); })
-      .catch(() => alert('Could not access clipboard'));
+    const exIds = new Set();
+    (sch.days || []).forEach(d => (d.items || []).forEach(it => { if (it.exId) exIds.add(it.exId); }));
+    const exercises = (clientStore.exercises || []).filter(e => exIds.has(e.id));
+    const payload = { type: 'zane-plan', version: 1, schedule: sch, exercises };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  const doImport = async () => {
-    setImportError('');
-    let parsed;
-    try { parsed = JSON.parse(importText.trim()); }
-    catch (_) { setImportError('Invalid JSON — paste a valid exported plan.'); return; }
-    if (!parsed.name || !Array.isArray(parsed.days)) {
-      setImportError('Expected { name, days } — export a plan first to get the right format.');
-      return;
-    }
-    setImporting(true);
-    try {
-      const newSch = { id: LB.uid(), name: parsed.name, days: parsed.days, archived: false, ...(parsed.mode ? { mode: parsed.mode } : {}) };
-      await LB.supabase.from('zane_schedules').insert({ id: newSch.id, user_id: clientId, name: newSch.name, days: newSch.days, archived: false });
-      setClientStore(s => ({ ...s, schedules: [...(s.schedules || []), newSch] }));
-      setImportText('');
-      setImportOpen(false);
-    } catch (e) { setImportError(e.message); }
-    finally { setImporting(false); }
+  const importPlan = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (data.type !== 'zane-plan' || !data.schedule) { alert('Invalid plan file.'); return; }
+        const idMap = {};
+        const newExercises = [];
+        (data.exercises || []).forEach(ex => {
+          const existing = (clientStore.exercises || []).find(x => x.name.trim().toLowerCase() === ex.name.trim().toLowerCase());
+          if (existing) {
+            idMap[ex.id] = existing.id;
+          } else {
+            const newId = LB.uid();
+            idMap[ex.id] = newId;
+            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null });
+          }
+        });
+        const sch = {
+          ...data.schedule,
+          id: LB.uid(),
+          archived: false,
+          days: (data.schedule.days || []).map(d => ({
+            ...d,
+            id: LB.uid(),
+            items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })),
+          })),
+        };
+        if (newExercises.length) {
+          await LB.supabase.from('zane_exercises').insert(newExercises.map(ex => ({ ...ex, user_id: clientId })));
+        }
+        await LB.supabase.from('zane_schedules').insert({ id: sch.id, user_id: clientId, name: sch.name, days: sch.days, archived: false });
+        setClientStore(s => ({
+          ...s,
+          exercises: [...(s.exercises || []), ...newExercises],
+          schedules: [...(s.schedules || []), sch],
+        }));
+      } catch (_) { alert('Could not read plan file.'); }
+    };
+    reader.readAsText(file);
   };
 
   const name = clientName || clientStore.user?.name || '?';
@@ -927,8 +953,9 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
           <i className="fa-solid fa-plus" style={{ fontSize: 10 }} />
           NEW PLAN
         </button>
+        <input ref={importRef} type="file" accept=".json" style={{ display: 'none' }} onChange={importPlan} />
         <button
-          onClick={() => setImportOpen(true)}
+          onClick={() => importRef.current?.click()}
           style={{ flex: 1, padding: '10px 0', borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
         >
           <i className="fa-solid fa-file-import" style={{ fontSize: 10 }} />
@@ -967,32 +994,12 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
                 style={{ width: 30, height: 30, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
                 title="Export plan"
               >
-                {copiedId === sch.id
-                  ? <i className="fa-solid fa-check" style={{ fontSize: 10, color: '#7bc47b' }} />
-                  : <i className="fa-solid fa-share-from-square" style={{ fontSize: 10, color: UI.inkSoft }} />
-                }
+                <i className="fa-solid fa-share-from-square" style={{ fontSize: 10, color: UI.inkSoft }} />
               </button>
             </div>
           </div>
         </div>
       ))}
-
-      <Sheet open={importOpen} onClose={() => { setImportOpen(false); setImportText(''); setImportError(''); }} title="Import Plan">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
-            Paste the JSON of an exported plan below.
-          </div>
-          <textarea
-            value={importText}
-            onChange={e => { setImportText(e.target.value); setImportError(''); }}
-            placeholder={'{\n  "name": "PLAN NAME",\n  "days": [...]\n}'}
-            rows={8}
-            style={{ background: UI.bgInset, border: `0.5px solid ${importError ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 8, padding: '10px 12px', fontFamily: 'monospace', fontSize: 12, color: UI.ink, outline: 'none', resize: 'none', width: '100%', boxSizing: 'border-box' }}
-          />
-          {importError && <div style={{ fontSize: 11, color: 'rgba(var(--danger-rgb),0.85)', fontFamily: UI.fontUi }}>{importError}</div>}
-          <Btn onClick={doImport} disabled={importing || !importText.trim()}>{importing ? 'Importing…' : 'Import Plan'}</Btn>
-        </div>
-      </Sheet>
     </div>
   );
 }
