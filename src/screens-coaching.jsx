@@ -170,7 +170,9 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   return (
     <>
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px 8px', borderBottom: `0.5px solid ${UI.hair}` }}>
-        <button onClick={onBack} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkSoft, padding: 0, fontFamily: UI.fontUi, fontSize: 13 }}>←</button>
+        <button onClick={onBack} style={{ width: 32, height: 32, borderRadius: 6, border: `0.5px solid ${UI.hair}`, background: UI.bgElevated, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <i className="fa-solid fa-chevron-left" style={{ fontSize: 12, color: UI.inkSoft }} />
+        </button>
         <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{thread.name}</div>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 8px', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -938,7 +940,9 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
     return (
       <div style={{ overflowY: 'auto', flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
-          <button onClick={() => { setSelected(null); onClearSelected?.(); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, padding: 0 }}>← Back</button>
+          <button onClick={() => { setSelected(null); onClearSelected?.(); }} style={{ width: 32, height: 32, borderRadius: 6, border: `0.5px solid ${UI.hair}`, background: UI.bgElevated, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <i className="fa-solid fa-chevron-left" style={{ fontSize: 12, color: UI.inkSoft }} />
+          </button>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{selected.dayName}</div>
             <div style={{ fontSize: 11, color: UI.inkFaint }}>{fmtDate(selected.date)}</div>
