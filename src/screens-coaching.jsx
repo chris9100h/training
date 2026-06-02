@@ -21,6 +21,48 @@ function fmtRelative(iso) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+// ─── diffSchedule ────────────────────────────────────────────────────────────
+// Returns a human-readable summary of what changed between two schedule
+// snapshots, or null if nothing relevant changed.
+
+function diffSchedule(before, after) {
+  if (!before || !after) return null;
+  const lines = [];
+
+  if (before.name !== after.name) lines.push(`Renamed: ${before.name} → ${after.name}`);
+
+  const beforeDays = before.days || [];
+  const afterDays  = after.days  || [];
+  const beforeById = Object.fromEntries(beforeDays.map(d => [d.id, d]));
+  const afterById  = Object.fromEntries(afterDays.map(d  => [d.id, d]));
+
+  const added   = afterDays.filter(d => !beforeById[d.id]);
+  const removed = beforeDays.filter(d => !afterById[d.id]);
+  const shared  = afterDays.filter(d =>  beforeById[d.id]);
+
+  if (added.length)   lines.push(`Days added: ${added.map(d => d.name).join(', ')}`);
+  if (removed.length) lines.push(`Days removed: ${removed.map(d => d.name).join(', ')}`);
+
+  const renamed = shared.filter(d => beforeById[d.id].name !== d.name)
+    .map(d => `${beforeById[d.id].name} → ${d.name}`);
+  if (renamed.length) lines.push(`Days renamed: ${renamed.join(', ')}`);
+
+  const exAdded = [], exRemoved = [];
+  for (const afterDay of shared) {
+    const beforeDay = beforeById[afterDay.id];
+    const bItems = beforeDay.items || [];
+    const aItems = afterDay.items  || [];
+    const bKeys  = new Set(bItems.map(i => i.exId || i.name));
+    const aKeys  = new Set(aItems.map(i => i.exId || i.name));
+    aItems.filter(i => !bKeys.has(i.exId || i.name)).forEach(i => exAdded.push(`${i.name} (${afterDay.name})`));
+    bItems.filter(i => !aKeys.has(i.exId || i.name)).forEach(i => exRemoved.push(`${i.name} (${beforeDay.name})`));
+  }
+  if (exAdded.length)   lines.push(`Exercises added: ${exAdded.join(', ')}`);
+  if (exRemoved.length) lines.push(`Exercises removed: ${exRemoved.join(', ')}`);
+
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
 // ─── CoachingPendingBanner ────────────────────────────────────────────────────
 // Shown on app boot when the user has a pending coaching invite.
 
@@ -1125,12 +1167,15 @@ function ClientNotesTab({ coachingId, userId, clientName, store, setStore }) {
 function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, clientId, clientName, scheduleId }) {
   const [clientStore, setClientStoreRaw] = useStateC(null);
   const prevClientStore = useRefC(null);
+  const initialSchedule = useRefC(null);
   const isDirty = useRefC(false);
 
   useEffectC(() => {
     LB.loadClientStore(clientId).then(data => {
       setClientStoreRaw(data);
       prevClientStore.current = data;
+      const sch = data.schedules?.find(s => s.id === scheduleId);
+      initialSchedule.current = sch ? JSON.parse(JSON.stringify(sch)) : null;
     });
   }, [clientId]);
 
@@ -1154,9 +1199,12 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
       if (isDirty.current) {
         isDirty.current = false;
         try {
-          const schName = prevClientStore.current?.schedules?.find(s => s.id === scheduleId)?.name || scheduleId;
+          const finalSch = prevClientStore.current?.schedules?.find(s => s.id === scheduleId);
+          const schName  = finalSch?.name || scheduleId;
+          const diff     = diffSchedule(initialSchedule.current, finalSch);
+          const body     = diff ? `Updated plan: ${schName}\n\n${diff}` : `Updated plan: ${schName}`;
           const threadId = await LB.getOrCreateCoachingThread(coachingId, `Changes on ${schName}`, userId);
-          await LB.addCoachingNote(coachingId, 'plan', scheduleId, schName, `Updated plan: ${schName}`, userId, threadId);
+          await LB.addCoachingNote(coachingId, 'plan', scheduleId, schName, body, userId, threadId);
         } catch (e) { console.error('Failed to send plan change note', e); }
       }
       go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' });
