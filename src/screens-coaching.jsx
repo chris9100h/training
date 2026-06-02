@@ -226,7 +226,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
           return (
             <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
               <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '12px 12px 2px 12px' : '12px 12px 12px 2px', padding: '9px 12px', border: isMe ? 'none' : `0.5px solid ${UI.hairStrong}` }}>
-                <div style={{ fontSize: 13, color: isMe ? '#0a0805' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{n.body}</div>
+                <div style={{ fontSize: 13, color: isMe ? '#0a0805' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{n.body}</div>
               </div>
               <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, margin: '3px 4px 0' }}>
                 {isMe ? 'You' : otherName} · {fmtRelative(n.createdAt)}
@@ -1050,7 +1050,7 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
       const planName = clientStore.schedules?.find(s => s.id === scheduleId)?.name || scheduleId;
       const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Changes', userId);
       await LB.addCoachingNote(coachingId, 'plan', scheduleId, planName,
-        `Activated plan: ${planName}`, userId, threadId);
+        `Activated plan\n${planName}`, userId, threadId);
     } catch (e) { alert(e.message); }
   };
 
@@ -1347,10 +1347,10 @@ function ClientNutritionTab({ coachingId, userId }) {
       const fmtDay = (cal, pro, car, fat) => [cal && `${cal} kcal`, pro && `${pro}g protein`, car && `${car}g carbs`, fat && `${fat}g fat`].filter(Boolean).join(' · ');
       const td = fmtDay(macro.caloriesTraining, macro.proteinTraining, macro.carbsTraining, macro.fatTraining);
       const rd = fmtDay(macro.caloriesRest,     macro.proteinRest,     macro.carbsRest,     macro.fatRest);
-      const lines = [td && `Training day: ${td}`, rd && `Rest day: ${rd}`].filter(Boolean);
-      if (lines.length) {
+      const parts = [td && `Training day\n${td}`, rd && `Rest day\n${rd}`].filter(Boolean);
+      if (parts.length) {
         const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Nutrition', userId);
-        await LB.addCoachingNote(coachingId, 'general', null, null, lines.join('\n'), userId, threadId);
+        await LB.addCoachingNote(coachingId, 'general', null, null, parts.join('\n\n'), userId, threadId);
       }
       reload();
     } catch (e) { alert(e.message); }
@@ -1483,7 +1483,9 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
           const schName   = finalSch?.name || scheduleId;
           const exercises = latestClientStore.current?.exercises || [];
           const diff      = diffSchedule(initialSchedule.current, finalSch, exercises);
-          const body     = diff ? `Updated plan: ${schName}\n\n${diff}` : `Updated plan: ${schName}`;
+          const body      = diff
+            ? `Updated plan: ${schName}\n\n${diff.split('\n').map(l => `• ${l}`).join('\n')}`
+            : `Updated plan: ${schName}`;
           const threadId = await LB.getOrCreateCoachingThread(coachingId, `Changes on ${schName}`, userId);
           await LB.addCoachingNote(coachingId, 'plan', scheduleId, schName, body, userId, threadId);
         } catch (e) { console.error('Failed to send plan change note', e); }
