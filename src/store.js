@@ -3,7 +3,8 @@
 const SUPABASE_URL = 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
 
-const PUSHOVER_URL = `${SUPABASE_URL}/functions/v1/pushover`;
+const PUSHOVER_URL          = `${SUPABASE_URL}/functions/v1/pushover`;
+const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify`;
 
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -919,9 +920,8 @@ function progressionSuggestion(store, exId, dayId, plannedReps) {
   if (!store.settings?.smartProgression) return null;
   const ex = findExercise(store, exId);
   const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
-  const increment = catCfg.increment ?? null;
+  const increment = catCfg.increment ?? 2.5;
   const maxKg = catCfg.maxKg ?? null;
-  if (!increment) return null;
 
   const last = lastSessionForExercise(store, exId, dayId);
   if (!last) return null;
@@ -975,6 +975,12 @@ async function addCoachingNote(coachingId, type, entityId, entityName, body, aut
     thread_id: threadId || null,
   });
   if (error) throw error;
+  // Fire-and-forget push to the other party (fails silently if push not enabled)
+  fetch(COACHING_NOTIFY_URL, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ coachingId, authorId, threadId, preview: body }),
+  }).catch(() => {});
   return id;
 }
 

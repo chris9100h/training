@@ -62,6 +62,21 @@ function diffSchedule(before, after, exercises) {
   return lines.length > 0 ? lines.join('\n') : null;
 }
 
+function isImprovement(curr, prev) {
+  if (!prev || !curr || !curr.done || curr.skipped || curr.kg == null || prev.kg == null) return false;
+  const rA = LB.effReps(curr); const rB = LB.effReps(prev);
+  if (rA == null || rB == null) return false;
+  return (curr.kg > prev.kg && rA >= rB - 2) || (curr.kg >= prev.kg && rA > rB);
+}
+function isDecline(curr, prev) {
+  if (!prev || !curr || curr.skipped) return false;
+  if (prev.skipped) return false;
+  if (!curr.done || curr.kg == null || prev.kg == null) return false;
+  const rA = LB.effReps(curr); const rB = LB.effReps(prev);
+  if (rA == null || rB == null) return false;
+  return (curr.kg < prev.kg && rA <= rB) || (curr.kg === prev.kg && rA < rB);
+}
+
 // ─── CoachingPendingBanner ────────────────────────────────────────────────────
 // Shown on app boot when the user has a pending coaching invite.
 
@@ -707,6 +722,17 @@ function localDateKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function getTodayDay(clientStore) {
+  const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
+  if (!activeSch) return null;
+  if (LB.isWeekdayPlan(activeSch)) {
+    const todayWd = (new Date().getDay() + 6) % 7;
+    return (activeSch.days || []).find(d => d.weekday === todayWd) || null;
+  }
+  const pos = cyclePosFn(clientStore, localDateKey(new Date()));
+  return (activeSch.days || [])[pos] || null;
+}
+
 function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   if (!activeSch) return [];
@@ -790,9 +816,20 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
   const sessions = clientStore.sessions || [];
   const ended = sessions.filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   const [chartOpen, setChartOpen] = useStateC(null);
+  const [planOpen, setPlanOpen] = useStateC(false);
 
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   const trainingDayCount = activeSch ? (activeSch.days || []).filter(d => d.items?.length > 0).length : 0;
+  const todayDay = useMemoC(() => getTodayDay(clientStore), [clientStore]);
+  const todayStr = localDateKey(new Date());
+  const todaySession = useMemoC(() =>
+    (clientStore.sessions || []).find(s => s.ended && s.date?.slice(0, 10) === todayStr && s.scheduleId === activeSch?.id) || null,
+    [clientStore, activeSch]
+  );
+  const trainedToday = !!todaySession;
+  const planStartDate = activeSch
+    ? (LB.isWeekdayPlan(activeSch) ? clientStore.weekPlanStartDate : clientStore.cycleStartDate) || null
+    : null;
 
   const weeks = useMemoC(() => computeWeeklyAdherence(clientStore), [clientStore]);
   const completedWeeks = weeks.filter(w => w.planned > 0 && w.pct !== null);
@@ -836,10 +873,121 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       <Sheet open={!!chartOpen} onClose={() => setChartOpen(null)} title={chartTitles[chartOpen] || ''}>
         <div style={{ paddingBottom: 8 }}>
           {chartOpen === 'adherence' && <AdherenceChart weeks={weeks} />}
-          {chartOpen === 'volume' && <RollingVolumeChart sessions={ended} />}
+          {chartOpen === 'volume' && <RollingVolumeChart sessions={ended} planStartDate={planStartDate} />}
           {chartOpen === 'sessions' && <SessionsWeekChart sessions={ended} />}
         </div>
       </Sheet>
+
+      {/* Up Today */}
+      {activeSch && (
+        <>
+          <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>UP TODAY</div>
+          {todayDay?.items?.length > 0 ? (
+            <div
+              onClick={() => setPlanOpen(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, marginBottom: 20, cursor: 'pointer' }}
+            >
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{todayDay.name}</div>
+                <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>
+                  {todayDay.items.filter(i => i.exId).length} exercises
+                </div>
+              </div>
+              {trainedToday && (
+                <span className="micro" style={{ color: '#7bc47b', marginRight: 4 }}>DONE</span>
+              )}
+              <ChevronRight />
+            </div>
+          ) : (
+            <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, marginBottom: 20 }}>
+              <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi }}>Rest day</div>
+            </div>
+          )}
+
+          <Sheet open={planOpen} onClose={() => setPlanOpen(false)} title={todayDay?.name || 'Today'}>
+            {trainedToday && todaySession ? (
+              <div>
+                <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+                  <StatBox label="Volume" value={`${Math.round(LB.totalVolume(todaySession)).toLocaleString('en-US')}kg`} />
+                  <StatBox label="Sets" value={LB.doneSetCount(todaySession)} />
+                  <StatBox label="Duration" value={todaySession.durationMinutes ? `${todaySession.durationMinutes}m` : '—'} />
+                </div>
+                {(() => {
+                  const storeWithoutToday = { ...clientStore, sessions: clientStore.sessions.filter(s => s.ended && s.ended < todaySession.ended) };
+                  return (todaySession.entries || []).map((e, i) => {
+                    const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutToday, e.exId, todaySession.dayId) : null;
+                    const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null));
+                    return (
+                      <div key={i} style={{ padding: '10px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+                        <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>{e.name}</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: lastSets.length ? 5 : 0 }}>
+                          {(e.sets || []).filter(s => !s.warmup).map((s, j) => {
+                            const prev = lastSets[j];
+                            const anyImpBefore = (e.sets || []).filter(x => !x.warmup).slice(0, j).some((x, k) => isImprovement(x, lastSets[k]));
+                            const highlight = isImprovement(s, prev);
+                            const decline   = !anyImpBefore && isDecline(s, prev);
+                            return (
+                              <span key={j} className="num" style={{
+                                fontSize: 12,
+                                color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : s.done ? UI.ink : UI.inkFaint,
+                                background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : UI.bgInset,
+                                borderRadius: 4, padding: '2px 8px',
+                                border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
+                              }}>
+                                {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                              </span>
+                            );
+                          })}
+                        </div>
+                        {lastSets.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+                            <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
+                            {lastSets.map((s, j) => (
+                              <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `0.5px solid ${UI.hair}` }}>
+                                {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                              </span>
+                            ))}
+                            <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            ) : (
+              <div>
+                {(todayDay?.items || []).filter(i => i.exId).map((item, idx) => {
+                  const ex = (clientStore.exercises || []).find(e => e.id === item.exId);
+                  const last = LB.lastSessionForExercise(clientStore, item.exId, todayDay.id);
+                  const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps);
+                  const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore.settings?.smartProgression);
+                  const hasWeight = seeds.some(s => s.kg != null);
+                  return (
+                    <div key={idx} style={{ padding: '12px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{ex?.name || item.exId}</div>
+                        {item.sets && item.reps && (
+                          <span className="micro" style={{ color: UI.inkFaint }}>{item.sets} × {item.reps}</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                        {hasWeight ? seeds.map((s, j) => (
+                          <span key={j} className="num" style={{ fontSize: 12, color: UI.ink, background: UI.bgInset, borderRadius: 4, padding: '3px 8px', border: `0.5px solid ${UI.hairStrong}` }}>
+                            {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                          </span>
+                        )) : (
+                          <span style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi }}>First time — no weight data yet</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Sheet>
+        </>
+      )}
 
       {/* Weekly adherence table */}
       {weeks.length > 0 && (
@@ -909,7 +1057,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
 // ─── Metric charts ────────────────────────────────────────────────────────────
 
 function AdherenceChart({ weeks }) {
-  const data = weeks.filter(w => w.planned > 0);
+  const data = weeks.filter(w => w.planned > 0).slice().reverse();
   if (!data.length) return <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No adherence data yet.</div>;
   const W = 300, H = 110, gap = 4;
   const barW = Math.max(6, Math.floor((W - gap * (data.length + 1)) / data.length));
@@ -933,14 +1081,17 @@ function AdherenceChart({ weeks }) {
   );
 }
 
-function RollingVolumeChart({ sessions }) {
-  const ended = (sessions || []).filter(s => s.ended).sort((a, b) => a.ended.localeCompare(b.ended));
-  const points = ended.map(s => {
-    const d = new Date(s.ended);
+function RollingVolumeChart({ sessions, planStartDate }) {
+  const cutoff = planStartDate ? planStartDate.slice(0, 10) : null;
+  const ended = (sessions || []).filter(s => s.ended && s.date && (!cutoff || s.date.slice(0, 10) >= cutoff)).sort((a, b) => a.date.slice(0, 10).localeCompare(b.date.slice(0, 10)));
+  const allPoints = ended.map(s => {
+    const dateKey = s.date.slice(0, 10);
+    const d = new Date(dateKey + 'T12:00:00');
     const from = new Date(d); from.setDate(from.getDate() - 30);
-    const win = ended.filter(x => { const xd = new Date(x.ended); return xd >= from && xd <= d; });
-    return { avg: win.length ? Math.round(win.reduce((sum, x) => sum + LB.totalVolume(x), 0) / win.length) : 0, date: s.ended.slice(0, 10) };
-  }).slice(-40);
+    const win = ended.filter(x => { const xd = new Date(x.date.slice(0, 10) + 'T12:00:00'); return xd >= from && xd <= d; });
+    return { avg: win.length ? Math.round(win.reduce((sum, x) => sum + LB.totalVolume(x), 0) / win.length) : 0, date: dateKey };
+  });
+  const points = allPoints.slice(-40);
 
   if (points.length < 2) return <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Not enough sessions yet.</div>;
 
@@ -952,14 +1103,14 @@ function RollingVolumeChart({ sessions }) {
   const py = v => H - 8 - ((v - minV) / vRange) * (H - 16);
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(p.avg).toFixed(1)}`).join(' ');
   const areaPath = `${linePath} L${W},${H} L0,${H} Z`;
-  const trend = points[points.length - 1].avg - points[0].avg;
+  const trend = allPoints[allPoints.length - 1].avg - allPoints[0].avg;
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
         <span style={{ fontSize: 11, color: trend >= 0 ? '#7bc47b' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>
           <i className={`fa-solid fa-arrow-trend-${trend >= 0 ? 'up' : 'down'}`} style={{ marginRight: 4 }} />
-          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}kg since first session
+          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}kg since plan start
         </span>
       </div>
       <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`}>
@@ -1229,11 +1380,23 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
               <div key={i} style={{ padding: '10px 14px', borderBottom: `0.5px solid ${UI.hair}` }}>
                 <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>{e.name}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: lastSets.length ? 5 : 0 }}>
-                  {(e.sets || []).filter(s => !s.warmup).map((s, j) => (
-                    <span key={j} className="num" style={{ fontSize: 12, color: s.done ? UI.ink : UI.inkFaint, background: UI.bgInset, borderRadius: 4, padding: '2px 8px', border: `0.5px solid ${UI.hair}` }}>
-                      {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
-                    </span>
-                  ))}
+                  {(e.sets || []).filter(s => !s.warmup).map((s, j) => {
+                    const prev = lastSets[j];
+                    const anyImpBefore = (e.sets || []).filter(x => !x.warmup).slice(0, j).some((x, k) => isImprovement(x, lastSets[k]));
+                    const highlight = isImprovement(s, prev);
+                    const decline   = !anyImpBefore && isDecline(s, prev);
+                    return (
+                      <span key={j} className="num" style={{
+                        fontSize: 12,
+                        color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : s.done ? UI.ink : UI.inkFaint,
+                        background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : UI.bgInset,
+                        borderRadius: 4, padding: '2px 8px',
+                        border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
+                      }}>
+                        {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                      </span>
+                    );
+                  })}
                 </div>
                 {lastSets.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
