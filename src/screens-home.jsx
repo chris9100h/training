@@ -856,7 +856,7 @@ function HomeScreen({ store, setStore, go, userId }) {
 
             {/* Exercise name strip */}
             {activeDay.items.length > 0 && (
-              <div style={{ display: 'flex', gap: 6, width: '100%', marginBottom: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 6, overflowX: 'auto', width: '100%', marginBottom: 16 }}>
                 {activeDay.items.map((it, i) => {
                   const ex = LB.findExercise(store, it.exId);
                   return (
