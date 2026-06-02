@@ -176,8 +176,9 @@ async function setupNewUser(userId, name) {
 
 // ─── LOAD ────────────────────────────────────────────────────────────────
 
-async function loadFromSupabase(userId, _depth = 0) {
-  const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes] = await Promise.all([
+async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
+  const isCoachLoad = !!_opts.coachLoad;
+  const queries = [
     _supabase.from('zane_profiles').select('id, name').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived').eq('user_id', userId),
@@ -189,15 +190,24 @@ async function loadFromSupabase(userId, _depth = 0) {
       .select('*, sets:zane_sets(*)')
       .eq('user_id', userId)
       .order('entry_idx'),
-  ]);
+    // Coaching data — only for own store load, not when a coach loads a client
+    isCoachLoad ? null : _supabase.rpc('get_coach_info'),
+    isCoachLoad ? null : _supabase.rpc('get_coaching_clients'),
+    isCoachLoad ? null : _supabase.from('zane_coaching_notes')
+      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
+      .is('read_at', null)
+      .neq('author_id', userId),
+  ];
+  const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
+         coachInfoRes, coachClientsRes, unreadNotesRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
   // new user and re-seeding starter data over an existing account.
   if (profileRes.error) throw profileRes.error;
 
-  // First login after email confirmation — profile not yet created
-  if (!profileRes.data) {
+  // First login after email confirmation — profile not yet created (skip for coach loads)
+  if (!profileRes.data && !isCoachLoad) {
     // guard against infinite recursion if setupNewUser silently fails (e.g. RLS)
     if (_depth > 0) throw new Error('User profile setup failed');
     const { data: { user } } = await _supabase.auth.getUser();
@@ -210,7 +220,8 @@ async function loadFromSupabase(userId, _depth = 0) {
 
   // Sessions with no ended timestamp that aren't the current in-progress
   // session are orphans (app crashed / closed mid-session). Delete them now.
-  const orphanIds = (sessRes.data || [])
+  // Skip for coach loads — we must not clean up a client's in-progress session.
+  const orphanIds = isCoachLoad ? [] : (sessRes.data || [])
     .filter(s => s.ended === null && s.id !== sett.in_progress_session_id)
     .map(s => s.id);
   if (orphanIds.length) {
@@ -227,7 +238,7 @@ async function loadFromSupabase(userId, _depth = 0) {
   }
 
   const result = {
-    user: { name: profileRes.data.name, email: authUser?.email || '' },
+    user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || '') },
     exercises: exRes.data || [],
     schedules: schRes.data || [],
     // map snake_case DB columns → camelCase store fields
@@ -299,8 +310,35 @@ async function loadFromSupabase(userId, _depth = 0) {
         showWarmupInSummary: sett.show_warmup_in_summary ?? true,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
+    coaching: isCoachLoad ? undefined : {
+      asClient: (coachInfoRes?.data?.[0]) ? {
+        id: coachInfoRes.data[0].coaching_id,
+        coachId: coachInfoRes.data[0].coach_id,
+        coachEmail: coachInfoRes.data[0].coach_email,
+        coachName: coachInfoRes.data[0].coach_name,
+        status: coachInfoRes.data[0].status,
+      } : null,
+      asCoach: (coachClientsRes?.data || []).map(r => ({
+        id: r.coaching_id,
+        clientId: r.client_id,
+        clientEmail: r.client_email,
+        clientName: r.client_name,
+        status: r.status,
+      })),
+      unreadNotes: (unreadNotesRes?.data || []).map(n => ({
+        id: n.id,
+        coachingId: n.coaching_id,
+        authorId: n.author_id,
+        type: n.type,
+        entityId: n.entity_id,
+        entityName: n.entity_name,
+        threadId: n.thread_id,
+        body: n.body,
+        createdAt: n.created_at,
+      })),
+    },
   };
-  await autoArchiveMissedDays(userId, result);
+  if (!isCoachLoad) await autoArchiveMissedDays(userId, result);
   return result;
 }
 
@@ -832,7 +870,7 @@ function clearLocal(userId) {
 
 let _realtimeChannel = null;
 
-function subscribeToChanges(userId, onSession, onExIdx, onSessionNav) {
+function subscribeToChanges(userId, onSession, onExIdx, onSessionNav, onCoachingNote) {
   const mapRow = row => ({
     id: row.id,
     scheduleId: row.schedule_id,
@@ -844,10 +882,18 @@ function subscribeToChanges(userId, onSession, onExIdx, onSessionNav) {
     entries: row.entries,
     durationMinutes: row.duration_minutes ?? null,
   });
+  const mapNote = n => ({
+    id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
+    type: n.type, entityId: n.entity_id, entityName: n.entity_name,
+    threadId: n.thread_id, body: n.body, createdAt: n.created_at,
+  });
   _realtimeChannel = _supabase
     .channel(`rt-${userId}`)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_sessions', filter: `user_id=eq.${userId}` }, p => onSession(mapRow(p.new)))
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'zane_sessions', filter: `user_id=eq.${userId}` }, p => onSession(mapRow(p.new)))
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_coaching_notes' }, p => {
+      if (p.new.author_id !== userId) onCoachingNote?.(mapNote(p.new));
+    })
     .on('broadcast', { event: 'ex_idx' }, ({ payload }) => onExIdx?.(payload))
     .on('broadcast', { event: 'session_nav' }, ({ payload }) => onSessionNav?.(payload))
     .subscribe();
@@ -896,6 +942,133 @@ function progressionSuggestion(store, exId, dayId, plannedReps) {
   return { kg: cappedKg, reps: baseReps ?? null };
 }
 
+// ─── COACHING ────────────────────────────────────────────────────────────────
+
+async function loadClientStore(clientId) {
+  return loadFromSupabase(clientId, 0, { coachLoad: true });
+}
+
+async function inviteClient(email) {
+  const { data, error } = await _supabase.rpc('invite_client', { p_email: email });
+  if (error) throw error;
+  return data; // coaching id or 'ERROR:...'
+}
+
+async function respondToCoachingInvite(coachingId, accept) {
+  const { error } = await _supabase.rpc('respond_to_coaching_invite', {
+    p_coaching_id: coachingId,
+    p_accept: accept,
+  });
+  if (error) throw error;
+}
+
+async function endCoaching(coachingId) {
+  const { error } = await _supabase.from('zane_coaching').delete().eq('id', coachingId);
+  if (error) throw error;
+}
+
+async function addCoachingNote(coachingId, type, entityId, entityName, body, authorId, threadId = null) {
+  const id = 'cnote_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const { error } = await _supabase.from('zane_coaching_notes').insert({
+    id, coaching_id: coachingId, author_id: authorId,
+    type, entity_id: entityId || null, entity_name: entityName || null, body,
+    thread_id: threadId || null,
+  });
+  if (error) throw error;
+  return id;
+}
+
+async function markCoachingNotesRead(noteIds) {
+  if (!noteIds.length) return;
+  const { error } = await _supabase.from('zane_coaching_notes')
+    .update({ read_at: new Date().toISOString() })
+    .in('id', noteIds);
+  if (error) throw error;
+}
+
+async function loadCoachingNotes(coachingId, threadId = null) {
+  let q = _supabase.from('zane_coaching_notes')
+    .select('*')
+    .eq('coaching_id', coachingId);
+  if (threadId !== null) q = q.eq('thread_id', threadId);
+  else q = q.is('thread_id', null);
+  const { data, error } = await q.order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(n => ({
+    id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
+    threadId: n.thread_id,
+    type: n.type, entityId: n.entity_id, entityName: n.entity_name,
+    body: n.body, createdAt: n.created_at, readAt: n.read_at,
+  }));
+}
+
+async function loadCoachingThreads(coachingId) {
+  const { data, error } = await _supabase.from('zane_coaching_threads')
+    .select('*')
+    .eq('coaching_id', coachingId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data || []).map(t => ({
+    id: t.id, coachingId: t.coaching_id, name: t.name,
+    createdBy: t.created_by, createdAt: t.created_at,
+  }));
+}
+
+async function createCoachingThread(coachingId, name, userId) {
+  const id = 'cthr_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const { error } = await _supabase.from('zane_coaching_threads')
+    .insert({ id, coaching_id: coachingId, name: name.trim(), created_by: userId });
+  if (error) throw error;
+  return id;
+}
+
+async function getOrCreateCoachingThread(coachingId, name, userId) {
+  const { data } = await _supabase.from('zane_coaching_threads')
+    .select('id')
+    .eq('coaching_id', coachingId)
+    .eq('name', name)
+    .maybeSingle();
+  if (data) return data.id;
+  return createCoachingThread(coachingId, name, userId);
+}
+
+async function deleteCoachingThread(threadId) {
+  await _supabase.from('zane_coaching_notes').delete().eq('thread_id', threadId);
+  const { error } = await _supabase.from('zane_coaching_threads').delete().eq('id', threadId);
+  if (error) throw error;
+}
+
+async function loadCoachingMacros(coachingId) {
+  const { data, error } = await _supabase
+    .from('zane_coaching_macros')
+    .select('*')
+    .eq('coaching_id', coachingId)
+    .order('set_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(r => ({
+    id: r.id, coachingId: r.coaching_id, setBy: r.set_by, setAt: r.set_at,
+    caloriesTraining: r.calories_training, proteinTraining: r.protein_training,
+    carbsTraining: r.carbs_training, fatTraining: r.fat_training,
+    caloriesRest: r.calories_rest, proteinRest: r.protein_rest,
+    carbsRest: r.carbs_rest, fatRest: r.fat_rest,
+  }));
+}
+
+async function addCoachingMacros(coachingId, macros, userId) {
+  const { error } = await _supabase.from('zane_coaching_macros').insert({
+    id: uid(), coaching_id: coachingId, set_by: userId,
+    calories_training: macros.caloriesTraining ?? null,
+    protein_training: macros.proteinTraining ?? null,
+    carbs_training: macros.carbsTraining ?? null,
+    fat_training: macros.fatTraining ?? null,
+    calories_rest: macros.caloriesRest ?? null,
+    protein_rest: macros.proteinRest ?? null,
+    carbs_rest: macros.carbsRest ?? null,
+    fat_rest: macros.fatRest ?? null,
+  });
+  if (error) throw error;
+}
+
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
@@ -908,4 +1081,7 @@ window.LB = {
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,
+  loadClientStore, inviteClient, respondToCoachingInvite, endCoaching,
+  addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
+  loadCoachingMacros, addCoachingMacros,
 };

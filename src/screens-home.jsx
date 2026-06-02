@@ -995,6 +995,9 @@ function HomeScreen({ store, setStore, go, userId }) {
         </div>
       )}
 
+      {/* Coach message banner */}
+      <window.Screens.CoachingBannerGroup store={store} setStore={setStore} userId={userId} go={go} />
+
       <SkipReasonSheet
         modal={skipReasonModal}
         onClose={() => setSkipReasonModal(null)}
