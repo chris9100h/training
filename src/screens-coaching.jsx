@@ -410,39 +410,129 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
 
 // ─── Tab: Overview ────────────────────────────────────────────────────────────
 
+function cyclePosFn(clientStore, date) {
+  const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
+  const cycleLen = activeSch?.days?.length || 1;
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const d = new Date(date); d.setHours(12, 0, 0, 0);
+  const daysAgo = Math.round((today - d) / 86400000);
+  return (((clientStore.cycleIndex || 0) - daysAgo) % cycleLen + cycleLen) % cycleLen;
+}
+
+function computeWeeklyAdherence(clientStore, weeksBack = 6) {
+  const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
+  if (!activeSch) return [];
+
+  const isWd = LB.isWeekdayPlan(activeSch);
+  const sessionDates = new Set(
+    (clientStore.sessions || []).filter(s => s.ended).map(s => s.date?.slice(0, 10))
+  );
+
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const todayWd = (today.getDay() + 6) % 7; // 0=Mon
+  const thisMonday = new Date(today);
+  thisMonday.setDate(today.getDate() - todayWd);
+
+  return Array.from({ length: weeksBack }, (_, w) => {
+    const monday = new Date(thisMonday);
+    monday.setDate(thisMonday.getDate() - w * 7);
+
+    let planned = 0, done = 0;
+    for (let d = 0; d < 7; d++) {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + d);
+      if (date > today) continue;
+
+      const dateStr = date.toISOString().slice(0, 10);
+      let isTrainingDay = false;
+
+      if (isWd) {
+        const wd = date.getDay();
+        isTrainingDay = (activeSch.days || []).some(day => day.weekday === wd && day.items?.length > 0);
+      } else {
+        const pos = cyclePosFn(clientStore, date);
+        isTrainingDay = !!(activeSch.days?.[pos]?.items?.length > 0);
+      }
+
+      if (isTrainingDay) {
+        planned++;
+        if (sessionDates.has(dateStr)) done++;
+      }
+    }
+
+    const pct = planned > 0 ? Math.min(100, Math.round((done / planned) * 100)) : null;
+    const label = w === 0 ? 'This week' : w === 1 ? 'Last week'
+      : `${monday.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}`;
+    return { label, planned, done, pct };
+  });
+}
+
 function ClientOverviewTab({ clientStore, coachingId, userId }) {
   const sessions = clientStore.sessions || [];
   const ended = sessions.filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
-  const last30 = ended.filter(s => {
-    const d = new Date(s.ended);
-    return (Date.now() - d.getTime()) < 30 * 86400000;
-  });
 
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
-  const trainingDays = activeSch ? (activeSch.days || []).filter(d => d.items?.length > 0).length : 0;
-  const weeksLast30 = 4;
-  const expectedSessions = trainingDays * weeksLast30;
-  const adherence = expectedSessions > 0 ? Math.round((last30.length / expectedSessions) * 100) : null;
+  const trainingDayCount = activeSch ? (activeSch.days || []).filter(d => d.items?.length > 0).length : 0;
 
+  const weeks = useMemoC(() => computeWeeklyAdherence(clientStore), [clientStore]);
+  const completedWeeks = weeks.filter(w => w.planned > 0 && w.pct !== null);
+  const overallAdherence = completedWeeks.length > 0
+    ? Math.round(completedWeeks.reduce((s, w) => s + w.pct, 0) / completedWeeks.length)
+    : null;
+
+  const last30 = ended.filter(s => (Date.now() - new Date(s.ended).getTime()) < 30 * 86400000);
   const avgVol = last30.length > 0
     ? Math.round(last30.reduce((s, x) => s + LB.totalVolume(x), 0) / last30.length)
     : null;
 
   return (
     <div style={{ overflowY: 'auto', flex: 1, padding: '16px 0 32px' }}>
-      {/* Stats row */}
+      {/* Top stats */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, padding: '0 4px' }}>
-        <StatBox label="Sessions (30d)" value={last30.length} />
-        <StatBox label="Adherence" value={adherence != null ? `${adherence}%` : '—'} gold={adherence >= 80} />
+        <StatBox label="Adherence (6w)" value={overallAdherence != null ? `${overallAdherence}%` : '—'} gold={overallAdherence >= 80} />
         <StatBox label="Avg Volume" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}kg` : '—'} />
+        <StatBox label="Sessions (30d)" value={last30.length} />
       </div>
+
+      {/* Weekly adherence table */}
+      {weeks.length > 0 && (
+        <>
+          <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>WEEKLY ADHERENCE</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
+            {weeks.map((w, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}` }}>
+                <div style={{ width: 72, flexShrink: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{w.label}</div>
+                <div style={{ flex: 1, height: 4, background: UI.bgElevated, borderRadius: 2, overflow: 'hidden' }}>
+                  {w.planned > 0 && (
+                    <div style={{
+                      height: '100%', borderRadius: 2,
+                      width: `${w.pct ?? 0}%`,
+                      background: w.pct >= 80 ? '#7bc47b' : w.pct >= 50 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.7)',
+                      transition: 'width 0.3s ease',
+                    }} />
+                  )}
+                </div>
+                <div style={{ width: 52, flexShrink: 0, textAlign: 'right' }}>
+                  {w.planned === 0 ? (
+                    <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>no plan</span>
+                  ) : (
+                    <span className="num" style={{ fontSize: 12, color: w.pct >= 80 ? '#7bc47b' : w.pct >= 50 ? UI.gold : 'rgba(var(--danger-rgb),0.8)' }}>
+                      {w.done}/{w.planned}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Active plan */}
       <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>ACTIVE PLAN</div>
       {activeSch ? (
         <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 20 }}>
           <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{activeSch.name}</div>
-          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{trainingDays} training {trainingDays === 1 ? 'day' : 'days'}</div>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{trainingDayCount} training {trainingDayCount === 1 ? 'day' : 'days'}</div>
         </div>
       ) : (
         <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 20, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No active plan</div>
