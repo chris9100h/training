@@ -84,9 +84,15 @@ function CoachingPendingBanner({ store, setStore, userId }) {
 // ─── CoachingUnreadBanner ─────────────────────────────────────────────────────
 // Small banner on home screen when there are unread coach notes.
 
-function CoachingUnreadBanner({ store, setStore, userId, onOpen }) {
+function CoachingUnreadBanner({ store, userId, onOpen }) {
   const notes = store.coaching?.unreadNotes || [];
   if (!notes.length) return null;
+
+  // Determine direction: are these messages from a client (user is coach) or from a coach (user is client)?
+  const clientIds = new Set((store.coaching?.asCoach || []).map(c => c.clientId));
+  const fromClient = notes.some(n => clientIds.has(n.authorId));
+  const label = fromClient ? 'NEW MESSAGE FROM CLIENT' : 'NEW MESSAGE FROM COACH';
+  const labelPlural = fromClient ? 'NEW MESSAGES FROM CLIENTS' : 'NEW MESSAGES FROM COACH';
 
   return (
     <div
@@ -103,7 +109,7 @@ function CoachingUnreadBanner({ store, setStore, userId, onOpen }) {
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="micro-gold" style={{ marginBottom: 1 }}>
-          {notes.length === 1 ? '1 NEW MESSAGE' : `${notes.length} NEW MESSAGES`} FROM COACH
+          {notes.length === 1 ? label : `${notes.length} ${labelPlural}`}
         </div>
         <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {notes[0].body}
@@ -208,13 +214,14 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
 // ─── ThreadList ────────────────────────────────────────────────────────────────
 // Thread list + inline create — used in both coach Notes tab and client sheet.
 
-function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore }) {
+function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canDelete }) {
   const [threads, setThreads] = useStateC([]);
   const [loading, setLoading] = useStateC(true);
   const [selected, setSelected] = useStateC(null);
   const [creating, setCreating] = useStateC(false);
   const [newName, setNewName] = useStateC('');
   const [saving, setSaving] = useStateC(false);
+  const [confirmEl, confirm] = useConfirm();
 
   const reload = () => {
     setLoading(true);
@@ -222,6 +229,15 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore }) {
   };
 
   useEffectC(() => { reload(); }, [coachingId]);
+
+  const deleteThread = async (t, e) => {
+    e.stopPropagation();
+    if (!await confirm(`Delete "${t.name}" and all its messages?`, { title: 'Delete thread', ok: 'Delete', danger: true })) return;
+    try {
+      await LB.deleteCoachingThread(t.id);
+      reload();
+    } catch (err) { alert(err.message); }
+  };
 
   const create = async () => {
     if (!newName.trim()) return;
@@ -256,6 +272,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore }) {
 
   return (
     <>
+      {confirmEl}
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
@@ -276,7 +293,14 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore }) {
                   {unread}
                 </div>
               )}
-              <ChevronRight />
+              {canDelete ? (
+                <button
+                  onClick={e => deleteThread(t, e)}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkGhost, fontSize: 16, lineHeight: 1, flexShrink: 0 }}
+                >×</button>
+              ) : (
+                <ChevronRight />
+              )}
             </div>
           );
         })}
@@ -324,6 +348,7 @@ function CoachingNotesSheet({ open, store, setStore, userId, onClose }) {
             otherName={coachName}
             unreadNotes={unreadNotes}
             setStore={setStore}
+            canDelete={false}
           />
         </div>
       )}
@@ -982,7 +1007,7 @@ function ClientNotesTab({ coachingId, userId, clientName, store }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-      <ThreadList coachingId={coachingId} userId={userId} otherName={clientName} unreadNotes={unreadNotes} />
+      <ThreadList coachingId={coachingId} userId={userId} otherName={clientName} unreadNotes={unreadNotes} canDelete={true} />
       {/* Auto-generated activity (plan activations, session notes not in threads) */}
       {!actLoading && activity.length > 0 && (
         <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}` }}>
@@ -1066,14 +1091,36 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
 // ─── CoachingBannerGroup ──────────────────────────────────────────────────────
 // Renders unread banner + notes sheet; mounted in HomeScreen.
 
-function CoachingBannerGroup({ store, setStore, userId }) {
+function CoachingBannerGroup({ store, setStore, userId, go }) {
   const [notesOpen, setNotesOpen] = useStateC(false);
   const notes = store.coaching?.unreadNotes || [];
   if (!notes.length) return null;
+
+  // Coach sees unread client replies → tap navigates to settings (coaching section)
+  const clientIds = new Set((store.coaching?.asCoach || []).map(c => c.clientId));
+  const fromClient = notes.some(n => clientIds.has(n.authorId));
+
+  const handleOpen = () => {
+    if (fromClient && go) {
+      // Find which client sent the message and go directly to their screen
+      const note = notes.find(n => clientIds.has(n.authorId));
+      const client = note && (store.coaching?.asCoach || []).find(c => c.clientId === note.authorId);
+      if (client) {
+        go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName });
+        return;
+      }
+      go({ name: 'settings' });
+    } else {
+      setNotesOpen(true);
+    }
+  };
+
   return (
     <div style={{ flexShrink: 0, padding: '0 22px 10px' }}>
-      <CoachingUnreadBanner store={store} setStore={setStore} userId={userId} onOpen={() => setNotesOpen(true)} />
-      <CoachingNotesSheet open={notesOpen} store={store} setStore={setStore} userId={userId} onClose={() => setNotesOpen(false)} />
+      <CoachingUnreadBanner store={store} setStore={setStore} userId={userId} onOpen={handleOpen} />
+      {!fromClient && (
+        <CoachingNotesSheet open={notesOpen} store={store} setStore={setStore} userId={userId} onClose={() => setNotesOpen(false)} />
+      )}
     </div>
   );
 }

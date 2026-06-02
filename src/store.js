@@ -1014,6 +1014,11 @@ async function createCoachingThread(coachingId, name, userId) {
   return id;
 }
 
+async function deleteCoachingThread(threadId) {
+  const { error } = await _supabase.from('zane_coaching_threads').delete().eq('id', threadId);
+  if (error) throw error;
+}
+
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
@@ -1027,5 +1032,5 @@ window.LB = {
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,
   loadClientStore, inviteClient, respondToCoachingInvite, endCoaching,
-  addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread,
+  addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread,
 };
