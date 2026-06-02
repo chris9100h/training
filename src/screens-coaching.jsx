@@ -245,22 +245,14 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
       )}
 
       {/* As coach */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <div className="micro" style={{ color: UI.inkFaint }}>MY CLIENTS</div>
-        {asCoach.length > 0 && (
-          <button
-            onClick={() => go({ name: 'coaching-dashboard' })}
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.08em', padding: 0 }}
-          >
-            OPEN DASHBOARD →
-          </button>
-        )}
-      </div>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>MY CLIENTS</div>
 
       {asCoach.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
           {asCoach.map(c => (
-            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}` }}>
+            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, cursor: c.status === 'active' ? 'pointer' : 'default' }}
+              onClick={() => c.status === 'active' && go({ name: 'coaching-client', coachingId: c.id, clientId: c.clientId, clientName: c.clientName })}
+            >
               <div style={{ width: 32, height: 32, borderRadius: 16, background: UI.bgElevated, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, fontWeight: 700 }}>{(c.clientName || '?')[0].toUpperCase()}</span>
               </div>
@@ -268,7 +260,8 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
                 <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{c.clientName}</div>
                 {c.status === 'pending' && <div className="micro" style={{ color: UI.inkFaint, marginTop: 1 }}>PENDING ACCEPTANCE</div>}
               </div>
-              <button onClick={() => handleEndCoaching(c.id)} disabled={ending} style={{ background: 'transparent', border: `1px solid rgba(var(--danger-rgb),0.4)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 11 }}>
+              {c.status === 'active' && <ChevronRight />}
+              <button onClick={e => { e.stopPropagation(); handleEndCoaching(c.id); }} disabled={ending} style={{ background: 'transparent', border: `1px solid rgba(var(--danger-rgb),0.4)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 11 }}>
                 END
               </button>
             </div>
