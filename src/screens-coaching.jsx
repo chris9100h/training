@@ -193,7 +193,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
         })}
         <div ref={bottomRef} />
       </div>
-      <div style={{ flexShrink: 0, padding: '10px 16px 12px', borderTop: `0.5px solid ${UI.hair}` }}>
+      <div style={{ flexShrink: 0, padding: '10px 16px 12px', paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))', borderTop: `0.5px solid ${UI.hair}` }}>
         <div style={{ display: 'flex', gap: 8 }}>
           <input
             value={body}
