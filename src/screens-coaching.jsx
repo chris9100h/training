@@ -1449,8 +1449,8 @@ function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) 
   const pts = entries.map((e, i) => `${xOf(i).toFixed(1)},${yOf(e.value).toFixed(1)}`).join(' ');
   const base = (padTop + plotH).toFixed(1);
 
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 400, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
+  const content = (
+    <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 400, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
       <div style={{ background: UI.bg, borderRadius: '16px 16px 0 0', padding: '20px 20px 44px', borderTop: `0.5px solid ${UI.hairStrong}` }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1484,6 +1484,7 @@ function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) 
       </div>
     </div>
   );
+  return ReactDOM.createPortal(content, document.body);
 }
 
 // ─── CheckInTrendCards ────────────────────────────────────────────────────────
@@ -2709,7 +2710,7 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   if ((thisWeek && !editing)) {
     const recent = [...checkins].slice(0, 6).reverse();
     return (
-      <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>This week submitted ✓</div>
           <div style={{ display: 'flex', gap: 10 }}>
