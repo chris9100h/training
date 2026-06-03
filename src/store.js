@@ -1260,7 +1260,16 @@ async function loadCheckins(coachingId) {
   }));
 }
 
-window.LB = {
+async function deleteCheckin(checkinId, userId) {
+  const { error } = await _supabase
+    .from('zane_checkins')
+    .delete()
+    .eq('id', checkinId)
+    .eq('client_id', userId);
+  if (error) throw error;
+}
+
+
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
@@ -1276,5 +1285,5 @@ window.LB = {
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
-  checkinWeekStart, submitCheckin, loadCheckins, loadCoachCheckinStatus, requestCheckin,
+  checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin,
 };

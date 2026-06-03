@@ -1582,13 +1582,13 @@ function CheckInTrendCards({ recent }) {
     const delta = prev != null ? last.cardioMinutes - prev.cardioMinutes : null;
     const sub = last.cardioDistanceM != null ? `${(last.cardioDistanceM / 1000).toFixed(1)} km` : null;
     return (
-      <div onClick={() => openChart('Cardio', 'fa-person-running', allMins, v => `${v}m`, false)} style={cardStyle}>
+      <div onClick={() => openChart('Cardio', 'fa-person-running', allMins, v => `${v} min`, false)} style={cardStyle}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
           <i className="fa-solid fa-person-running" style={{ fontSize: 10, color: UI.inkFaint }} />
           <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Cardio</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
-          <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last.cardioMinutes}m</span>
+          <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last.cardioMinutes} min</span>
           {delta != null && Math.abs(delta) > 0 && (
             <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
           )}
@@ -1664,11 +1664,11 @@ function ClientCheckInsTab({ coachingId }) {
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <CheckInTrendCards recent={recent} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
         {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
       </div>
-      <CheckInTrendCards recent={recent} />
     </div>
   );
 }
@@ -2682,6 +2682,8 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   const weekStart = LB.checkinWeekStart();
   const [checkins, setCheckins] = useStateC(null);
   const [editing, setEditing] = useStateC(false);
+  const [confirmDelete, setConfirmDelete] = useStateC(false);
+  const [deleting, setDeleting] = useStateC(false);
 
   const load = () => LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
   useEffectC(() => { load(); }, [coachingId]);
@@ -2689,8 +2691,16 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   const thisWeek = (checkins || []).find(c => c.weekStart === weekStart);
   const past = (checkins || []).filter(c => c.weekStart !== weekStart);
 
-  const d = new Date(weekStart + 'T12:00:00');
-  const end = new Date(d); end.setDate(d.getDate() + 6);
+  const handleDelete = async () => {
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 3000);
+      return;
+    }
+    setDeleting(true);
+    try { await LB.deleteCheckin(thisWeek.id, userId); await load(); }
+    catch(e) {} finally { setDeleting(false); setConfirmDelete(false); }
+  };
 
   if (checkins === null) {
     return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div></div>;
@@ -2699,10 +2709,16 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   if ((thisWeek && !editing)) {
     const recent = [...checkins].slice(0, 6).reverse();
     return (
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>This week submitted ✓</div>
-          <button onClick={() => setEditing(true)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>Edit</button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={handleDelete} disabled={deleting}
+              style={{ background: 'transparent', border: 'none', fontSize: 11, color: confirmDelete ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>
+              {confirmDelete ? 'Confirm?' : 'Delete'}
+            </button>
+            <button onClick={() => setEditing(true)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>Edit</button>
+          </div>
         </div>
         <CheckInCard ci={thisWeek} defaultOpen={true} />
         {checkins.length >= 2 && (
@@ -2721,7 +2737,7 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   }
 
   return (
-    <>
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '10px 14px 0', flexShrink: 0 }}>
         <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
           Week of <strong>{fmtWeek(weekStart)}</strong> — covers Mon–Sun of last week.
@@ -2736,7 +2752,7 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
         existing={editing ? thisWeek : null}
         onSaved={() => { setEditing(false); load(); }}
       />
-    </>
+    </div>
   );
 }
 
@@ -2831,7 +2847,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
       )}
       {tab === 'nutrition' && <ClientNutritionReadView coachingId={coaching.id} />}
       {tab === 'checkin' && (
-        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
           <ClientCheckInTab coachingId={coaching.id} clientId={userId} userId={userId} />
         </div>
       )}
