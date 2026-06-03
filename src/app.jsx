@@ -138,7 +138,12 @@ function ErrorScreen({ onRetry }) {
 
 function App() {
   const isPad = useIsPad();
-  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error'
+  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error' | 'invite'
+  // Detect invite/password-reset link before Supabase clears the hash
+  const isTokenFlow = useRefA(() => {
+    const hash = window.location.hash;
+    return hash.includes('type=invite') || hash.includes('type=recovery');
+  });
   const [store, setStore]         = useStateA(null);
   const [userId, setUserId]       = useStateA(null);
   const [route, setRoute]         = useStateA({ name: 'home' });
@@ -366,13 +371,18 @@ function App() {
   useEffectA(() => {
     const { data: { subscription } } = LB.supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'INITIAL_SESSION') {
-        if (session) { setUserId(session.user.id); loadData(session.user.id); }
+        if (session) {
+          setUserId(session.user.id);
+          if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
+          else loadData(session.user.id);
+        }
         // Offline with no restorable session: show the error screen, not the
         // login screen — you can't sign in offline, and a retry recovers.
         else          { setPhase(navigator.onLine ? 'unauthed' : 'error'); }
       } else if (event === 'SIGNED_IN') {
         setUserId(session.user.id);
-        loadData(session.user.id);
+        if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
+        else loadData(session.user.id);
       } else if (event === 'SIGNED_OUT') {
         // An offline SIGNED_OUT is almost always a failed token refresh, not a
         // real sign-out — never wipe the cache or drop to the login screen.
@@ -611,6 +621,7 @@ function App() {
 
   if (phase === 'init' || phase === 'loading') return <LoadingScreen />;
   if (phase === 'unauthed') return <window.Screens.LoginScreen />;
+  if (phase === 'invite') return <window.Screens.SetPasswordScreen onDone={() => loadData(userId)} />;
   if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 
   const go    = (r) => setRoute(r);

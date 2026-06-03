@@ -80,6 +80,76 @@ function LoginScreen() {
   );
 }
 
+// ─── SET PASSWORD (invite / password-reset flow) ──────────────────────────────
+function SetPasswordScreen({ onDone }) {
+  const [name, setName]         = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm]   = useState('');
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState('');
+
+  const canSubmit = password.length >= 6 && password === confirm;
+
+  const submit = async () => {
+    if (!canSubmit || loading) return;
+    setLoading(true);
+    setError('');
+    try {
+      const updates = { password };
+      if (name.trim()) updates.data = { name: name.trim() };
+      const { error: err } = await LB.supabase.auth.updateUser(updates);
+      if (err) throw err;
+      if (name.trim()) {
+        const { data: { user } } = await LB.supabase.auth.getUser();
+        if (user?.id) {
+          await LB.supabase.from('zane_profiles').upsert({ id: user.id, name: name.trim() });
+        }
+      }
+      onDone();
+    } catch (e) {
+      setError(e.message || 'Failed to set password');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Screen scroll={false} style={{ position: 'relative', overflow: 'hidden' }}>
+      <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
+        <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain', marginBottom: 28 }} />
+        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
+          <div style={{ textAlign: 'center', marginBottom: 4 }}>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, marginBottom: 6 }}>Welcome to Zane</div>
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Set a password to complete your account.</div>
+          </div>
+          <Field label="Your name (optional)">
+            <TextInput value={name} onChange={setName} placeholder="e.g. Alex" autoFocus />
+          </Field>
+          <Field label="Password">
+            <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters" />
+          </Field>
+          <Field label="Confirm password">
+            <TextInput value={confirm} onChange={setConfirm} type="password" placeholder="repeat password"
+              onKeyDown={e => e.key === 'Enter' && submit()} />
+          </Field>
+          {password.length > 0 && confirm.length > 0 && password !== confirm && (
+            <div style={{ fontSize: 12, color: UI.danger, fontFamily: UI.fontUi }}>Passwords don't match.</div>
+          )}
+          {error && (
+            <div style={{ fontSize: 12, color: UI.danger, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.06)', border: `1px solid rgba(var(--danger-rgb),0.25)`, borderRadius: 4, fontFamily: UI.fontUi }}>
+              {error}
+            </div>
+          )}
+          <Btn onClick={submit} disabled={!canSubmit || loading} style={{ marginTop: 4, opacity: canSubmit && !loading ? 1 : 0.4 }}>
+            {loading ? 'Setting up…' : 'Set password & continue'}
+          </Btn>
+        </div>
+      </div>
+    </Screen>
+  );
+}
+
 // ─── Sub-components used by HomeScreen ────────────────────────────────
 
 function SkipReasonSheet({ modal, onClose, setStore, userId }) {
@@ -1070,4 +1140,4 @@ function HomeScreen({ store, setStore, go, userId }) {
 }
 
 window.Screens = window.Screens || {};
-Object.assign(window.Screens, { LoginScreen, HomeScreen });
+Object.assign(window.Screens, { LoginScreen, HomeScreen, SetPasswordScreen });
