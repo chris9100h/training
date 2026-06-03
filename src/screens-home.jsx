@@ -95,20 +95,31 @@ function SetPasswordScreen({ onDone }) {
     setLoading(true);
     setError('');
     try {
+      // Grab email from the current invite session before updating
+      const { data: { user: currentUser } } = await LB.supabase.auth.getUser();
+      const email = currentUser?.email;
+
       const updates = { password };
       if (name.trim()) updates.data = { name: name.trim() };
-      const { error: err } = await LB.supabase.auth.updateUser(updates);
-      if (err) throw err;
-      if (name.trim()) {
-        const { data: { user } } = await LB.supabase.auth.getUser();
-        if (user?.id) {
-          await LB.supabase.from('zane_profiles').upsert({ id: user.id, name: name.trim() });
-        }
+      const { error: updateErr } = await LB.supabase.auth.updateUser(updates);
+      if (updateErr) throw updateErr;
+
+      if (name.trim() && currentUser?.id) {
+        await LB.supabase.from('zane_profiles').upsert({ id: currentUser.id, name: name.trim() });
       }
-      onDone();
+
+      if (email) {
+        // Re-authenticate with the new password — verifies it was saved correctly
+        // and replaces the one-time invite session with a permanent one.
+        // The SIGNED_IN event in app.jsx will then call loadData().
+        const { error: signInErr } = await LB.supabase.auth.signInWithPassword({ email, password });
+        if (signInErr) throw new Error('Password saved but login failed — please try logging in manually.');
+        // Don't call setLoading(false): phase will switch and unmount this screen
+      } else {
+        onDone();
+      }
     } catch (e) {
       setError(e.message || 'Failed to set password');
-    } finally {
       setLoading(false);
     }
   };
