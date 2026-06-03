@@ -1791,15 +1791,21 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
 
 function CoachingTabScreen({ store, setStore, userId, go }) {
   const isCoach = (store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0;
-  if (isCoach) return <CoachingTabCoachView store={store} userId={userId} go={go} />;
+  if (isCoach) return <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} />;
   return <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} />;
 }
 
 // ─── CoachingTabCoachView ─────────────────────────────────────────────────────
 
-function CoachingTabCoachView({ store, userId, go }) {
-  const clients = (store.coaching?.asCoach || []).filter(c => c.status === 'active');
+function CoachingTabCoachView({ store, setStore, userId, go }) {
+  const allClients = store.coaching?.asCoach || [];
   const [liveMap, setLiveMap] = useStateC({});
+  const [inviteOpen, setInviteOpen] = useStateC(false);
+  const [inviteEmail, setInviteEmail] = useStateC('');
+  const [inviting, setInviting] = useStateC(false);
+  const [inviteError, setInviteError] = useStateC('');
+  const [ending, setEnding] = useStateC(null);
+  const [confirmEl, confirm] = useConfirm();
   const unreadNotes = store.coaching?.unreadNotes || [];
 
   useEffectC(() => {
@@ -1817,16 +1823,101 @@ function CoachingTabCoachView({ store, userId, go }) {
     return () => clearInterval(iv);
   }, []);
 
+  const handleInvite = async () => {
+    if (!inviteEmail.trim()) return;
+    setInviting(true);
+    setInviteError('');
+    try {
+      const result = await LB.inviteClient(inviteEmail.trim());
+      if (result?.startsWith('ERROR:not_found')) { setInviteError('No user found with that email.'); return; }
+      if (result?.startsWith('ERROR:self')) { setInviteError('Cannot coach yourself.'); return; }
+      if (result?.startsWith('ERROR:exists')) { setInviteError('Invite already sent or coaching already active.'); return; }
+      setInviteEmail('');
+      setInviteOpen(false);
+      const coaching = await LB.reloadCoachingState(userId);
+      setStore(s => s ? { ...s, coaching } : s);
+    } catch (e) {
+      setInviteError(e.message);
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const handleEnd = async (client) => {
+    const isPending = client.status === 'pending';
+    const msg = isPending
+      ? `Cancel the invite sent to ${client.clientName || client.clientEmail}?`
+      : 'This will immediately revoke access to training data.';
+    const title = isPending ? 'Cancel invite?' : 'End coaching?';
+    const ok = isPending ? 'Cancel invite' : 'End';
+    if (!await confirm(msg, { title, ok, danger: true })) return;
+    setEnding(client.id);
+    try {
+      await LB.endCoaching(client.id);
+      const coaching = await LB.reloadCoachingState(userId);
+      setStore(s => s ? { ...s, coaching } : s);
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setEnding(null);
+    }
+  };
+
+  const AddIcon = () => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+      <line x1="19" y1="8" x2="19" y2="14"/><line x1="16" y1="11" x2="22" y2="11"/>
+    </svg>
+  );
+
   return (
     <Screen scroll>
-      <TopBar title="Coaching" />
-      {clients.length === 0 ? (
+      {confirmEl}
+      <TopBar title="Coaching" right={
+        <button
+          onClick={() => { setInviteEmail(''); setInviteError(''); setInviteOpen(true); }}
+          style={{ background: 'transparent', border: 'none', padding: '4px 6px', cursor: 'pointer', color: 'var(--accent)', display: 'flex', alignItems: 'center' }}
+        >
+          <AddIcon />
+        </button>
+      } />
+
+      {/* Invite sheet */}
+      <Sheet open={inviteOpen} onClose={() => setInviteOpen(false)} title="Invite Client">
+        <div style={{ padding: '8px 0 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+            The user must already have an account. They'll see the invite next time the app is opened.
+          </div>
+          <input
+            type="email"
+            placeholder="client@email.com"
+            value={inviteEmail}
+            onChange={e => { setInviteEmail(e.target.value); setInviteError(''); }}
+            onKeyDown={e => { if (e.key === 'Enter') handleInvite(); }}
+            autoFocus
+            style={{ width: '100%', boxSizing: 'border-box', padding: '11px 13px', borderRadius: 10, border: `1px solid ${inviteError ? 'rgba(var(--danger-rgb),0.6)' : UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none' }}
+          />
+          {inviteError && (
+            <div style={{ fontSize: 12, color: 'rgba(var(--danger-rgb),0.85)', fontFamily: UI.fontUi }}>{inviteError}</div>
+          )}
+          <button
+            onClick={handleInvite}
+            disabled={inviting || !inviteEmail.trim()}
+            style={{ width: '100%', padding: '13px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, cursor: inviting || !inviteEmail.trim() ? 'not-allowed' : 'pointer', opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }}
+          >
+            {inviting ? 'Sending…' : 'Send Invite'}
+          </button>
+        </div>
+      </Sheet>
+
+      {allClients.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '60px 24px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
-          No active clients yet.<br />Invite clients from Settings → Coaching.
+          No clients yet.<br />
+          <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => { setInviteEmail(''); setInviteError(''); setInviteOpen(true); }}>Invite someone →</span>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 12px 24px' }}>
-          {clients.map(c => {
+          {allClients.map(c => {
             const inProgress = liveMap[c.clientId];
             const clientUnread = unreadNotes.filter(n => n.authorId === c.clientId).length;
             return (
@@ -1835,6 +1926,8 @@ function CoachingTabCoachView({ store, userId, go }) {
                 client={c}
                 inProgress={inProgress}
                 unreadCount={clientUnread}
+                isEnding={ending === c.id}
+                onEnd={() => handleEnd(c)}
                 go={go}
               />
             );
@@ -1845,35 +1938,50 @@ function CoachingTabCoachView({ store, userId, go }) {
   );
 }
 
-function CoachingTabClientCard({ client, inProgress, unreadCount, go }) {
+function CoachingTabClientCard({ client, inProgress, unreadCount, isEnding, onEnd, go }) {
+  const isPending = client.status === 'pending';
+  const handleCardClick = () => {
+    if (isPending) return;
+    go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName, backRoute: 'coaching' });
+  };
+
   return (
     <div
-      onClick={() => go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName, backRoute: 'coaching' })}
-      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${inProgress ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`, cursor: 'pointer', position: 'relative', overflow: 'hidden' }}
+      onClick={handleCardClick}
+      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${inProgress ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`, cursor: isPending ? 'default' : 'pointer', position: 'relative', overflow: 'hidden', opacity: isPending ? 0.75 : 1 }}
     >
       {inProgress && (
         <div style={{ position: 'absolute', inset: 0, background: `rgba(var(--accent-rgb),0.04)`, pointerEvents: 'none' }} />
       )}
       <div style={{ width: 44, height: 44, borderRadius: 22, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' }}>
-        <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.inkSoft, fontWeight: 700 }}>{(client.clientName || '?')[0].toUpperCase()}</span>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.inkSoft, fontWeight: 700 }}>{(client.clientName || client.clientEmail || '?')[0].toUpperCase()}</span>
         {inProgress && (
           <div style={{ position: 'absolute', top: 0, right: 0, width: 12, height: 12, borderRadius: 6, background: 'var(--accent)', border: '2px solid var(--bg)', animation: 'pulseDot 1.5s ease-in-out infinite' }} />
         )}
       </div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 2 }}>{client.clientName}</div>
-        {inProgress ? (
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 2 }}>{client.clientName || client.clientEmail}</div>
+        {isPending ? (
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.05em' }}>INVITE PENDING</div>
+        ) : inProgress ? (
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>TRAINING NOW</div>
         ) : (
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{client.clientEmail}</div>
         )}
       </div>
-      {unreadCount > 0 && (
+      {!isPending && unreadCount > 0 && (
         <div style={{ minWidth: 20, height: 20, borderRadius: 10, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <span style={{ fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, color: '#0a0805' }}>{unreadCount > 9 ? '9+' : unreadCount}</span>
         </div>
       )}
-      <ChevronRight />
+      <button
+        onClick={e => { e.stopPropagation(); onEnd(); }}
+        disabled={isEnding}
+        style={{ background: 'transparent', border: `1px solid rgba(var(--danger-rgb),0.35)`, borderRadius: 6, padding: '5px 9px', cursor: isEnding ? 'not-allowed' : 'pointer', color: 'rgba(var(--danger-rgb),0.75)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', flexShrink: 0 }}
+      >
+        {isPending ? 'CANCEL' : 'END'}
+      </button>
+      {!isPending && <ChevronRight />}
     </div>
   );
 }
