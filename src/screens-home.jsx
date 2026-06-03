@@ -114,9 +114,9 @@ function SetPasswordScreen({ onDone }) {
   };
 
   return (
-    <Screen scroll={false} style={{ position: 'relative', overflow: 'hidden' }}>
+    <Screen scroll style={{ position: 'relative' }}>
       <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 32px 48px', position: 'relative', zIndex: 1 }}>
         <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain', marginBottom: 28 }} />
         <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
           <div style={{ textAlign: 'center', marginBottom: 4 }}>
