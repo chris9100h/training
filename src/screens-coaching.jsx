@@ -1895,6 +1895,7 @@ function CoachingTabScreen({ store, setStore, userId, go }) {
 function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false }) {
   const allClients = store.coaching?.asCoach || [];
   const [liveMap, setLiveMap] = useStateC({});
+  const [checkinMap, setCheckinMap] = useStateC({});
   const [inviteOpen, setInviteOpen] = useStateC(false);
   const [inviteEmail, setInviteEmail] = useStateC('');
   const [inviting, setInviting] = useStateC(false);
@@ -1906,11 +1907,14 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
 
   useEffectC(() => {
     const poll = () => {
-      LB.loadCoachClientsStatus()
-        .then(data => {
-          const m = {};
-          data.forEach(r => { m[r.clientId] = r.inProgressSessionId; });
-          setLiveMap(m);
+      Promise.all([LB.loadCoachClientsStatus(), LB.loadCoachCheckinStatus()])
+        .then(([statusData, checkinData]) => {
+          const lm = {};
+          statusData.forEach(r => { lm[r.clientId] = r.inProgressSessionId; });
+          setLiveMap(lm);
+          const cm = {};
+          checkinData.forEach(r => { cm[r.coachingId] = r.hasCheckin; });
+          setCheckinMap(cm);
         })
         .catch(() => {});
     };
@@ -1959,6 +1963,10 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
     } finally {
       setEnding(null);
     }
+  };
+
+  const handleRequestCheckin = async (coachingId) => {
+    try { await LB.requestCheckin(coachingId, userId); } catch (e) { console.error(e); }
   };
 
   const AddIcon = () => (
@@ -2067,12 +2075,15 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           {allClients.map(c => {
             const inProgress = liveMap[c.clientId];
             const clientUnread = unreadNotes.filter(n => n.authorId === c.clientId).length;
+            const checkinDue = c.status === 'active' && checkinMap[c.id] === false;
             return (
               <CoachingTabClientCard
                 key={c.id}
                 client={c}
                 inProgress={inProgress}
                 unreadCount={clientUnread}
+                checkinDue={checkinDue}
+                onRequestCheckin={() => handleRequestCheckin(c.id)}
                 go={go}
               />
             );
@@ -2083,17 +2094,29 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
   );
 }
 
-function CoachingTabClientCard({ client, inProgress, unreadCount, go }) {
+function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, onRequestCheckin, go }) {
   const isPending = client.status === 'pending';
+  const [requested, setRequested] = useStateC(false);
+
   const handleCardClick = () => {
     if (isPending) return;
     go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName, backRoute: 'coaching' });
   };
 
+  const handleRequest = (e) => {
+    e.stopPropagation();
+    if (requested) return;
+    setRequested(true);
+    onRequestCheckin();
+    setTimeout(() => setRequested(false), 4000);
+  };
+
+  const borderColor = inProgress ? 'rgba(var(--accent-rgb),0.4)' : checkinDue ? 'rgba(var(--accent-rgb),0.2)' : UI.hair;
+
   return (
     <div
       onClick={handleCardClick}
-      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${inProgress ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`, cursor: isPending ? 'default' : 'pointer', position: 'relative', overflow: 'hidden', opacity: isPending ? 0.75 : 1 }}
+      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${borderColor}`, cursor: isPending ? 'default' : 'pointer', position: 'relative', overflow: 'hidden', opacity: isPending ? 0.75 : 1 }}
     >
       {inProgress && (
         <div style={{ position: 'absolute', inset: 0, background: `rgba(var(--accent-rgb),0.04)`, pointerEvents: 'none' }} />
@@ -2110,10 +2133,21 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, go }) {
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.05em' }}>INVITE PENDING</div>
         ) : inProgress ? (
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>TRAINING NOW</div>
+        ) : checkinDue ? (
+          <div style={{ fontSize: 11, color: `rgba(var(--accent-rgb),0.7)`, fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>CHECK-IN DUE</div>
         ) : (
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{client.clientEmail}</div>
         )}
       </div>
+      {checkinDue && !isPending && (
+        <button
+          onClick={handleRequest}
+          style={{ background: requested ? `rgba(var(--accent-rgb),0.15)` : 'transparent', border: `0.5px solid ${requested ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, borderRadius: 7, padding: '5px 8px', cursor: requested ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}
+        >
+          <i className="fa-solid fa-bell" style={{ fontSize: 10, color: requested ? 'var(--accent)' : UI.inkFaint }} />
+          <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.06em', color: requested ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase' }}>{requested ? 'Sent' : 'Remind'}</span>
+        </button>
+      )}
       {!isPending && unreadCount > 0 && (
         <div style={{ minWidth: 20, height: 20, borderRadius: 10, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <span style={{ fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, color: '#0a0805' }}>{unreadCount > 9 ? '9+' : unreadCount}</span>

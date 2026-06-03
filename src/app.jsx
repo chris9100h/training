@@ -577,18 +577,22 @@ function App() {
     store?.inProgress,
   ]);
 
-  // Poll live client training status so the coaching badge updates even when the tab is closed.
+  // Poll live client training status + check-in status so the coaching badge
+  // updates even when the tab is closed.
   const isCoachActive = phase === 'ready' && (store?.coaching?.asCoach || []).some(c => c.status === 'active');
   const prevAnyLiveRef = useRefA(false);
+  const prevPendingRef = useRefA(0);
   useEffectA(() => {
     if (!isCoachActive) return;
     const poll = () => {
-      LB.loadCoachClientsStatus()
-        .then(data => {
-          const anyLive = data.some(r => r.inProgressSessionId);
-          if (anyLive !== prevAnyLiveRef.current) {
+      Promise.all([LB.loadCoachClientsStatus(), LB.loadCoachCheckinStatus()])
+        .then(([statusData, checkinData]) => {
+          const anyLive = statusData.some(r => r.inProgressSessionId);
+          const pendingCheckinsCount = checkinData.filter(r => !r.hasCheckin).length;
+          if (anyLive !== prevAnyLiveRef.current || pendingCheckinsCount !== prevPendingRef.current) {
             prevAnyLiveRef.current = anyLive;
-            setStore(s => s ? { ...s, coaching: { ...s.coaching, anyClientLive: anyLive } } : s);
+            prevPendingRef.current = pendingCheckinsCount;
+            setStore(s => s ? { ...s, coaching: { ...s.coaching, anyClientLive: anyLive, pendingCheckinsCount } } : s);
           }
         })
         .catch(() => {});
@@ -620,7 +624,8 @@ function App() {
     store?.coaching?.asClient?.status === 'active'
   );
   const coachingUnread = (store?.coaching?.unreadNotes || []).length;
-  const coachingBadge = showCoaching ? { count: coachingUnread, live: !!store?.coaching?.anyClientLive } : null;
+  const pendingCheckinsCount = store?.coaching?.pendingCheckinsCount || 0;
+  const coachingBadge = showCoaching ? { count: coachingUnread + pendingCheckinsCount, live: !!store?.coaching?.anyClientLive } : null;
 
   let screen;
   switch (route.name) {

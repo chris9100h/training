@@ -1148,6 +1148,19 @@ async function addCoachingMacros(coachingId, macros, userId) {
   if (error) throw error;
 }
 
+async function loadCoachCheckinStatus() {
+  const { data, error } = await _supabase.rpc('get_coach_checkin_status');
+  if (error) throw error;
+  return (data || []).map(r => ({ coachingId: r.coaching_id, hasCheckin: r.has_checkin }));
+}
+
+async function requestCheckin(coachingId, userId) {
+  const threadId = await getOrCreateCoachingThread(coachingId, 'Weekly Check-in', userId);
+  await addCoachingNote(coachingId, 'general', null, null,
+    'Your coach is requesting your weekly check-in. Please fill it in when you get a chance.',
+    userId, threadId);
+}
+
 function checkinWeekStart() {
   const today = new Date();
   const daysSinceSunday = today.getDay(); // 0=Sun, 1=Mon, …, 6=Sat
@@ -1256,5 +1269,5 @@ window.LB = {
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
-  checkinWeekStart, submitCheckin, loadCheckins,
+  checkinWeekStart, submitCheckin, loadCheckins, loadCoachCheckinStatus, requestCheckin,
 };
