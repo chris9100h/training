@@ -21,46 +21,7 @@ function fmtRelative(iso) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-// ─── diffSchedule ────────────────────────────────────────────────────────────
-// Returns a human-readable summary of what changed between two schedule
-// snapshots, or null if nothing relevant changed.
 
-function diffSchedule(before, after, exercises) {
-  if (!before || !after) return null;
-  const lines = [];
-  const exName = (exId) => (exercises || []).find(e => e.id === exId)?.name || exId;
-
-  if (before.name !== after.name) lines.push(`Renamed: ${before.name} → ${after.name}`);
-
-  const beforeDays = before.days || [];
-  const afterDays  = after.days  || [];
-  const beforeById = Object.fromEntries(beforeDays.map(d => [d.id, d]));
-  const afterById  = Object.fromEntries(afterDays.map(d  => [d.id, d]));
-
-  const added   = afterDays.filter(d => !beforeById[d.id]);
-  const removed = beforeDays.filter(d => !afterById[d.id]);
-  const shared  = afterDays.filter(d =>  beforeById[d.id]);
-
-  if (added.length)   lines.push(`Days added: ${added.map(d => d.name).join(', ')}`);
-  if (removed.length) lines.push(`Days removed: ${removed.map(d => d.name).join(', ')}`);
-
-  const renamed = shared.filter(d => beforeById[d.id].name !== d.name)
-    .map(d => `${beforeById[d.id].name} → ${d.name}`);
-  if (renamed.length) lines.push(`Days renamed: ${renamed.join(', ')}`);
-
-  const exAdded = [], exRemoved = [];
-  for (const afterDay of shared) {
-    const beforeDay = beforeById[afterDay.id];
-    const bKeys = new Set((beforeDay.items || []).map(i => i.exId).filter(Boolean));
-    const aKeys = new Set((afterDay.items  || []).map(i => i.exId).filter(Boolean));
-    (afterDay.items  || []).filter(i => i.exId && !bKeys.has(i.exId)).forEach(i => exAdded.push(`${exName(i.exId)} (${afterDay.name})`));
-    (beforeDay.items || []).filter(i => i.exId && !aKeys.has(i.exId)).forEach(i => exRemoved.push(`${exName(i.exId)} (${beforeDay.name})`));
-  }
-  if (exAdded.length)   lines.push(`Exercises added: ${exAdded.join(', ')}`);
-  if (exRemoved.length) lines.push(`Exercises removed: ${exRemoved.join(', ')}`);
-
-  return lines.length > 0 ? lines.join('\n') : null;
-}
 
 function isImprovement(curr, prev) {
   if (!prev || !curr || !curr.done || curr.skipped || curr.kg == null || prev.kg == null) return false;
@@ -1659,7 +1620,7 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
           const finalSch  = latestClientStore.current?.schedules?.find(s => s.id === scheduleId);
           const schName   = finalSch?.name || scheduleId;
           const exercises = latestClientStore.current?.exercises || [];
-          const diff      = diffSchedule(initialSchedule.current, finalSch, exercises);
+          const diff      = LB.diffSchedule(initialSchedule.current, finalSch, exercises);
           const body      = diff
             ? `Updated plan: ${schName}\n\n${diff.split('\n').map(l => `• ${l}`).join('\n')}`
             : `Updated plan: ${schName}`;

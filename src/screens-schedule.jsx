@@ -452,7 +452,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
 }
 
 // ─── Edit screen — rename, manage pattern ─
-function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
+function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
   const [confirmEl, confirm] = useConfirm();
   const original = store.schedules.find(s => s.id === scheduleId);
   const [draft, setDraft] = useStateS(original ? JSON.parse(JSON.stringify(original)) : null);
@@ -488,8 +488,20 @@ function ScheduleEditScreen({ store, setStore, go, scheduleId }) {
     setPickingType(false);
   };
 
-  const save = () => {
+  const save = async () => {
     setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === draft.id ? draft : x) }));
+    const isActivePlan = store.activeScheduleId === draft.id;
+    const asClient = store.coaching?.asClient;
+    if (isActivePlan && asClient?.status === 'active') {
+      try {
+        const diff = LB.diffSchedule(original, draft, store.exercises);
+        if (diff) {
+          const threadId = await LB.getOrCreateCoachingThread(asClient.id, `Changes on ${draft.name}`, userId);
+          const body = `Modified active plan: ${draft.name}\n\n${diff.split('\n').map(l => `• ${l}`).join('\n')}`;
+          await LB.addCoachingNote(asClient.id, 'plan', draft.id, draft.name, body, userId, threadId);
+        }
+      } catch (e) { console.error('Failed to send plan change note', e); }
+    }
     go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
   };
   const deleteSch = async () => {
