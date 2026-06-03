@@ -180,7 +180,7 @@ async function setupNewUser(userId, name) {
 async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const isCoachLoad = !!_opts.coachLoad;
   const queries = [
-    _supabase.from('zane_profiles').select('id, name').eq('id', userId).maybeSingle(),
+    _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived').eq('user_id', userId),
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries, duration_minutes')
@@ -198,9 +198,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
       .is('read_at', null)
       .neq('author_id', userId),
+    isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at').eq('client_id', userId).eq('status', 'active').maybeSingle(),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
-         coachInfoRes, coachClientsRes, unreadNotesRes] = await Promise.all(queries);
+         coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -239,7 +240,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   }
 
   const result = {
-    user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || '') },
+    user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || ''), approved: profileRes.data?.approved ?? false },
     exercises: exRes.data || [],
     schedules: schRes.data || [],
     // map snake_case DB columns → camelCase store fields
@@ -309,6 +310,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         reminderEnabled: sett.reminder_enabled ?? false,
         reminderTime: sett.reminder_time ?? '07:00',
         showWarmupInSummary: sett.show_warmup_in_summary ?? true,
+        showCoachingTab: sett.show_coaching_tab ?? false,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -318,6 +320,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         coachEmail: coachInfoRes.data[0].coach_email,
         coachName: coachInfoRes.data[0].coach_name,
         status: coachInfoRes.data[0].status,
+        checkinRequestedAt: coachingRowRes?.data?.checkin_requested_at ?? null,
       } : null,
       asCoach: (coachClientsRes?.data || []).map(r => ({
         id: r.coaching_id,
@@ -541,6 +544,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.reminderEnabled      !== next.settings?.reminderEnabled      ||
     prev.settings?.reminderTime         !== next.settings?.reminderTime         ||
     prev.settings?.showWarmupInSummary  !== next.settings?.showWarmupInSummary  ||
+    prev.settings?.showCoachingTab      !== next.settings?.showCoachingTab      ||
     prev.nextReminderAt                 !== next.nextReminderAt;
 
   if (settingsChanged) {
@@ -571,6 +575,7 @@ async function syncStore(prev, next, userId) {
       reminder_enabled: next.settings?.reminderEnabled ?? false,
       reminder_time: next.settings?.reminderTime ?? '07:00',
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
+      show_coaching_tab: next.settings?.showCoachingTab ?? false,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
     }));
@@ -871,7 +876,7 @@ function clearLocal(userId) {
 
 let _realtimeChannel = null;
 
-function subscribeToChanges(userId, onSession, onExIdx, onSessionNav, onCoachingNote) {
+function subscribeToChanges(userId, onSession, onExIdx, onSessionNav, onCoachingNote, onCoachingInvite) {
   const mapRow = row => ({
     id: row.id,
     scheduleId: row.schedule_id,
@@ -894,6 +899,12 @@ function subscribeToChanges(userId, onSession, onExIdx, onSessionNav, onCoaching
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'zane_sessions', filter: `user_id=eq.${userId}` }, p => onSession(mapRow(p.new)))
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_coaching_notes' }, p => {
       if (p.new.author_id !== userId) onCoachingNote?.(mapNote(p.new));
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `client_id=eq.${userId}` }, () => {
+      onCoachingInvite?.();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `coach_id=eq.${userId}` }, () => {
+      onCoachingInvite?.();
     })
     .on('broadcast', { event: 'ex_idx' }, ({ payload }) => onExIdx?.(payload))
     .on('broadcast', { event: 'session_nav' }, ({ payload }) => onSessionNav?.(payload))
@@ -948,6 +959,43 @@ async function loadClientStore(clientId) {
   return loadFromSupabase(clientId, 0, { coachLoad: true });
 }
 
+async function loadCoachClientsStatus() {
+  const { data, error } = await _supabase.rpc('get_coach_clients_status');
+  if (error) throw error;
+  return (data || []).map(r => ({ clientId: r.client_id, inProgressSessionId: r.in_progress_session_id }));
+}
+
+async function reloadCoachingState(userId) {
+  const [coachInfoRes, coachClientsRes, unreadRes, coachingRowRes] = await Promise.all([
+    _supabase.rpc('get_coach_info'),
+    _supabase.rpc('get_coaching_clients'),
+    _supabase.from('zane_coaching_notes')
+      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
+      .is('read_at', null)
+      .neq('author_id', userId),
+    _supabase.from('zane_coaching').select('id, checkin_requested_at').eq('client_id', userId).eq('status', 'active').maybeSingle(),
+  ]);
+  return {
+    asClient: (coachInfoRes?.data?.[0]) ? {
+      id: coachInfoRes.data[0].coaching_id,
+      coachId: coachInfoRes.data[0].coach_id,
+      coachEmail: coachInfoRes.data[0].coach_email,
+      coachName: coachInfoRes.data[0].coach_name,
+      status: coachInfoRes.data[0].status,
+      checkinRequestedAt: coachingRowRes?.data?.checkin_requested_at ?? null,
+    } : null,
+    asCoach: (coachClientsRes?.data || []).map(r => ({
+      id: r.coaching_id, clientId: r.client_id, clientEmail: r.client_email,
+      clientName: r.client_name, status: r.status,
+    })),
+    unreadNotes: (unreadRes?.data || []).map(n => ({
+      id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
+      type: n.type, entityId: n.entity_id, entityName: n.entity_name,
+      threadId: n.thread_id, body: n.body, createdAt: n.created_at,
+    })),
+  };
+}
+
 async function inviteClient(email) {
   const { data, error } = await _supabase.rpc('invite_client', { p_email: email });
   if (error) throw error;
@@ -965,6 +1013,35 @@ async function respondToCoachingInvite(coachingId, accept) {
 async function endCoaching(coachingId) {
   const { error } = await _supabase.from('zane_coaching').delete().eq('id', coachingId);
   if (error) throw error;
+}
+
+function diffSchedule(before, after, exercises) {
+  if (!before || !after) return null;
+  const lines = [];
+  const exName = (exId) => (exercises || []).find(e => e.id === exId)?.name || exId;
+  if (before.name !== after.name) lines.push(`Renamed: ${before.name} → ${after.name}`);
+  const beforeDays = before.days || [];
+  const afterDays  = after.days  || [];
+  const beforeById = Object.fromEntries(beforeDays.map(d => [d.id, d]));
+  const afterById  = Object.fromEntries(afterDays.map(d  => [d.id, d]));
+  const added   = afterDays.filter(d => !beforeById[d.id]);
+  const removed = beforeDays.filter(d => !afterById[d.id]);
+  const shared  = afterDays.filter(d =>  beforeById[d.id]);
+  if (added.length)   lines.push(`Days added: ${added.map(d => d.name).join(', ')}`);
+  if (removed.length) lines.push(`Days removed: ${removed.map(d => d.name).join(', ')}`);
+  const renamed = shared.filter(d => beforeById[d.id].name !== d.name).map(d => `${beforeById[d.id].name} → ${d.name}`);
+  if (renamed.length) lines.push(`Days renamed: ${renamed.join(', ')}`);
+  const exAdded = [], exRemoved = [];
+  for (const afterDay of shared) {
+    const beforeDay = beforeById[afterDay.id];
+    const bKeys = new Set((beforeDay.items || []).map(i => i.exId).filter(Boolean));
+    const aKeys = new Set((afterDay.items  || []).map(i => i.exId).filter(Boolean));
+    (afterDay.items  || []).filter(i => i.exId && !bKeys.has(i.exId)).forEach(i => exAdded.push(`${exName(i.exId)} (${afterDay.name})`));
+    (beforeDay.items || []).filter(i => i.exId && !aKeys.has(i.exId)).forEach(i => exRemoved.push(`${exName(i.exId)} (${beforeDay.name})`));
+  }
+  if (exAdded.length)   lines.push(`Exercises added: ${exAdded.join(', ')}`);
+  if (exRemoved.length) lines.push(`Exercises removed: ${exRemoved.join(', ')}`);
+  return lines.length > 0 ? lines.join('\n') : null;
 }
 
 async function addCoachingNote(coachingId, type, entityId, entityName, body, authorId, threadId = null) {
@@ -1075,6 +1152,144 @@ async function addCoachingMacros(coachingId, macros, userId) {
   if (error) throw error;
 }
 
+async function loadCoachCheckinStatus() {
+  const { data, error } = await _supabase.rpc('get_coach_checkin_status');
+  if (error) throw error;
+  return (data || []).map(r => ({ coachingId: r.coaching_id, hasCheckin: r.has_checkin }));
+}
+
+async function requestCheckin(coachingId, userId) {
+  const threadId = await getOrCreateCoachingThread(coachingId, 'Weekly Check-in', userId);
+  await addCoachingNote(coachingId, 'general', null, null,
+    'Your coach is requesting your weekly check-in. Please fill it in when you get a chance.',
+    userId, threadId);
+  await _supabase.from('zane_coaching').update({ checkin_requested_at: new Date().toISOString() }).eq('id', coachingId);
+}
+
+function checkinWeekStart() {
+  const today = new Date();
+  const daysSinceSunday = today.getDay(); // 0=Sun, 1=Mon, …, 6=Sat
+  const lastSunday = new Date(today);
+  lastSunday.setDate(today.getDate() - daysSinceSunday);
+  const monday = new Date(lastSunday);
+  monday.setDate(lastSunday.getDate() - 6);
+  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+}
+
+async function submitCheckin(coachingId, clientId, data, userId) {
+  const weekStart = checkinWeekStart();
+  const id = 'ci_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const row = {
+    id,
+    coaching_id: coachingId,
+    client_id: clientId,
+    week_start: weekStart,
+    checked_in_at: new Date().toISOString(),
+    weight_today: data.weightToday ?? null,
+    weight_avg_last_week: data.weightAvgLastWeek ?? null,
+    off_plan_notes: data.offPlanNotes || null,
+    hydration_ml: data.hydrationMl ?? null,
+    days_trained: data.daysTrained ?? null,
+    steps: data.steps ?? null,
+    cardio_minutes: data.cardioMinutes ?? null,
+    cardio_distance_m: data.cardioDistanceM ?? null,
+    cardio_pace_feeling: data.cardioPaceFeeling ?? null,
+    cardio_effort: data.cardioEffort ?? null,
+    performance_vs_last_week: data.performanceVsLastWeek || null,
+    goal_note: data.goalNote || null,
+    hunger: data.hunger ?? null,
+    sleep_quality: data.sleepQuality ?? null,
+    life_stress: data.lifeStress ?? null,
+    work_stress: data.workStress ?? null,
+    tiredness: data.tiredness ?? null,
+    issues_notes: data.issuesNotes || null,
+    general_note: data.generalNote || null,
+  };
+  const { error } = await _supabase.from('zane_checkins').upsert(row, { onConflict: 'coaching_id,week_start' });
+  if (error) throw error;
+  // Clear check-in request flag so the modal disappears
+  _supabase.from('zane_coaching').update({ checkin_requested_at: null }).eq('id', coachingId).eq('client_id', clientId).then(() => {}, () => {});
+
+  // Send note to "Weekly Check-in" thread
+  try {
+    const d = new Date(weekStart + 'T12:00:00');
+    const endDate = new Date(d); endDate.setDate(d.getDate() + 6);
+    const fmt = (dt) => dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    const weekLabel = `Week of ${fmt(d)} – ${fmt(endDate)}`;
+    const lines = [weekLabel, '------------'];
+    // Weight
+    const wLines = [];
+    if (data.weightToday != null) wLines.push(`Weight: ${data.weightToday} kg`);
+    if (data.weightAvgLastWeek != null) wLines.push(`Avg last week: ${data.weightAvgLastWeek} kg`);
+    if (wLines.length) lines.push('', ...wLines);
+    // Training
+    const tLines = [];
+    if (data.daysTrained != null) tLines.push(`Training: ${data.daysTrained} days`);
+    if (data.performanceVsLastWeek) tLines.push(`Performance: ${data.performanceVsLastWeek}`);
+    if (tLines.length) lines.push('', ...tLines);
+    // Cardio
+    const cLines = [];
+    if (data.steps != null) cLines.push(`Steps: ${Number(data.steps).toLocaleString()}`);
+    if (data.cardioMinutes != null) {
+      const dist = data.cardioDistanceM != null ? ` · ${(data.cardioDistanceM / 1000).toFixed(1)} km` : '';
+      cLines.push(`Cardio: ${data.cardioMinutes} min${dist}`);
+    }
+    if (data.cardioPaceFeeling != null) cLines.push(`Pace: ${data.cardioPaceFeeling}/6`);
+    if (data.cardioEffort != null) cLines.push(`Effort: ${data.cardioEffort}/10`);
+    if (cLines.length) lines.push('', ...cLines);
+    // Markers
+    const mLines = [];
+    if (data.hunger != null) mLines.push(`  Hunger: ${data.hunger}/10`);
+    if (data.sleepQuality != null) mLines.push(`  Sleep: ${data.sleepQuality}/10`);
+    if (data.lifeStress != null) mLines.push(`  Life stress: ${data.lifeStress}/10`);
+    if (data.workStress != null) mLines.push(`  Work stress: ${data.workStress}/10`);
+    if (data.tiredness != null) mLines.push(`  Tiredness: ${data.tiredness}/10`);
+    if (mLines.length) lines.push('', 'Markers:', ...mLines);
+    // Bottom block — no blank lines between items
+    const bLines = [];
+    if (data.hydrationMl != null) bLines.push(`Hydration: ${(data.hydrationMl / 1000).toFixed(1)} L/day`);
+    if (data.offPlanNotes) bLines.push(`Off-plan: ${data.offPlanNotes}`);
+    if (data.goalNote) bLines.push(`Goal: ${data.goalNote}`);
+    if (data.issuesNotes) bLines.push(`Issues: ${data.issuesNotes}`);
+    if (data.generalNote) bLines.push(`General: ${data.generalNote}`);
+    if (bLines.length) lines.push('', ...bLines);
+    const threadId = await getOrCreateCoachingThread(coachingId, 'Weekly Check-in', userId);
+    await addCoachingNote(coachingId, 'general', null, null, lines.filter((_, i) => !(i === 1 && lines[2] === undefined)).join('\n'), userId, threadId);
+  } catch (e) { console.error('Failed to send check-in note', e); }
+}
+
+async function loadCheckins(coachingId) {
+  const { data, error } = await _supabase
+    .from('zane_checkins')
+    .select('*')
+    .eq('coaching_id', coachingId)
+    .order('week_start', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(r => ({
+    id: r.id, coachingId: r.coaching_id, clientId: r.client_id,
+    weekStart: r.week_start, checkedInAt: r.checked_in_at,
+    weightToday: r.weight_today, weightAvgLastWeek: r.weight_avg_last_week,
+    offPlanNotes: r.off_plan_notes, hydrationMl: r.hydration_ml,
+    daysTrained: r.days_trained, steps: r.steps,
+    cardioMinutes: r.cardio_minutes, cardioDistanceM: r.cardio_distance_m,
+    cardioPaceFeeling: r.cardio_pace_feeling, cardioEffort: r.cardio_effort,
+    performanceVsLastWeek: r.performance_vs_last_week,
+    goalNote: r.goal_note,
+    hunger: r.hunger, sleepQuality: r.sleep_quality,
+    lifeStress: r.life_stress, workStress: r.work_stress, tiredness: r.tiredness,
+    issuesNotes: r.issues_notes, generalNote: r.general_note,
+  }));
+}
+
+async function deleteCheckin(checkinId, userId) {
+  const { error } = await _supabase
+    .from('zane_checkins')
+    .delete()
+    .eq('id', checkinId)
+    .eq('client_id', userId);
+  if (error) throw error;
+}
+
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
@@ -1087,7 +1302,9 @@ window.LB = {
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,
-  loadClientStore, inviteClient, respondToCoachingInvite, endCoaching,
+  loadClientStore, loadCoachClientsStatus, reloadCoachingState, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,
+  diffSchedule,
+  checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin,
 };

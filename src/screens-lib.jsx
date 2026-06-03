@@ -1952,7 +1952,9 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                   opacity: done ? 1 : 0.35,
                   transition: 'opacity 0.3s',
                 }}>
-                  <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
+                  <span className="num" style={{ fontSize: 11, color: s.warmup ? UI.inkFaint : done ? UI.gold : UI.inkFaint }}>
+                    {s.warmup ? 'W' : i + 1}
+                  </span>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
                     <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>
                       {s.kg != null ? s.kg : '—'}
@@ -1993,15 +1995,18 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
           {(() => {
             const lastEntry = (session.last_session_entries || []).find(e => e.name === entry.name);
             if (!lastEntry?.sets?.length) return null;
+            const lastSets = lastEntry.sets.filter(s => !s.warmup);
+            const currWorkingSets = (entry.sets || []).filter(s => !s.warmup);
+            if (!lastSets.length) return null;
             return (
               <div style={{ marginTop: 16 }}>
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>LAST TIME</div>
                 <Frame style={{ padding: '0 16px' }}>
-                  {lastEntry.sets.map((s, i) => {
-                    const curr     = (entry.sets || [])[i];
+                  {lastSets.map((s, i) => {
+                    const curr     = currWorkingSets[i];
                     const prevDone = !s.skipped;
                     const improved = isImprovement(curr, s);
-                    const anyImprovementBefore = (entry.sets || []).slice(0, i).some((c, j) => isImprovement(c, lastEntry.sets[j]));
+                    const anyImprovementBefore = currWorkingSets.slice(0, i).some((c, j) => isImprovement(c, lastSets[j]));
                     const declined = !anyImprovementBefore && (isDecline(curr, s) || (curr?.skipped && prevDone));
                     const showIcon = (curr?.done || curr?.skipped) && !!s;
                     const icon     = curr?.skipped && prevDone ? '↓' : improved ? '↑' : declined ? '↓' : '—';
@@ -2030,7 +2035,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                           {showIcon ? icon : ''}
                         </div>
                       </div>
-                      {i < lastEntry.sets.length - 1 && <div className="knurl" />}
+                      {i < lastSets.length - 1 && <div className="knurl" />}
                       </React.Fragment>
                     );
                   })}

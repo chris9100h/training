@@ -7,26 +7,33 @@ const { useState, useEffect, useMemo, useRef } = React;
 
 const SKIP_REASONS = ['Tired', 'Sick', 'Stress', 'Forgot', 'Rest day', 'No particular reason'];
 
-// ─── LOGIN ────────────────────────────────────────────────────────────
+// ─── LOGIN / REGISTER ─────────────────────────────────────────────────────────
 function LoginScreen() {
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
+  const [mode, setMode]           = useState('login'); // 'login' | 'register'
+  const [name, setName]           = useState('');
+  const [email, setEmail]         = useState('');
+  const [password, setPassword]   = useState('');
+  const [confirm, setConfirm]     = useState('');
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState('');
   const [swVersion, setSwVersion] = useState('');
 
   useEffect(() => {
     if (!('caches' in window)) return;
     caches.keys().then(keys => {
-      const name = keys.find(k => k.startsWith('zane-'));
-      if (name) setSwVersion(name.replace('zane-', ''));
+      const k = keys.find(k => k.startsWith('zane-'));
+      if (k) setSwVersion(k.replace('zane-', ''));
     });
   }, []);
 
-  const canSubmit = email.trim() && password.length >= 6;
+  const switchMode = (m) => { setMode(m); setError(''); setPassword(''); setConfirm(''); };
 
-  const submit = async () => {
-    if (!canSubmit || loading) return;
+  const pwMatch = password === confirm;
+  const canLogin    = email.trim() && password.length >= 6;
+  const canRegister = name.trim() && email.trim() && password.length >= 6 && pwMatch;
+
+  const submitLogin = async () => {
+    if (!canLogin || loading) return;
     setLoading(true); setError('');
     try {
       await LB.signIn(email.trim(), password);
@@ -37,44 +44,177 @@ function LoginScreen() {
     }
   };
 
+  const submitRegister = async () => {
+    if (!canRegister || loading) return;
+    if (!pwMatch) { setError('Passwords do not match'); return; }
+    setLoading(true); setError('');
+    try {
+      await LB.signUp(email.trim(), password, name.trim());
+    } catch (e) {
+      setError(e.message || 'Registration failed');
+      setLoading(false);
+    }
+  };
+
+  const isLogin = mode === 'login';
+
   return (
-    <Screen scroll={false} style={{ position: 'relative', overflow: 'hidden' }}>
-      <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
+    <Screen scroll style={{ position: 'relative' }}>
+      <div className="guilloche" style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0 }} />
 
       <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
         <span className="micro">ZANE TRAINING</span>
       </div>
 
-      {/* Centered block: logo + title + form */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 32px 24px', position: 'relative', zIndex: 1, marginTop: 'auto', marginBottom: 'auto' }}>
         <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain', marginBottom: 28 }} />
+
+        {/* Tab switcher */}
+        <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', marginBottom: 24, borderRadius: 6, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
+          {['login', 'register'].map(m => (
+            <button key={m} onClick={() => switchMode(m)} style={{
+              padding: '10px 0',
+              background: mode === m ? UI.goldFaint : 'transparent',
+              border: 'none',
+              borderRight: m === 'login' ? `1px solid ${UI.hairStrong}` : 'none',
+              color: mode === m ? UI.gold : UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600,
+              letterSpacing: '0.12em', textTransform: 'uppercase',
+              cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              transition: 'background 0.15s, color 0.15s',
+            }}>
+              {m === 'login' ? 'Login' : 'Register'}
+            </button>
+          ))}
+        </div>
+
         <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
+          {!isLogin && (
+            <Field label="Name">
+              <TextInput value={name} onChange={setName} placeholder="Your name" autoFocus={!isLogin} />
+            </Field>
+          )}
           <Field label="Email">
-            <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus />
+            <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus={isLogin} />
           </Field>
           <Field label="Password">
-            <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters" />
+            <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters"
+              onKeyDown={e => e.key === 'Enter' && isLogin && submitLogin()} />
           </Field>
+          {!isLogin && (
+            <Field label="Repeat password">
+              <TextInput value={confirm} onChange={setConfirm} type="password" placeholder="repeat password"
+                onKeyDown={e => e.key === 'Enter' && submitRegister()} />
+            </Field>
+          )}
+
+          {!isLogin && confirm.length > 0 && !pwMatch && (
+            <div style={{ fontSize: 12, color: UI.danger, fontFamily: UI.fontUi, marginTop: -10 }}>
+              Passwords do not match
+            </div>
+          )}
+
           {error && (
-            <div style={{
-              fontSize: 12, color: UI.danger,
-              padding: '10px 14px',
-              background: 'rgba(var(--danger-rgb),0.06)',
-              border: `1px solid rgba(var(--danger-rgb),0.25)`,
-              borderRadius: 4,
-              fontFamily: UI.fontUi,
-            }}>
+            <div style={{ fontSize: 12, color: UI.danger, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.06)', border: `1px solid rgba(var(--danger-rgb),0.25)`, borderRadius: 4, fontFamily: UI.fontUi }}>
               {error}
             </div>
           )}
-          <Btn onClick={submit} disabled={!canSubmit || loading} style={{ marginTop: 4, opacity: canSubmit && !loading ? 1 : 0.4 }}>
-            {loading ? 'Signing in…' : 'Log in'}
-          </Btn>
+
+          {isLogin ? (
+            <Btn onClick={submitLogin} disabled={!canLogin || loading} style={{ marginTop: 4, opacity: canLogin && !loading ? 1 : 0.4 }}>
+              {loading ? 'Signing in…' : 'Log in'}
+            </Btn>
+          ) : (
+            <Btn onClick={submitRegister} disabled={!canRegister || loading} style={{ marginTop: 4, opacity: canRegister && !loading ? 1 : 0.4 }}>
+              {loading ? 'Creating account…' : 'Create account'}
+            </Btn>
+          )}
         </div>
       </div>
 
       <div style={{ flexShrink: 0, padding: '0 22px calc(env(safe-area-inset-bottom, 8px) + 18px)', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
         <span className="micro">{swVersion || '…'}</span>
+      </div>
+    </Screen>
+  );
+}
+
+// ─── SET PASSWORD (invite / password-reset flow) ──────────────────────────────
+function SetPasswordScreen({ onDone }) {
+  const [name, setName]         = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm]   = useState('');
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState('');
+
+  const canSubmit = password.length >= 6 && password === confirm;
+
+  const submit = async () => {
+    if (!canSubmit || loading) return;
+    setLoading(true);
+    setError('');
+    try {
+      // Grab email from the current invite session before updating
+      const { data: { user: currentUser } } = await LB.supabase.auth.getUser();
+      const email = currentUser?.email;
+
+      const updates = { password };
+      if (name.trim()) updates.data = { name: name.trim() };
+      const { error: updateErr } = await LB.supabase.auth.updateUser(updates);
+      if (updateErr) throw updateErr;
+
+      if (name.trim() && currentUser?.id) {
+        await LB.supabase.from('zane_profiles').upsert({ id: currentUser.id, name: name.trim() });
+      }
+
+      if (email) {
+        // Re-authenticate with the new password — verifies it was saved correctly
+        // and replaces the one-time invite session with a permanent one.
+        // The SIGNED_IN event in app.jsx will then call loadData().
+        const { error: signInErr } = await LB.supabase.auth.signInWithPassword({ email, password });
+        if (signInErr) throw new Error('Password saved but login failed — please try logging in manually.');
+        // Don't call setLoading(false): phase will switch and unmount this screen
+      } else {
+        onDone();
+      }
+    } catch (e) {
+      setError(e.message || 'Failed to set password');
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Screen scroll style={{ position: 'relative' }}>
+      <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 32px 48px', position: 'relative', zIndex: 1 }}>
+        <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain', marginBottom: 28 }} />
+        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
+          <div style={{ textAlign: 'center', marginBottom: 4 }}>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, marginBottom: 6 }}>Welcome to Zane</div>
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Set a password to complete your account.</div>
+          </div>
+          <Field label="Your name (optional)">
+            <TextInput value={name} onChange={setName} placeholder="e.g. Alex" autoFocus />
+          </Field>
+          <Field label="Password">
+            <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters" />
+          </Field>
+          <Field label="Confirm password">
+            <TextInput value={confirm} onChange={setConfirm} type="password" placeholder="repeat password"
+              onKeyDown={e => e.key === 'Enter' && submit()} />
+          </Field>
+          {password.length > 0 && confirm.length > 0 && password !== confirm && (
+            <div style={{ fontSize: 12, color: UI.danger, fontFamily: UI.fontUi }}>Passwords don't match.</div>
+          )}
+          {error && (
+            <div style={{ fontSize: 12, color: UI.danger, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.06)', border: `1px solid rgba(var(--danger-rgb),0.25)`, borderRadius: 4, fontFamily: UI.fontUi }}>
+              {error}
+            </div>
+          )}
+          <Btn onClick={submit} disabled={!canSubmit || loading} style={{ marginTop: 4, opacity: canSubmit && !loading ? 1 : 0.4 }}>
+            {loading ? 'Setting up…' : 'Set password & continue'}
+          </Btn>
+        </div>
       </div>
     </Screen>
   );
@@ -1069,5 +1209,34 @@ function HomeScreen({ store, setStore, go, userId }) {
   );
 }
 
+// ─── PENDING APPROVAL ────────────────────────────────────────────────────────
+function PendingApprovalScreen({ onSignOut }) {
+  return (
+    <Screen scroll={false} style={{ position: 'relative', overflow: 'hidden' }}>
+      <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
+      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
+        <span className="micro">ZANE TRAINING</span>
+      </div>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1, gap: 16 }}>
+        <img src="icons/zane-logo.png" style={{ width: '70%', maxWidth: 380, objectFit: 'contain', marginBottom: 8 }} />
+        <div className="display" style={{ fontSize: 22, color: UI.ink, fontWeight: 400, textAlign: 'center' }}>
+          Waiting for approval
+        </div>
+        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.6, maxWidth: 280 }}>
+          Your account has been created. The admin will review and approve your access shortly.
+        </div>
+        <button onClick={onSignOut} style={{
+          marginTop: 8, padding: '10px 20px', borderRadius: 4,
+          background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+          color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11,
+          letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer',
+        }}>
+          Sign out
+        </button>
+      </div>
+    </Screen>
+  );
+}
+
 window.Screens = window.Screens || {};
-Object.assign(window.Screens, { LoginScreen, HomeScreen });
+Object.assign(window.Screens, { LoginScreen, HomeScreen, SetPasswordScreen, PendingApprovalScreen });

@@ -330,7 +330,7 @@ END;
 $$;
 
 -- Returns full detail of a single active or past session (gated by feature grant).
-CREATE OR REPLACE FUNCTION public.get_active_session_detail(p_user_id uuid, p_session_id text)
+CREATE OR REPLACE FUNCTION public.get_active_session_detail(p_user_id uuid, p_session_id text DEFAULT NULL)
 RETURNS TABLE(
   user_name                    text,
   day_name                     text,
@@ -350,7 +350,8 @@ BEGIN
      NOT EXISTS (
        SELECT 1 FROM zane_feature_grants
        WHERE feature = 'active_users' AND email = auth.email()
-     )
+     ) AND
+     NOT zane_is_coach_of(p_user_id)
   THEN
     RETURN;
   END IF;
@@ -431,6 +432,20 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.get_coach_clients_status()
+RETURNS TABLE(client_id uuid, in_progress_session_id text)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT us.user_id AS client_id, us.in_progress_session_id
+  FROM zane_user_settings us
+  INNER JOIN zane_coaching zc ON zc.client_id = us.user_id
+  WHERE zc.coach_id = auth.uid()
+    AND zc.status = 'active'
+    AND us.in_progress_session_id IS NOT NULL;
+$$;
+
 -- ── Realtime ──────────────────────────────────────────────────────────────────
 
 -- Enable Realtime on zane_sessions for cross-device live sync.
@@ -441,6 +456,18 @@ BEGIN
     WHERE pubname = 'supabase_realtime' AND tablename = 'zane_sessions'
   ) THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE zane_sessions;
+  END IF;
+END;
+$$;
+
+-- Enable Realtime on zane_coaching so clients receive live invite notifications.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'zane_coaching'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE zane_coaching;
   END IF;
 END;
 $$;

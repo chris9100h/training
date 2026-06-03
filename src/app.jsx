@@ -138,7 +138,11 @@ function ErrorScreen({ onRetry }) {
 
 function App() {
   const isPad = useIsPad();
-  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error'
+  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error' | 'invite' | 'pending'
+  // Detect invite/password-reset link before Supabase clears the hash
+  const isTokenFlow = useRefA(
+    window.location.hash.includes('type=invite') || window.location.hash.includes('type=recovery')
+  );
   const [store, setStore]         = useStateA(null);
   const [userId, setUserId]       = useStateA(null);
   const [route, setRoute]         = useStateA({ name: 'home' });
@@ -343,6 +347,7 @@ function App() {
               schedules: [...localOnlySchedules, ...fresh.schedules],
             };
           }
+          if (!fresh.user.approved) { setPhase('pending'); return; }
           prevStore.current = merged;
           setStore(merged);
         })
@@ -351,6 +356,7 @@ function App() {
       setPhase('loading');
       try {
         const loaded = await LB.loadFromSupabase(uid);
+        if (!loaded.user.approved) { setPhase('pending'); return; }
         prevStore.current = loaded;
         syncBase.current = loaded;
         LB.saveBase(loaded, uid);
@@ -366,13 +372,18 @@ function App() {
   useEffectA(() => {
     const { data: { subscription } } = LB.supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'INITIAL_SESSION') {
-        if (session) { setUserId(session.user.id); loadData(session.user.id); }
+        if (session) {
+          setUserId(session.user.id);
+          if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
+          else loadData(session.user.id);
+        }
         // Offline with no restorable session: show the error screen, not the
         // login screen — you can't sign in offline, and a retry recovers.
         else          { setPhase(navigator.onLine ? 'unauthed' : 'error'); }
       } else if (event === 'SIGNED_IN') {
         setUserId(session.user.id);
-        loadData(session.user.id);
+        if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
+        else loadData(session.user.id);
       } else if (event === 'SIGNED_OUT') {
         // An offline SIGNED_OUT is almost always a failed token refresh, not a
         // real sign-out — never wipe the cache or drop to the login screen.
@@ -477,6 +488,11 @@ function App() {
           };
         });
       },
+      () => {
+        LB.reloadCoachingState(userId).then(coaching => {
+          setStore(s => s ? { ...s, coaching } : s);
+        }).catch(() => {});
+      },
     );
   }, [userId]);
 
@@ -514,11 +530,12 @@ function App() {
     };
   }, []);
 
-  // Check for SW updates on every screen navigation.
-  // Fetches sw.js directly from the network (bypassing the SW cache via ?_v=)
-  // and compares the CACHE version string. iOS Safari ignores reg.update() when
-  // the app is in the foreground, so this is the only reliable detection path.
-  useEffectA(() => {
+  // Check for SW updates on every screen navigation and whenever the app
+  // comes back to the foreground (visibilitychange). Fetches sw.js directly
+  // from the network (bypassing the SW cache via ?_v=) and compares the CACHE
+  // version string. iOS Safari ignores reg.update() when the app is in the
+  // foreground, so this is the only reliable detection path.
+  const checkSwUpdate = useCallbackA(() => {
     fetch(`/training/sw.js?_v=${Date.now()}`)
       .then(r => r.text())
       .then(text => {
@@ -534,7 +551,15 @@ function App() {
         }
       })
       .catch(() => {});
-  }, [route]);
+  }, []);
+
+  useEffectA(() => { checkSwUpdate(); }, [route]);
+
+  useEffectA(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') checkSwUpdate(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
 
   // Retry a failed sync as soon as connectivity returns
   useEffectA(() => {
@@ -563,6 +588,31 @@ function App() {
     store?.inProgress,
   ]);
 
+  // Poll live client training status + check-in status so the coaching badge
+  // updates even when the tab is closed.
+  const isCoachActive = phase === 'ready' && (store?.coaching?.asCoach || []).some(c => c.status === 'active');
+  const prevAnyLiveRef = useRefA(false);
+  const prevPendingRef = useRefA(0);
+  useEffectA(() => {
+    if (!isCoachActive) return;
+    const poll = () => {
+      Promise.all([LB.loadCoachClientsStatus(), LB.loadCoachCheckinStatus()])
+        .then(([statusData, checkinData]) => {
+          const anyLive = statusData.some(r => r.inProgressSessionId);
+          const pendingCheckinsCount = checkinData.filter(r => !r.hasCheckin).length;
+          if (anyLive !== prevAnyLiveRef.current || pendingCheckinsCount !== prevPendingRef.current) {
+            prevAnyLiveRef.current = anyLive;
+            prevPendingRef.current = pendingCheckinsCount;
+            setStore(s => s ? { ...s, coaching: { ...s.coaching, anyClientLive: anyLive, pendingCheckinsCount } } : s);
+          }
+        })
+        .catch(() => {});
+    };
+    poll();
+    const iv = setInterval(poll, 5000);
+    return () => clearInterval(iv);
+  }, [isCoachActive]);
+
   // helper for in-sheet "+ new exercise"
   window.__createExercise = (name) => {
     const id = LB.uid();
@@ -572,12 +622,23 @@ function App() {
 
   if (phase === 'init' || phase === 'loading') return <LoadingScreen />;
   if (phase === 'unauthed') return <window.Screens.LoginScreen />;
+  if (phase === 'invite') return <window.Screens.SetPasswordScreen onDone={() => loadData(userId)} />;
+  if (phase === 'pending') return <window.Screens.PendingApprovalScreen onSignOut={() => LB.signOut()} />;
   if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 
   const go    = (r) => setRoute(r);
   const props = { store, setStore, go, userId };
-  const tabRoutes = ['home', 'plan', 'lib', 'hist'];
+  const tabRoutes = ['home', 'plan', 'lib', 'hist', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
+
+  const showCoaching = !!(
+    store?.settings?.showCoachingTab ||
+    (store?.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0 ||
+    store?.coaching?.asClient?.status === 'active'
+  );
+  const coachingUnread = (store?.coaching?.unreadNotes || []).length;
+  const pendingCheckinsCount = store?.coaching?.pendingCheckinsCount || 0;
+  const coachingBadge = showCoaching ? { count: coachingUnread + pendingCheckinsCount, live: !!store?.coaching?.anyClientLive } : null;
 
   let screen;
   switch (route.name) {
@@ -593,8 +654,9 @@ function App() {
     case 'session':       screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'settings':          screen = <window.Screens.SettingsScreen {...props} />; break;
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
+    case 'coaching':            screen = <window.Screens.CoachingTabScreen {...props} />; break;
     case 'coaching-dashboard':  screen = <window.Screens.CoachingDashboard {...props} />; break;
-    case 'coaching-client':     screen = <window.Screens.CoachClientScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} initialTab={route.initialTab} />; break;
+    case 'coaching-client':     screen = <window.Screens.CoachClientScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} initialTab={route.initialTab} backRoute={route.backRoute || 'settings'} />; break;
     case 'coaching-edit-plan':  screen = <window.Screens.CoachPlanEditorScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} scheduleId={route.scheduleId} />; break;
     case 'coaching-new-plan':   screen = <window.Screens.CoachNewPlanScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} />; break;
     default:                  screen = <window.Screens.HomeScreen {...props} />; break;
@@ -603,7 +665,7 @@ function App() {
   if (isPad && showTab) {
     return (
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <TabBar active={route.name} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} />
+        <TabBar active={route.name} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} showCoaching={showCoaching} coachingBadge={coachingBadge} />
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
             {screen}
@@ -621,7 +683,7 @@ function App() {
         {screen}
       </ErrorBoundary>
       {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
-      {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} />}
+      {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
     </>
   );

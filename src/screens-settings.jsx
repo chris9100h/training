@@ -153,6 +153,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [accountOpen, setAccountOpen] = useStateSet(false);
   const [trainingOpen, setTrainingOpen] = useStateSet(false);
   const [coachingOpen, setCoachingOpen] = useStateSet(false);
+
   // Training sub-sheets
   const [restSheet, setRestSheet] = useStateSet(false);
   const [paceguardSheet, setPaceguardSheet] = useStateSet(false);
@@ -163,6 +164,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [qsSwitching, setQsSwitching] = useStateSet(false);
   const [activeGrants, setActiveGrants] = useStateSet([]);
   const [newGrantEmail, setNewGrantEmail] = useStateSet('');
+  const [pendingUsers, setPendingUsers] = useStateSet([]);
+  const [approvingId, setApprovingId] = useStateSet(null);
+  const [decliningId, setDecliningId] = useStateSet(null);
   const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateSet(
     () => localStorage.getItem('logbook-active-users-access') === 'true'
   );
@@ -195,7 +199,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
     let mounted = true;
     const loadSessions = () => LB.supabase.rpc('get_active_sessions_overview').then(({ data }) => { if (mounted) setActiveSessions(data || []); }).catch(() => {});
     const loadGrants = () => LB.supabase.rpc('get_active_users_grants').then(({ data }) => { if (mounted) setActiveGrants((data || []).map(r => r.email)); }).catch(() => {});
-    loadSessions(); if (isAdmin) loadGrants();
+    const loadPending = () => LB.supabase.rpc('get_pending_users').then(({ data }) => { if (mounted) setPendingUsers(data || []); }).catch(() => {});
+    loadSessions(); if (isAdmin) { loadGrants(); loadPending(); }
     const iv = setInterval(() => { loadSessions(); setNowS(Date.now()); }, 2000);
     return () => { mounted = false; clearInterval(iv); };
   }, [hasActiveUsersAccess, isAdmin]);
@@ -204,6 +209,26 @@ function SettingsScreen({ store, setStore, go, userId }) {
     if (!('caches' in window)) return;
     caches.keys().then(keys => { const name = keys.find(k => k.startsWith('zane-')); if (name) setSwVersion(name.replace('zane-', '')); });
   }, []);
+
+  const approveUser = async (userId) => {
+    setApprovingId(userId);
+    try {
+      await LB.supabase.rpc('approve_user', { p_user_id: userId });
+      setPendingUsers(u => u.filter(x => x.user_id !== userId));
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const declineUser = async (userId) => {
+    setDecliningId(userId);
+    try {
+      await LB.supabase.rpc('decline_user', { p_user_id: userId });
+      setPendingUsers(u => u.filter(x => x.user_id !== userId));
+    } finally {
+      setDecliningId(null);
+    }
+  };
 
   const addGrant = async () => {
     const email = newGrantEmail.trim().toLowerCase();
@@ -236,7 +261,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
     clearTimeout(pushStatusTimer.current);
     setPushStatus(delaySeconds > 0 ? 'Sending… Lock screen now!' : 'Sending…');
     try {
-      const res = await fetch(LB.PUSHOVER_URL, { method: 'POST', headers: { 'Authorization': `Bearer ${LB.SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: 'Rest done — keep going! 💪', title: 'Zane Test', delaySeconds, nonce: String(Date.now()), userKey: store.settings?.pushoverUserKey ?? '' }) });
+      const res = await fetch(LB.PUSHOVER_URL, { method: 'POST', headers: { 'Authorization': `Bearer ${LB.SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: 'Rest done — keep going! 💪', title: 'Zane Test', delaySeconds, nonce: String(Date.now()), userKey: store.settings?.pushoverUserKey ?? '', ttl: 10 }) });
       if (res.status === 202) { setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
       else { const data = await res.json(); setPushStatus(data.status === 1 ? '✓ Sent' : `Error: ${JSON.stringify(data)}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
     } catch (e) { setPushStatus(`Error: ${e.message}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
@@ -385,14 +410,25 @@ function SettingsScreen({ store, setStore, go, userId }) {
         )}
 
         {/* ─── Coaching ─── */}
-        <Frame style={{ padding: '12px 14px' }}>
-          <SecHead label="Coaching" open={coachingOpen} onToggle={() => setCoachingOpen(v => !v)} />
-          {coachingOpen && (
-            <div style={{ marginTop: 14 }}>
-              <window.Screens.CoachingSettingsSection store={store} setStore={setStore} userId={userId} go={go} />
-            </div>
-          )}
-        </Frame>
+        {(() => {
+          const hasCoaching = !!((store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0 || store.coaching?.asClient?.status === 'active');
+          const coachingTabOn = !!(store.settings?.showCoachingTab || hasCoaching);
+          return (
+            <Frame style={{ padding: '12px 14px' }}>
+              <SecHead label="Coaching" open={coachingOpen} onToggle={() => setCoachingOpen(v => !v)} />
+              {coachingOpen && (
+                <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 0 }}>
+                  <Row label="Coaching tab">
+                    <Toggle on={coachingTabOn} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, showCoachingTab: !coachingTabOn } }))} />
+                  </Row>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+                    Pin the coaching tab to the nav bar. Shows automatically when a coaching relationship is active.
+                  </div>
+                </div>
+              )}
+            </Frame>
+          );
+        })()}
 
         {/* ─── Account ─── */}
         <Frame style={{ padding: '12px 14px' }}>
@@ -520,6 +556,44 @@ function SettingsScreen({ store, setStore, go, userId }) {
         </Frame>
 
         {/* ─── Admin ─── */}
+        {isAdmin && pendingUsers.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>Pending registrations</div>
+            <Frame style={{ padding: '0 16px' }}>
+              {pendingUsers.map((u, i) => (
+                <React.Fragment key={u.user_id}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</div>
+                      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
+                    </div>
+                    <button onClick={() => approveUser(u.user_id)} disabled={!!approvingId || !!decliningId} style={{
+                      padding: '6px 12px', borderRadius: 4,
+                      background: approvingId === u.user_id ? UI.goldFaint : 'rgba(var(--accent-rgb),0.12)',
+                      border: `1px solid rgba(var(--accent-rgb),0.3)`,
+                      color: UI.gold, fontFamily: UI.fontUi, fontSize: 10,
+                      letterSpacing: '0.1em', textTransform: 'uppercase',
+                      cursor: approvingId === u.user_id ? 'default' : 'pointer', flexShrink: 0,
+                    }}>
+                      {approvingId === u.user_id ? '…' : 'Approve'}
+                    </button>
+                    <button onClick={() => declineUser(u.user_id)} disabled={!!approvingId || !!decliningId} style={{
+                      padding: '6px 12px', borderRadius: 4,
+                      background: 'transparent',
+                      border: `1px solid rgba(var(--danger-rgb),0.25)`,
+                      color: 'rgba(var(--danger-rgb),0.7)', fontFamily: UI.fontUi, fontSize: 10,
+                      letterSpacing: '0.1em', textTransform: 'uppercase',
+                      cursor: decliningId === u.user_id ? 'default' : 'pointer', flexShrink: 0,
+                    }}>
+                      {decliningId === u.user_id ? '…' : 'Decline'}
+                    </button>
+                  </div>
+                  {i < pendingUsers.length - 1 && <div className="knurl" />}
+                </React.Fragment>
+              ))}
+            </Frame>
+          </div>
+        )}
         {isAdmin && (
           <NavRow label="Debug log" first onTap={() => setDebugPanelOpen(true)} />
         )}

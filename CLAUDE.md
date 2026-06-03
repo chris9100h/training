@@ -94,13 +94,15 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_sets`:** `id` (text), `session_id` (text), `entry_id` (text), `user_id` (uuid), `set_idx` (int), `kg` (numeric), `reps` (int), `reps_l` (int), `reps_r` (int), `done` (boolean), `skipped` (boolean), `warmup` (boolean), `updated_at` (timestamptz)
 
-**`zane_coaching`:** `id` (text), `coach_id` (uuid), `client_id` (uuid), `status` (text: pending|active), `created_at` (timestamptz)
+**`zane_coaching`:** `id` (text), `coach_id` (uuid), `client_id` (uuid), `status` (text: pending|active), `created_at` (timestamptz), `checkin_requested_at` (timestamptz, nullable)
 
 **`zane_coaching_threads`:** `id` (text), `coaching_id` (text), `name` (text), `created_by` (uuid), `created_at` (timestamptz)
 
 **`zane_coaching_notes`:** `id` (text), `coaching_id` (text), `author_id` (uuid), `thread_id` (text, nullable → references zane_coaching_threads), `type` (text: session|plan|general|change), `entity_id` (text, nullable), `entity_name` (text, nullable), `body` (text), `created_at` (timestamptz), `read_at` (timestamptz, nullable)
 
 **`zane_coaching_macros`:** `id` (text), `coaching_id` (text), `set_by` (uuid), `set_at` (timestamptz), `calories_training` (int), `protein_training` (int), `carbs_training` (int), `fat_training` (int), `calories_rest` (int), `protein_rest` (int), `carbs_rest` (int), `fat_rest` (int)
+
+**`zane_checkins`:** `id` (text), `coaching_id` (text), `client_id` (uuid), `week_start` (date), `checked_in_at` (timestamptz), `weight_today` (numeric), `weight_avg_last_week` (numeric), `off_plan_notes` (text), `hydration_ml` (int), `days_trained` (int), `performance_vs_last_week` (text: worse|same|improved), `steps` (int), `cardio_minutes` (int), `cardio_distance_m` (int), `cardio_pace_feeling` (int 1–6), `cardio_effort` (int 1–10), `goal_note` (text), `hunger` (int), `sleep_quality` (int), `life_stress` (int), `work_stress` (int), `tiredness` (int), `issues_notes` (text), `general_note` (text) — UNIQUE (coaching_id, week_start)
 
 **`zane_skips`:** `id` (text), `user_id` (uuid), `date` (text), `day_id` (text), `day_name` (text), `skip_reason` (text), `skipped_at` (timestamptz)
 
@@ -120,10 +122,14 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`sync_sets_batch(p_sets jsonb)`** → `void` — batch-upsert sets with updated_at guard; only updates a row if the incoming updated_at is newer than what's stored (prevents stale kbApply writes from overwriting completed sets)
 
-**Realtime:** `zane_sessions` ist in der `supabase_realtime`-Publikation — ermöglicht Cross-Device Live-Sync laufender Sessions.
+**`get_coach_clients_status()`** → `TABLE(client_id uuid, in_progress_session_id text)` — gibt live-Trainingsstatus aller aktiven Clients eines Coaches zurück (SECURITY DEFINER, umgeht RLS auf zane_user_settings)
+
+**Realtime:** `zane_sessions` und `zane_coaching` sind in der `supabase_realtime`-Publikation — ermöglicht Cross-Device Live-Sync laufender Sessions und Live-Coaching-Einladungen.
 
 ## Deployment
 
 PWA, erreichbar unter `/training/`. Service Worker in `sw.js`.
 
 **Bei jedem Commit die SW-Cache-Version in `sw.js` um 1 erhöhen** (erste Zeile: `const CACHE = 'zane-vX.XXX'`). Das stellt sicher, dass Nutzer nach einem Deploy automatisch frische Assets bekommen. Aktuelles Format: `zane-v1.501`, nächster Commit `zane-v1.502`, dann `zane-v1.503`, usw.
+
+**Nach jedem Cache-Bump die neue Versionsnummer im Chat melden** — z.B. „SW-Cache → zane-v1.922".
