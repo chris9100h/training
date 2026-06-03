@@ -582,12 +582,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
   const checkSet = () => {
     const idx = entry.sets.findIndex(s => !s.done && !s.skipped);
     if (idx < 0) return;
-    updateSet(idx, { done: true });
-    if (!entry.sets[idx]?.warmup) {
-      persistRestStart(Date.now(), restDef);
-    }
-    const willBeAllDone = entry.sets.every((s, i) => i === idx || s.done || s.skipped);
-    if (willBeAllDone) navigate(1);
+    completeSet(idx);
   };
 
   const skipExercise = () => {
