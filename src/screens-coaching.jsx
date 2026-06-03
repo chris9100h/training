@@ -1474,18 +1474,18 @@ function ClientCheckInsTab({ coachingId }) {
       : invertColor ? (up ? 'rgba(var(--danger-rgb),0.8)' : 'var(--accent)')
       : (up ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)');
     return (
-      <div style={{ flex: 1, minWidth: 80, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}` }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
+      <div style={{ flex: 1, minWidth: 80, minHeight: 90, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}`, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
           <i className={`fa-solid ${icon}`} style={{ fontSize: 10, color: UI.inkFaint }} />
-          <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</span>
+          <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
           <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{format(last)}</span>
           {delta != null && Math.abs(delta) > 0.001 && (
             <span style={{ fontSize: 10, color: arrowColor, fontFamily: UI.fontUi }}>{up ? '▲' : '▼'} {format(Math.abs(delta))}</span>
           )}
         </div>
-        {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{sub}</div>}
+        {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, textAlign: 'center' }}>{sub}</div>}
         <Sparkline vals={valid} />
       </div>
     );
@@ -1502,12 +1502,12 @@ function ClientCheckInsTab({ coachingId }) {
     const perfColor = lastPerf === 'improved' ? 'var(--accent)' : lastPerf === 'worse' ? 'rgba(var(--danger-rgb),0.8)' : UI.inkSoft;
     const perfLabel = lastPerf === 'improved' ? '↑ Better' : lastPerf === 'worse' ? '↓ Worse' : lastPerf === 'same' ? '= Same' : null;
     return (
-      <div style={{ flex: 1, minWidth: 80, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}` }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
+      <div style={{ flex: 1, minWidth: 80, minHeight: 90, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}`, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
           <i className="fa-solid fa-dumbbell" style={{ fontSize: 10, color: UI.inkFaint }} />
-          <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Training</span>
+          <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Training</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }}>
           <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last}d</span>
           {delta != null && Math.abs(delta) > 0 && (
             <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
@@ -1529,18 +1529,18 @@ function ClientCheckInsTab({ coachingId }) {
     const delta = prev != null ? last.cardioMinutes - prev.cardioMinutes : null;
     const sub = last.cardioDistanceM != null ? `${(last.cardioDistanceM / 1000).toFixed(1)} km` : null;
     return (
-      <div style={{ flex: 1, minWidth: 80, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}` }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
+      <div style={{ flex: 1, minWidth: 80, minHeight: 90, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}`, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
           <i className="fa-solid fa-person-running" style={{ fontSize: 10, color: UI.inkFaint }} />
-          <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Cardio</span>
+          <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Cardio</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
           <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last.cardioMinutes}m</span>
           {delta != null && Math.abs(delta) > 0 && (
             <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
           )}
         </div>
-        {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{sub}</div>}
+        {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, textAlign: 'center' }}>{sub}</div>}
         <Sparkline vals={minVals} />
       </div>
     );
@@ -1551,8 +1551,8 @@ function ClientCheckInsTab({ coachingId }) {
     if (!hasAny) return null;
     return (
       <div>
-        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>{label}</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{children}</div>
+        <div className="micro" style={{ fontWeight: 700, color: UI.inkFaint, marginBottom: 8, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>{label}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>{children}</div>
       </div>
     );
   };
