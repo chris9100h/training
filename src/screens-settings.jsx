@@ -152,6 +152,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [activeUsersOpen, setActiveUsersOpen] = useStateSet(false);
   const [accountOpen, setAccountOpen] = useStateSet(false);
   const [trainingOpen, setTrainingOpen] = useStateSet(false);
+  const [coachingOpen, setCoachingOpen] = useStateSet(false);
 
   // Training sub-sheets
   const [restSheet, setRestSheet] = useStateSet(false);
@@ -385,14 +386,25 @@ function SettingsScreen({ store, setStore, go, userId }) {
         )}
 
         {/* ─── Coaching ─── */}
-        <Frame style={{ padding: '12px 14px' }}>
-          <Row label="Coaching tab">
-            <Toggle on={!!store.settings?.showCoachingTab} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, showCoachingTab: !s.settings?.showCoachingTab } }))} />
-          </Row>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-            Pin the coaching tab to the nav bar. Shows automatically when a coaching relationship is active.
-          </div>
-        </Frame>
+        {(() => {
+          const hasCoaching = !!((store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0 || store.coaching?.asClient?.status === 'active');
+          const coachingTabOn = !!(store.settings?.showCoachingTab || hasCoaching);
+          return (
+            <Frame style={{ padding: '12px 14px' }}>
+              <SecHead label="Coaching" open={coachingOpen} onToggle={() => setCoachingOpen(v => !v)} />
+              {coachingOpen && (
+                <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 0 }}>
+                  <Row label="Coaching tab">
+                    <Toggle on={coachingTabOn} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, showCoachingTab: !coachingTabOn } }))} />
+                  </Row>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+                    Pin the coaching tab to the nav bar. Shows automatically when a coaching relationship is active.
+                  </div>
+                </div>
+              )}
+            </Frame>
+          );
+        })()}
 
         {/* ─── Account ─── */}
         <Frame style={{ padding: '12px 14px' }}>
