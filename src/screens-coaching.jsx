@@ -2355,11 +2355,11 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         <div style={{ display: 'flex', gap: 8 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Today (kg)</div>
-            <input type="number" step="0.1" placeholder="97.3" value={form.weightToday} onChange={e => set('weightToday', e.target.value)} style={inputStyle} />
+            <input type="number" step="0.1" placeholder="0.0" value={form.weightToday} onChange={e => set('weightToday', e.target.value)} style={inputStyle} />
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Last week avg (kg)</div>
-            <input type="number" step="0.1" placeholder="98.1" value={form.weightAvgLastWeek} onChange={e => set('weightAvgLastWeek', e.target.value)} style={inputStyle} />
+            <input type="number" step="0.1" placeholder="0.0" value={form.weightAvgLastWeek} onChange={e => set('weightAvgLastWeek', e.target.value)} style={inputStyle} />
           </div>
         </div>
       </div>
@@ -2384,21 +2384,21 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Steps</div>
-            <input type="number" placeholder="68953" value={form.steps} onChange={e => set('steps', e.target.value)} style={inputStyle} />
+            <input type="number" placeholder="—" value={form.steps} onChange={e => set('steps', e.target.value)} style={inputStyle} />
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Cardio (min)</div>
-            <input type="number" placeholder="140" value={form.cardioMinutes} onChange={e => set('cardioMinutes', e.target.value)} style={inputStyle} />
+            <input type="number" placeholder="—" value={form.cardioMinutes} onChange={e => set('cardioMinutes', e.target.value)} style={inputStyle} />
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Distance (m)</div>
-            <input type="number" placeholder="16950" value={form.cardioDistanceM} onChange={e => set('cardioDistanceM', e.target.value)} style={inputStyle} />
+            <input type="number" placeholder="—" value={form.cardioDistanceM} onChange={e => set('cardioDistanceM', e.target.value)} style={inputStyle} />
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Avg pace</div>
-            <input type="text" placeholder="08:16" value={form.cardioAvgPace} onChange={e => set('cardioAvgPace', e.target.value)} style={inputStyle} />
+            <input type="text" placeholder="mm:ss" value={form.cardioAvgPace} onChange={e => set('cardioAvgPace', e.target.value)} style={inputStyle} />
           </div>
         </div>
       </div>
@@ -2408,10 +2408,10 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         <SectionHead label="NUTRITION" />
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Off-plan days / notes</div>
-          <textarea placeholder="Mo: Family event&#10;Fr: Weekly pastry" value={form.offPlanNotes} onChange={e => set('offPlanNotes', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }} />
+          <textarea placeholder="Mo: …&#10;Fr: …" value={form.offPlanNotes} onChange={e => set('offPlanNotes', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }} />
         </div>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Avg hydration / day (ml)</div>
-        <input type="number" placeholder="3500" value={form.hydrationMl} onChange={e => set('hydrationMl', e.target.value)} style={inputStyle} />
+        <input type="number" placeholder="—" value={form.hydrationMl} onChange={e => set('hydrationMl', e.target.value)} style={inputStyle} />
       </div>
 
       {/* Goals */}
