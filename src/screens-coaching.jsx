@@ -1664,11 +1664,13 @@ function ClientCheckInsTab({ coachingId }) {
   const recent = [...checkins].slice(0, 6).reverse();
 
   return (
-    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <CheckInTrendCards recent={recent} />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
-        {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <CheckInTrendCards recent={recent} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
+          {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
+        </div>
       </div>
     </div>
   );
@@ -2710,29 +2712,31 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   if ((thisWeek && !editing)) {
     const recent = [...checkins].slice(0, 6).reverse();
     return (
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>This week submitted ✓</div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button onClick={handleDelete} disabled={deleting}
-              style={{ background: 'transparent', border: 'none', fontSize: 11, color: confirmDelete ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>
-              {confirmDelete ? 'Confirm?' : 'Delete'}
-            </button>
-            <button onClick={() => setEditing(true)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>Edit</button>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>This week submitted ✓</div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={handleDelete} disabled={deleting}
+                style={{ background: 'transparent', border: 'none', fontSize: 11, color: confirmDelete ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>
+                {confirmDelete ? 'Confirm?' : 'Delete'}
+              </button>
+              <button onClick={() => setEditing(true)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>Edit</button>
+            </div>
           </div>
+          <CheckInCard ci={thisWeek} defaultOpen={true} />
+          {checkins.length >= 2 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginTop: 4 }}>
+              <CheckInTrendCards recent={recent} />
+            </div>
+          )}
+          {past.length > 0 && (
+            <>
+              <div className="micro" style={{ color: UI.inkFaint, marginTop: 8 }}>PREVIOUS CHECK-INS</div>
+              {past.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
+            </>
+          )}
         </div>
-        <CheckInCard ci={thisWeek} defaultOpen={true} />
-        {checkins.length >= 2 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginTop: 4 }}>
-            <CheckInTrendCards recent={recent} />
-          </div>
-        )}
-        {past.length > 0 && (
-          <>
-            <div className="micro" style={{ color: UI.inkFaint, marginTop: 8 }}>PREVIOUS CHECK-INS</div>
-            {past.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
-          </>
-        )}
       </div>
     );
   }
