@@ -2196,7 +2196,7 @@ function MarkerRow({ label, value, onChange, readOnly }) {
 
 function CheckInCard({ ci, defaultOpen = false }) {
   const [open, setOpen] = useStateC(defaultOpen);
-  const hasActivity = ci.daysTrained != null || ci.steps != null || ci.cardioMinutes != null;
+  const hasActivity = ci.daysTrained != null || ci.steps != null || ci.cardioMinutes != null || ci.performanceVsLastWeek != null;
   const hasMarkers = ci.hunger != null || ci.sleepQuality != null || ci.lifeStress != null || ci.workStress != null || ci.tiredness != null;
 
   return (
@@ -2237,10 +2237,16 @@ function CheckInCard({ ci, defaultOpen = false }) {
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ACTIVITY</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {ci.daysTrained != null && <StatPill label="Days trained" value={ci.daysTrained} />}
+                {ci.performanceVsLastWeek && (
+                  <StatPill label="Performance"
+                    value={ci.performanceVsLastWeek === 'improved' ? '↑ Better' : ci.performanceVsLastWeek === 'worse' ? '↓ Worse' : '= Same'}
+                  />
+                )}
                 {ci.steps != null && <StatPill label="Steps" value={Number(ci.steps).toLocaleString()} />}
                 {ci.cardioMinutes != null && <StatPill label="Cardio" value={`${ci.cardioMinutes} min`} />}
                 {ci.cardioDistanceM != null && <StatPill label="Distance" value={`${(ci.cardioDistanceM / 1000).toFixed(1)} km`} />}
-                {ci.cardioAvgPace && <StatPill label="Avg pace" value={ci.cardioAvgPace} />}
+                {ci.cardioPaceFeeling != null && <StatPill label="Pace feeling" value={`${ci.cardioPaceFeeling}/5`} />}
+                {ci.cardioEffort != null && <StatPill label="Effort" value={`${ci.cardioEffort}/10`} />}
               </div>
             </div>
           )}
@@ -2313,7 +2319,9 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
   const empty = {
     weightToday: '', weightAvgLastWeek: '',
     offPlanNotes: '', hydrationMl: '',
-    daysTrained: '', steps: '', cardioMinutes: '', cardioDistanceM: '', cardioAvgPace: '',
+    daysTrained: '', performanceVsLastWeek: null,
+    steps: '', cardioMinutes: '', cardioDistanceM: '',
+    cardioPaceFeeling: null, cardioEffort: null,
     goalNote: '',
     hunger: null, sleepQuality: null, lifeStress: null, workStress: null, tiredness: null,
     issuesNotes: '', generalNote: '',
@@ -2325,10 +2333,12 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
     offPlanNotes: existing.offPlanNotes ?? '',
     hydrationMl: existing.hydrationMl ?? '',
     daysTrained: existing.daysTrained ?? '',
+    performanceVsLastWeek: existing.performanceVsLastWeek ?? null,
     steps: existing.steps ?? '',
     cardioMinutes: existing.cardioMinutes ?? '',
     cardioDistanceM: existing.cardioDistanceM ?? '',
-    cardioAvgPace: existing.cardioAvgPace ?? '',
+    cardioPaceFeeling: existing.cardioPaceFeeling ?? null,
+    cardioEffort: existing.cardioEffort ?? null,
     goalNote: existing.goalNote ?? '',
     hunger: existing.hunger ?? null,
     sleepQuality: existing.sleepQuality ?? null,
@@ -2362,7 +2372,9 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         steps: num(form.steps),
         cardioMinutes: num(form.cardioMinutes),
         cardioDistanceM: num(form.cardioDistanceM),
-        cardioAvgPace: form.cardioAvgPace || null,
+        cardioPaceFeeling: form.cardioPaceFeeling,
+        cardioEffort: form.cardioEffort,
+        performanceVsLastWeek: form.performanceVsLastWeek || null,
         goalNote: form.goalNote || null,
         hunger: form.hunger,
         sleepQuality: form.sleepQuality,
@@ -2389,11 +2401,11 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         <div style={{ display: 'flex', gap: 8 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Today (kg)</div>
-            <input type="number" step="0.1" placeholder="0.0" value={form.weightToday} onChange={e => set('weightToday', e.target.value)} style={inputStyle} />
+            <input type="number" step="0.1" placeholder="–" value={form.weightToday} onChange={e => set('weightToday', e.target.value)} style={inputStyle} />
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Last week avg (kg)</div>
-            <input type="number" step="0.1" placeholder="0.0" value={form.weightAvgLastWeek} onChange={e => set('weightAvgLastWeek', e.target.value)} style={inputStyle} />
+            <input type="number" step="0.1" placeholder="–" value={form.weightAvgLastWeek} onChange={e => set('weightAvgLastWeek', e.target.value)} style={inputStyle} />
           </div>
         </div>
       </div>
@@ -2411,30 +2423,74 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
       {/* Activity */}
       <div>
         <SectionHead label="ACTIVITY" />
-        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+
+        {/* Days trained + performance vs last week */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Days trained</div>
-            <input type="number" min="0" max="7" placeholder="4" value={form.daysTrained} onChange={e => set('daysTrained', e.target.value)} style={inputStyle} />
+            <input type="number" min="0" max="7" placeholder="–" value={form.daysTrained} onChange={e => set('daysTrained', e.target.value)} style={inputStyle} />
           </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Steps</div>
-            <input type="number" placeholder="—" value={form.steps} onChange={e => set('steps', e.target.value)} style={inputStyle} />
+          <div style={{ flex: 2 }}>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Performance vs last week</div>
+            <div style={{ display: 'flex', gap: 5 }}>
+              {[['worse', 'Worse'], ['same', 'Same'], ['improved', 'Improved']].map(([val, label]) => (
+                <button key={val} onClick={() => set('performanceVsLastWeek', form.performanceVsLastWeek === val ? null : val)}
+                  style={{ flex: 1, padding: '9px 4px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                    background: form.performanceVsLastWeek === val
+                      ? val === 'improved' ? `rgba(var(--accent-rgb),0.2)` : val === 'worse' ? `rgba(var(--danger-rgb),0.15)` : UI.bgRaised
+                      : UI.bgInset,
+                    color: form.performanceVsLastWeek === val
+                      ? val === 'improved' ? 'var(--accent)' : val === 'worse' ? 'rgba(var(--danger-rgb),0.85)' : UI.ink
+                      : UI.inkFaint,
+                    fontFamily: UI.fontUi, fontSize: 10, fontWeight: form.performanceVsLastWeek === val ? 700 : 400,
+                    letterSpacing: '0.04em', border: `0.5px solid ${form.performanceVsLastWeek === val ? 'currentColor' : UI.hairStrong}`,
+                  }}
+                >{label}</button>
+              ))}
+            </div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+
+        {/* Steps */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Steps</div>
+          <input type="number" placeholder="–" value={form.steps} onChange={e => set('steps', e.target.value)} style={inputStyle} />
+        </div>
+
+        {/* Cardio */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Cardio (min)</div>
-            <input type="number" placeholder="—" value={form.cardioMinutes} onChange={e => set('cardioMinutes', e.target.value)} style={inputStyle} />
+            <input type="number" placeholder="–" value={form.cardioMinutes} onChange={e => set('cardioMinutes', e.target.value)} style={inputStyle} />
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Distance (m)</div>
-            <input type="number" placeholder="—" value={form.cardioDistanceM} onChange={e => set('cardioDistanceM', e.target.value)} style={inputStyle} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Avg pace</div>
-            <input type="text" placeholder="mm:ss" value={form.cardioAvgPace} onChange={e => set('cardioAvgPace', e.target.value)} style={inputStyle} />
+            <input type="number" placeholder="–" value={form.cardioDistanceM} onChange={e => set('cardioDistanceM', e.target.value)} style={inputStyle} />
           </div>
         </div>
+
+        {/* Pace feeling 1–5 */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+            <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Pace feeling</span>
+            {form.cardioPaceFeeling != null && <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{form.cardioPaceFeeling}/5</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[['1','Stroll'],['2','Walk'],['3','Brisk'],['4','Power'],['5','Jog']].map(([n, lbl]) => (
+              <button key={n} onClick={() => set('cardioPaceFeeling', form.cardioPaceFeeling === Number(n) ? null : Number(n))}
+                style={{ flex: 1, padding: '7px 2px', borderRadius: 8, border: `0.5px solid ${form.cardioPaceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
+                  background: form.cardioPaceFeeling === Number(n) ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
+                  cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}
+              >
+                <span className="num" style={{ fontSize: 13, color: form.cardioPaceFeeling === Number(n) ? 'var(--accent)' : UI.inkSoft }}>{n}</span>
+                <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.04em' }}>{lbl}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Cardio effort 1–10 */}
+        <MarkerRow label="Cardio effort (1 = easy, 10 = max)" value={form.cardioEffort} onChange={v => set('cardioEffort', v)} />
       </div>
 
       {/* Nutrition */}
@@ -2442,20 +2498,20 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         <SectionHead label="NUTRITION" />
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Off-plan days / notes</div>
-          <textarea placeholder="Mo: …&#10;Fr: …" value={form.offPlanNotes} onChange={e => set('offPlanNotes', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }} />
+          <textarea placeholder="–" value={form.offPlanNotes} onChange={e => set('offPlanNotes', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }} />
         </div>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Avg hydration / day (ml)</div>
-        <input type="number" placeholder="—" value={form.hydrationMl} onChange={e => set('hydrationMl', e.target.value)} style={inputStyle} />
+        <input type="number" placeholder="–" value={form.hydrationMl} onChange={e => set('hydrationMl', e.target.value)} style={inputStyle} />
       </div>
 
       {/* Goals */}
       <div>
         <SectionHead label="GOALS / NOTES" />
-        <textarea placeholder="No goal — improvement season…" value={form.goalNote} onChange={e => set('goalNote', e.target.value)} rows={2} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5, marginBottom: 8 }} />
+        <textarea placeholder="–" value={form.goalNote} onChange={e => set('goalNote', e.target.value)} rows={2} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5, marginBottom: 8 }} />
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Issues / things to address</div>
-        <textarea placeholder="Any injuries, concerns…" value={form.issuesNotes} onChange={e => set('issuesNotes', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5, marginBottom: 8 }} />
+        <textarea placeholder="–" value={form.issuesNotes} onChange={e => set('issuesNotes', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5, marginBottom: 8 }} />
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>General note</div>
-        <textarea placeholder="Anything else…" value={form.generalNote} onChange={e => set('generalNote', e.target.value)} rows={2} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }} />
+        <textarea placeholder="–" value={form.generalNote} onChange={e => set('generalNote', e.target.value)} rows={2} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }} />
       </div>
 
       {error && <div style={{ fontSize: 12, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{error}</div>}

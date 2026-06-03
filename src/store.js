@@ -1188,7 +1188,9 @@ async function submitCheckin(coachingId, clientId, data, userId) {
     steps: data.steps ?? null,
     cardio_minutes: data.cardioMinutes ?? null,
     cardio_distance_m: data.cardioDistanceM ?? null,
-    cardio_avg_pace: data.cardioAvgPace || null,
+    cardio_pace_feeling: data.cardioPaceFeeling ?? null,
+    cardio_effort: data.cardioEffort ?? null,
+    performance_vs_last_week: data.performanceVsLastWeek || null,
     goal_note: data.goalNote || null,
     hunger: data.hunger ?? null,
     sleep_quality: data.sleepQuality ?? null,
@@ -1214,8 +1216,11 @@ async function submitCheckin(coachingId, clientId, data, userId) {
     }
     const actParts = [];
     if (data.daysTrained != null) actParts.push(`${data.daysTrained} days trained`);
+    if (data.performanceVsLastWeek) actParts.push(`performance: ${data.performanceVsLastWeek}`);
     if (data.steps != null) actParts.push(`${Number(data.steps).toLocaleString()} steps`);
     if (data.cardioMinutes != null) actParts.push(`${data.cardioMinutes} min cardio`);
+    if (data.cardioPaceFeeling != null) actParts.push(`pace feeling: ${data.cardioPaceFeeling}/5`);
+    if (data.cardioEffort != null) actParts.push(`effort: ${data.cardioEffort}/10`);
     if (actParts.length) lines.push(`Activity: ${actParts.join(' · ')}`);
     const markerParts = [];
     if (data.hunger != null) markerParts.push(`Hunger ${data.hunger}/10`);
@@ -1245,7 +1250,9 @@ async function loadCheckins(coachingId) {
     weightToday: r.weight_today, weightAvgLastWeek: r.weight_avg_last_week,
     offPlanNotes: r.off_plan_notes, hydrationMl: r.hydration_ml,
     daysTrained: r.days_trained, steps: r.steps,
-    cardioMinutes: r.cardio_minutes, cardioDistanceM: r.cardio_distance_m, cardioAvgPace: r.cardio_avg_pace,
+    cardioMinutes: r.cardio_minutes, cardioDistanceM: r.cardio_distance_m,
+    cardioPaceFeeling: r.cardio_pace_feeling, cardioEffort: r.cardio_effort,
+    performanceVsLastWeek: r.performance_vs_last_week,
     goalNote: r.goal_note,
     hunger: r.hunger, sleepQuality: r.sleep_quality,
     lifeStress: r.life_stress, workStress: r.work_stress, tiredness: r.tiredness,
