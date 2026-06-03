@@ -198,9 +198,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
       .is('read_at', null)
       .neq('author_id', userId),
+    isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at').eq('client_id', userId).eq('status', 'active').maybeSingle(),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
-         coachInfoRes, coachClientsRes, unreadNotesRes] = await Promise.all(queries);
+         coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -319,6 +320,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         coachEmail: coachInfoRes.data[0].coach_email,
         coachName: coachInfoRes.data[0].coach_name,
         status: coachInfoRes.data[0].status,
+        checkinRequestedAt: coachingRowRes?.data?.checkin_requested_at ?? null,
       } : null,
       asCoach: (coachClientsRes?.data || []).map(r => ({
         id: r.coaching_id,
@@ -964,13 +966,14 @@ async function loadCoachClientsStatus() {
 }
 
 async function reloadCoachingState(userId) {
-  const [coachInfoRes, coachClientsRes, unreadRes] = await Promise.all([
+  const [coachInfoRes, coachClientsRes, unreadRes, coachingRowRes] = await Promise.all([
     _supabase.rpc('get_coach_info'),
     _supabase.rpc('get_coaching_clients'),
     _supabase.from('zane_coaching_notes')
       .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
       .is('read_at', null)
       .neq('author_id', userId),
+    _supabase.from('zane_coaching').select('id, checkin_requested_at').eq('client_id', userId).eq('status', 'active').maybeSingle(),
   ]);
   return {
     asClient: (coachInfoRes?.data?.[0]) ? {
@@ -979,6 +982,7 @@ async function reloadCoachingState(userId) {
       coachEmail: coachInfoRes.data[0].coach_email,
       coachName: coachInfoRes.data[0].coach_name,
       status: coachInfoRes.data[0].status,
+      checkinRequestedAt: coachingRowRes?.data?.checkin_requested_at ?? null,
     } : null,
     asCoach: (coachClientsRes?.data || []).map(r => ({
       id: r.coaching_id, clientId: r.client_id, clientEmail: r.client_email,
@@ -1159,6 +1163,7 @@ async function requestCheckin(coachingId, userId) {
   await addCoachingNote(coachingId, 'general', null, null,
     'Your coach is requesting your weekly check-in. Please fill it in when you get a chance.',
     userId, threadId);
+  await _supabase.from('zane_coaching').update({ checkin_requested_at: new Date().toISOString() }).eq('id', coachingId);
 }
 
 function checkinWeekStart() {
@@ -1202,6 +1207,8 @@ async function submitCheckin(coachingId, clientId, data, userId) {
   };
   const { error } = await _supabase.from('zane_checkins').upsert(row, { onConflict: 'coaching_id,week_start' });
   if (error) throw error;
+  // Clear check-in request flag so the modal disappears
+  _supabase.from('zane_coaching').update({ checkin_requested_at: null }).eq('id', coachingId).eq('client_id', clientId).then(() => {}, () => {});
 
   // Send note to "Weekly Check-in" thread
   try {

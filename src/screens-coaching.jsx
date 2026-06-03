@@ -2762,6 +2762,59 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   );
 }
 
+// ─── CheckInRequestModal ──────────────────────────────────────────────────────
+// Shown when the coach has requested a weekly check-in and the client hasn't
+// dismissed it yet today. Dismisses until midnight via localStorage.
+
+function CheckInRequestModal({ coaching }) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const dismissKey = `logbook-checkin-dismiss-${coaching.id}`;
+
+  const [dismissed, setDismissed] = useStateC(() => {
+    try { return localStorage.getItem(dismissKey); } catch (_) { return null; }
+  });
+
+  const visible = !!coaching.checkinRequestedAt && dismissed !== todayStr;
+  if (!visible) return null;
+
+  const handleOk = () => {
+    try { localStorage.setItem(dismissKey, todayStr); } catch (_) {}
+    setDismissed(todayStr);
+  };
+
+  return ReactDOM.createPortal(
+    <div style={{
+      position: 'fixed', top: 0, right: 0, bottom: 0, left: 0,
+      zIndex: 9000, background: 'rgba(0,0,0,0.75)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+    }}>
+      <div style={{
+        background: UI.bg, border: `1px solid ${UI.hairStrong}`,
+        borderRadius: 16, padding: 28, maxWidth: 380, width: '100%',
+      }}>
+        <div className="micro-gold" style={{ marginBottom: 10, letterSpacing: '0.15em' }}>WEEKLY CHECK-IN</div>
+        <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, color: UI.ink, marginBottom: 6 }}>
+          {coaching.coachName}
+        </div>
+        <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 24, lineHeight: 1.5 }}>
+          is requesting your weekly check-in. Head to the Check-in tab and fill in your weekly report when you get a chance.
+        </div>
+        <button
+          onClick={handleOk}
+          style={{
+            width: '100%', padding: 14, background: 'var(--accent)', border: 'none',
+            borderRadius: 10, fontSize: 15, fontWeight: 700, color: '#fff',
+            fontFamily: UI.fontUi, cursor: 'pointer', letterSpacing: '0.05em',
+          }}
+        >
+          OK
+        </button>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ─── CoachingTabClientView ────────────────────────────────────────────────────
 // Client's coaching tab — messages + nutrition + check-in.
 
@@ -2809,6 +2862,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
   return (
     <Screen scroll={false}>
       {confirmEl}
+      <CheckInRequestModal coaching={coaching} />
       {!hideTopBar && <TopBar title="Coaching" />}
       <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', background: UI.bgInset, borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
         <div style={{ flex: 1 }} />
