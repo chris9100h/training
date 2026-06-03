@@ -1515,7 +1515,7 @@ function CheckInTrendCards({ recent }) {
     );
   };
 
-  const cardStyle = { flex: 1, minWidth: 80, minHeight: 90, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}`, display: 'flex', flexDirection: 'column', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
+  const cardStyle = { flex: 1, minWidth: 80, background: UI.bgInset, borderRadius: 10, padding: '8px 10px', border: `0.5px solid ${UI.hair}`, display: 'flex', flexDirection: 'column', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
 
   const TrendCard = ({ label, icon, values, format, invertColor, sub }) => {
     const valid = values.filter(v => v != null);
@@ -1664,11 +1664,11 @@ function ClientCheckInsTab({ coachingId }) {
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <CheckInTrendCards recent={recent} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
         {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
       </div>
+      <CheckInTrendCards recent={recent} />
     </div>
   );
 }
