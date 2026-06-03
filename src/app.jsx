@@ -477,6 +477,11 @@ function App() {
           };
         });
       },
+      () => {
+        LB.reloadCoachingState(userId).then(coaching => {
+          setStore(s => s ? { ...s, coaching } : s);
+        }).catch(() => {});
+      },
     );
   }, [userId]);
 

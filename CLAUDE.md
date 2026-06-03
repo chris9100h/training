@@ -122,7 +122,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`get_coach_clients_status()`** → `TABLE(client_id uuid, in_progress_session_id text)` — gibt live-Trainingsstatus aller aktiven Clients eines Coaches zurück (SECURITY DEFINER, umgeht RLS auf zane_user_settings)
 
-**Realtime:** `zane_sessions` ist in der `supabase_realtime`-Publikation — ermöglicht Cross-Device Live-Sync laufender Sessions.
+**Realtime:** `zane_sessions` und `zane_coaching` sind in der `supabase_realtime`-Publikation — ermöglicht Cross-Device Live-Sync laufender Sessions und Live-Coaching-Einladungen.
 
 ## Deployment
 

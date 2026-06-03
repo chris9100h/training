@@ -871,7 +871,7 @@ function clearLocal(userId) {
 
 let _realtimeChannel = null;
 
-function subscribeToChanges(userId, onSession, onExIdx, onSessionNav, onCoachingNote) {
+function subscribeToChanges(userId, onSession, onExIdx, onSessionNav, onCoachingNote, onCoachingInvite) {
   const mapRow = row => ({
     id: row.id,
     scheduleId: row.schedule_id,
@@ -894,6 +894,9 @@ function subscribeToChanges(userId, onSession, onExIdx, onSessionNav, onCoaching
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'zane_sessions', filter: `user_id=eq.${userId}` }, p => onSession(mapRow(p.new)))
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_coaching_notes' }, p => {
       if (p.new.author_id !== userId) onCoachingNote?.(mapNote(p.new));
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `client_id=eq.${userId}` }, () => {
+      onCoachingInvite?.();
     })
     .on('broadcast', { event: 'ex_idx' }, ({ payload }) => onExIdx?.(payload))
     .on('broadcast', { event: 'session_nav' }, ({ payload }) => onSessionNav?.(payload))
@@ -952,6 +955,35 @@ async function loadCoachClientsStatus() {
   const { data, error } = await _supabase.rpc('get_coach_clients_status');
   if (error) throw error;
   return (data || []).map(r => ({ clientId: r.client_id, inProgressSessionId: r.in_progress_session_id }));
+}
+
+async function reloadCoachingState(userId) {
+  const [coachInfoRes, coachClientsRes, unreadRes] = await Promise.all([
+    _supabase.rpc('get_coach_info'),
+    _supabase.rpc('get_coaching_clients'),
+    _supabase.from('zane_coaching_notes')
+      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
+      .is('read_at', null)
+      .neq('author_id', userId),
+  ]);
+  return {
+    asClient: (coachInfoRes?.data?.[0]) ? {
+      id: coachInfoRes.data[0].coaching_id,
+      coachId: coachInfoRes.data[0].coach_id,
+      coachEmail: coachInfoRes.data[0].coach_email,
+      coachName: coachInfoRes.data[0].coach_name,
+      status: coachInfoRes.data[0].status,
+    } : null,
+    asCoach: (coachClientsRes?.data || []).map(r => ({
+      id: r.coaching_id, clientId: r.client_id, clientEmail: r.client_email,
+      clientName: r.client_name, status: r.status,
+    })),
+    unreadNotes: (unreadRes?.data || []).map(n => ({
+      id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
+      type: n.type, entityId: n.entity_id, entityName: n.entity_name,
+      threadId: n.thread_id, body: n.body, createdAt: n.created_at,
+    })),
+  };
 }
 
 async function inviteClient(email) {
@@ -1093,7 +1125,7 @@ window.LB = {
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,
-  loadClientStore, loadCoachClientsStatus, inviteClient, respondToCoachingInvite, endCoaching,
+  loadClientStore, loadCoachClientsStatus, reloadCoachingState, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,
 };
