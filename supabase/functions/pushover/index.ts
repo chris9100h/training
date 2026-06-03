@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
     userKey = '',
     userId = 'singleton',
     priority = 0,
-    ttl = 3600,   // expire after 1 hour by default; pass 0 to disable
+    ttl = 180,    // expire after 3 minutes by default; pass 0 to disable
   } = await req.json().catch(() => ({}));
 
   const user = userKey || (Deno.env.get('PUSHOVER_USER') ?? 'uxrg8gh43b1tpw31pq4r4i4ebqrhjt');
