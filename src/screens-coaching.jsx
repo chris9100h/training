@@ -1804,6 +1804,7 @@ function CoachingTabCoachView({ store, setStore, userId, go }) {
   const [inviteEmail, setInviteEmail] = useStateC('');
   const [inviting, setInviting] = useStateC(false);
   const [inviteError, setInviteError] = useStateC('');
+  const [endOpen, setEndOpen] = useStateC(false);
   const [ending, setEnding] = useStateC(null);
   const [confirmEl, confirm] = useConfirm();
   const unreadNotes = store.coaching?.unreadNotes || [];
@@ -1844,10 +1845,11 @@ function CoachingTabCoachView({ store, setStore, userId, go }) {
   };
 
   const handleEnd = async (client) => {
+    setEndOpen(false);
     const isPending = client.status === 'pending';
     const msg = isPending
       ? `Cancel the invite sent to ${client.clientName || client.clientEmail}?`
-      : 'This will immediately revoke access to training data.';
+      : `End coaching with ${client.clientName || client.clientEmail}? This will immediately revoke access to training data.`;
     const title = isPending ? 'Cancel invite?' : 'End coaching?';
     const ok = isPending ? 'Cancel invite' : 'End';
     if (!await confirm(msg, { title, ok, danger: true })) return;
@@ -1870,16 +1872,33 @@ function CoachingTabCoachView({ store, setStore, userId, go }) {
     </svg>
   );
 
+  const RemoveIcon = () => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+      <line x1="22" y1="11" x2="16" y2="11"/>
+    </svg>
+  );
+
   return (
     <Screen scroll>
       {confirmEl}
       <TopBar title="Coaching" right={
-        <button
-          onClick={() => { setInviteEmail(''); setInviteError(''); setInviteOpen(true); }}
-          style={{ background: 'transparent', border: 'none', padding: '4px 6px', cursor: 'pointer', color: 'var(--accent)', display: 'flex', alignItems: 'center' }}
-        >
-          <AddIcon />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          {allClients.length > 0 && (
+            <button
+              onClick={() => setEndOpen(true)}
+              style={{ background: 'transparent', border: 'none', padding: '4px 6px', cursor: 'pointer', color: UI.inkSoft, display: 'flex', alignItems: 'center' }}
+            >
+              <RemoveIcon />
+            </button>
+          )}
+          <button
+            onClick={() => { setInviteEmail(''); setInviteError(''); setInviteOpen(true); }}
+            style={{ background: 'transparent', border: 'none', padding: '4px 6px', cursor: 'pointer', color: 'var(--accent)', display: 'flex', alignItems: 'center' }}
+          >
+            <AddIcon />
+          </button>
+        </div>
       } />
 
       {/* Invite sheet */}
@@ -1910,6 +1929,39 @@ function CoachingTabCoachView({ store, setStore, userId, go }) {
         </div>
       </Sheet>
 
+      {/* End / cancel sheet */}
+      <Sheet open={endOpen} onClose={() => setEndOpen(false)} title="End Coaching">
+        <div style={{ padding: '4px 0 24px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 6, lineHeight: 1.5 }}>
+            Select a client to end the relationship or cancel a pending invite.
+          </div>
+          {allClients.map(c => {
+            const isPending = c.status === 'pending';
+            return (
+              <div
+                key={c.id}
+                onClick={() => handleEnd(c)}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, cursor: ending === c.id ? 'wait' : 'pointer' }}
+              >
+                <div style={{ width: 36, height: 36, borderRadius: 18, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 15, color: UI.inkSoft, fontWeight: 700 }}>{(c.clientName || c.clientEmail || '?')[0].toUpperCase()}</span>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{c.clientName || c.clientEmail}</div>
+                  {isPending
+                    ? <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 1 }}>INVITE PENDING</div>
+                    : <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 1 }}>{c.clientEmail}</div>
+                  }
+                </div>
+                <div style={{ fontSize: 11, fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.04em', color: 'rgba(var(--danger-rgb),0.7)' }}>
+                  {isPending ? 'CANCEL' : 'END'}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Sheet>
+
       {allClients.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '60px 24px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
           No clients yet.<br />
@@ -1926,8 +1978,6 @@ function CoachingTabCoachView({ store, setStore, userId, go }) {
                 client={c}
                 inProgress={inProgress}
                 unreadCount={clientUnread}
-                isEnding={ending === c.id}
-                onEnd={() => handleEnd(c)}
                 go={go}
               />
             );
@@ -1938,7 +1988,7 @@ function CoachingTabCoachView({ store, setStore, userId, go }) {
   );
 }
 
-function CoachingTabClientCard({ client, inProgress, unreadCount, isEnding, onEnd, go }) {
+function CoachingTabClientCard({ client, inProgress, unreadCount, go }) {
   const isPending = client.status === 'pending';
   const handleCardClick = () => {
     if (isPending) return;
@@ -1974,13 +2024,6 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, isEnding, onEn
           <span style={{ fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, color: '#0a0805' }}>{unreadCount > 9 ? '9+' : unreadCount}</span>
         </div>
       )}
-      <button
-        onClick={e => { e.stopPropagation(); onEnd(); }}
-        disabled={isEnding}
-        style={{ background: 'transparent', border: `1px solid rgba(var(--danger-rgb),0.35)`, borderRadius: 6, padding: '5px 9px', cursor: isEnding ? 'not-allowed' : 'pointer', color: 'rgba(var(--danger-rgb),0.75)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', flexShrink: 0 }}
-      >
-        {isPending ? 'CANCEL' : 'END'}
-      </button>
       {!isPending && <ChevronRight />}
     </div>
   );
