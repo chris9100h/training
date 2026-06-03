@@ -138,7 +138,7 @@ function ErrorScreen({ onRetry }) {
 
 function App() {
   const isPad = useIsPad();
-  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error' | 'invite'
+  const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error' | 'invite' | 'pending'
   // Detect invite/password-reset link before Supabase clears the hash
   const isTokenFlow = useRefA(
     window.location.hash.includes('type=invite') || window.location.hash.includes('type=recovery')
@@ -347,6 +347,7 @@ function App() {
               schedules: [...localOnlySchedules, ...fresh.schedules],
             };
           }
+          if (!fresh.user.approved) { setPhase('pending'); return; }
           prevStore.current = merged;
           setStore(merged);
         })
@@ -355,6 +356,7 @@ function App() {
       setPhase('loading');
       try {
         const loaded = await LB.loadFromSupabase(uid);
+        if (!loaded.user.approved) { setPhase('pending'); return; }
         prevStore.current = loaded;
         syncBase.current = loaded;
         LB.saveBase(loaded, uid);
@@ -621,6 +623,7 @@ function App() {
   if (phase === 'init' || phase === 'loading') return <LoadingScreen />;
   if (phase === 'unauthed') return <window.Screens.LoginScreen />;
   if (phase === 'invite') return <window.Screens.SetPasswordScreen onDone={() => loadData(userId)} />;
+  if (phase === 'pending') return <window.Screens.PendingApprovalScreen onSignOut={() => LB.signOut()} />;
   if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 
   const go    = (r) => setRoute(r);

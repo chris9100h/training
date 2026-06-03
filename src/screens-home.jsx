@@ -1209,5 +1209,34 @@ function HomeScreen({ store, setStore, go, userId }) {
   );
 }
 
+// ─── PENDING APPROVAL ────────────────────────────────────────────────────────
+function PendingApprovalScreen({ onSignOut }) {
+  return (
+    <Screen scroll={false} style={{ position: 'relative', overflow: 'hidden' }}>
+      <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
+      <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
+        <span className="micro">ZANE TRAINING</span>
+      </div>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1, gap: 16 }}>
+        <img src="icons/zane-logo.png" style={{ width: '70%', maxWidth: 380, objectFit: 'contain', marginBottom: 8 }} />
+        <div className="display" style={{ fontSize: 22, color: UI.ink, fontWeight: 400, textAlign: 'center' }}>
+          Waiting for approval
+        </div>
+        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.6, maxWidth: 280 }}>
+          Your account has been created. The admin will review and approve your access shortly.
+        </div>
+        <button onClick={onSignOut} style={{
+          marginTop: 8, padding: '10px 20px', borderRadius: 4,
+          background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+          color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11,
+          letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer',
+        }}>
+          Sign out
+        </button>
+      </div>
+    </Screen>
+  );
+}
+
 window.Screens = window.Screens || {};
-Object.assign(window.Screens, { LoginScreen, HomeScreen, SetPasswordScreen });
+Object.assign(window.Screens, { LoginScreen, HomeScreen, SetPasswordScreen, PendingApprovalScreen });

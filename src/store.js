@@ -180,7 +180,7 @@ async function setupNewUser(userId, name) {
 async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const isCoachLoad = !!_opts.coachLoad;
   const queries = [
-    _supabase.from('zane_profiles').select('id, name').eq('id', userId).maybeSingle(),
+    _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived').eq('user_id', userId),
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries, duration_minutes')
@@ -240,7 +240,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   }
 
   const result = {
-    user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || '') },
+    user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || ''), approved: profileRes.data?.approved ?? false },
     exercises: exRes.data || [],
     schedules: schRes.data || [],
     // map snake_case DB columns → camelCase store fields
