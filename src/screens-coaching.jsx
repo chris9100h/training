@@ -2030,10 +2030,10 @@ function CoachingTabScreen({ store, setStore, userId, go }) {
             </button>
           ))}
         </div>
-        <div style={{ flex: 1, minHeight: 0, display: tab === 'clients' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <div style={{ flex: 1, overflow: 'hidden', display: tab === 'clients' ? 'flex' : 'none', flexDirection: 'column' }}>
           <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} hideTopBar />
         </div>
-        <div style={{ flex: 1, minHeight: 0, display: tab === 'coach' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <div style={{ flex: 1, overflow: 'hidden', display: tab === 'coach' ? 'flex' : 'none', flexDirection: 'column' }}>
           <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} hideTopBar />
         </div>
       </div>
