@@ -2079,14 +2079,9 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
   return (
     <Screen scroll={false}>
       {!hideTopBar && <TopBar title="Coaching" />}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: UI.bgInset, borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
-        <div style={{ width: 38, height: 38, borderRadius: 19, background: `rgba(var(--accent-rgb),0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 16, color: 'var(--accent)', fontWeight: 700 }}>{(coaching.coachName || '?')[0].toUpperCase()}</span>
-        </div>
-        <div>
-          <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{coaching.coachName}</div>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{coaching.coachEmail}</div>
-        </div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '12px 16px', background: UI.bgInset, borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
+        <i className="fa-solid fa-dumbbell" style={{ fontSize: 16, color: 'var(--accent)' }} />
+        <div style={{ fontSize: 14, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 700 }}>{coaching.coachName}</div>
       </div>
       <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0 }}>
         {[{ id: 'messages', label: 'Messages', icon: 'fa-comment' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }].map(t => (
