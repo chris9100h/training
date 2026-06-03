@@ -608,11 +608,12 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
   };
 
   const TABS = [
-    { id: 'overview',   icon: 'fa-chart-bar',      label: 'Overview' },
-    { id: 'plan',       icon: 'fa-calendar-days',   label: 'Plan' },
-    { id: 'sessions',   icon: 'fa-dumbbell',        label: 'Sessions' },
-    { id: 'nutrition',  icon: 'fa-utensils',        label: 'Nutrition' },
-    { id: 'notes',      icon: 'fa-comment',         label: 'Notes' },
+    { id: 'overview',   icon: 'fa-chart-bar',         label: 'Overview' },
+    { id: 'plan',       icon: 'fa-calendar-days',      label: 'Plan' },
+    { id: 'sessions',   icon: 'fa-dumbbell',           label: 'Sessions' },
+    { id: 'checkins',   icon: 'fa-clipboard-list',     label: 'Check-ins' },
+    { id: 'nutrition',  icon: 'fa-utensils',           label: 'Nutrition' },
+    { id: 'notes',      icon: 'fa-comment',            label: 'Notes' },
   ];
 
   return (
@@ -659,6 +660,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'overview'   && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} onSelectSession={openSession} />}
           {tab === 'plan'       && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
           {tab === 'sessions'   && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
+          {tab === 'checkins'   && <ClientCheckInsTab coachingId={coachingId} />}
           {tab === 'nutrition'  && <ClientNutritionTab coachingId={coachingId} userId={userId} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
@@ -1422,6 +1424,102 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
   );
 }
 
+// ─── Tab: Check-ins (coach view) ─────────────────────────────────────────────
+
+function ClientCheckInsTab({ coachingId }) {
+  const [checkins, setCheckins] = useStateC(null);
+
+  useEffectC(() => {
+    LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
+  }, [coachingId]);
+
+  if (checkins === null) {
+    return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div></div>;
+  }
+
+  if (!checkins.length) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
+        <i className="fa-solid fa-clipboard-list" style={{ fontSize: 28, color: UI.inkGhost }} />
+        <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center' }}>No check-ins yet.</div>
+      </div>
+    );
+  }
+
+  // Trend: last 6 check-ins, oldest first for charting direction
+  const recent = [...checkins].slice(0, 6).reverse();
+
+  const TrendCard = ({ label, icon, values, format, invertColor }) => {
+    const valid = values.filter(v => v != null);
+    if (!valid.length) return null;
+    const last = valid[valid.length - 1];
+    const prev = valid.length > 1 ? valid[valid.length - 2] : null;
+    const delta = prev != null ? last - prev : null;
+    const up = delta > 0;
+    // For markers: up = worse (red), down = better (green). For weight: neutral arrow.
+    const arrowColor = delta === 0 || delta == null ? UI.inkFaint
+      : invertColor ? (up ? 'rgba(var(--danger-rgb),0.8)' : 'var(--accent)')
+      : UI.inkSoft;
+    return (
+      <div style={{ flex: 1, minWidth: 80, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
+          <i className={`fa-solid ${icon}`} style={{ fontSize: 10, color: UI.inkFaint }} />
+          <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+          <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{format(last)}</span>
+          {delta != null && Math.abs(delta) > 0.001 && (
+            <span style={{ fontSize: 10, color: arrowColor, fontFamily: UI.fontUi }}>
+              {up ? '▲' : '▼'} {format(Math.abs(delta))}
+            </span>
+          )}
+        </div>
+        {/* Sparkline dots */}
+        {valid.length > 1 && (
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, marginTop: 8, height: 20 }}>
+            {valid.map((v, i) => {
+              const min = Math.min(...valid); const max = Math.max(...valid);
+              const range = max - min || 1;
+              const h = Math.max(3, Math.round(((v - min) / range) * 16) + 3);
+              return <div key={i} style={{ flex: 1, height: h, borderRadius: 2, background: i === valid.length - 1 ? 'var(--accent)' : `rgba(var(--accent-rgb),0.3)` }} />;
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const wVals = recent.map(c => c.weightToday);
+  const hVals = recent.map(c => c.hunger);
+  const sVals = recent.map(c => c.sleepQuality);
+  const lsVals = recent.map(c => c.lifeStress);
+  const wsVals = recent.map(c => c.workStress);
+  const tVals = recent.map(c => c.tiredness);
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Trend row */}
+      <div>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>TRENDS (last {Math.min(recent.length, 6)} check-ins)</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <TrendCard label="Weight" icon="fa-weight-scale" values={wVals} format={v => `${v}kg`} invertColor={false} />
+          <TrendCard label="Hunger" icon="fa-bowl-food" values={hVals} format={v => `${v}`} invertColor={true} />
+          <TrendCard label="Sleep" icon="fa-moon" values={sVals} format={v => `${v}`} invertColor={true} />
+          <TrendCard label="Life stress" icon="fa-brain" values={lsVals} format={v => `${v}`} invertColor={true} />
+          <TrendCard label="Work stress" icon="fa-briefcase" values={wsVals} format={v => `${v}`} invertColor={true} />
+          <TrendCard label="Tiredness" icon="fa-battery-half" values={tVals} format={v => `${v}`} invertColor={true} />
+        </div>
+      </div>
+
+      {/* Check-in list */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
+        {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
+      </div>
+    </div>
+  );
+}
+
 // ─── Tab: Notes ───────────────────────────────────────────────────────────────
 
 function ClientNotesTab({ coachingId, userId, clientName, store, setStore }) {
@@ -2026,8 +2124,375 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, go }) {
   );
 }
 
+// ─── CheckIn helpers ─────────────────────────────────────────────────────────
+
+function fmtWeek(weekStart) {
+  if (!weekStart) return '';
+  const d = new Date(weekStart + 'T12:00:00');
+  const end = new Date(d); end.setDate(d.getDate() + 6);
+  const fmt = (dt) => dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+  return `${fmt(d)} – ${fmt(end)}`;
+}
+
+function MarkerRow({ label, value, onChange, readOnly }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+        <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
+        {value != null && <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{value}/10</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {[1,2,3,4,5,6,7,8,9,10].map(n => (
+          <button
+            key={n}
+            onClick={() => !readOnly && onChange(n)}
+            style={{
+              flex: 1, padding: '6px 0', borderRadius: 5, border: 'none', cursor: readOnly ? 'default' : 'pointer',
+              background: value === n ? 'var(--accent)' : value != null && n <= value ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
+              color: value === n ? '#0a0805' : n <= 3 ? 'var(--accent)' : n <= 6 ? UI.inkSoft : UI.inkFaint,
+              fontSize: 10, fontFamily: UI.fontUi, fontWeight: value === n ? 700 : 400,
+              transition: 'background 0.1s',
+            }}
+          >{n}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CheckInCard({ ci, defaultOpen = false }) {
+  const [open, setOpen] = useStateC(defaultOpen);
+  const hasActivity = ci.daysTrained != null || ci.steps != null || ci.cardioMinutes != null;
+  const hasMarkers = ci.hunger != null || ci.sleepQuality != null || ci.lifeStress != null || ci.workStress != null || ci.tiredness != null;
+
+  return (
+    <div style={{ background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', gap: 12 }}
+      >
+        <div style={{ flex: 1, textAlign: 'left' }}>
+          <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>Week of {fmtWeek(ci.weekStart)}</div>
+          {ci.weightToday != null && (
+            <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginTop: 2 }}>
+              {ci.weightToday} kg{ci.weightAvgLastWeek != null ? ` · avg ${ci.weightAvgLastWeek} kg` : ''}
+            </div>
+          )}
+        </div>
+        <i className={`fa-solid fa-chevron-${open ? 'up' : 'down'}`} style={{ fontSize: 11, color: UI.inkFaint }} />
+      </button>
+
+      {open && (
+        <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Markers */}
+          {hasMarkers && (
+            <div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>MARKERS (1=good, 10=bad)</div>
+              {[['Hunger', ci.hunger], ['Sleep', ci.sleepQuality], ['Life Stress', ci.lifeStress], ['Work Stress', ci.workStress], ['Tiredness', ci.tiredness]].filter(([, v]) => v != null).map(([label, value]) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+                  <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
+                  <span className="num" style={{ fontSize: 12, color: value <= 3 ? 'var(--accent)' : value >= 7 ? 'rgba(var(--danger-rgb),0.8)' : UI.ink }}>{value}/10</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Activity */}
+          {hasActivity && (
+            <div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ACTIVITY</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {ci.daysTrained != null && <StatPill label="Days trained" value={ci.daysTrained} />}
+                {ci.steps != null && <StatPill label="Steps" value={Number(ci.steps).toLocaleString()} />}
+                {ci.cardioMinutes != null && <StatPill label="Cardio" value={`${ci.cardioMinutes} min`} />}
+                {ci.cardioDistanceM != null && <StatPill label="Distance" value={`${(ci.cardioDistanceM / 1000).toFixed(1)} km`} />}
+                {ci.cardioAvgPace && <StatPill label="Avg pace" value={ci.cardioAvgPace} />}
+              </div>
+            </div>
+          )}
+
+          {/* Weight detail */}
+          {ci.weightToday != null && (
+            <div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>WEIGHT</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <StatPill label="Today" value={`${ci.weightToday} kg`} />
+                {ci.weightAvgLastWeek != null && <StatPill label="Last week avg" value={`${ci.weightAvgLastWeek} kg`} />}
+              </div>
+            </div>
+          )}
+
+          {/* Hydration */}
+          {ci.hydrationMl != null && (
+            <div><div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>HYDRATION</div>
+              <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{(ci.hydrationMl / 1000).toFixed(1)} L / day</div>
+            </div>
+          )}
+
+          {/* Off-plan */}
+          {ci.offPlanNotes && (
+            <div><div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>OFF-PLAN</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ci.offPlanNotes}</div>
+            </div>
+          )}
+
+          {/* Goal */}
+          {ci.goalNote && (
+            <div><div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>GOAL</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>{ci.goalNote}</div>
+            </div>
+          )}
+
+          {/* Issues */}
+          {ci.issuesNotes && (
+            <div><div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>ISSUES / TO ADDRESS</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ci.issuesNotes}</div>
+            </div>
+          )}
+
+          {/* General note */}
+          {ci.generalNote && (
+            <div><div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>NOTE</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ci.generalNote}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatPill({ label, value }) {
+  return (
+    <div style={{ background: UI.bgRaised, borderRadius: 8, padding: '7px 10px', border: `0.5px solid ${UI.hair}` }}>
+      <div className="num" style={{ fontSize: 15, color: UI.ink, fontWeight: 300 }}>{value}</div>
+      <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', marginTop: 1 }}>{label}</div>
+    </div>
+  );
+}
+
+// ─── CheckInForm ──────────────────────────────────────────────────────────────
+
+function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSaved }) {
+  const REQUIRED = ['hunger', 'sleepQuality', 'lifeStress', 'workStress', 'tiredness', 'weightToday'];
+
+  const empty = {
+    weightToday: '', weightAvgLastWeek: '',
+    offPlanNotes: '', hydrationMl: '',
+    daysTrained: '', steps: '', cardioMinutes: '', cardioDistanceM: '', cardioAvgPace: '',
+    goalNote: '',
+    hunger: null, sleepQuality: null, lifeStress: null, workStress: null, tiredness: null,
+    issuesNotes: '', generalNote: '',
+  };
+
+  const [form, setForm] = useStateC(() => existing ? {
+    weightToday: existing.weightToday ?? '',
+    weightAvgLastWeek: existing.weightAvgLastWeek ?? '',
+    offPlanNotes: existing.offPlanNotes ?? '',
+    hydrationMl: existing.hydrationMl ?? '',
+    daysTrained: existing.daysTrained ?? '',
+    steps: existing.steps ?? '',
+    cardioMinutes: existing.cardioMinutes ?? '',
+    cardioDistanceM: existing.cardioDistanceM ?? '',
+    cardioAvgPace: existing.cardioAvgPace ?? '',
+    goalNote: existing.goalNote ?? '',
+    hunger: existing.hunger ?? null,
+    sleepQuality: existing.sleepQuality ?? null,
+    lifeStress: existing.lifeStress ?? null,
+    workStress: existing.workStress ?? null,
+    tiredness: existing.tiredness ?? null,
+    issuesNotes: existing.issuesNotes ?? '',
+    generalNote: existing.generalNote ?? '',
+  } : empty);
+
+  const [saving, setSaving] = useStateC(false);
+  const [error, setError] = useStateC('');
+
+  const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
+  const num = (v) => v === '' || v == null ? null : Number(v);
+
+  const canSubmit = form.weightToday !== '' && form.weightToday != null &&
+    form.hunger != null && form.sleepQuality != null &&
+    form.lifeStress != null && form.workStress != null && form.tiredness != null;
+
+  const handleSubmit = async () => {
+    if (!canSubmit) { setError('Please fill in weight and all markers.'); return; }
+    setSaving(true); setError('');
+    try {
+      await LB.submitCheckin(coachingId, clientId, {
+        weightToday: num(form.weightToday),
+        weightAvgLastWeek: num(form.weightAvgLastWeek),
+        offPlanNotes: form.offPlanNotes || null,
+        hydrationMl: num(form.hydrationMl),
+        daysTrained: num(form.daysTrained),
+        steps: num(form.steps),
+        cardioMinutes: num(form.cardioMinutes),
+        cardioDistanceM: num(form.cardioDistanceM),
+        cardioAvgPace: form.cardioAvgPace || null,
+        goalNote: form.goalNote || null,
+        hunger: form.hunger,
+        sleepQuality: form.sleepQuality,
+        lifeStress: form.lifeStress,
+        workStress: form.workStress,
+        tiredness: form.tiredness,
+        issuesNotes: form.issuesNotes || null,
+        generalNote: form.generalNote || null,
+      }, userId);
+      onSaved();
+    } catch (e) { setError(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const inputStyle = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' };
+  const SectionHead = ({ label }) => <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10, marginTop: 4 }}>{label}</div>;
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* Weight */}
+      <div>
+        <SectionHead label="WEIGHT *" />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Today (kg)</div>
+            <input type="number" step="0.1" placeholder="97.3" value={form.weightToday} onChange={e => set('weightToday', e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Last week avg (kg)</div>
+            <input type="number" step="0.1" placeholder="98.1" value={form.weightAvgLastWeek} onChange={e => set('weightAvgLastWeek', e.target.value)} style={inputStyle} />
+          </div>
+        </div>
+      </div>
+
+      {/* Markers */}
+      <div>
+        <SectionHead label="MARKERS * (1 = good, 10 = bad)" />
+        <MarkerRow label="Hunger" value={form.hunger} onChange={v => set('hunger', v)} />
+        <MarkerRow label="Sleep" value={form.sleepQuality} onChange={v => set('sleepQuality', v)} />
+        <MarkerRow label="Life Stress" value={form.lifeStress} onChange={v => set('lifeStress', v)} />
+        <MarkerRow label="Work Stress" value={form.workStress} onChange={v => set('workStress', v)} />
+        <MarkerRow label="Tiredness" value={form.tiredness} onChange={v => set('tiredness', v)} />
+      </div>
+
+      {/* Activity */}
+      <div>
+        <SectionHead label="ACTIVITY" />
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Days trained</div>
+            <input type="number" min="0" max="7" placeholder="4" value={form.daysTrained} onChange={e => set('daysTrained', e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Steps</div>
+            <input type="number" placeholder="68953" value={form.steps} onChange={e => set('steps', e.target.value)} style={inputStyle} />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Cardio (min)</div>
+            <input type="number" placeholder="140" value={form.cardioMinutes} onChange={e => set('cardioMinutes', e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Distance (m)</div>
+            <input type="number" placeholder="16950" value={form.cardioDistanceM} onChange={e => set('cardioDistanceM', e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Avg pace</div>
+            <input type="text" placeholder="08:16" value={form.cardioAvgPace} onChange={e => set('cardioAvgPace', e.target.value)} style={inputStyle} />
+          </div>
+        </div>
+      </div>
+
+      {/* Nutrition */}
+      <div>
+        <SectionHead label="NUTRITION" />
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Off-plan days / notes</div>
+          <textarea placeholder="Mo: Family event&#10;Fr: Weekly pastry" value={form.offPlanNotes} onChange={e => set('offPlanNotes', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }} />
+        </div>
+        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Avg hydration / day (ml)</div>
+        <input type="number" placeholder="3500" value={form.hydrationMl} onChange={e => set('hydrationMl', e.target.value)} style={inputStyle} />
+      </div>
+
+      {/* Goals */}
+      <div>
+        <SectionHead label="GOALS / NOTES" />
+        <textarea placeholder="No goal — improvement season…" value={form.goalNote} onChange={e => set('goalNote', e.target.value)} rows={2} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5, marginBottom: 8 }} />
+        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Issues / things to address</div>
+        <textarea placeholder="Any injuries, concerns…" value={form.issuesNotes} onChange={e => set('issuesNotes', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5, marginBottom: 8 }} />
+        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>General note</div>
+        <textarea placeholder="Anything else…" value={form.generalNote} onChange={e => set('generalNote', e.target.value)} rows={2} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }} />
+      </div>
+
+      {error && <div style={{ fontSize: 12, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{error}</div>}
+
+      <Btn onClick={handleSubmit} disabled={saving || !canSubmit}>
+        {saving ? 'Sending…' : existing ? 'Update Check-in' : 'Submit Check-in'}
+      </Btn>
+    </div>
+  );
+}
+
+// ─── ClientCheckInTab ─────────────────────────────────────────────────────────
+
+function ClientCheckInTab({ coachingId, clientId, userId }) {
+  const weekStart = LB.checkinWeekStart();
+  const [checkins, setCheckins] = useStateC(null);
+  const [editing, setEditing] = useStateC(false);
+
+  const load = () => LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
+  useEffectC(() => { load(); }, [coachingId]);
+
+  const thisWeek = (checkins || []).find(c => c.weekStart === weekStart);
+  const past = (checkins || []).filter(c => c.weekStart !== weekStart);
+
+  const d = new Date(weekStart + 'T12:00:00');
+  const end = new Date(d); end.setDate(d.getDate() + 6);
+
+  if (checkins === null) {
+    return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div></div>;
+  }
+
+  if ((thisWeek && !editing)) {
+    return (
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>This week submitted ✓</div>
+          <button onClick={() => setEditing(true)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>Edit</button>
+        </div>
+        <CheckInCard ci={thisWeek} defaultOpen={true} />
+        {past.length > 0 && (
+          <>
+            <div className="micro" style={{ color: UI.inkFaint, marginTop: 8 }}>PREVIOUS CHECK-INS</div>
+            {past.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div style={{ padding: '10px 14px 0', flexShrink: 0 }}>
+        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+          Week of <strong>{fmtWeek(weekStart)}</strong> — covers Mon–Sun of last week.
+        </div>
+        {editing && <button onClick={() => setEditing(false)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>← Cancel</button>}
+      </div>
+      <CheckInForm
+        coachingId={coachingId}
+        clientId={clientId}
+        userId={userId}
+        weekStart={weekStart}
+        existing={editing ? thisWeek : null}
+        onSaved={() => { setEditing(false); load(); }}
+      />
+    </>
+  );
+}
+
 // ─── CoachingTabClientView ────────────────────────────────────────────────────
-// Client's coaching tab — messages + nutrition.
+// Client's coaching tab — messages + nutrition + check-in.
 
 function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false }) {
   const coaching = store.coaching?.asClient;
@@ -2093,7 +2558,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
         </div>
       </div>
       <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0 }}>
-        {[{ id: 'messages', label: 'Messages', icon: 'fa-comment' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }].map(t => (
+        {[{ id: 'messages', label: 'Messages', icon: 'fa-comment' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }, { id: 'checkin', label: 'Check-in', icon: 'fa-clipboard-list' }].map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
@@ -2116,6 +2581,11 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
         </div>
       )}
       {tab === 'nutrition' && <ClientNutritionReadView coachingId={coaching.id} />}
+      {tab === 'checkin' && (
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+          <ClientCheckInTab coachingId={coaching.id} clientId={userId} userId={userId} />
+        </div>
+      )}
     </Screen>
   );
 }

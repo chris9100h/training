@@ -1148,6 +1148,98 @@ async function addCoachingMacros(coachingId, macros, userId) {
   if (error) throw error;
 }
 
+function checkinWeekStart() {
+  const today = new Date();
+  const daysSinceSunday = today.getDay(); // 0=Sun, 1=Mon, …, 6=Sat
+  const lastSunday = new Date(today);
+  lastSunday.setDate(today.getDate() - daysSinceSunday);
+  const monday = new Date(lastSunday);
+  monday.setDate(lastSunday.getDate() - 6);
+  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+}
+
+async function submitCheckin(coachingId, clientId, data, userId) {
+  const weekStart = checkinWeekStart();
+  const id = 'ci_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const row = {
+    id,
+    coaching_id: coachingId,
+    client_id: clientId,
+    week_start: weekStart,
+    checked_in_at: new Date().toISOString(),
+    weight_today: data.weightToday ?? null,
+    weight_avg_last_week: data.weightAvgLastWeek ?? null,
+    off_plan_notes: data.offPlanNotes || null,
+    hydration_ml: data.hydrationMl ?? null,
+    days_trained: data.daysTrained ?? null,
+    steps: data.steps ?? null,
+    cardio_minutes: data.cardioMinutes ?? null,
+    cardio_distance_m: data.cardioDistanceM ?? null,
+    cardio_avg_pace: data.cardioAvgPace || null,
+    goal_note: data.goalNote || null,
+    hunger: data.hunger ?? null,
+    sleep_quality: data.sleepQuality ?? null,
+    life_stress: data.lifeStress ?? null,
+    work_stress: data.workStress ?? null,
+    tiredness: data.tiredness ?? null,
+    issues_notes: data.issuesNotes || null,
+    general_note: data.generalNote || null,
+  };
+  const { error } = await _supabase.from('zane_checkins').upsert(row, { onConflict: 'coaching_id,week_start' });
+  if (error) throw error;
+
+  // Send note to "Weekly Check-in" thread
+  try {
+    const d = new Date(weekStart + 'T12:00:00');
+    const endDate = new Date(d); endDate.setDate(d.getDate() + 6);
+    const fmt = (dt) => dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    const weekLabel = `Week of ${fmt(d)} – ${fmt(endDate)}`;
+    const lines = [weekLabel, ''];
+    if (data.weightToday != null) {
+      const avgPart = data.weightAvgLastWeek != null ? ` (avg last week: ${data.weightAvgLastWeek} kg)` : '';
+      lines.push(`Weight: ${data.weightToday} kg${avgPart}`);
+    }
+    const actParts = [];
+    if (data.daysTrained != null) actParts.push(`${data.daysTrained} days trained`);
+    if (data.steps != null) actParts.push(`${Number(data.steps).toLocaleString()} steps`);
+    if (data.cardioMinutes != null) actParts.push(`${data.cardioMinutes} min cardio`);
+    if (actParts.length) lines.push(`Activity: ${actParts.join(' · ')}`);
+    const markerParts = [];
+    if (data.hunger != null) markerParts.push(`Hunger ${data.hunger}/10`);
+    if (data.sleepQuality != null) markerParts.push(`Sleep ${data.sleepQuality}/10`);
+    if (data.lifeStress != null) markerParts.push(`Life stress ${data.lifeStress}/10`);
+    if (data.workStress != null) markerParts.push(`Work stress ${data.workStress}/10`);
+    if (data.tiredness != null) markerParts.push(`Tiredness ${data.tiredness}/10`);
+    if (markerParts.length) lines.push(`Markers: ${markerParts.join(' · ')}`);
+    if (data.offPlanNotes) lines.push(`Off-plan: ${data.offPlanNotes}`);
+    if (data.issuesNotes) { lines.push(''); lines.push(data.issuesNotes); }
+    if (data.generalNote) { lines.push(''); lines.push(data.generalNote); }
+    const threadId = await getOrCreateCoachingThread(coachingId, 'Weekly Check-in', userId);
+    await addCoachingNote(coachingId, 'general', null, null, lines.filter((_, i) => !(i === 1 && lines[2] === undefined)).join('\n'), userId, threadId);
+  } catch (e) { console.error('Failed to send check-in note', e); }
+}
+
+async function loadCheckins(coachingId) {
+  const { data, error } = await _supabase
+    .from('zane_checkins')
+    .select('*')
+    .eq('coaching_id', coachingId)
+    .order('week_start', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(r => ({
+    id: r.id, coachingId: r.coaching_id, clientId: r.client_id,
+    weekStart: r.week_start, checkedInAt: r.checked_in_at,
+    weightToday: r.weight_today, weightAvgLastWeek: r.weight_avg_last_week,
+    offPlanNotes: r.off_plan_notes, hydrationMl: r.hydration_ml,
+    daysTrained: r.days_trained, steps: r.steps,
+    cardioMinutes: r.cardio_minutes, cardioDistanceM: r.cardio_distance_m, cardioAvgPace: r.cardio_avg_pace,
+    goalNote: r.goal_note,
+    hunger: r.hunger, sleepQuality: r.sleep_quality,
+    lifeStress: r.life_stress, workStress: r.work_stress, tiredness: r.tiredness,
+    issuesNotes: r.issues_notes, generalNote: r.general_note,
+  }));
+}
+
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
@@ -1164,4 +1256,5 @@ window.LB = {
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
+  checkinWeekStart, submitCheckin, loadCheckins,
 };
