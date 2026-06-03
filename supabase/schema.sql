@@ -330,7 +330,7 @@ END;
 $$;
 
 -- Returns full detail of a single active or past session (gated by feature grant).
-CREATE OR REPLACE FUNCTION public.get_active_session_detail(p_user_id uuid, p_session_id text)
+CREATE OR REPLACE FUNCTION public.get_active_session_detail(p_user_id uuid, p_session_id text DEFAULT NULL)
 RETURNS TABLE(
   user_name                    text,
   day_name                     text,
@@ -350,7 +350,8 @@ BEGIN
      NOT EXISTS (
        SELECT 1 FROM zane_feature_grants
        WHERE feature = 'active_users' AND email = auth.email()
-     )
+     ) AND
+     NOT zane_is_coach_of(p_user_id)
   THEN
     RETURN;
   END IF;
