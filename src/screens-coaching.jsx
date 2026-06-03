@@ -1551,7 +1551,7 @@ function ClientCheckInsTab({ coachingId }) {
     if (!hasAny) return null;
     return (
       <div>
-        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{label}</div>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>{label}</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{children}</div>
       </div>
     );
@@ -1583,7 +1583,7 @@ function ClientCheckInsTab({ coachingId }) {
 
       <TrendSection label="CARDIO">
         <CardioTrendCard />
-        <TrendCard label="Pace feeling" icon="fa-gauge" values={recent.map(c => c.cardioPaceFeeling)} format={v => `${v}/5`} invertColor={false} />
+        <TrendCard label="Pace feeling" icon="fa-gauge" values={recent.map(c => c.cardioPaceFeeling)} format={v => `${v}/6`} invertColor={false} />
         <TrendCard label="Effort" icon="fa-fire" values={recent.map(c => c.cardioEffort)} format={v => `${v}/10`} invertColor={true} />
       </TrendSection>
 
@@ -2297,7 +2297,7 @@ function CheckInCard({ ci, defaultOpen = false }) {
           {/* Markers */}
           {hasMarkers && (
             <div>
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>MARKERS (1=good, 10=bad)</div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>MARKERS (1=good/low, 10=bad/high)</div>
               {[['Hunger', ci.hunger], ['Sleep', ci.sleepQuality], ['Life Stress', ci.lifeStress], ['Work Stress', ci.workStress], ['Tiredness', ci.tiredness]].filter(([, v]) => v != null).map(([label, value]) => (
                 <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
                   <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
@@ -2321,7 +2321,7 @@ function CheckInCard({ ci, defaultOpen = false }) {
                 {ci.steps != null && <StatPill label="Steps" value={Number(ci.steps).toLocaleString()} />}
                 {ci.cardioMinutes != null && <StatPill label="Cardio" value={`${ci.cardioMinutes} min`} />}
                 {ci.cardioDistanceM != null && <StatPill label="Distance" value={`${(ci.cardioDistanceM / 1000).toFixed(1)} km`} />}
-                {ci.cardioPaceFeeling != null && <StatPill label="Pace feeling" value={`${ci.cardioPaceFeeling}/5`} />}
+                {ci.cardioPaceFeeling != null && <StatPill label="Pace feeling" value={`${ci.cardioPaceFeeling}/6`} />}
                 {ci.cardioEffort != null && <StatPill label="Effort" value={`${ci.cardioEffort}/10`} />}
               </div>
             </div>
@@ -2488,7 +2488,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
 
       {/* Markers */}
       <div>
-        <SectionHead label="MARKERS * (1 = good, 10 = bad)" />
+        <SectionHead label="MARKERS * (1 = good/low, 10 = bad/high)" />
         <MarkerRow label="Hunger" value={form.hunger} onChange={v => set('hunger', v)} />
         <MarkerRow label="Sleep" value={form.sleepQuality} onChange={v => set('sleepQuality', v)} />
         <MarkerRow label="Life Stress" value={form.lifeStress} onChange={v => set('lifeStress', v)} />
@@ -2545,14 +2545,14 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
           </div>
         </div>
 
-        {/* Pace feeling 1–5 */}
+        {/* Pace feeling 1–6 */}
         <div style={{ marginBottom: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
             <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Pace feeling</span>
-            {form.cardioPaceFeeling != null && <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{form.cardioPaceFeeling}/5</span>}
+            {form.cardioPaceFeeling != null && <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{form.cardioPaceFeeling}/6</span>}
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
-            {[['1','Stroll'],['2','Walk'],['3','Brisk'],['4','Power'],['5','Jog']].map(([n, lbl]) => (
+            {[['1','Stroll'],['2','Walk'],['3','Brisk'],['4','Power'],['5','Jog'],['6','Run']].map(([n, lbl]) => (
               <button key={n} onClick={() => set('cardioPaceFeeling', form.cardioPaceFeeling === Number(n) ? null : Number(n))}
                 style={{ flex: 1, padding: '7px 2px', borderRadius: 8, border: `0.5px solid ${form.cardioPaceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
                   background: form.cardioPaceFeeling === Number(n) ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
