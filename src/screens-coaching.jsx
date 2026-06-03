@@ -1446,20 +1446,33 @@ function ClientCheckInsTab({ coachingId }) {
     );
   }
 
-  // Trend: last 6 check-ins, oldest first for charting direction
+  // Trend: last 6 check-ins, oldest first for sparklines
   const recent = [...checkins].slice(0, 6).reverse();
 
-  const TrendCard = ({ label, icon, values, format, invertColor }) => {
+  const Sparkline = ({ vals }) => {
+    if (vals.length < 2) return null;
+    const min = Math.min(...vals); const max = Math.max(...vals);
+    const range = max - min || 1;
+    return (
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, marginTop: 8, height: 20 }}>
+        {vals.map((v, i) => {
+          const h = Math.max(3, Math.round(((v - min) / range) * 16) + 3);
+          return <div key={i} style={{ flex: 1, height: h, borderRadius: 2, background: i === vals.length - 1 ? 'var(--accent)' : `rgba(var(--accent-rgb),0.3)` }} />;
+        })}
+      </div>
+    );
+  };
+
+  const TrendCard = ({ label, icon, values, format, invertColor, sub }) => {
     const valid = values.filter(v => v != null);
     if (!valid.length) return null;
     const last = valid[valid.length - 1];
     const prev = valid.length > 1 ? valid[valid.length - 2] : null;
     const delta = prev != null ? last - prev : null;
     const up = delta > 0;
-    // For markers: up = worse (red), down = better (green). For weight: neutral arrow.
     const arrowColor = delta === 0 || delta == null ? UI.inkFaint
       : invertColor ? (up ? 'rgba(var(--danger-rgb),0.8)' : 'var(--accent)')
-      : UI.inkSoft;
+      : (up ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)');
     return (
       <div style={{ flex: 1, minWidth: 80, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
@@ -1469,47 +1482,110 @@ function ClientCheckInsTab({ coachingId }) {
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
           <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{format(last)}</span>
           {delta != null && Math.abs(delta) > 0.001 && (
-            <span style={{ fontSize: 10, color: arrowColor, fontFamily: UI.fontUi }}>
-              {up ? '▲' : '▼'} {format(Math.abs(delta))}
-            </span>
+            <span style={{ fontSize: 10, color: arrowColor, fontFamily: UI.fontUi }}>{up ? '▲' : '▼'} {format(Math.abs(delta))}</span>
           )}
         </div>
-        {/* Sparkline dots */}
-        {valid.length > 1 && (
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, marginTop: 8, height: 20 }}>
-            {valid.map((v, i) => {
-              const min = Math.min(...valid); const max = Math.max(...valid);
-              const range = max - min || 1;
-              const h = Math.max(3, Math.round(((v - min) / range) * 16) + 3);
-              return <div key={i} style={{ flex: 1, height: h, borderRadius: 2, background: i === valid.length - 1 ? 'var(--accent)' : `rgba(var(--accent-rgb),0.3)` }} />;
-            })}
-          </div>
-        )}
+        {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{sub}</div>}
+        <Sparkline vals={valid} />
       </div>
     );
   };
 
-  const wVals = recent.map(c => c.weightToday);
-  const hVals = recent.map(c => c.hunger);
-  const sVals = recent.map(c => c.sleepQuality);
-  const lsVals = recent.map(c => c.lifeStress);
-  const wsVals = recent.map(c => c.workStress);
-  const tVals = recent.map(c => c.tiredness);
+  // Training combo card: days trained sparkline + last performance badge
+  const TrainingTrendCard = () => {
+    const dtVals = recent.map(c => c.daysTrained).filter(v => v != null);
+    if (!dtVals.length) return null;
+    const last = dtVals[dtVals.length - 1];
+    const prev = dtVals.length > 1 ? dtVals[dtVals.length - 2] : null;
+    const delta = prev != null ? last - prev : null;
+    const lastPerf = [...recent].reverse().find(c => c.performanceVsLastWeek)?.performanceVsLastWeek;
+    const perfColor = lastPerf === 'improved' ? 'var(--accent)' : lastPerf === 'worse' ? 'rgba(var(--danger-rgb),0.8)' : UI.inkSoft;
+    const perfLabel = lastPerf === 'improved' ? '↑ Better' : lastPerf === 'worse' ? '↓ Worse' : lastPerf === 'same' ? '= Same' : null;
+    return (
+      <div style={{ flex: 1, minWidth: 80, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
+          <i className="fa-solid fa-dumbbell" style={{ fontSize: 10, color: UI.inkFaint }} />
+          <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Training</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+          <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last}d</span>
+          {delta != null && Math.abs(delta) > 0 && (
+            <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
+          )}
+          {perfLabel && <span style={{ fontSize: 9, color: perfColor, fontFamily: UI.fontUi, fontWeight: 700 }}>{perfLabel}</span>}
+        </div>
+        <Sparkline vals={dtVals} />
+      </div>
+    );
+  };
+
+  // Cardio combo card: minutes sparkline + last distance as sub
+  const CardioTrendCard = () => {
+    const valid = recent.filter(c => c.cardioMinutes != null);
+    if (!valid.length) return null;
+    const minVals = valid.map(c => c.cardioMinutes);
+    const last = valid[valid.length - 1];
+    const prev = valid.length > 1 ? valid[valid.length - 2] : null;
+    const delta = prev != null ? last.cardioMinutes - prev.cardioMinutes : null;
+    const sub = last.cardioDistanceM != null ? `${(last.cardioDistanceM / 1000).toFixed(1)} km` : null;
+    return (
+      <div style={{ flex: 1, minWidth: 80, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
+          <i className="fa-solid fa-person-running" style={{ fontSize: 10, color: UI.inkFaint }} />
+          <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Cardio</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+          <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last.cardioMinutes}m</span>
+          {delta != null && Math.abs(delta) > 0 && (
+            <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
+          )}
+        </div>
+        {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{sub}</div>}
+        <Sparkline vals={minVals} />
+      </div>
+    );
+  };
+
+  const TrendSection = ({ label, children }) => {
+    const hasAny = React.Children.toArray(children).some(Boolean);
+    if (!hasAny) return null;
+    return (
+      <div>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{label}</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{children}</div>
+      </div>
+    );
+  };
+
+  const n = Math.min(recent.length, 6);
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Trend row */}
-      <div>
-        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>TRENDS (last {Math.min(recent.length, 6)} check-ins)</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          <TrendCard label="Weight" icon="fa-weight-scale" values={wVals} format={v => `${v}kg`} invertColor={false} />
-          <TrendCard label="Hunger" icon="fa-bowl-food" values={hVals} format={v => `${v}`} invertColor={true} />
-          <TrendCard label="Sleep" icon="fa-moon" values={sVals} format={v => `${v}`} invertColor={true} />
-          <TrendCard label="Life stress" icon="fa-brain" values={lsVals} format={v => `${v}`} invertColor={true} />
-          <TrendCard label="Work stress" icon="fa-briefcase" values={wsVals} format={v => `${v}`} invertColor={true} />
-          <TrendCard label="Tiredness" icon="fa-battery-half" values={tVals} format={v => `${v}`} invertColor={true} />
-        </div>
-      </div>
+    <div style={{ flex: 1, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div className="micro" style={{ color: UI.inkFaint }}>TRENDS — LAST {n} CHECK-IN{n !== 1 ? 'S' : ''}</div>
+
+      <TrendSection label="WEIGHT">
+        <TrendCard label="Avg last week" icon="fa-weight-scale" values={recent.map(c => c.weightAvgLastWeek)} format={v => `${v}kg`} invertColor={false} />
+        <TrendCard label="Today" icon="fa-weight-scale" values={recent.map(c => c.weightToday)} format={v => `${v}kg`} invertColor={false} />
+      </TrendSection>
+
+      <TrendSection label="MARKERS">
+        <TrendCard label="Hunger" icon="fa-bowl-food" values={recent.map(c => c.hunger)} format={v => `${v}`} invertColor={true} />
+        <TrendCard label="Sleep" icon="fa-moon" values={recent.map(c => c.sleepQuality)} format={v => `${v}`} invertColor={true} />
+        <TrendCard label="Life stress" icon="fa-brain" values={recent.map(c => c.lifeStress)} format={v => `${v}`} invertColor={true} />
+        <TrendCard label="Work stress" icon="fa-briefcase" values={recent.map(c => c.workStress)} format={v => `${v}`} invertColor={true} />
+        <TrendCard label="Tiredness" icon="fa-battery-half" values={recent.map(c => c.tiredness)} format={v => `${v}`} invertColor={true} />
+      </TrendSection>
+
+      <TrendSection label="TRAINING">
+        <TrainingTrendCard />
+        <TrendCard label="Steps" icon="fa-shoe-prints" values={recent.map(c => c.steps)} format={v => `${Math.round(v / 1000)}k`} invertColor={false} />
+      </TrendSection>
+
+      <TrendSection label="CARDIO">
+        <CardioTrendCard />
+        <TrendCard label="Pace feeling" icon="fa-gauge" values={recent.map(c => c.cardioPaceFeeling)} format={v => `${v}/5`} invertColor={false} />
+        <TrendCard label="Effort" icon="fa-fire" values={recent.map(c => c.cardioEffort)} format={v => `${v}/10`} invertColor={true} />
+      </TrendSection>
 
       {/* Check-in list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
