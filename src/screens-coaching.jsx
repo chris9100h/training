@@ -1788,16 +1788,45 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
 
 // ─── CoachingTabScreen ────────────────────────────────────────────────────────
 // Root screen for the coaching tab — routes to coach or client view.
+// When the user is both coach and client, shows a two-tab layout.
 
 function CoachingTabScreen({ store, setStore, userId, go }) {
   const isCoach = (store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0;
+  const isClient = store.coaching?.asClient?.status === 'active';
+  const [tab, setTab] = useStateC('clients');
+
+  if (isCoach && isClient) {
+    const tabs = [
+      { id: 'clients', label: 'My Clients', icon: 'fa-users' },
+      { id: 'coach',   label: 'My Coach',   icon: 'fa-person-chalkboard' },
+    ];
+    return (
+      <div style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: UI.bg, color: UI.ink }}>
+        <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0 }}>
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, padding: '10px 4px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent', WebkitTapHighlightColor: 'transparent' }}>
+              <i className={`fa-solid ${t.icon}`} style={{ fontSize: 14, color: tab === t.id ? 'var(--accent)' : UI.inkFaint }} />
+              <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.08em', color: tab === t.id ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase' }}>{t.label}</span>
+            </button>
+          ))}
+        </div>
+        <div style={{ flex: 1, minHeight: 0, display: tab === 'clients' ? 'flex' : 'none', flexDirection: 'column' }}>
+          <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} hideTopBar />
+        </div>
+        <div style={{ flex: 1, minHeight: 0, display: tab === 'coach' ? 'flex' : 'none', flexDirection: 'column' }}>
+          <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} hideTopBar />
+        </div>
+      </div>
+    );
+  }
+
   if (isCoach) return <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} />;
   return <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} />;
 }
 
 // ─── CoachingTabCoachView ─────────────────────────────────────────────────────
 
-function CoachingTabCoachView({ store, setStore, userId, go }) {
+function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false }) {
   const allClients = store.coaching?.asCoach || [];
   const [liveMap, setLiveMap] = useStateC({});
   const [inviteOpen, setInviteOpen] = useStateC(false);
@@ -1879,27 +1908,26 @@ function CoachingTabCoachView({ store, setStore, userId, go }) {
     </svg>
   );
 
+  const actionButtons = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {allClients.length > 0 && (
+        <button onClick={() => setEndOpen(true)} style={{ background: 'transparent', border: 'none', padding: '4px 6px', cursor: 'pointer', color: UI.inkSoft, display: 'flex', alignItems: 'center' }}>
+          <RemoveIcon />
+        </button>
+      )}
+      <button onClick={() => { setInviteEmail(''); setInviteError(''); setInviteOpen(true); }} style={{ background: 'transparent', border: 'none', padding: '4px 6px', cursor: 'pointer', color: 'var(--accent)', display: 'flex', alignItems: 'center' }}>
+        <AddIcon />
+      </button>
+    </div>
+  );
+
   return (
     <Screen scroll>
       {confirmEl}
-      <TopBar title="Coaching" right={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {allClients.length > 0 && (
-            <button
-              onClick={() => setEndOpen(true)}
-              style={{ background: 'transparent', border: 'none', padding: '4px 6px', cursor: 'pointer', color: UI.inkSoft, display: 'flex', alignItems: 'center' }}
-            >
-              <RemoveIcon />
-            </button>
-          )}
-          <button
-            onClick={() => { setInviteEmail(''); setInviteError(''); setInviteOpen(true); }}
-            style={{ background: 'transparent', border: 'none', padding: '4px 6px', cursor: 'pointer', color: 'var(--accent)', display: 'flex', alignItems: 'center' }}
-          >
-            <AddIcon />
-          </button>
-        </div>
-      } />
+      {hideTopBar
+        ? <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '6px 10px 0', flexShrink: 0 }}>{actionButtons}</div>
+        : <TopBar title="Coaching" right={actionButtons} />
+      }
 
       {/* Invite sheet */}
       <Sheet open={inviteOpen} onClose={() => setInviteOpen(false)} title="Invite Client">
@@ -2032,14 +2060,14 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, go }) {
 // ─── CoachingTabClientView ────────────────────────────────────────────────────
 // Client's coaching tab — messages + nutrition.
 
-function CoachingTabClientView({ store, setStore, userId, go }) {
+function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false }) {
   const coaching = store.coaching?.asClient;
   const [tab, setTab] = useStateC('messages');
 
   if (!coaching || coaching.status !== 'active') {
     return (
       <Screen scroll>
-        <TopBar title="Coaching" />
+        {!hideTopBar && <TopBar title="Coaching" />}
         <div style={{ textAlign: 'center', padding: '60px 24px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
           No active coaching relationship.
         </div>
@@ -2049,10 +2077,12 @@ function CoachingTabClientView({ store, setStore, userId, go }) {
 
   return (
     <Screen scroll={false}>
-      <TopBar
-        title="Coaching"
-        sub={<span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{coaching.coachName}</span>}
-      />
+      {!hideTopBar && (
+        <TopBar
+          title="Coaching"
+          sub={<span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{coaching.coachName}</span>}
+        />
+      )}
       <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0 }}>
         {[{ id: 'messages', label: 'Messages', icon: 'fa-comment' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }].map(t => (
           <button
