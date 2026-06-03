@@ -577,6 +577,27 @@ function App() {
     store?.inProgress,
   ]);
 
+  // Poll live client training status so the coaching badge updates even when the tab is closed.
+  const isCoachActive = phase === 'ready' && (store?.coaching?.asCoach || []).some(c => c.status === 'active');
+  const prevAnyLiveRef = useRefA(false);
+  useEffectA(() => {
+    if (!isCoachActive) return;
+    const poll = () => {
+      LB.loadCoachClientsStatus()
+        .then(data => {
+          const anyLive = data.some(r => r.inProgressSessionId);
+          if (anyLive !== prevAnyLiveRef.current) {
+            prevAnyLiveRef.current = anyLive;
+            setStore(s => s ? { ...s, coaching: { ...s.coaching, anyClientLive: anyLive } } : s);
+          }
+        })
+        .catch(() => {});
+    };
+    poll();
+    const iv = setInterval(poll, 5000);
+    return () => clearInterval(iv);
+  }, [isCoachActive]);
+
   // helper for in-sheet "+ new exercise"
   window.__createExercise = (name) => {
     const id = LB.uid();

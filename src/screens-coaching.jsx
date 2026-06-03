@@ -1829,7 +1829,6 @@ function CoachingTabScreen({ store, setStore, userId, go }) {
 function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false }) {
   const allClients = store.coaching?.asCoach || [];
   const [liveMap, setLiveMap] = useStateC({});
-  const prevAnyLiveRef = useRefC(false);
   const [inviteOpen, setInviteOpen] = useStateC(false);
   const [inviteEmail, setInviteEmail] = useStateC('');
   const [inviting, setInviting] = useStateC(false);
@@ -1846,11 +1845,6 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           const m = {};
           data.forEach(r => { m[r.clientId] = r.inProgressSessionId; });
           setLiveMap(m);
-          const anyLive = data.some(r => r.inProgressSessionId);
-          if (anyLive !== prevAnyLiveRef.current) {
-            prevAnyLiveRef.current = anyLive;
-            setStore(s => s ? { ...s, coaching: { ...s.coaching, anyClientLive: anyLive } } : s);
-          }
         })
         .catch(() => {});
     };
