@@ -519,11 +519,12 @@ function App() {
     };
   }, []);
 
-  // Check for SW updates on every screen navigation.
-  // Fetches sw.js directly from the network (bypassing the SW cache via ?_v=)
-  // and compares the CACHE version string. iOS Safari ignores reg.update() when
-  // the app is in the foreground, so this is the only reliable detection path.
-  useEffectA(() => {
+  // Check for SW updates on every screen navigation and whenever the app
+  // comes back to the foreground (visibilitychange). Fetches sw.js directly
+  // from the network (bypassing the SW cache via ?_v=) and compares the CACHE
+  // version string. iOS Safari ignores reg.update() when the app is in the
+  // foreground, so this is the only reliable detection path.
+  const checkSwUpdate = useCallbackA(() => {
     fetch(`/training/sw.js?_v=${Date.now()}`)
       .then(r => r.text())
       .then(text => {
@@ -539,7 +540,15 @@ function App() {
         }
       })
       .catch(() => {});
-  }, [route]);
+  }, []);
+
+  useEffectA(() => { checkSwUpdate(); }, [route]);
+
+  useEffectA(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') checkSwUpdate(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
 
   // Retry a failed sync as soon as connectivity returns
   useEffectA(() => {
