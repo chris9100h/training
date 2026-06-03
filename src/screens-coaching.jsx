@@ -1560,7 +1560,7 @@ function ClientCheckInsTab({ coachingId }) {
   const n = Math.min(recent.length, 6);
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div className="micro" style={{ color: UI.inkFaint }}>TRENDS — LAST {n} CHECK-IN{n !== 1 ? 'S' : ''}</div>
 
       <TrendSection label="WEIGHT">
@@ -2469,7 +2469,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
   const SectionHead = ({ label }) => <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10, marginTop: 4 }}>{label}</div>;
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
       {/* Weight */}
       <div>
@@ -2621,7 +2621,7 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
 
   if ((thisWeek && !editing)) {
     return (
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>This week submitted ✓</div>
           <button onClick={() => setEditing(true)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>Edit</button>
@@ -2748,7 +2748,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
       )}
       {tab === 'nutrition' && <ClientNutritionReadView coachingId={coaching.id} />}
       {tab === 'checkin' && (
-        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
           <ClientCheckInTab coachingId={coaching.id} clientId={userId} userId={userId} />
         </div>
       )}
