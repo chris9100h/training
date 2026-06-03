@@ -309,6 +309,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         reminderEnabled: sett.reminder_enabled ?? false,
         reminderTime: sett.reminder_time ?? '07:00',
         showWarmupInSummary: sett.show_warmup_in_summary ?? true,
+        showCoachingTab: sett.show_coaching_tab ?? false,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -541,6 +542,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.reminderEnabled      !== next.settings?.reminderEnabled      ||
     prev.settings?.reminderTime         !== next.settings?.reminderTime         ||
     prev.settings?.showWarmupInSummary  !== next.settings?.showWarmupInSummary  ||
+    prev.settings?.showCoachingTab      !== next.settings?.showCoachingTab      ||
     prev.nextReminderAt                 !== next.nextReminderAt;
 
   if (settingsChanged) {
@@ -571,6 +573,7 @@ async function syncStore(prev, next, userId) {
       reminder_enabled: next.settings?.reminderEnabled ?? false,
       reminder_time: next.settings?.reminderTime ?? '07:00',
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
+      show_coaching_tab: next.settings?.showCoachingTab ?? false,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
     }));

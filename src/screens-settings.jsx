@@ -152,7 +152,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [activeUsersOpen, setActiveUsersOpen] = useStateSet(false);
   const [accountOpen, setAccountOpen] = useStateSet(false);
   const [trainingOpen, setTrainingOpen] = useStateSet(false);
-  const [coachingOpen, setCoachingOpen] = useStateSet(false);
+
   // Training sub-sheets
   const [restSheet, setRestSheet] = useStateSet(false);
   const [paceguardSheet, setPaceguardSheet] = useStateSet(false);
@@ -386,12 +386,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
         {/* ─── Coaching ─── */}
         <Frame style={{ padding: '12px 14px' }}>
-          <SecHead label="Coaching" open={coachingOpen} onToggle={() => setCoachingOpen(v => !v)} />
-          {coachingOpen && (
-            <div style={{ marginTop: 14 }}>
-              <window.Screens.CoachingSettingsSection store={store} setStore={setStore} userId={userId} go={go} />
-            </div>
-          )}
+          <Row label="Coaching tab">
+            <Toggle on={!!store.settings?.showCoachingTab} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, showCoachingTab: !s.settings?.showCoachingTab } }))} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Pin the coaching tab to the nav bar. Shows automatically when a coaching relationship is active.
+          </div>
         </Frame>
 
         {/* ─── Account ─── */}

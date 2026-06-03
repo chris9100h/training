@@ -594,6 +594,7 @@ function App() {
   const showTab = tabRoutes.includes(route.name);
 
   const showCoaching = !!(
+    store?.settings?.showCoachingTab ||
     (store?.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0 ||
     store?.coaching?.asClient?.status === 'active'
   );

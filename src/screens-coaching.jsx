@@ -1820,8 +1820,8 @@ function CoachingTabScreen({ store, setStore, userId, go }) {
     );
   }
 
-  if (isCoach) return <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} />;
-  return <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} />;
+  if (isClient) return <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} />;
+  return <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} />;
 }
 
 // ─── CoachingTabCoachView ─────────────────────────────────────────────────────
@@ -1862,6 +1862,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
       if (result?.startsWith('ERROR:not_found')) { setInviteError('No user found with that email.'); return; }
       if (result?.startsWith('ERROR:self')) { setInviteError('Cannot coach yourself.'); return; }
       if (result?.startsWith('ERROR:exists')) { setInviteError('Invite already sent or coaching already active.'); return; }
+      if (result?.startsWith('ERROR:already_coached')) { setInviteError('This person already has an active coach.'); return; }
       setInviteEmail('');
       setInviteOpen(false);
       const coaching = await LB.reloadCoachingState(userId);
@@ -2077,12 +2078,16 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
 
   return (
     <Screen scroll={false}>
-      {!hideTopBar && (
-        <TopBar
-          title="Coaching"
-          sub={<span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{coaching.coachName}</span>}
-        />
-      )}
+      {!hideTopBar && <TopBar title="Coaching" />}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: UI.bgInset, borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
+        <div style={{ width: 38, height: 38, borderRadius: 19, background: `rgba(var(--accent-rgb),0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 16, color: 'var(--accent)', fontWeight: 700 }}>{(coaching.coachName || '?')[0].toUpperCase()}</span>
+        </div>
+        <div>
+          <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{coaching.coachName}</div>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{coaching.coachEmail}</div>
+        </div>
+      </div>
       <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0 }}>
         {[{ id: 'messages', label: 'Messages', icon: 'fa-comment' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }].map(t => (
           <button
