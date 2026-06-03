@@ -2308,9 +2308,7 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>CHECK-IN SUBMITTED</div>
         ) : checkinDue ? (
           <div style={{ fontSize: 11, color: `rgba(var(--accent-rgb),0.7)`, fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>CHECK-IN DUE</div>
-        ) : (
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{client.clientEmail}</div>
-        )}
+        ) : null}
       </div>
       {checkinDue && !isPending && (
         <button
