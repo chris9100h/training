@@ -45,6 +45,7 @@ Deno.serve(async (req) => {
     userKey = '',
     userId = 'singleton',
     priority = 0,
+    ttl = 3600,   // expire after 1 hour by default; pass 0 to disable
   } = await req.json().catch(() => ({}));
 
   const user = userKey || (Deno.env.get('PUSHOVER_USER') ?? 'uxrg8gh43b1tpw31pq4r4i4ebqrhjt');
@@ -82,7 +83,7 @@ Deno.serve(async (req) => {
         fetch(SELF_URL, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message, title, delaySeconds: delaySeconds - MAX_CHUNK, nonce, _relay: true, userKey, userId, priority }),
+          body: JSON.stringify({ message, title, delaySeconds: delaySeconds - MAX_CHUNK, nonce, _relay: true, userKey, userId, priority, ttl }),
         }).catch(e => console.error('[pushover] relay error:', e))
       );
     } else {
@@ -96,7 +97,7 @@ Deno.serve(async (req) => {
       const r = await fetch('https://api.pushover.net/1/messages.json', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, user, message, title, priority }),
+        body: JSON.stringify({ token, user, message, title, priority, ...(ttl > 0 ? { ttl } : {}) }),
       });
       console.log(`[pushover] ${r.status}: ${await r.text()}`);
     }

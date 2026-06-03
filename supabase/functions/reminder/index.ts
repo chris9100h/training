@@ -44,6 +44,7 @@ async function sendReminders() {
           title: 'Zane · Training Reminder',
           message: "Training day ahead — time to get after it! 💪",
           priority: 0,
+          ttl: 14400, // expire after 4 hours
         }),
       });
       console.log(`[reminder] sent to ${row.user_id}: ${res.status}`);
