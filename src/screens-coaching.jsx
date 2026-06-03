@@ -1450,8 +1450,8 @@ function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) 
   const base = (padTop + plotH).toFixed(1);
 
   const content = (
-    <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 400, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
-      <div style={{ background: UI.bg, borderRadius: '16px 16px 0 0', padding: '20px 20px 44px', borderTop: `0.5px solid ${UI.hairStrong}` }} onClick={e => e.stopPropagation()}>
+    <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 400, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
+      <div style={{ background: UI.bg, borderRadius: '16px 16px 0 0', padding: '20px 20px 44px', borderTop: `0.5px solid ${UI.hairStrong}`, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: 'var(--accent)' }} />
@@ -2710,7 +2710,7 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   if ((thisWeek && !editing)) {
     const recent = [...checkins].slice(0, 6).reverse();
     return (
-      <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>This week submitted ✓</div>
           <div style={{ display: 'flex', gap: 10 }}>
@@ -2738,7 +2738,7 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   }
 
   return (
-    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '10px 14px 0', flexShrink: 0 }}>
         <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
           Week of <strong>{fmtWeek(weekStart)}</strong> — covers Mon–Sun of last week.
@@ -2848,7 +2848,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
       )}
       {tab === 'nutrition' && <ClientNutritionReadView coachingId={coaching.id} />}
       {tab === 'checkin' && (
-        <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
           <ClientCheckInTab coachingId={coaching.id} clientId={userId} userId={userId} />
         </div>
       )}
