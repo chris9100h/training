@@ -59,14 +59,14 @@ function LoginScreen() {
   const isLogin = mode === 'login';
 
   return (
-    <Screen scroll={false} style={{ position: 'relative', overflow: 'hidden' }}>
-      <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
+    <Screen scroll style={{ position: 'relative' }}>
+      <div className="guilloche" style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0 }} />
 
       <div style={{ flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 0', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
         <span className="micro">ZANE TRAINING</span>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 32px 24px', position: 'relative', zIndex: 1, marginTop: 'auto', marginBottom: 'auto' }}>
         <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain', marginBottom: 28 }} />
 
         {/* Tab switcher */}
