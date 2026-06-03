@@ -948,6 +948,12 @@ async function loadClientStore(clientId) {
   return loadFromSupabase(clientId, 0, { coachLoad: true });
 }
 
+async function loadCoachClientsStatus() {
+  const { data, error } = await _supabase.rpc('get_coach_clients_status');
+  if (error) throw error;
+  return (data || []).map(r => ({ clientId: r.client_id, inProgressSessionId: r.in_progress_session_id }));
+}
+
 async function inviteClient(email) {
   const { data, error } = await _supabase.rpc('invite_client', { p_email: email });
   if (error) throw error;
@@ -1087,7 +1093,7 @@ window.LB = {
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,
-  loadClientStore, inviteClient, respondToCoachingInvite, endCoaching,
+  loadClientStore, loadCoachClientsStatus, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,
 };

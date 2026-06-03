@@ -576,8 +576,15 @@ function App() {
 
   const go    = (r) => setRoute(r);
   const props = { store, setStore, go, userId };
-  const tabRoutes = ['home', 'plan', 'lib', 'hist'];
+  const tabRoutes = ['home', 'plan', 'lib', 'hist', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
+
+  const showCoaching = !!(
+    (store?.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0 ||
+    store?.coaching?.asClient?.status === 'active'
+  );
+  const coachingUnread = (store?.coaching?.unreadNotes || []).length;
+  const coachingBadge = showCoaching ? { count: coachingUnread, live: false } : null;
 
   let screen;
   switch (route.name) {
@@ -593,8 +600,9 @@ function App() {
     case 'session':       screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'settings':          screen = <window.Screens.SettingsScreen {...props} />; break;
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
+    case 'coaching':            screen = <window.Screens.CoachingTabScreen {...props} />; break;
     case 'coaching-dashboard':  screen = <window.Screens.CoachingDashboard {...props} />; break;
-    case 'coaching-client':     screen = <window.Screens.CoachClientScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} initialTab={route.initialTab} />; break;
+    case 'coaching-client':     screen = <window.Screens.CoachClientScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} initialTab={route.initialTab} backRoute={route.backRoute || 'settings'} />; break;
     case 'coaching-edit-plan':  screen = <window.Screens.CoachPlanEditorScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} scheduleId={route.scheduleId} />; break;
     case 'coaching-new-plan':   screen = <window.Screens.CoachNewPlanScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} />; break;
     default:                  screen = <window.Screens.HomeScreen {...props} />; break;
@@ -603,7 +611,7 @@ function App() {
   if (isPad && showTab) {
     return (
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <TabBar active={route.name} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} />
+        <TabBar active={route.name} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} showCoaching={showCoaching} coachingBadge={coachingBadge} />
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
             {screen}
@@ -621,7 +629,7 @@ function App() {
         {screen}
       </ErrorBoundary>
       {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
-      {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} />}
+      {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
     </>
   );

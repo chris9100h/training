@@ -83,6 +83,12 @@ function TopBar({ title, sub, onBack, right }) {
 
 // ─── TabBar — floating dock with position indicator ──────────────────
 const TAB_ICONS = {
+  coaching: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+      <path d="M17 11l1.5 1.5L21 10"/>
+    </svg>
+  ),
   home: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V10.5z"/>
@@ -107,12 +113,13 @@ const TAB_ICONS = {
   ),
 };
 
-function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
+function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoaching = false, coachingBadge = null }) {
   const tabs = [
     { id: 'home', label: 'Today' },
     { id: 'plan', label: 'Plan' },
     { id: 'lib',  label: 'Library' },
     { id: 'hist', label: 'History' },
+    ...(showCoaching ? [{ id: 'coaching', label: 'Coaching' }] : []),
   ];
   const idx = tabs.findIndex(t => t.id === active);
   const [switchModal, setSwitchModal] = React.useState(false);
@@ -152,6 +159,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
           <div style={{ display: 'flex', flexDirection: 'column', padding: '0 12px', flex: 1, justifyContent: 'space-evenly' }}>
             {tabs.map(t => {
               const on = t.id === active;
+              const badge = t.id === 'coaching' ? coachingBadge : null;
               return (
                 <button key={t.id} onClick={() => onChange(t.id)} style={{
                   display: 'flex',
@@ -175,8 +183,16 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
                   transition: 'background 0.15s, color 0.15s, border-color 0.15s',
                   WebkitTapHighlightColor: 'transparent',
                 }}>
-                  <div style={{ transform: 'scale(1.4)', display: 'inline-flex', margin: '0 0 2px' }}>
+                  <div style={{ position: 'relative', transform: 'scale(1.4)', display: 'inline-flex', margin: '0 0 2px' }}>
                     {TAB_ICONS[t.id]}
+                    {badge?.live && (
+                      <div style={{ position: 'absolute', top: -2, right: -2, width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: '1.5px solid var(--bg)' }} />
+                    )}
+                    {!badge?.live && badge?.count > 0 && (
+                      <div style={{ position: 'absolute', top: -4, right: -6, minWidth: 14, height: 14, borderRadius: 7, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--bg)' }}>
+                        <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: '#0a0805', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
+                      </div>
+                    )}
                   </div>
                   <span>{t.label}</span>
                 </button>
@@ -355,6 +371,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
         )}
         {tabs.map(t => {
           const on = t.id === active;
+          const badge = t.id === 'coaching' ? coachingBadge : null;
           return (
             <button key={t.id} onClick={() => onChange(t.id)} style={{
               flex: 1, background: 'transparent', border: 'none', cursor: 'pointer',
@@ -368,7 +385,17 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null }) {
               transition: 'color 0.25s',
               WebkitTapHighlightColor: 'transparent',
             }}>
-              {TAB_ICONS[t.id]}
+              <div style={{ position: 'relative', display: 'inline-flex' }}>
+                {TAB_ICONS[t.id]}
+                {badge?.live && (
+                  <div style={{ position: 'absolute', top: -2, right: -2, width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: '1.5px solid var(--bg)' }} />
+                )}
+                {!badge?.live && badge?.count > 0 && (
+                  <div style={{ position: 'absolute', top: -4, right: -6, minWidth: 14, height: 14, borderRadius: 7, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--bg)' }}>
+                    <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: '#0a0805', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
+                  </div>
+                )}
+              </div>
               {t.label}
             </button>
           );

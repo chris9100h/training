@@ -625,7 +625,7 @@ function ClientCard({ client, go }) {
 // ─── CoachClientScreen ────────────────────────────────────────────────────────
 // Full coach view for a single client — 4 tabs: Overview, Plan, Sessions, Notes.
 
-function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName, initialTab }) {
+function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName, initialTab, backRoute = 'settings' }) {
   const [tab, setTab] = useStateC(initialTab || 'overview');
   const [selectedSession, setSelectedSession] = useStateC(null);
 
@@ -659,7 +659,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
       <TopBar
         title={clientName}
         sub={<span className="micro" style={{ color: 'var(--accent)', letterSpacing: '0.12em' }}>COACHING</span>}
-        onBack={() => go({ name: 'settings' })}
+        onBack={() => go({ name: backRoute })}
       />
 
       {/* Tab bar */}
@@ -687,7 +687,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {/* Live training banner */}
           {clientStore.inProgress && (
             <div
-              onClick={() => go({ name: 'spectator', targetUserId: clientId, userName: clientName, sessionId: clientStore.inProgress })}
+              onClick={() => go({ name: 'spectator', targetUserId: clientId, userName: clientName })}
               style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: `rgba(var(--accent-rgb), 0.08)`, borderBottom: `0.5px solid rgba(var(--accent-rgb), 0.25)`, cursor: 'pointer' }}
             >
               <div style={{ width: 8, height: 8, borderRadius: 4, background: 'var(--accent)', boxShadow: '0 0 6px rgba(var(--accent-rgb),0.8)', animation: 'pulseDot 1.5s ease-in-out infinite', flexShrink: 0 }} />
@@ -1773,6 +1773,226 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
   );
 }
 
+// ─── CoachingTabScreen ────────────────────────────────────────────────────────
+// Root screen for the coaching tab — routes to coach or client view.
+
+function CoachingTabScreen({ store, setStore, userId, go }) {
+  const isCoach = (store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0;
+  if (isCoach) return <CoachingTabCoachView store={store} userId={userId} go={go} />;
+  return <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} />;
+}
+
+// ─── CoachingTabCoachView ─────────────────────────────────────────────────────
+
+function CoachingTabCoachView({ store, userId, go }) {
+  const clients = (store.coaching?.asCoach || []).filter(c => c.status === 'active');
+  const [liveMap, setLiveMap] = useStateC({});
+  const unreadNotes = store.coaching?.unreadNotes || [];
+
+  useEffectC(() => {
+    const poll = () => {
+      LB.loadCoachClientsStatus()
+        .then(data => {
+          const m = {};
+          data.forEach(r => { m[r.clientId] = r.inProgressSessionId; });
+          setLiveMap(m);
+        })
+        .catch(() => {});
+    };
+    poll();
+    const iv = setInterval(poll, 5000);
+    return () => clearInterval(iv);
+  }, []);
+
+  return (
+    <Screen scroll>
+      <TopBar title="Coaching" />
+      {clients.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '60px 24px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
+          No active clients yet.<br />Invite clients from Settings → Coaching.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 12px 24px' }}>
+          {clients.map(c => {
+            const inProgress = liveMap[c.clientId];
+            const clientUnread = unreadNotes.filter(n => n.authorId === c.clientId).length;
+            return (
+              <CoachingTabClientCard
+                key={c.id}
+                client={c}
+                inProgress={inProgress}
+                unreadCount={clientUnread}
+                go={go}
+              />
+            );
+          })}
+        </div>
+      )}
+    </Screen>
+  );
+}
+
+function CoachingTabClientCard({ client, inProgress, unreadCount, go }) {
+  return (
+    <div
+      onClick={() => go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName, backRoute: 'coaching' })}
+      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${inProgress ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`, cursor: 'pointer', position: 'relative', overflow: 'hidden' }}
+    >
+      {inProgress && (
+        <div style={{ position: 'absolute', inset: 0, background: `rgba(var(--accent-rgb),0.04)`, pointerEvents: 'none' }} />
+      )}
+      <div style={{ width: 44, height: 44, borderRadius: 22, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' }}>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.inkSoft, fontWeight: 700 }}>{(client.clientName || '?')[0].toUpperCase()}</span>
+        {inProgress && (
+          <div style={{ position: 'absolute', top: 0, right: 0, width: 12, height: 12, borderRadius: 6, background: 'var(--accent)', border: '2px solid var(--bg)', animation: 'pulseDot 1.5s ease-in-out infinite' }} />
+        )}
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 2 }}>{client.clientName}</div>
+        {inProgress ? (
+          <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>TRAINING NOW</div>
+        ) : (
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{client.clientEmail}</div>
+        )}
+      </div>
+      {unreadCount > 0 && (
+        <div style={{ minWidth: 20, height: 20, borderRadius: 10, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <span style={{ fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, color: '#0a0805' }}>{unreadCount > 9 ? '9+' : unreadCount}</span>
+        </div>
+      )}
+      <ChevronRight />
+    </div>
+  );
+}
+
+// ─── CoachingTabClientView ────────────────────────────────────────────────────
+// Client's coaching tab — messages + nutrition.
+
+function CoachingTabClientView({ store, setStore, userId, go }) {
+  const coaching = store.coaching?.asClient;
+  const [tab, setTab] = useStateC('messages');
+
+  if (!coaching || coaching.status !== 'active') {
+    return (
+      <Screen scroll>
+        <TopBar title="Coaching" />
+        <div style={{ textAlign: 'center', padding: '60px 24px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
+          No active coaching relationship.
+        </div>
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen scroll={false}>
+      <TopBar
+        title="Coaching"
+        sub={<span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{coaching.coachName}</span>}
+      />
+      <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0 }}>
+        {[{ id: 'messages', label: 'Messages', icon: 'fa-comment' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }].map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            style={{ flex: 1, padding: '10px 4px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent', WebkitTapHighlightColor: 'transparent' }}
+          >
+            <i className={`fa-solid ${t.icon}`} style={{ fontSize: 14, color: tab === t.id ? 'var(--accent)' : UI.inkFaint }} />
+            <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.08em', color: tab === t.id ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase' }}>{t.label}</span>
+          </button>
+        ))}
+      </div>
+      {tab === 'messages' && (
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+          <ThreadList
+            coachingId={coaching.id}
+            userId={userId}
+            otherName={coaching.coachName}
+            unreadNotes={store.coaching?.unreadNotes || []}
+            setStore={setStore}
+          />
+        </div>
+      )}
+      {tab === 'nutrition' && <ClientNutritionReadView coachingId={coaching.id} />}
+    </Screen>
+  );
+}
+
+// ─── ClientNutritionReadView ──────────────────────────────────────────────────
+// Read-only macro view for clients.
+
+function ClientNutritionReadView({ coachingId }) {
+  const [macros, setMacros] = useStateC(null);
+  const [loading, setLoading] = useStateC(true);
+
+  useEffectC(() => {
+    LB.loadCoachingMacros(coachingId)
+      .then(data => setMacros(data[0] || null))
+      .finally(() => setLoading(false));
+  }, [coachingId]);
+
+  if (loading) {
+    return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div></div>;
+  }
+
+  if (!macros) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
+        <i className="fa-solid fa-utensils" style={{ fontSize: 28, color: UI.inkGhost }} />
+        <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center' }}>No macro targets set yet.<br />Your coach will add them here.</div>
+      </div>
+    );
+  }
+
+  const MacroDay = ({ label, calories, protein, carbs, fat }) => (
+    <div style={{ background: UI.bgInset, borderRadius: 12, padding: '16px 18px', border: `0.5px solid ${UI.hair}` }}>
+      <div className="micro-gold" style={{ marginBottom: 12 }}>{label}</div>
+      {calories != null && (
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 14 }}>
+          <span className="num" style={{ fontSize: 32, color: UI.ink, fontWeight: 300 }}>{calories}</span>
+          <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 10 }}>
+        {[{ label: 'Protein', value: protein }, { label: 'Carbs', value: carbs }, { label: 'Fat', value: fat }].map(m => (
+          <div key={m.label} style={{ flex: 1, background: UI.bgRaised, borderRadius: 8, padding: '10px 8px', textAlign: 'center', border: `0.5px solid ${UI.hair}` }}>
+            <div className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{m.value != null ? m.value : '—'}</div>
+            <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', marginTop: 2 }}>g {m.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const hasTraining = macros.caloriesTraining != null || macros.proteinTraining != null;
+  const hasRest = macros.caloriesRest != null || macros.proteinRest != null;
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '16px 14px 32px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '0 2px 4px' }}>
+        Last updated {fmtRelative(macros.setAt)}
+      </div>
+      {hasTraining && (
+        <MacroDay
+          label="TRAINING DAY"
+          calories={macros.caloriesTraining}
+          protein={macros.proteinTraining}
+          carbs={macros.carbsTraining}
+          fat={macros.fatTraining}
+        />
+      )}
+      {hasRest && (
+        <MacroDay
+          label="REST DAY"
+          calories={macros.caloriesRest}
+          protein={macros.proteinRest}
+          carbs={macros.carbsRest}
+          fat={macros.fatRest}
+        />
+      )}
+    </div>
+  );
+}
+
 // ─── Register ─────────────────────────────────────────────────────────────────
 
 window.Screens = window.Screens || {};
@@ -1786,4 +2006,5 @@ Object.assign(window.Screens, {
   CoachClientScreen,
   CoachPlanEditorScreen,
   CoachNewPlanScreen,
+  CoachingTabScreen,
 });
