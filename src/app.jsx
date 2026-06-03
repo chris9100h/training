@@ -140,10 +140,9 @@ function App() {
   const isPad = useIsPad();
   const [phase, setPhase]         = useStateA('init'); // 'init' | 'loading' | 'ready' | 'unauthed' | 'error' | 'invite'
   // Detect invite/password-reset link before Supabase clears the hash
-  const isTokenFlow = useRefA(() => {
-    const hash = window.location.hash;
-    return hash.includes('type=invite') || hash.includes('type=recovery');
-  });
+  const isTokenFlow = useRefA(
+    window.location.hash.includes('type=invite') || window.location.hash.includes('type=recovery')
+  );
   const [store, setStore]         = useStateA(null);
   const [userId, setUserId]       = useStateA(null);
   const [route, setRoute]         = useStateA({ name: 'home' });
