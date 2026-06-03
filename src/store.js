@@ -214,7 +214,13 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     if (_depth > 0) throw new Error('User profile setup failed');
     const { data: { user } } = await _supabase.auth.getUser();
     const name = user?.user_metadata?.name || user?.email?.split('@')[0] || 'Athlete';
-    await setupNewUser(userId, name);
+    try {
+      await setupNewUser(userId, name);
+    } catch (setupErr) {
+      // Profile creation failed (e.g. auth user was deleted externally) — sign out cleanly
+      await _supabase.auth.signOut();
+      throw new Error('Account not found. Please register again.');
+    }
     return loadFromSupabase(userId, _depth + 1);
   }
 
