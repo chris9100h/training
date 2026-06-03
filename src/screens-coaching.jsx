@@ -1168,14 +1168,15 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
 
   const activate = async (scheduleId) => {
     try {
+      const oldPlanName = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId)?.name;
       await LB.supabase.from('zane_user_settings')
         .update({ active_schedule_id: scheduleId })
         .eq('user_id', clientId);
       setClientStore(s => ({ ...s, activeScheduleId: scheduleId }));
       const planName = clientStore.schedules?.find(s => s.id === scheduleId)?.name || scheduleId;
-      const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Changes', userId);
-      await LB.addCoachingNote(coachingId, 'plan', scheduleId, planName,
-        `Activated plan\n${planName}`, userId, threadId);
+      const body = oldPlanName ? `Plan changed from ${oldPlanName} to ${planName}` : `Plan changed to ${planName}`;
+      const threadId = await LB.getOrCreateCoachingThread(coachingId, `Changes on ${planName}`, userId);
+      await LB.addCoachingNote(coachingId, 'plan', scheduleId, planName, body, userId, threadId);
     } catch (e) { alert(e.message); }
   };
 
