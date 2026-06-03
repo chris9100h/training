@@ -2724,15 +2724,16 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
               <button onClick={() => setEditing(true)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>Edit</button>
             </div>
           </div>
-          <CheckInCard ci={thisWeek} defaultOpen={true} />
           {checkins.length >= 2 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginTop: 4 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <CheckInTrendCards recent={recent} />
             </div>
           )}
+          <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>THIS WEEK</div>
+          <CheckInCard ci={thisWeek} />
           {past.length > 0 && (
             <>
-              <div className="micro" style={{ color: UI.inkFaint, marginTop: 8 }}>PREVIOUS CHECK-INS</div>
+              <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>PREVIOUS CHECK-INS</div>
               {past.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
             </>
           )}

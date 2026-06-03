@@ -1209,29 +1209,34 @@ async function submitCheckin(coachingId, clientId, data, userId) {
     const endDate = new Date(d); endDate.setDate(d.getDate() + 6);
     const fmt = (dt) => dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
     const weekLabel = `Week of ${fmt(d)} – ${fmt(endDate)}`;
-    const lines = [weekLabel, ''];
+    const lines = [weekLabel];
     if (data.weightToday != null) {
-      const avgPart = data.weightAvgLastWeek != null ? ` (avg last week: ${data.weightAvgLastWeek} kg)` : '';
-      lines.push(`Weight: ${data.weightToday} kg${avgPart}`);
+      const avgPart = data.weightAvgLastWeek != null ? ` · avg last week: ${data.weightAvgLastWeek} kg` : '';
+      lines.push('', `Weight: ${data.weightToday} kg${avgPart}`);
     }
-    const actParts = [];
-    if (data.daysTrained != null) actParts.push(`${data.daysTrained} days trained`);
-    if (data.performanceVsLastWeek) actParts.push(`performance: ${data.performanceVsLastWeek}`);
-    if (data.steps != null) actParts.push(`${Number(data.steps).toLocaleString()} steps`);
-    if (data.cardioMinutes != null) actParts.push(`${data.cardioMinutes} min cardio`);
-    if (data.cardioPaceFeeling != null) actParts.push(`pace feeling: ${data.cardioPaceFeeling}/5`);
-    if (data.cardioEffort != null) actParts.push(`effort: ${data.cardioEffort}/10`);
-    if (actParts.length) lines.push(`Activity: ${actParts.join(' · ')}`);
-    const markerParts = [];
-    if (data.hunger != null) markerParts.push(`Hunger ${data.hunger}/10`);
-    if (data.sleepQuality != null) markerParts.push(`Sleep ${data.sleepQuality}/10`);
-    if (data.lifeStress != null) markerParts.push(`Life stress ${data.lifeStress}/10`);
-    if (data.workStress != null) markerParts.push(`Work stress ${data.workStress}/10`);
-    if (data.tiredness != null) markerParts.push(`Tiredness ${data.tiredness}/10`);
-    if (markerParts.length) lines.push(`Markers: ${markerParts.join(' · ')}`);
-    if (data.offPlanNotes) lines.push(`Off-plan: ${data.offPlanNotes}`);
-    if (data.issuesNotes) { lines.push(''); lines.push(data.issuesNotes); }
-    if (data.generalNote) { lines.push(''); lines.push(data.generalNote); }
+    const trainParts = [];
+    if (data.daysTrained != null) trainParts.push(`${data.daysTrained} days trained`);
+    if (data.performanceVsLastWeek) trainParts.push(`performance: ${data.performanceVsLastWeek}`);
+    if (data.steps != null) trainParts.push(`${Number(data.steps).toLocaleString()} steps`);
+    if (trainParts.length) lines.push('', `Training: ${trainParts.join(' · ')}`);
+    const cardioParts = [];
+    if (data.cardioMinutes != null) cardioParts.push(`${data.cardioMinutes} min`);
+    if (data.cardioDistanceM != null) cardioParts.push(`${(data.cardioDistanceM / 1000).toFixed(1)} km`);
+    if (data.cardioPaceFeeling != null) cardioParts.push(`pace ${data.cardioPaceFeeling}/6`);
+    if (data.cardioEffort != null) cardioParts.push(`effort ${data.cardioEffort}/10`);
+    if (cardioParts.length) lines.push('', `Cardio: ${cardioParts.join(' · ')}`);
+    const markerLines = [];
+    if (data.hunger != null) markerLines.push(`  Hunger: ${data.hunger}/10`);
+    if (data.sleepQuality != null) markerLines.push(`  Sleep: ${data.sleepQuality}/10`);
+    if (data.lifeStress != null) markerLines.push(`  Life stress: ${data.lifeStress}/10`);
+    if (data.workStress != null) markerLines.push(`  Work stress: ${data.workStress}/10`);
+    if (data.tiredness != null) markerLines.push(`  Tiredness: ${data.tiredness}/10`);
+    if (markerLines.length) lines.push('', 'Markers:', ...markerLines);
+    if (data.hydrationMl != null) lines.push('', `Hydration: ${(data.hydrationMl / 1000).toFixed(1)} L/day`);
+    if (data.offPlanNotes) lines.push('', `Off-plan: ${data.offPlanNotes}`);
+    if (data.goalNote) lines.push('', `Goal: ${data.goalNote}`);
+    if (data.issuesNotes) lines.push('', `Issues: ${data.issuesNotes}`);
+    if (data.generalNote) lines.push('', data.generalNote);
     const threadId = await getOrCreateCoachingThread(coachingId, 'Weekly Check-in', userId);
     await addCoachingNote(coachingId, 'general', null, null, lines.filter((_, i) => !(i === 1 && lines[2] === undefined)).join('\n'), userId, threadId);
   } catch (e) { console.error('Failed to send check-in note', e); }
