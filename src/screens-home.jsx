@@ -7,26 +7,31 @@ const { useState, useEffect, useMemo, useRef } = React;
 
 const SKIP_REASONS = ['Tired', 'Sick', 'Stress', 'Forgot', 'Rest day', 'No particular reason'];
 
-// ─── LOGIN ────────────────────────────────────────────────────────────
+// ─── LOGIN / REGISTER ─────────────────────────────────────────────────────────
 function LoginScreen() {
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
+  const [mode, setMode]           = useState('login'); // 'login' | 'register'
+  const [name, setName]           = useState('');
+  const [email, setEmail]         = useState('');
+  const [password, setPassword]   = useState('');
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState('');
   const [swVersion, setSwVersion] = useState('');
 
   useEffect(() => {
     if (!('caches' in window)) return;
     caches.keys().then(keys => {
-      const name = keys.find(k => k.startsWith('zane-'));
-      if (name) setSwVersion(name.replace('zane-', ''));
+      const k = keys.find(k => k.startsWith('zane-'));
+      if (k) setSwVersion(k.replace('zane-', ''));
     });
   }, []);
 
-  const canSubmit = email.trim() && password.length >= 6;
+  const switchMode = (m) => { setMode(m); setError(''); };
 
-  const submit = async () => {
-    if (!canSubmit || loading) return;
+  const canLogin    = email.trim() && password.length >= 6;
+  const canRegister = name.trim() && email.trim() && password.length >= 6;
+
+  const submitLogin = async () => {
+    if (!canLogin || loading) return;
     setLoading(true); setError('');
     try {
       await LB.signIn(email.trim(), password);
@@ -37,6 +42,22 @@ function LoginScreen() {
     }
   };
 
+  const submitRegister = async () => {
+    if (!canRegister || loading) return;
+    setLoading(true); setError('');
+    try {
+      await LB.signUp(email.trim(), password, name.trim());
+      // signUp calls setupNewUser which creates the profile with the name.
+      // If email confirmation is disabled, SIGNED_IN fires and loadData runs.
+      // If confirmation is required, inform the user.
+    } catch (e) {
+      setError(e.message || 'Registration failed');
+      setLoading(false);
+    }
+  };
+
+  const isLogin = mode === 'login';
+
   return (
     <Screen scroll={false} style={{ position: 'relative', overflow: 'hidden' }}>
       <div className="guilloche" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
@@ -45,31 +66,52 @@ function LoginScreen() {
         <span className="micro">ZANE TRAINING</span>
       </div>
 
-      {/* Centered block: logo + title + form */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
         <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain', marginBottom: 28 }} />
+
         <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
+          {!isLogin && (
+            <Field label="Name">
+              <TextInput value={name} onChange={setName} placeholder="Your name" autoFocus={!isLogin} />
+            </Field>
+          )}
           <Field label="Email">
-            <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus />
+            <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus={isLogin} />
           </Field>
           <Field label="Password">
-            <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters" />
+            <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters"
+              onKeyDown={e => e.key === 'Enter' && (isLogin ? submitLogin() : submitRegister())} />
           </Field>
+
           {error && (
-            <div style={{
-              fontSize: 12, color: UI.danger,
-              padding: '10px 14px',
-              background: 'rgba(var(--danger-rgb),0.06)',
-              border: `1px solid rgba(var(--danger-rgb),0.25)`,
-              borderRadius: 4,
-              fontFamily: UI.fontUi,
-            }}>
+            <div style={{ fontSize: 12, color: UI.danger, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.06)', border: `1px solid rgba(var(--danger-rgb),0.25)`, borderRadius: 4, fontFamily: UI.fontUi }}>
               {error}
             </div>
           )}
-          <Btn onClick={submit} disabled={!canSubmit || loading} style={{ marginTop: 4, opacity: canSubmit && !loading ? 1 : 0.4 }}>
-            {loading ? 'Signing in…' : 'Log in'}
-          </Btn>
+
+          {isLogin ? (
+            <Btn onClick={submitLogin} disabled={!canLogin || loading} style={{ marginTop: 4, opacity: canLogin && !loading ? 1 : 0.4 }}>
+              {loading ? 'Signing in…' : 'Log in'}
+            </Btn>
+          ) : (
+            <Btn onClick={submitRegister} disabled={!canRegister || loading} style={{ marginTop: 4, opacity: canRegister && !loading ? 1 : 0.4 }}>
+              {loading ? 'Creating account…' : 'Create account'}
+            </Btn>
+          )}
+
+          <div style={{ textAlign: 'center', marginTop: 2 }}>
+            {isLogin ? (
+              <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+                No account?{' '}
+                <span onClick={() => switchMode('register')} style={{ color: 'var(--accent)', cursor: 'pointer' }}>Register</span>
+              </span>
+            ) : (
+              <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+                Already have an account?{' '}
+                <span onClick={() => switchMode('login')} style={{ color: 'var(--accent)', cursor: 'pointer' }}>Log in</span>
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
