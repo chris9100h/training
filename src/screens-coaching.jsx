@@ -1426,6 +1426,220 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
 
 // ─── Tab: Check-ins (coach view) ─────────────────────────────────────────────
 
+// ─── LineChartSheet ───────────────────────────────────────────────────────────
+
+function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) {
+  const W = 300, padX = 20, padTop = 36, padBottom = 26, plotH = 110;
+  const H = padTop + plotH + padBottom;
+  const plotW = W - 2 * padX;
+  const vals = entries.map(e => e.value);
+  const minV = Math.min(...vals);
+  const maxV = Math.max(...vals);
+  const range = maxV - minV || 1;
+  const n = entries.length;
+
+  const xOf = i => padX + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+  const yOf = v => padTop + (1 - (v - minV) / range) * plotH;
+
+  const fmtD = s => {
+    const d = new Date(s + 'T12:00:00');
+    return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`;
+  };
+
+  const pts = entries.map((e, i) => `${xOf(i).toFixed(1)},${yOf(e.value).toFixed(1)}`).join(' ');
+  const base = (padTop + plotH).toFixed(1);
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 400, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
+      <div style={{ background: UI.bg, borderRadius: '16px 16px 0 0', padding: '20px 20px 44px', borderTop: `0.5px solid ${UI.hairStrong}` }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</span>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, fontSize: 18, lineHeight: 1 }}>
+            <i className="fa-solid fa-xmark" />
+          </button>
+        </div>
+        {n < 2 ? (
+          <div style={{ textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, padding: '24px 0' }}>Need at least 2 check-ins for a trend.</div>
+        ) : (
+          <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+            <polygon points={`${xOf(0).toFixed(1)},${base} ${pts} ${xOf(n-1).toFixed(1)},${base}`} fill={`rgba(var(--accent-rgb),0.12)`} />
+            <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+            {entries.map((e, i) => {
+              const cx = xOf(i).toFixed(1);
+              const cy = yOf(e.value).toFixed(1);
+              const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+              return (
+                <g key={i}>
+                  <circle cx={cx} cy={cy} r="4" fill="var(--accent)" />
+                  <text x={cx} y={(yOf(e.value) - 9).toFixed(1)} textAnchor="middle" fontSize="9" fontFamily={UI.fontUi} fill={UI.ink}>{format(e.value)}</text>
+                  <text x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtD(e.weekStart)}</text>
+                </g>
+              );
+            })}
+          </svg>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── CheckInTrendCards ────────────────────────────────────────────────────────
+// Shared trend cards component used by both coach and client check-in views.
+// recent = last 6 check-ins sorted oldest → newest.
+
+function CheckInTrendCards({ recent }) {
+  const [chartModal, setChartModal] = useStateC(null);
+  const n = Math.min(recent.length, 6);
+
+  const openChart = (label, icon, values, format, invertColor) => {
+    const entries = values
+      .map((v, i) => v != null ? { weekStart: recent[i].weekStart, value: v } : null)
+      .filter(Boolean);
+    if (entries.length) setChartModal({ label, icon, entries, format, invertColor });
+  };
+
+  const Sparkline = ({ vals }) => {
+    if (vals.length < 2) return null;
+    const min = Math.min(...vals); const max = Math.max(...vals);
+    const range = max - min || 1;
+    return (
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, marginTop: 8, height: 20 }}>
+        {vals.map((v, i) => {
+          const h = Math.max(3, Math.round(((v - min) / range) * 16) + 3);
+          return <div key={i} style={{ flex: 1, height: h, borderRadius: 2, background: i === vals.length - 1 ? 'var(--accent)' : `rgba(var(--accent-rgb),0.3)` }} />;
+        })}
+      </div>
+    );
+  };
+
+  const cardStyle = { flex: 1, minWidth: 80, minHeight: 90, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}`, display: 'flex', flexDirection: 'column', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
+
+  const TrendCard = ({ label, icon, values, format, invertColor, sub }) => {
+    const valid = values.filter(v => v != null);
+    if (!valid.length) return null;
+    const last = valid[valid.length - 1];
+    const prev = valid.length > 1 ? valid[valid.length - 2] : null;
+    const delta = prev != null ? last - prev : null;
+    const up = delta > 0;
+    const arrowColor = delta === 0 || delta == null ? UI.inkFaint
+      : invertColor ? (up ? 'rgba(var(--danger-rgb),0.8)' : 'var(--accent)')
+      : (up ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)');
+    return (
+      <div onClick={() => openChart(label, icon, values, format, invertColor)} style={cardStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
+          <i className={`fa-solid ${icon}`} style={{ fontSize: 10, color: UI.inkFaint }} />
+          <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
+          <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{format(last)}</span>
+          {delta != null && Math.abs(delta) > 0.001 && (
+            <span style={{ fontSize: 10, color: arrowColor, fontFamily: UI.fontUi }}>{up ? '▲' : '▼'} {format(Math.abs(delta))}</span>
+          )}
+        </div>
+        {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, textAlign: 'center' }}>{sub}</div>}
+        <Sparkline vals={valid} />
+      </div>
+    );
+  };
+
+  const TrainingTrendCard = () => {
+    const dtVals = recent.map(c => c.daysTrained);
+    const valid = dtVals.filter(v => v != null);
+    if (!valid.length) return null;
+    const last = valid[valid.length - 1];
+    const prev = valid.length > 1 ? valid[valid.length - 2] : null;
+    const delta = prev != null ? last - prev : null;
+    const lastPerf = [...recent].reverse().find(c => c.performanceVsLastWeek)?.performanceVsLastWeek;
+    const perfColor = lastPerf === 'improved' ? 'var(--accent)' : lastPerf === 'worse' ? 'rgba(var(--danger-rgb),0.8)' : UI.inkSoft;
+    const perfLabel = lastPerf === 'improved' ? '↑ Better' : lastPerf === 'worse' ? '↓ Worse' : lastPerf === 'same' ? '= Same' : null;
+    return (
+      <div onClick={() => openChart('Training days', 'fa-dumbbell', dtVals, v => `${v}d`, false)} style={cardStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
+          <i className="fa-solid fa-dumbbell" style={{ fontSize: 10, color: UI.inkFaint }} />
+          <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Training</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last}d</span>
+          {delta != null && Math.abs(delta) > 0 && (
+            <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
+          )}
+          {perfLabel && <span style={{ fontSize: 9, color: perfColor, fontFamily: UI.fontUi, fontWeight: 700 }}>{perfLabel}</span>}
+        </div>
+        <Sparkline vals={valid} />
+      </div>
+    );
+  };
+
+  const CardioTrendCard = () => {
+    const allMins = recent.map(c => c.cardioMinutes);
+    const validItems = recent.filter(c => c.cardioMinutes != null);
+    if (!validItems.length) return null;
+    const last = validItems[validItems.length - 1];
+    const prev = validItems.length > 1 ? validItems[validItems.length - 2] : null;
+    const delta = prev != null ? last.cardioMinutes - prev.cardioMinutes : null;
+    const sub = last.cardioDistanceM != null ? `${(last.cardioDistanceM / 1000).toFixed(1)} km` : null;
+    return (
+      <div onClick={() => openChart('Cardio', 'fa-person-running', allMins, v => `${v}m`, false)} style={cardStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
+          <i className="fa-solid fa-person-running" style={{ fontSize: 10, color: UI.inkFaint }} />
+          <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Cardio</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
+          <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last.cardioMinutes}m</span>
+          {delta != null && Math.abs(delta) > 0 && (
+            <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
+          )}
+        </div>
+        {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, textAlign: 'center' }}>{sub}</div>}
+        <Sparkline vals={validItems.map(c => c.cardioMinutes)} />
+      </div>
+    );
+  };
+
+  const TrendSection = ({ label, children }) => {
+    const hasAny = React.Children.toArray(children).some(Boolean);
+    if (!hasAny) return null;
+    return (
+      <div>
+        <div className="micro" style={{ fontWeight: 700, color: UI.inkFaint, marginBottom: 8, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>{label}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>{children}</div>
+      </div>
+    );
+  };
+
+  return (
+    <>
+      {chartModal && <LineChartSheet {...chartModal} onClose={() => setChartModal(null)} />}
+      <div className="micro" style={{ color: UI.inkFaint }}>TRENDS — LAST {n} CHECK-IN{n !== 1 ? 'S' : ''}</div>
+      <TrendSection label="WEIGHT">
+        <TrendCard label="Avg last week" icon="fa-weight-scale" values={recent.map(c => c.weightAvgLastWeek)} format={v => `${v}kg`} invertColor={false} />
+        <TrendCard label="Today" icon="fa-weight-scale" values={recent.map(c => c.weightToday)} format={v => `${v}kg`} invertColor={false} />
+      </TrendSection>
+      <TrendSection label="MARKERS">
+        <TrendCard label="Hunger" icon="fa-bowl-food" values={recent.map(c => c.hunger)} format={v => `${v}`} invertColor={true} />
+        <TrendCard label="Sleep" icon="fa-moon" values={recent.map(c => c.sleepQuality)} format={v => `${v}`} invertColor={true} />
+        <TrendCard label="Life stress" icon="fa-brain" values={recent.map(c => c.lifeStress)} format={v => `${v}`} invertColor={true} />
+        <TrendCard label="Work stress" icon="fa-briefcase" values={recent.map(c => c.workStress)} format={v => `${v}`} invertColor={true} />
+        <TrendCard label="Tiredness" icon="fa-battery-half" values={recent.map(c => c.tiredness)} format={v => `${v}`} invertColor={true} />
+      </TrendSection>
+      <TrendSection label="TRAINING">
+        <TrainingTrendCard />
+        <TrendCard label="Steps" icon="fa-shoe-prints" values={recent.map(c => c.steps)} format={v => `${Math.round(v / 1000)}k`} invertColor={false} />
+      </TrendSection>
+      <TrendSection label="CARDIO">
+        <CardioTrendCard />
+        <TrendCard label="Pace feeling" icon="fa-gauge" values={recent.map(c => c.cardioPaceFeeling)} format={v => `${v}/6`} invertColor={false} />
+        <TrendCard label="Effort" icon="fa-fire" values={recent.map(c => c.cardioEffort)} format={v => `${v}/10`} invertColor={true} />
+      </TrendSection>
+    </>
+  );
+}
+
+// ─── ClientCheckInsTab (coach view) ───────────────────────────────────────────
+
 function ClientCheckInsTab({ coachingId }) {
   const [checkins, setCheckins] = useStateC(null);
 
@@ -1446,148 +1660,11 @@ function ClientCheckInsTab({ coachingId }) {
     );
   }
 
-  // Trend: last 6 check-ins, oldest first for sparklines
   const recent = [...checkins].slice(0, 6).reverse();
-
-  const Sparkline = ({ vals }) => {
-    if (vals.length < 2) return null;
-    const min = Math.min(...vals); const max = Math.max(...vals);
-    const range = max - min || 1;
-    return (
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, marginTop: 8, height: 20 }}>
-        {vals.map((v, i) => {
-          const h = Math.max(3, Math.round(((v - min) / range) * 16) + 3);
-          return <div key={i} style={{ flex: 1, height: h, borderRadius: 2, background: i === vals.length - 1 ? 'var(--accent)' : `rgba(var(--accent-rgb),0.3)` }} />;
-        })}
-      </div>
-    );
-  };
-
-  const TrendCard = ({ label, icon, values, format, invertColor, sub }) => {
-    const valid = values.filter(v => v != null);
-    if (!valid.length) return null;
-    const last = valid[valid.length - 1];
-    const prev = valid.length > 1 ? valid[valid.length - 2] : null;
-    const delta = prev != null ? last - prev : null;
-    const up = delta > 0;
-    const arrowColor = delta === 0 || delta == null ? UI.inkFaint
-      : invertColor ? (up ? 'rgba(var(--danger-rgb),0.8)' : 'var(--accent)')
-      : (up ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)');
-    return (
-      <div style={{ flex: 1, minWidth: 80, minHeight: 90, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}`, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
-          <i className={`fa-solid ${icon}`} style={{ fontSize: 10, color: UI.inkFaint }} />
-          <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
-          <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{format(last)}</span>
-          {delta != null && Math.abs(delta) > 0.001 && (
-            <span style={{ fontSize: 10, color: arrowColor, fontFamily: UI.fontUi }}>{up ? '▲' : '▼'} {format(Math.abs(delta))}</span>
-          )}
-        </div>
-        {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, textAlign: 'center' }}>{sub}</div>}
-        <Sparkline vals={valid} />
-      </div>
-    );
-  };
-
-  // Training combo card: days trained sparkline + last performance badge
-  const TrainingTrendCard = () => {
-    const dtVals = recent.map(c => c.daysTrained).filter(v => v != null);
-    if (!dtVals.length) return null;
-    const last = dtVals[dtVals.length - 1];
-    const prev = dtVals.length > 1 ? dtVals[dtVals.length - 2] : null;
-    const delta = prev != null ? last - prev : null;
-    const lastPerf = [...recent].reverse().find(c => c.performanceVsLastWeek)?.performanceVsLastWeek;
-    const perfColor = lastPerf === 'improved' ? 'var(--accent)' : lastPerf === 'worse' ? 'rgba(var(--danger-rgb),0.8)' : UI.inkSoft;
-    const perfLabel = lastPerf === 'improved' ? '↑ Better' : lastPerf === 'worse' ? '↓ Worse' : lastPerf === 'same' ? '= Same' : null;
-    return (
-      <div style={{ flex: 1, minWidth: 80, minHeight: 90, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}`, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
-          <i className="fa-solid fa-dumbbell" style={{ fontSize: 10, color: UI.inkFaint }} />
-          <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Training</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last}d</span>
-          {delta != null && Math.abs(delta) > 0 && (
-            <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
-          )}
-          {perfLabel && <span style={{ fontSize: 9, color: perfColor, fontFamily: UI.fontUi, fontWeight: 700 }}>{perfLabel}</span>}
-        </div>
-        <Sparkline vals={dtVals} />
-      </div>
-    );
-  };
-
-  // Cardio combo card: minutes sparkline + last distance as sub
-  const CardioTrendCard = () => {
-    const valid = recent.filter(c => c.cardioMinutes != null);
-    if (!valid.length) return null;
-    const minVals = valid.map(c => c.cardioMinutes);
-    const last = valid[valid.length - 1];
-    const prev = valid.length > 1 ? valid[valid.length - 2] : null;
-    const delta = prev != null ? last.cardioMinutes - prev.cardioMinutes : null;
-    const sub = last.cardioDistanceM != null ? `${(last.cardioDistanceM / 1000).toFixed(1)} km` : null;
-    return (
-      <div style={{ flex: 1, minWidth: 80, minHeight: 90, background: UI.bgInset, borderRadius: 10, padding: '10px 12px', border: `0.5px solid ${UI.hair}`, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
-          <i className="fa-solid fa-person-running" style={{ fontSize: 10, color: UI.inkFaint }} />
-          <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Cardio</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
-          <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last.cardioMinutes}m</span>
-          {delta != null && Math.abs(delta) > 0 && (
-            <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
-          )}
-        </div>
-        {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, textAlign: 'center' }}>{sub}</div>}
-        <Sparkline vals={minVals} />
-      </div>
-    );
-  };
-
-  const TrendSection = ({ label, children }) => {
-    const hasAny = React.Children.toArray(children).some(Boolean);
-    if (!hasAny) return null;
-    return (
-      <div>
-        <div className="micro" style={{ fontWeight: 700, color: UI.inkFaint, marginBottom: 8, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>{label}</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>{children}</div>
-      </div>
-    );
-  };
-
-  const n = Math.min(recent.length, 6);
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div className="micro" style={{ color: UI.inkFaint }}>TRENDS — LAST {n} CHECK-IN{n !== 1 ? 'S' : ''}</div>
-
-      <TrendSection label="WEIGHT">
-        <TrendCard label="Avg last week" icon="fa-weight-scale" values={recent.map(c => c.weightAvgLastWeek)} format={v => `${v}kg`} invertColor={false} />
-        <TrendCard label="Today" icon="fa-weight-scale" values={recent.map(c => c.weightToday)} format={v => `${v}kg`} invertColor={false} />
-      </TrendSection>
-
-      <TrendSection label="MARKERS">
-        <TrendCard label="Hunger" icon="fa-bowl-food" values={recent.map(c => c.hunger)} format={v => `${v}`} invertColor={true} />
-        <TrendCard label="Sleep" icon="fa-moon" values={recent.map(c => c.sleepQuality)} format={v => `${v}`} invertColor={true} />
-        <TrendCard label="Life stress" icon="fa-brain" values={recent.map(c => c.lifeStress)} format={v => `${v}`} invertColor={true} />
-        <TrendCard label="Work stress" icon="fa-briefcase" values={recent.map(c => c.workStress)} format={v => `${v}`} invertColor={true} />
-        <TrendCard label="Tiredness" icon="fa-battery-half" values={recent.map(c => c.tiredness)} format={v => `${v}`} invertColor={true} />
-      </TrendSection>
-
-      <TrendSection label="TRAINING">
-        <TrainingTrendCard />
-        <TrendCard label="Steps" icon="fa-shoe-prints" values={recent.map(c => c.steps)} format={v => `${Math.round(v / 1000)}k`} invertColor={false} />
-      </TrendSection>
-
-      <TrendSection label="CARDIO">
-        <CardioTrendCard />
-        <TrendCard label="Pace feeling" icon="fa-gauge" values={recent.map(c => c.cardioPaceFeeling)} format={v => `${v}/6`} invertColor={false} />
-        <TrendCard label="Effort" icon="fa-fire" values={recent.map(c => c.cardioEffort)} format={v => `${v}/10`} invertColor={true} />
-      </TrendSection>
-
-      {/* Check-in list */}
+      <CheckInTrendCards recent={recent} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
         {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
@@ -2620,6 +2697,7 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   }
 
   if ((thisWeek && !editing)) {
+    const recent = [...checkins].slice(0, 6).reverse();
     return (
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -2627,6 +2705,11 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
           <button onClick={() => setEditing(true)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>Edit</button>
         </div>
         <CheckInCard ci={thisWeek} defaultOpen={true} />
+        {checkins.length >= 2 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginTop: 4 }}>
+            <CheckInTrendCards recent={recent} />
+          </div>
+        )}
         {past.length > 0 && (
           <>
             <div className="micro" style={{ color: UI.inkFaint, marginTop: 8 }}>PREVIOUS CHECK-INS</div>
