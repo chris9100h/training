@@ -1883,7 +1883,7 @@ function CoachingTabCoachView({ store, setStore, userId, go }) {
     <Screen scroll>
       {confirmEl}
       <TopBar title="Coaching" right={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {allClients.length > 0 && (
             <button
               onClick={() => setEndOpen(true)}
