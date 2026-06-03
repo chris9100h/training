@@ -599,7 +599,7 @@ function App() {
     store?.coaching?.asClient?.status === 'active'
   );
   const coachingUnread = (store?.coaching?.unreadNotes || []).length;
-  const coachingBadge = showCoaching ? { count: coachingUnread, live: false } : null;
+  const coachingBadge = showCoaching ? { count: coachingUnread, live: !!store?.coaching?.anyClientLive } : null;
 
   let screen;
   switch (route.name) {

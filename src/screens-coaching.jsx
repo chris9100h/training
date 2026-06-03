@@ -1829,6 +1829,7 @@ function CoachingTabScreen({ store, setStore, userId, go }) {
 function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false }) {
   const allClients = store.coaching?.asCoach || [];
   const [liveMap, setLiveMap] = useStateC({});
+  const prevAnyLiveRef = useRefC(false);
   const [inviteOpen, setInviteOpen] = useStateC(false);
   const [inviteEmail, setInviteEmail] = useStateC('');
   const [inviting, setInviting] = useStateC(false);
@@ -1845,6 +1846,11 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           const m = {};
           data.forEach(r => { m[r.clientId] = r.inProgressSessionId; });
           setLiveMap(m);
+          const anyLive = data.some(r => r.inProgressSessionId);
+          if (anyLive !== prevAnyLiveRef.current) {
+            prevAnyLiveRef.current = anyLive;
+            setStore(s => s ? { ...s, coaching: { ...s.coaching, anyClientLive: anyLive } } : s);
+          }
         })
         .catch(() => {});
     };
@@ -2064,6 +2070,32 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, go }) {
 function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false }) {
   const coaching = store.coaching?.asClient;
   const [tab, setTab] = useStateC('messages');
+  const [confirmEl, confirm] = useConfirm();
+  const [ending, setEnding] = useStateC(false);
+
+  const handleEnd = async () => {
+    if (!await confirm(
+      `End coaching with ${coaching?.coachName}? Your coach will lose access to your training data.`,
+      { title: 'End coaching?', ok: 'End', danger: true }
+    )) return;
+    setEnding(true);
+    try {
+      await LB.endCoaching(coaching.id);
+      const newCoaching = await LB.reloadCoachingState(userId);
+      setStore(s => s ? { ...s, coaching: newCoaching } : s);
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setEnding(false);
+    }
+  };
+
+  const EndIcon = () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+      <line x1="22" y1="11" x2="16" y2="11"/>
+    </svg>
+  );
 
   if (!coaching || coaching.status !== 'active') {
     return (
@@ -2078,12 +2110,25 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
 
   return (
     <Screen scroll={false}>
+      {confirmEl}
       {!hideTopBar && <TopBar title="Coaching" />}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '12px 16px', background: UI.bgInset, borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
-        <div style={{ width: 40, height: 40, borderRadius: 10, background: `rgba(var(--accent-rgb),0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <i className="fa-solid fa-dumbbell" style={{ fontSize: 16, color: 'var(--accent)' }} />
+      <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', background: UI.bgInset, borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
+        <div style={{ flex: 1 }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: `rgba(var(--accent-rgb),0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <i className="fa-solid fa-dumbbell" style={{ fontSize: 16, color: 'var(--accent)' }} />
+          </div>
+          <div style={{ fontSize: 14, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.08em' }}>{(coaching.coachName || '').toUpperCase()}</div>
         </div>
-        <div style={{ fontSize: 14, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.08em' }}>{(coaching.coachName || '').toUpperCase()}</div>
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            onClick={handleEnd}
+            disabled={ending}
+            style={{ background: 'transparent', border: 'none', padding: '4px 2px', cursor: 'pointer', color: UI.inkSoft, display: 'flex', alignItems: 'center', opacity: ending ? 0.4 : 1 }}
+          >
+            <EndIcon />
+          </button>
+        </div>
       </div>
       <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0 }}>
         {[{ id: 'messages', label: 'Messages', icon: 'fa-comment' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }].map(t => (

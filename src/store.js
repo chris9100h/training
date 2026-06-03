@@ -901,6 +901,9 @@ function subscribeToChanges(userId, onSession, onExIdx, onSessionNav, onCoaching
     .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `client_id=eq.${userId}` }, () => {
       onCoachingInvite?.();
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `coach_id=eq.${userId}` }, () => {
+      onCoachingInvite?.();
+    })
     .on('broadcast', { event: 'ex_idx' }, ({ payload }) => onExIdx?.(payload))
     .on('broadcast', { event: 'session_nav' }, ({ payload }) => onSessionNav?.(payload))
     .subscribe();
