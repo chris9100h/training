@@ -711,8 +711,13 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
 function cyclePosFn(clientStore, date) {
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   const cycleLen = activeSch?.days?.length || 1;
-  const today = new Date(); today.setHours(12, 0, 0, 0);
   const d = new Date(date); d.setHours(12, 0, 0, 0);
+  if (clientStore.cycleStartDate) {
+    const start = LB.parseDate(clientStore.cycleStartDate);
+    const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+    return ((n % cycleLen) + cycleLen) % cycleLen;
+  }
+  const today = new Date(); today.setHours(12, 0, 0, 0);
   const daysAgo = Math.round((today - d) / 86400000);
   return (((clientStore.cycleIndex || 0) - daysAgo) % cycleLen + cycleLen) % cycleLen;
 }
@@ -727,10 +732,18 @@ function getTodayDay(clientStore) {
   if (!activeSch) return null;
   if (LB.isWeekdayPlan(activeSch)) {
     const todayWd = (new Date().getDay() + 6) % 7;
-    return (activeSch.days || []).find(d => d.weekday === todayWd) || null;
+    return (activeSch.days || []).find(d => d.weekday === todayWd) || { id: 'rest-virtual', name: 'REST', items: [] };
   }
-  const pos = cyclePosFn(clientStore, localDateKey(new Date()));
-  return (activeSch.days || [])[pos] || null;
+  let idx;
+  if (clientStore.cycleStartDate) {
+    const today = new Date(); today.setHours(12, 0, 0, 0);
+    const start = LB.parseDate(clientStore.cycleStartDate);
+    const n = Math.round((today.getTime() - start.getTime()) / 86400000);
+    idx = ((n % activeSch.days.length) + activeSch.days.length) % activeSch.days.length;
+  } else {
+    idx = (clientStore.cycleIndex || 0) % activeSch.days.length;
+  }
+  return (activeSch.days || [])[idx] || null;
 }
 
 function computeWeeklyAdherence(clientStore, weeksBack = 6) {
