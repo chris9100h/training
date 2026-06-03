@@ -1269,7 +1269,7 @@ async function deleteCheckin(checkinId, userId) {
   if (error) throw error;
 }
 
-
+window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
