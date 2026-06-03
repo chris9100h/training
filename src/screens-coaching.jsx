@@ -609,11 +609,11 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
 
   const TABS = [
     { id: 'overview',   icon: 'fa-chart-bar',         label: 'Overview' },
-    { id: 'plan',       icon: 'fa-calendar-days',      label: 'Plan' },
-    { id: 'sessions',   icon: 'fa-dumbbell',           label: 'Sessions' },
-    { id: 'checkins',   icon: 'fa-clipboard-list',     label: 'Check-ins' },
     { id: 'nutrition',  icon: 'fa-utensils',           label: 'Nutrition' },
+    { id: 'sessions',   icon: 'fa-dumbbell',           label: 'Sessions' },
+    { id: 'plan',       icon: 'fa-calendar-days',      label: 'Plan' },
     { id: 'notes',      icon: 'fa-comment',            label: 'Notes' },
+    { id: 'checkins',   icon: 'fa-clipboard-list',     label: 'Check-ins' },
   ];
 
   return (
