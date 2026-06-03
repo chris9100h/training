@@ -1616,17 +1616,20 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
     if (route.name === 'plan-view' || route.name === 'plan') {
       if (isDirty.current) {
         isDirty.current = false;
-        try {
-          const finalSch  = latestClientStore.current?.schedules?.find(s => s.id === scheduleId);
-          const schName   = finalSch?.name || scheduleId;
-          const exercises = latestClientStore.current?.exercises || [];
-          const diff      = LB.diffSchedule(initialSchedule.current, finalSch, exercises);
-          const body      = diff
-            ? `Updated plan: ${schName}\n\n${diff.split('\n').map(l => `• ${l}`).join('\n')}`
-            : `Updated plan: ${schName}`;
-          const threadId = await LB.getOrCreateCoachingThread(coachingId, `Changes on ${schName}`, userId);
-          await LB.addCoachingNote(coachingId, 'plan', scheduleId, schName, body, userId, threadId);
-        } catch (e) { console.error('Failed to send plan change note', e); }
+        const isActivePlan = scheduleId === latestClientStore.current?.activeScheduleId;
+        if (isActivePlan) {
+          try {
+            const finalSch  = latestClientStore.current?.schedules?.find(s => s.id === scheduleId);
+            const schName   = finalSch?.name || scheduleId;
+            const exercises = latestClientStore.current?.exercises || [];
+            const diff      = LB.diffSchedule(initialSchedule.current, finalSch, exercises);
+            const body      = diff
+              ? `Updated plan: ${schName}\n\n${diff.split('\n').map(l => `• ${l}`).join('\n')}`
+              : `Updated plan: ${schName}`;
+            const threadId = await LB.getOrCreateCoachingThread(coachingId, `Changes on ${schName}`, userId);
+            await LB.addCoachingNote(coachingId, 'plan', scheduleId, schName, body, userId, threadId);
+          } catch (e) { console.error('Failed to send plan change note', e); }
+        }
       }
       go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' });
     } else {
