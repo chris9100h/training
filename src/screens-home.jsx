@@ -13,6 +13,7 @@ function LoginScreen() {
   const [name, setName]           = useState('');
   const [email, setEmail]         = useState('');
   const [password, setPassword]   = useState('');
+  const [confirm, setConfirm]     = useState('');
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
   const [swVersion, setSwVersion] = useState('');
@@ -25,10 +26,11 @@ function LoginScreen() {
     });
   }, []);
 
-  const switchMode = (m) => { setMode(m); setError(''); };
+  const switchMode = (m) => { setMode(m); setError(''); setPassword(''); setConfirm(''); };
 
+  const pwMatch = password === confirm;
   const canLogin    = email.trim() && password.length >= 6;
-  const canRegister = name.trim() && email.trim() && password.length >= 6;
+  const canRegister = name.trim() && email.trim() && password.length >= 6 && pwMatch;
 
   const submitLogin = async () => {
     if (!canLogin || loading) return;
@@ -44,12 +46,10 @@ function LoginScreen() {
 
   const submitRegister = async () => {
     if (!canRegister || loading) return;
+    if (!pwMatch) { setError('Passwords do not match'); return; }
     setLoading(true); setError('');
     try {
       await LB.signUp(email.trim(), password, name.trim());
-      // signUp calls setupNewUser which creates the profile with the name.
-      // If email confirmation is disabled, SIGNED_IN fires and loadData runs.
-      // If confirmation is required, inform the user.
     } catch (e) {
       setError(e.message || 'Registration failed');
       setLoading(false);
@@ -69,6 +69,25 @@ function LoginScreen() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
         <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain', marginBottom: 28 }} />
 
+        {/* Tab switcher */}
+        <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', marginBottom: 24, borderRadius: 6, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
+          {['login', 'register'].map(m => (
+            <button key={m} onClick={() => switchMode(m)} style={{
+              padding: '10px 0',
+              background: mode === m ? UI.goldFaint : 'transparent',
+              border: 'none',
+              borderRight: m === 'login' ? `1px solid ${UI.hairStrong}` : 'none',
+              color: mode === m ? UI.gold : UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600,
+              letterSpacing: '0.12em', textTransform: 'uppercase',
+              cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              transition: 'background 0.15s, color 0.15s',
+            }}>
+              {m === 'login' ? 'Login' : 'Register'}
+            </button>
+          ))}
+        </div>
+
         <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
           {!isLogin && (
             <Field label="Name">
@@ -80,8 +99,20 @@ function LoginScreen() {
           </Field>
           <Field label="Password">
             <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters"
-              onKeyDown={e => e.key === 'Enter' && (isLogin ? submitLogin() : submitRegister())} />
+              onKeyDown={e => e.key === 'Enter' && isLogin && submitLogin()} />
           </Field>
+          {!isLogin && (
+            <Field label="Repeat password">
+              <TextInput value={confirm} onChange={setConfirm} type="password" placeholder="repeat password"
+                onKeyDown={e => e.key === 'Enter' && submitRegister()} />
+            </Field>
+          )}
+
+          {!isLogin && confirm.length > 0 && !pwMatch && (
+            <div style={{ fontSize: 12, color: UI.danger, fontFamily: UI.fontUi, marginTop: -10 }}>
+              Passwords do not match
+            </div>
+          )}
 
           {error && (
             <div style={{ fontSize: 12, color: UI.danger, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.06)', border: `1px solid rgba(var(--danger-rgb),0.25)`, borderRadius: 4, fontFamily: UI.fontUi }}>
@@ -98,20 +129,6 @@ function LoginScreen() {
               {loading ? 'Creating account…' : 'Create account'}
             </Btn>
           )}
-
-          <div style={{ textAlign: 'center', marginTop: 2 }}>
-            {isLogin ? (
-              <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>
-                No account?{' '}
-                <span onClick={() => switchMode('register')} style={{ color: 'var(--accent)', cursor: 'pointer' }}>Register</span>
-              </span>
-            ) : (
-              <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>
-                Already have an account?{' '}
-                <span onClick={() => switchMode('login')} style={{ color: 'var(--accent)', cursor: 'pointer' }}>Log in</span>
-              </span>
-            )}
-          </div>
         </div>
       </div>
 
