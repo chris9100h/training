@@ -251,7 +251,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
         })}
         <div ref={bottomRef} />
       </div>
-      <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, background: UI.bg }}>
+      <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, background: 'transparent' }}>
         <div style={{ padding: '10px 16px', display: 'flex', gap: 8, alignItems: 'center' }}>
           <input
             value={body}
@@ -383,7 +383,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
           );
         })}
       </div>
-      <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, background: UI.bg }}>
+      <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, background: 'transparent' }}>
         <div style={{ padding: '10px 16px' }}>
           {creating ? (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
