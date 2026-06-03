@@ -1174,8 +1174,11 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
         .eq('user_id', clientId);
       setClientStore(s => ({ ...s, activeScheduleId: scheduleId }));
       const planName = clientStore.schedules?.find(s => s.id === scheduleId)?.name || scheduleId;
-      const body = oldPlanName ? `Plan changed from ${oldPlanName} to ${planName}` : `Plan changed to ${planName}`;
-      const threadId = await LB.getOrCreateCoachingThread(coachingId, `Changes on ${planName}`, userId);
+      const threadName = oldPlanName ? `Plan changed from ${oldPlanName} to ${planName}` : `Plan changed to ${planName}`;
+      const body = oldPlanName
+        ? `Your plan has been changed from "${oldPlanName}" to "${planName}". If you have any questions, feel free to ask.`
+        : `Your plan has been set to "${planName}". If you have any questions, feel free to ask.`;
+      const threadId = await LB.getOrCreateCoachingThread(coachingId, threadName, userId);
       await LB.addCoachingNote(coachingId, 'plan', scheduleId, planName, body, userId, threadId);
     } catch (e) { alert(e.message); }
   };
