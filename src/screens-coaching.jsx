@@ -2593,7 +2593,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         tiredness: form.tiredness,
         issuesNotes: form.issuesNotes || null,
         generalNote: form.generalNote || null,
-      }, userId);
+      }, userId, weekStart, !!existing);
       onSaved();
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
@@ -2738,8 +2738,8 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
 function ClientCheckInTab({ coachingId, clientId, userId }) {
   const weekStart = LB.checkinWeekStart();
   const [checkins, setCheckins] = useStateC(null);
-  const [editing, setEditing] = useStateC(false);
-  const [confirmDelete, setConfirmDelete] = useStateC(false);
+  const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
+  const [confirmDelete, setConfirmDelete] = useStateC(null); // id of check-in awaiting delete confirm
   const [deleting, setDeleting] = useStateC(false);
 
   const load = () => LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
@@ -2748,68 +2748,95 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   const thisWeek = (checkins || []).find(c => c.weekStart === weekStart);
   const past = (checkins || []).filter(c => c.weekStart !== weekStart);
 
-  const handleDelete = async () => {
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      setTimeout(() => setConfirmDelete(false), 3000);
+  const handleDelete = async (ci) => {
+    if (confirmDelete !== ci.id) {
+      setConfirmDelete(ci.id);
+      setTimeout(() => setConfirmDelete(c => c === ci.id ? null : c), 3000);
       return;
     }
     setDeleting(true);
-    try { await LB.deleteCheckin(thisWeek.id, userId); await load(); }
-    catch(e) {} finally { setDeleting(false); setConfirmDelete(false); }
+    try { await LB.deleteCheckin(ci.id, userId); await load(); }
+    catch (e) {} finally { setDeleting(false); setConfirmDelete(null); }
   };
 
   if (checkins === null) {
     return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div></div>;
   }
 
-  if ((thisWeek && !editing)) {
-    const recent = [...checkins].slice(0, 6).reverse();
+  // ── Form: new check-in or editing any existing one ──
+  if (editTarget) {
+    const isNew = editTarget === 'new';
+    const target = isNew ? null : editTarget;
+    const formWeek = isNew ? weekStart : target.weekStart;
     return (
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-        <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>This week submitted ✓</div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={handleDelete} disabled={deleting}
-                style={{ background: 'transparent', border: 'none', fontSize: 11, color: confirmDelete ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>
-                {confirmDelete ? 'Confirm?' : 'Delete'}
-              </button>
-              <button onClick={() => setEditing(true)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>Edit</button>
-            </div>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '10px 14px 0', flexShrink: 0 }}>
+          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+            {isNew
+              ? <>Week of <strong>{fmtWeek(formWeek)}</strong> — covers Mon–Sun of last week.</>
+              : <>Editing <strong>week of {fmtWeek(formWeek)}</strong> — the change is logged to your coach.</>}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <CheckInTrendCards recent={recent} />
-          </div>
-          <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>THIS WEEK</div>
-          <CheckInCard ci={thisWeek} />
-          {past.length > 0 && (
-            <>
-              <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>PREVIOUS CHECK-INS</div>
-              {past.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
-            </>
-          )}
+          <button onClick={() => setEditTarget(null)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>← Cancel</button>
         </div>
+        <CheckInForm
+          coachingId={coachingId}
+          clientId={clientId}
+          userId={userId}
+          weekStart={formWeek}
+          existing={target}
+          onSaved={() => { setEditTarget(null); load(); }}
+        />
       </div>
     );
   }
 
+  // ── Overview: every check-in is editable/deletable ──
+  const recent = [...checkins].slice(0, 6).reverse();
+  const editBar = (ci) => (
+    <div style={{ display: 'flex', gap: 14, justifyContent: 'flex-end', paddingRight: 4 }}>
+      <button onClick={() => handleDelete(ci)} disabled={deleting}
+        style={{ background: 'transparent', border: 'none', fontSize: 11, color: confirmDelete === ci.id ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 0' }}>
+        {confirmDelete === ci.id ? 'Confirm?' : 'Delete'}
+      </button>
+      <button onClick={() => setEditTarget(ci)}
+        style={{ background: 'transparent', border: 'none', fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 0' }}>Edit</button>
+    </div>
+  );
+
   return (
-    <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '10px 14px 0', flexShrink: 0 }}>
-        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
-          Week of <strong>{fmtWeek(weekStart)}</strong> — covers Mon–Sun of last week.
-        </div>
-        {editing && <button onClick={() => setEditing(false)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>← Cancel</button>}
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {checkins.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <CheckInTrendCards recent={recent} />
+          </div>
+        )}
+
+        <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>THIS WEEK</div>
+        {thisWeek ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <CheckInCard ci={thisWeek} defaultOpen />
+            {editBar(thisWeek)}
+          </div>
+        ) : (
+          <button onClick={() => setEditTarget('new')}
+            style={{ background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+            Submit this week's check-in
+          </button>
+        )}
+
+        {past.length > 0 && (
+          <>
+            <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>PREVIOUS CHECK-INS</div>
+            {past.map(ci => (
+              <div key={ci.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <CheckInCard ci={ci} />
+                {editBar(ci)}
+              </div>
+            ))}
+          </>
+        )}
       </div>
-      <CheckInForm
-        coachingId={coachingId}
-        clientId={clientId}
-        userId={userId}
-        weekStart={weekStart}
-        existing={editing ? thisWeek : null}
-        onSaved={() => { setEditing(false); load(); }}
-      />
     </div>
   );
 }

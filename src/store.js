@@ -1177,8 +1177,8 @@ function checkinWeekStart() {
   return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
 }
 
-async function submitCheckin(coachingId, clientId, data, userId) {
-  const weekStart = checkinWeekStart();
+async function submitCheckin(coachingId, clientId, data, userId, weekStartArg = null, isEdit = false) {
+  const weekStart = weekStartArg || checkinWeekStart();
   const id = 'ci_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   const row = {
     id,
@@ -1216,7 +1216,7 @@ async function submitCheckin(coachingId, clientId, data, userId) {
     const d = new Date(weekStart + 'T12:00:00');
     const endDate = new Date(d); endDate.setDate(d.getDate() + 6);
     const fmt = (dt) => dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-    const weekLabel = `Week of ${fmt(d)} – ${fmt(endDate)}`;
+    const weekLabel = `${isEdit ? '✏️ EDITED · ' : ''}Week of ${fmt(d)} – ${fmt(endDate)}`;
     const lines = [weekLabel, '------------'];
     // Weight
     const wLines = [];
