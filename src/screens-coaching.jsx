@@ -844,9 +844,13 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       monday.setHours(0, 0, 0, 0);
       return ended.filter(s => new Date(s.ended) >= monday);
     } else {
-      const cycleLen = activeSch.days?.length || 7;
-      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - cycleLen);
-      return ended.filter(s => new Date(s.ended) >= cutoff);
+      // Start of the *current* cycle run = today minus today's position in the
+      // cycle. A rolling cycleLen-day window would wrongly drag in the previous
+      // run's sessions (e.g. on day 0 it would still show the whole last cycle).
+      const pos = cyclePosFn(clientStore, new Date());
+      const cycleStart = new Date(); cycleStart.setHours(0, 0, 0, 0);
+      cycleStart.setDate(cycleStart.getDate() - pos);
+      return ended.filter(s => new Date(s.ended) >= cycleStart);
     }
   }, [clientStore]);
 
