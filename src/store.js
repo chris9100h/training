@@ -198,10 +198,14 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
       .is('read_at', null)
       .neq('author_id', userId),
-    isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at').eq('client_id', userId).eq('status', 'active').maybeSingle(),
+    // Real coaching row (for check-in requests) — exclude the self-coaching row
+    // so maybeSingle() never trips when both a real coach and self-coaching exist.
+    isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
+    // Self-coaching row (coach_id = client_id), if the user is their own coach
+    isCoachLoad ? null : _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
-         coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes] = await Promise.all(queries);
+         coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -317,6 +321,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         reminderTime: sett.reminder_time ?? '07:00',
         showWarmupInSummary: sett.show_warmup_in_summary ?? true,
         showCoachingTab: sett.show_coaching_tab ?? false,
+        beYourOwnCoach: sett.be_your_own_coach ?? false,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -335,6 +340,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         clientName: r.client_name,
         status: r.status,
       })),
+      asSelf: selfRowRes?.data ? { id: selfRowRes.data.id } : null,
       unreadNotes: (unreadNotesRes?.data || []).map(n => ({
         id: n.id,
         coachingId: n.coaching_id,
@@ -551,6 +557,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.reminderTime         !== next.settings?.reminderTime         ||
     prev.settings?.showWarmupInSummary  !== next.settings?.showWarmupInSummary  ||
     prev.settings?.showCoachingTab      !== next.settings?.showCoachingTab      ||
+    prev.settings?.beYourOwnCoach       !== next.settings?.beYourOwnCoach       ||
     prev.nextReminderAt                 !== next.nextReminderAt;
 
   if (settingsChanged) {
@@ -582,6 +589,7 @@ async function syncStore(prev, next, userId) {
       reminder_time: next.settings?.reminderTime ?? '07:00',
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
       show_coaching_tab: next.settings?.showCoachingTab ?? false,
+      be_your_own_coach: next.settings?.beYourOwnCoach ?? false,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
     }));
@@ -972,14 +980,15 @@ async function loadCoachClientsStatus() {
 }
 
 async function reloadCoachingState(userId) {
-  const [coachInfoRes, coachClientsRes, unreadRes, coachingRowRes] = await Promise.all([
+  const [coachInfoRes, coachClientsRes, unreadRes, coachingRowRes, selfRowRes] = await Promise.all([
     _supabase.rpc('get_coach_info'),
     _supabase.rpc('get_coaching_clients'),
     _supabase.from('zane_coaching_notes')
       .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
       .is('read_at', null)
       .neq('author_id', userId),
-    _supabase.from('zane_coaching').select('id, checkin_requested_at').eq('client_id', userId).eq('status', 'active').maybeSingle(),
+    _supabase.from('zane_coaching').select('id, checkin_requested_at').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
+    _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
   ]);
   return {
     asClient: (coachInfoRes?.data?.[0]) ? {
@@ -994,12 +1003,20 @@ async function reloadCoachingState(userId) {
       id: r.coaching_id, clientId: r.client_id, clientEmail: r.client_email,
       clientName: r.client_name, status: r.status,
     })),
+    asSelf: selfRowRes?.data ? { id: selfRowRes.data.id } : null,
     unreadNotes: (unreadRes?.data || []).map(n => ({
       id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
       type: n.type, entityId: n.entity_id, entityName: n.entity_name,
       threadId: n.thread_id, body: n.body, createdAt: n.created_at,
     })),
   };
+}
+
+// Be your own coach: create (or re-activate) a self-coaching row. Idempotent.
+async function enableSelfCoaching() {
+  const { data, error } = await _supabase.rpc('enable_self_coaching');
+  if (error) throw error;
+  return data; // self-coaching id
 }
 
 async function inviteClient(email) {
@@ -1058,12 +1075,15 @@ async function addCoachingNote(coachingId, type, entityId, entityName, body, aut
     thread_id: threadId || null,
   });
   if (error) throw error;
-  // Fire-and-forget push to the other party (fails silently if push not enabled)
-  fetch(COACHING_NOTIFY_URL, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ coachingId, authorId, threadId, preview: body }),
-  }).catch(() => {});
+  // Fire-and-forget push to the other party (fails silently if push not enabled).
+  // Skip for self-coaching — there's no "other party" to notify.
+  if (!coachingId.startsWith('self_')) {
+    fetch(COACHING_NOTIFY_URL, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ coachingId, authorId, threadId, preview: body }),
+    }).catch(() => {});
+  }
   return id;
 }
 
@@ -1308,7 +1328,7 @@ window.LB = {
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
   subscribeToChanges, broadcastExIdx, broadcastSessionNav,
-  loadClientStore, loadCoachClientsStatus, reloadCoachingState, inviteClient, respondToCoachingInvite, endCoaching,
+  loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,

@@ -413,17 +413,51 @@ function SettingsScreen({ store, setStore, go, userId }) {
         {(() => {
           const hasCoaching = !!((store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0 || store.coaching?.asClient?.status === 'active');
           const coachingTabOn = !!(store.settings?.showCoachingTab || hasCoaching);
+          const selfOn = !!store.settings?.beYourOwnCoach;
+
+          // Tab off ⇒ self off (coupled). Turning the tab off also disables self-coaching.
+          const toggleTab = () => {
+            const turningOff = coachingTabOn;
+            setStore(s => ({ ...s, settings: { ...s.settings, showCoachingTab: !coachingTabOn, ...(turningOff ? { beYourOwnCoach: false } : {}) } }));
+          };
+
+          // Be your own coach: create the self-coaching row on first enable, then
+          // refresh coaching state so the "Myself" view appears in the coaching tab.
+          const toggleSelf = async () => {
+            const next = !selfOn;
+            setStore(s => ({ ...s, settings: { ...s.settings, beYourOwnCoach: next } }));
+            if (next) {
+              try {
+                await LB.enableSelfCoaching();
+                const cs = await LB.reloadCoachingState(userId);
+                setStore(s => s ? { ...s, coaching: cs } : s);
+              } catch (e) {
+                setStore(s => ({ ...s, settings: { ...s.settings, beYourOwnCoach: false } }));
+              }
+            }
+          };
+
           return (
             <Frame style={{ padding: '12px 14px' }}>
               <SecHead label="Coaching" open={coachingOpen} onToggle={() => setCoachingOpen(v => !v)} />
               {coachingOpen && (
                 <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 0 }}>
                   <Row label="Coaching tab">
-                    <Toggle on={coachingTabOn} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, showCoachingTab: !coachingTabOn } }))} />
+                    <Toggle on={coachingTabOn} onToggle={toggleTab} />
                   </Row>
                   <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
                     Pin the coaching tab to the nav bar. Shows automatically when a coaching relationship is active.
                   </div>
+                  {coachingTabOn && (
+                    <>
+                      <Row label="Be your own coach">
+                        <Toggle on={selfOn} onToggle={toggleSelf} />
+                      </Row>
+                      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+                        Track your own training like a coach would — stats, nutrition, check-ins & notes, just for you.
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </Frame>

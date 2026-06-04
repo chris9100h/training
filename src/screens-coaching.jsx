@@ -586,7 +586,7 @@ function ClientCard({ client, go }) {
 // ─── CoachClientScreen ────────────────────────────────────────────────────────
 // Full coach view for a single client — 4 tabs: Overview, Plan, Sessions, Notes.
 
-function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName, initialTab, backRoute = 'settings' }) {
+function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName, initialTab, backRoute = 'settings', hideTopBar = false, isSelf = false }) {
   const [tab, setTab] = useStateC(initialTab || 'overview');
   const [selectedSession, setSelectedSession] = useStateC(null);
 
@@ -625,11 +625,15 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
 
   return (
     <Screen scroll={false}>
-      <TopBar
-        title={clientName}
-        sub={<span className="micro" style={{ color: 'var(--accent)', letterSpacing: '0.12em' }}>COACHING</span>}
-        onBack={() => go({ name: backRoute })}
-      />
+      {!hideTopBar && (
+        isSelf
+          ? <TopBar title="Coaching" />
+          : <TopBar
+              title={clientName}
+              sub={<span className="micro" style={{ color: 'var(--accent)', letterSpacing: '0.12em' }}>COACHING</span>}
+              onBack={() => go({ name: backRoute })}
+            />
+      )}
 
       {/* Tab bar */}
       <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0 }}>
@@ -653,8 +657,8 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
         <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
       ) : (
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          {/* Live training banner */}
-          {clientStore.inProgress && (
+          {/* Live training banner (not for self — no point watching yourself) */}
+          {clientStore.inProgress && !isSelf && (
             <div
               onClick={() => go({ name: 'spectator', targetUserId: clientId, userName: clientName })}
               style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: `rgba(var(--accent-rgb), 0.08)`, borderBottom: `0.5px solid rgba(var(--accent-rgb), 0.25)`, cursor: 'pointer' }}
@@ -667,7 +671,9 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'overview'   && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} onSelectSession={openSession} />}
           {tab === 'plan'       && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
           {tab === 'sessions'   && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
-          {tab === 'checkins'   && <ClientCheckInsTab coachingId={coachingId} />}
+          {tab === 'checkins'   && (isSelf
+            ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} />
+            : <ClientCheckInsTab coachingId={coachingId} />)}
           {tab === 'nutrition'  && <ClientNutritionTab coachingId={coachingId} userId={userId} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
@@ -2022,35 +2028,55 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
 function CoachingTabScreen({ store, setStore, userId, go }) {
   const isCoach = (store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0;
   const isClient = store.coaching?.asClient?.status === 'active';
-  const [tab, setTab] = useStateC('clients');
+  const isSelf = !!store.settings?.beYourOwnCoach && !!store.coaching?.asSelf;
 
-  if (isCoach && isClient) {
-    const tabs = [
-      { id: 'clients', label: 'My Clients', icon: 'fa-users' },
-      { id: 'coach',   label: 'My Coach',   icon: 'fa-person-chalkboard' },
-    ];
-    return (
-      <div style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: UI.bg, color: UI.ink }}>
-        <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0, paddingTop: 'env(safe-area-inset-top, 0px)' }}>
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, padding: '10px 4px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent', WebkitTapHighlightColor: 'transparent' }}>
-              <i className={`fa-solid ${t.icon}`} style={{ fontSize: 14, color: tab === t.id ? 'var(--accent)' : UI.inkFaint }} />
-              <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.08em', color: tab === t.id ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase' }}>{t.label}</span>
-            </button>
-          ))}
-        </div>
-        <div style={{ flex: 1, overflow: 'hidden', display: tab === 'clients' ? 'flex' : 'none', flexDirection: 'column' }}>
-          <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} hideTopBar />
-        </div>
-        <div style={{ flex: 1, overflow: 'hidden', display: tab === 'coach' ? 'flex' : 'none', flexDirection: 'column' }}>
-          <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} hideTopBar />
-        </div>
-      </div>
+  const renderView = (id, hideTopBar) => {
+    if (id === 'self') return (
+      <CoachClientScreen
+        store={store} setStore={setStore} userId={userId} go={go}
+        coachingId={store.coaching.asSelf.id} clientId={userId}
+        clientName={store.user?.name || 'You'} isSelf hideTopBar={hideTopBar}
+      />
     );
-  }
+    if (id === 'clients') return <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} hideTopBar={hideTopBar} />;
+    return <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} hideTopBar={hideTopBar} />;
+  };
 
-  if (isClient) return <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} />;
-  return <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} />;
+  const views = [];
+  if (isSelf)   views.push({ id: 'self',    label: 'Myself',     icon: 'fa-chart-line' });
+  if (isCoach)  views.push({ id: 'clients', label: 'My Clients', icon: 'fa-users' });
+  if (isClient) views.push({ id: 'coach',   label: 'My Coach',   icon: 'fa-person-chalkboard' });
+
+  // No active role → default to the coach view (empty client list + invite).
+  if (views.length === 0) return <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} />;
+  // Single role → render it directly with its own top bar.
+  if (views.length === 1) return renderView(views[0].id, false);
+  // Multiple roles → sub-tab bar across the active views.
+  return <CoachingMultiView views={views} renderView={renderView} />;
+}
+
+// Sub-tab bar shown when a user holds several coaching roles at once
+// (e.g. self + real clients). Keeps every view mounted so switching is instant.
+function CoachingMultiView({ views, renderView }) {
+  const [active, setActive] = useStateC(views[0].id);
+  const activeId = views.some(v => v.id === active) ? active : views[0].id;
+  return (
+    <div style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: UI.bg, color: UI.ink }}>
+      <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0, paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+        {views.map(t => (
+          <button key={t.id} onClick={() => setActive(t.id)} style={{ flex: 1, padding: '10px 4px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, borderBottom: activeId === t.id ? '2px solid var(--accent)' : '2px solid transparent', WebkitTapHighlightColor: 'transparent' }}>
+            <i className={`fa-solid ${t.icon}`} style={{ fontSize: 14, color: activeId === t.id ? 'var(--accent)' : UI.inkFaint }} />
+            <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.08em', color: activeId === t.id ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase' }}>{t.label}</span>
+          </button>
+        ))}
+      </div>
+      {views.map(v => (
+        <div key={v.id} style={{ flex: 1, overflow: 'hidden', display: activeId === v.id ? 'flex' : 'none', flexDirection: 'column' }}>
+          {renderView(v.id, true)}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // ─── CoachingTabCoachView ─────────────────────────────────────────────────────

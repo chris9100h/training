@@ -69,7 +69,9 @@ CREATE TABLE IF NOT EXISTS public.zane_user_settings (
   reminder_enabled         boolean NOT NULL DEFAULT false,
   reminder_time            text NOT NULL DEFAULT '07:00',
   next_reminder_at         timestamptz,
-  show_warmup_in_summary   boolean NOT NULL DEFAULT true
+  show_warmup_in_summary   boolean NOT NULL DEFAULT true,
+  show_coaching_tab        boolean NOT NULL DEFAULT false,
+  be_your_own_coach        boolean NOT NULL DEFAULT false
 );
 
 -- Pushover cancellation token — no RLS, never exposed to clients directly.
@@ -442,6 +444,7 @@ AS $$
   FROM zane_user_settings us
   INNER JOIN zane_coaching zc ON zc.client_id = us.user_id
   WHERE zc.coach_id = auth.uid()
+    AND zc.coach_id <> zc.client_id
     AND zc.status = 'active'
     AND us.in_progress_session_id IS NOT NULL;
 $$;
