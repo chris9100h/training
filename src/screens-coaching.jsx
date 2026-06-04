@@ -1633,8 +1633,8 @@ function CheckInTrendCards({ recent }) {
       {chartModal && <LineChartSheet {...chartModal} onClose={() => setChartModal(null)} />}
       <div className="micro" style={{ color: UI.inkFaint }}>TRENDS — LAST {n} CHECK-IN{n !== 1 ? 'S' : ''}</div>
       <TrendSection label="WEIGHT">
-        <TrendCard label="Avg last week" icon="fa-weight-scale" values={recent.map(c => c.weightAvgLastWeek)} format={v => `${v}kg`} invertColor={false} />
-        <TrendCard label="Today" icon="fa-weight-scale" values={recent.map(c => c.weightToday)} format={v => `${v}kg`} invertColor={false} />
+        <TrendCard label="Avg last week" icon="fa-weight-scale" values={recent.map(c => c.weightAvgLastWeek)} format={v => `${Math.round(v * 100) / 100}kg`} invertColor={false} />
+        <TrendCard label="Today" icon="fa-weight-scale" values={recent.map(c => c.weightToday)} format={v => `${Math.round(v * 100) / 100}kg`} invertColor={false} />
       </TrendSection>
       <TrendSection label="MARKERS">
         <TrendCard label="Hunger" icon="fa-bowl-food" values={recent.map(c => c.hunger)} format={v => `${v}`} invertColor={true} />
