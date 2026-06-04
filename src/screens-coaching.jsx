@@ -2520,7 +2520,10 @@ function StatPill({ label, value }) {
 // ─── CheckInForm ──────────────────────────────────────────────────────────────
 
 function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSaved }) {
-  const REQUIRED = ['hunger', 'sleepQuality', 'lifeStress', 'workStress', 'tiredness', 'weightToday'];
+  const REQUIRED_LABELS = {
+    weightToday: 'Weight (today)', hunger: 'Hunger', sleepQuality: 'Sleep',
+    lifeStress: 'Life Stress', workStress: 'Work Stress', tiredness: 'Tiredness',
+  };
 
   const empty = {
     weightToday: '', weightAvgLastWeek: '',
@@ -2561,12 +2564,13 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
   const num = (v) => v === '' || v == null ? null : Number(v);
 
-  const canSubmit = form.weightToday !== '' && form.weightToday != null &&
-    form.hunger != null && form.sleepQuality != null &&
-    form.lifeStress != null && form.workStress != null && form.tiredness != null;
+  const missing = Object.entries(REQUIRED_LABELS)
+    .filter(([k]) => form[k] === '' || form[k] == null)
+    .map(([, label]) => label);
+  const canSubmit = missing.length === 0;
 
   const handleSubmit = async () => {
-    if (!canSubmit) { setError('Please fill in weight and all markers.'); return; }
+    if (!canSubmit) { setError(`Can't submit — please fill in: ${missing.join(', ')}.`); return; }
     setSaving(true); setError('');
     try {
       await LB.submitCheckin(coachingId, clientId, {
@@ -2722,7 +2726,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
 
       {error && <div style={{ fontSize: 12, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{error}</div>}
 
-      <Btn onClick={handleSubmit} disabled={saving || !canSubmit}>
+      <Btn onClick={handleSubmit} disabled={saving}>
         {saving ? 'Sending…' : existing ? 'Update Check-in' : 'Submit Check-in'}
       </Btn>
     </div>
@@ -2774,11 +2778,9 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
               <button onClick={() => setEditing(true)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>Edit</button>
             </div>
           </div>
-          {checkins.length >= 2 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-              <CheckInTrendCards recent={recent} />
-            </div>
-          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <CheckInTrendCards recent={recent} />
+          </div>
           <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>THIS WEEK</div>
           <CheckInCard ci={thisWeek} />
           {past.length > 0 && (
