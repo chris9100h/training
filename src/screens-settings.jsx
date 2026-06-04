@@ -412,8 +412,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
         {/* ─── Coaching ─── */}
         {(() => {
           const hasCoaching = !!((store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0 || store.coaching?.asClient?.status === 'active');
-          const coachingTabOn = !!(store.settings?.showCoachingTab || hasCoaching);
           const selfOn = !!store.settings?.beYourOwnCoach;
+          // Self implies the tab is pinned — keep the toggle (and the self toggle below) in sync even if show_coaching_tab drifted out of sync across devices.
+          const coachingTabOn = !!(store.settings?.showCoachingTab || hasCoaching || selfOn);
 
           // Tab off ⇒ self off (coupled). Turning the tab off also disables self-coaching.
           const toggleTab = () => {
