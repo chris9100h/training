@@ -425,10 +425,13 @@ function App() {
           }
           const existing = s.sessions[idx];
           const sessions = [...s.sessions];
-          // Merge entries: don't let a stale server write uncheck a locally-completed set.
-          // kbApply writes done:false to Supabase on every keystroke; if the realtime event
-          // from that write arrives after completeSet has already set done:true locally,
-          // it would silently revert the checkbox without going through updateSession.
+          // Merge entries: a local check/uncheck must win over a server write that
+          // raced past it out of order. Two cases, both guarded by a recent local
+          // edit stamp (window._setDoneEdits, set in screens-train.jsx):
+          //   • stale done=false after a completion — kbApply writes done:false on
+          //     every keystroke, and its realtime echo can land after completeSet.
+          //   • delayed done=true re-checking a set the user just unchecked — without
+          //     this guard the checkbox snaps back on the next realtime event.
           const mergedEntries = (session.entries || []).map((serverEntry, ei) => {
             const localEntry = existing.entries?.[ei];
             if (!localEntry) return serverEntry;
@@ -436,9 +439,13 @@ function App() {
               ...serverEntry,
               sets: (serverEntry.sets || []).map((serverSet, si) => {
                 const localSet = localEntry.sets?.[si];
-                if (localSet?.done === true && serverSet.done === false) {
-                  if (window._dbg) window._dbg.push({ t: Date.now(), msg: `⚠ RT ex${ei} set${si}: server done=false blocked (local=true)` });
-                  return localSet;
+                if (!localSet) return serverSet;
+                if (serverSet.done !== localSet.done) {
+                  const edit = window._setDoneEdits?.[`${session.id}:${ei}:${si}`];
+                  if (edit && edit.done === localSet.done && Date.now() - edit.t < 8000) {
+                    if (window._dbg) window._dbg.push({ t: Date.now(), msg: `⚠ RT ex${ei} set${si}: server done=${serverSet.done} blocked (local=${localSet.done})` });
+                    return localSet;
+                  }
                 }
                 return serverSet;
               }),
