@@ -1454,6 +1454,10 @@ function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) 
   const maxV = Math.max(...vals);
   const range = maxV - minV || 1;
   const n = entries.length;
+  // Thin out point labels (value + date) so they don't overlap when there are
+  // many check-ins — show roughly 5 across, always including the last point.
+  const labelStep = Math.max(1, Math.round(n / 5));
+  const showLabel = i => i === n - 1 || i % labelStep === 0;
 
   const xOf = i => padX + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
   const yOf = v => padTop + (1 - (v - minV) / range) * plotH;
@@ -1488,11 +1492,12 @@ function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) 
               const cx = xOf(i).toFixed(1);
               const cy = yOf(e.value).toFixed(1);
               const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+              const lbl = showLabel(i);
               return (
                 <g key={i}>
-                  <circle cx={cx} cy={cy} r="4" fill="var(--accent)" />
-                  <text x={cx} y={(yOf(e.value) - 9).toFixed(1)} textAnchor="middle" fontSize="9" fontFamily={UI.fontUi} fill={UI.ink}>{format(e.value)}</text>
-                  <text x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtD(e.weekStart)}</text>
+                  <circle cx={cx} cy={cy} r={lbl ? '4' : '2.5'} fill="var(--accent)" />
+                  {lbl && <text x={cx} y={(yOf(e.value) - 9).toFixed(1)} textAnchor="middle" fontSize="9" fontFamily={UI.fontUi} fill={UI.ink}>{format(e.value)}</text>}
+                  {lbl && <text x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtD(e.weekStart)}</text>}
                 </g>
               );
             })}
@@ -1510,7 +1515,7 @@ function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) 
 
 function CheckInTrendCards({ recent }) {
   const [chartModal, setChartModal] = useStateC(null);
-  const n = Math.min(recent.length, 6);
+  const n = recent.length;
 
   const openChart = (label, icon, values, format, invertColor) => {
     const entries = values
@@ -1631,7 +1636,7 @@ function CheckInTrendCards({ recent }) {
   return (
     <>
       {chartModal && <LineChartSheet {...chartModal} onClose={() => setChartModal(null)} />}
-      <div className="micro" style={{ color: UI.inkFaint }}>TRENDS — LAST {n} CHECK-IN{n !== 1 ? 'S' : ''}</div>
+      <div className="micro" style={{ color: UI.inkFaint }}>TRENDS — {n} CHECK-IN{n !== 1 ? 'S' : ''}</div>
       <TrendSection label="WEIGHT">
         <TrendCard label="Avg last week" icon="fa-weight-scale" values={recent.map(c => c.weightAvgLastWeek)} format={v => `${Math.round(v * 100) / 100}kg`} invertColor={false} />
         <TrendCard label="Today" icon="fa-weight-scale" values={recent.map(c => c.weightToday)} format={v => `${Math.round(v * 100) / 100}kg`} invertColor={false} />
@@ -1678,7 +1683,7 @@ function ClientCheckInsTab({ coachingId }) {
     );
   }
 
-  const recent = [...checkins].slice(0, 6).reverse();
+  const recent = [...checkins].reverse();
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
@@ -2791,7 +2796,7 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   }
 
   // ── Overview: every check-in is editable/deletable ──
-  const recent = [...checkins].slice(0, 6).reverse();
+  const recent = [...checkins].reverse();
   const editBar = (ci) => (
     <div style={{ display: 'flex', gap: 14, justifyContent: 'flex-end', paddingRight: 4 }}>
       <button onClick={() => handleDelete(ci)} disabled={deleting}
