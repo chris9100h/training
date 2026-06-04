@@ -2798,13 +2798,13 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   // ── Overview: every check-in is editable/deletable ──
   const recent = [...checkins].reverse();
   const editBar = (ci) => (
-    <div style={{ display: 'flex', gap: 14, justifyContent: 'flex-end', paddingRight: 4 }}>
+    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingRight: 4 }}>
       <button onClick={() => handleDelete(ci)} disabled={deleting}
-        style={{ background: 'transparent', border: 'none', fontSize: 11, color: confirmDelete === ci.id ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 0' }}>
+        style={{ background: confirmDelete === ci.id ? 'rgba(var(--danger-rgb),0.12)' : UI.bgInset, border: `0.5px solid ${confirmDelete === ci.id ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 8, padding: '8px 16px', fontSize: 12, color: confirmDelete === ci.id ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
         {confirmDelete === ci.id ? 'Confirm?' : 'Delete'}
       </button>
       <button onClick={() => setEditTarget(ci)}
-        style={{ background: 'transparent', border: 'none', fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 0' }}>Edit</button>
+        style={{ background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.4)', borderRadius: 8, padding: '8px 18px', fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Edit</button>
     </div>
   );
 
