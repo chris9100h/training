@@ -269,7 +269,7 @@ function LastSessionStrip({ session, onClick }) {
               {LB.parseDate(session.date).toLocaleDateString('en-US', { day:'2-digit', month:'short' }).toUpperCase()}
             </span>
             <span className="num" style={{ color: UI.gold, fontSize: 11 }}>
-              {Math.round(LB.totalVolume(session)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>kg</span>
+              {Math.round(LB.totalVolume(session)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>{UI.unit()}</span>
             </span>
           </div>
         </div>
@@ -1115,7 +1115,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                 <div className="micro" style={{ marginBottom: 3 }}>LAST SESSION</div>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
                   <span className="display" style={{ fontSize: 15, color: UI.ink, lineHeight: 1 }}>{lastSession.dayName}</span>
-                  <span className="num" style={{ color: UI.gold, fontSize: 10 }}>{Math.round(LB.totalVolume(lastSession)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>kg</span></span>
+                  <span className="num" style={{ color: UI.gold, fontSize: 10 }}>{Math.round(LB.totalVolume(lastSession)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>{UI.unit()}</span></span>
                 </div>
               </Frame>
               <Frame onClick={() => setNotLoggedModalOpen(true)} style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: 'rgba(var(--danger-rgb),0.05)', border: '0.5px solid rgba(var(--danger-rgb),0.2)', cursor: 'pointer' }}>
@@ -1189,7 +1189,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                 <div key={pct} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 14px', background: UI.bgInset, borderRadius: 4, border: `1px solid ${UI.hairStrong}` }}>
                   <span className="micro" style={{ color: UI.inkFaint }}>{pct}%</span>
                   <span className="num" style={{ fontSize: 14, color: kg != null ? UI.inkSoft : UI.inkFaint }}>
-                    {kg != null ? `${kg}kg` : '—'} · {reps}
+                    {kg != null ? `${kg}${UI.unit()}` : '—'} · {reps}
                   </span>
                 </div>
               ))}

@@ -859,7 +859,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       {/* Top stats */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, padding: '0 4px' }}>
         <StatBox label="Adherence (6w)" value={overallAdherence != null ? `${overallAdherence}%` : '—'} gold={overallAdherence >= 80} onClick={() => setChartOpen('adherence')} />
-        <StatBox label="Avg Volume" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}kg` : '—'} onClick={() => setChartOpen('volume')} />
+        <StatBox label="Avg Volume" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}${UI.unit()}` : '—'} onClick={() => setChartOpen('volume')} />
         <StatBox label="Sessions (30d)" value={last30.length} onClick={() => setChartOpen('sessions')} />
       </div>
 
@@ -901,7 +901,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
             {trainedToday && todaySession ? (
               <div>
                 <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-                  <StatBox label="Volume" value={`${Math.round(LB.totalVolume(todaySession)).toLocaleString('en-US')}kg`} />
+                  <StatBox label="Volume" value={`${Math.round(LB.totalVolume(todaySession)).toLocaleString('en-US')}${UI.unit()}`} />
                   <StatBox label="Sets" value={LB.doneSetCount(todaySession)} />
                   <StatBox label="Duration" value={todaySession.durationMinutes ? `${todaySession.durationMinutes}m` : '—'} />
                 </div>
@@ -927,7 +927,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                                 borderRadius: 4, padding: '2px 8px',
                                 border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
                               }}>
-                                {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                                {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
                               </span>
                             );
                           })}
@@ -937,7 +937,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                             <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
                             {lastSets.map((s, j) => (
                               <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `0.5px solid ${UI.hair}` }}>
-                                {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                                {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
                               </span>
                             ))}
                             <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
@@ -967,7 +967,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                         {hasWeight ? seeds.map((s, j) => (
                           <span key={j} className="num" style={{ fontSize: 12, color: UI.ink, background: UI.bgInset, borderRadius: 4, padding: '3px 8px', border: `0.5px solid ${UI.hairStrong}` }}>
-                            {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                            {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
                           </span>
                         )) : (
                           <span style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi }}>First time — no weight data yet</span>
@@ -1038,7 +1038,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
               <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{fmtDate(s.date)}</div>
             </div>
-            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(LB.totalVolume(s)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span></span>
+            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(LB.totalVolume(s)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span></span>
             <ChevronRight />
           </div>
         ))
@@ -1103,7 +1103,7 @@ function RollingVolumeChart({ sessions, planStartDate }) {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
         <span style={{ fontSize: 11, color: trend >= 0 ? '#7bc47b' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>
           <i className={`fa-solid fa-arrow-trend-${trend >= 0 ? 'up' : 'down'}`} style={{ marginRight: 4 }} />
-          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}kg since plan start
+          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}{UI.unit()} since plan start
         </span>
       </div>
       <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`}>
@@ -1119,8 +1119,8 @@ function RollingVolumeChart({ sessions, planStartDate }) {
         <circle cx={px(points.length - 1)} cy={py(points[points.length - 1].avg)} r={3} fill="var(--accent)" />
         <text x={0} y={H + 14} fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(points[0].date)}</text>
         <text x={W} y={H + 14} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(points[points.length - 1].date)}</text>
-        <text x={W - 2} y={Math.max(py(maxV) - 3, 8)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{maxV.toLocaleString('en-US')}kg</text>
-        <text x={W - 2} y={Math.min(py(minV) + 10, H - 2)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{minV.toLocaleString('en-US')}kg</text>
+        <text x={W - 2} y={Math.max(py(maxV) - 3, 8)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{maxV.toLocaleString('en-US')}{UI.unit()}</text>
+        <text x={W - 2} y={Math.min(py(minV) + 10, H - 2)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{minV.toLocaleString('en-US')}{UI.unit()}</text>
       </svg>
     </div>
   );
@@ -1364,7 +1364,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
         </div>
         <div style={{ padding: '12px 12px 32px' }}>
           <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-            <StatBox label="Volume" value={`${Math.round(vol).toLocaleString('en-US')}kg`} />
+            <StatBox label="Volume" value={`${Math.round(vol).toLocaleString('en-US')}${UI.unit()}`} />
             <StatBox label="Sets" value={LB.doneSetCount(selected)} />
             <StatBox label="Duration" value={selected.durationMinutes ? `${selected.durationMinutes}m` : '—'} />
           </div>
@@ -1390,7 +1390,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                         borderRadius: 4, padding: '2px 8px',
                         border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
                       }}>
-                        {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                        {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
                       </span>
                     );
                   })}
@@ -1400,7 +1400,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                     <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
                     {lastSets.map((s, j) => (
                       <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `0.5px solid ${UI.hair}` }}>
-                        {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                        {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
                       </span>
                     ))}
                     <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
@@ -1432,7 +1432,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
               <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
               <div style={{ fontSize: 11, color: UI.inkFaint }}>{fmtDate(s.date)} · {LB.doneSetCount(s)} sets</div>
             </div>
-            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(vol).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span></span>
+            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(vol).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span></span>
             <ChevronRight />
           </div>
         );
@@ -1638,8 +1638,8 @@ function CheckInTrendCards({ recent }) {
       {chartModal && <LineChartSheet {...chartModal} onClose={() => setChartModal(null)} />}
       <div className="micro" style={{ color: UI.inkFaint }}>TRENDS — {n} CHECK-IN{n !== 1 ? 'S' : ''}</div>
       <TrendSection label="WEIGHT">
-        <TrendCard label="Avg last week" icon="fa-weight-scale" values={recent.map(c => c.weightAvgLastWeek)} format={v => `${Math.round(v * 100) / 100}kg`} invertColor={false} />
-        <TrendCard label="Today" icon="fa-weight-scale" values={recent.map(c => c.weightToday)} format={v => `${Math.round(v * 100) / 100}kg`} invertColor={false} />
+        <TrendCard label="Avg last week" icon="fa-weight-scale" values={recent.map(c => c.weightAvgLastWeek)} format={v => `${Math.round(v * 100) / 100}${UI.unit()}`} invertColor={false} />
+        <TrendCard label="Today" icon="fa-weight-scale" values={recent.map(c => c.weightToday)} format={v => `${Math.round(v * 100) / 100}${UI.unit()}`} invertColor={false} />
       </TrendSection>
       <TrendSection label="MARKERS">
         <TrendCard label="Hunger" icon="fa-bowl-food" values={recent.map(c => c.hunger)} format={v => `${v}`} invertColor={true} />
@@ -2420,7 +2420,7 @@ function CheckInCard({ ci, defaultOpen = false }) {
           <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>Week of {fmtWeek(ci.weekStart)}</div>
           {ci.weightToday != null && (
             <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginTop: 2 }}>
-              {ci.weightToday} kg{ci.weightAvgLastWeek != null ? ` · avg ${ci.weightAvgLastWeek} kg` : ''}
+              {ci.weightToday} {UI.unit()}{ci.weightAvgLastWeek != null ? ` · avg ${ci.weightAvgLastWeek} ${UI.unit()}` : ''}
             </div>
           )}
         </div>
@@ -2467,8 +2467,8 @@ function CheckInCard({ ci, defaultOpen = false }) {
             <div>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>WEIGHT</div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <StatPill label="Today" value={`${ci.weightToday} kg`} />
-                {ci.weightAvgLastWeek != null && <StatPill label="Last week avg" value={`${ci.weightAvgLastWeek} kg`} />}
+                <StatPill label="Today" value={`${ci.weightToday} ${UI.unit()}`} />
+                {ci.weightAvgLastWeek != null && <StatPill label="Last week avg" value={`${ci.weightAvgLastWeek} ${UI.unit()}`} />}
               </div>
             </div>
           )}
@@ -2615,11 +2615,11 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         <SectionHead label="WEIGHT *" />
         <div style={{ display: 'flex', gap: 8 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Today (kg)</div>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Today ({UI.unit()})</div>
             <input type="number" step="0.1" placeholder="–" value={form.weightToday} onChange={e => set('weightToday', e.target.value)} style={inputStyle} />
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Last week avg (kg)</div>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Last week avg ({UI.unit()})</div>
             <input type="number" step="0.1" placeholder="–" value={form.weightAvgLastWeek} onChange={e => set('weightAvgLastWeek', e.target.value)} style={inputStyle} />
           </div>
         </div>

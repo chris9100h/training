@@ -814,6 +814,11 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus }) {
   );
 }
 
+// Weight unit label ('kg' or 'lbs'). Pure display label — the stored number is
+// the same regardless of unit (lbs users enter lbs directly, no conversion).
+// Kept in sync with store.settings.unit by app.jsx on every render.
+UI.unit = () => (typeof window !== 'undefined' && window.__UNIT) || 'kg';
+
 Object.assign(window, {
   UI, Screen, TopBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty,
   ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,

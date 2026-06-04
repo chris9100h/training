@@ -320,7 +320,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
               </span>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
                 {seedSets.map((st, si) => {
-                  const kg = st.kg != null ? `${st.kg}kg` : '—';
+                  const kg = st.kg != null ? `${st.kg}${UI.unit()}` : '—';
                   const reps = isUni
                     ? `L${st.repsL ?? it.reps}/R${st.repsR ?? it.reps}`
                     : `${st.reps ?? it.reps}`;

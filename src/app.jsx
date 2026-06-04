@@ -608,6 +608,10 @@ function App() {
     );
   }
 
+  // Expose the weight-unit label globally so UI.unit() can read it anywhere
+  // (display-only; the stored numbers stay the same).
+  window.__UNIT = store?.settings?.unit || 'kg';
+
   return (
     <>
       <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>

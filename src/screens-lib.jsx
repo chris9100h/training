@@ -207,7 +207,7 @@ function LibraryScreen({ store, setStore, go }) {
                 <div className="display" style={{ fontSize: 19, color: isToday ? UI.gold : UI.ink, lineHeight: 1.1, marginBottom: 3 }}>{ex.name}</div>
                 <div className="num" style={{ fontSize: 10, color: isToday ? UI.gold : UI.inkFaint, letterSpacing: '0.05em', marginBottom: 4 }}>
                   {isToday ? 'today' : `${days}d ago`}
-                  {top && ` · ${top.kg}kg × ${LB.effReps(top) ?? '?'}`}
+                  {top && ` · ${top.kg}${UI.unit()} × ${LB.effReps(top) ?? '?'}`}
                 </div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                   {ex.tags?.map(t => <Pill key={t}>{t}</Pill>)}
@@ -655,9 +655,9 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
 
         {/* Stats — SubDials */}
         <div style={{ display: 'flex', justifyContent: 'space-around', padding: '6px 0' }}>
-          <SubDial label="1RM PR" value={pr ? Math.round(pr) : '—'} sub="kg" size={90} gold />
+          <SubDial label="1RM PR" value={pr ? Math.round(pr) : '—'} sub={UI.unit()} size={90} gold />
           <SubDial label="Sessions" value={history.length} size={90} />
-          <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub="kg" size={90} gold />
+          <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub={UI.unit()} size={90} gold />
         </div>
 
         {points.length > 1 && <ProgressChart points={points} />}
@@ -1014,7 +1014,7 @@ function StatsTab({ store, sessions, go }) {
         <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>ALL TIME</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <StatCard label="Sessions" value={sessions.length} />
-          <StatCard label="Avg Volume" value={Math.round(avgVol).toLocaleString('en-US')} sub="kg / session" />
+          <StatCard label="Avg Volume" value={Math.round(avgVol).toLocaleString('en-US')} sub={`${UI.unit()} / session`} />
           <StatCard label="Avg Duration" value={avgDuration || '—'} sub={avgDuration ? 'min' : ''} compact />
           <StatCard label="Longest Session" value={maxDuration || '—'} sub={maxDuration ? 'min' : ''} compact />
           <div style={{ gridColumn: '1 / -1', background: UI.bgInset, borderRadius: 4, padding: '16px 14px', textAlign: 'center', border: `1px solid ${UI.hair}` }}>
@@ -1064,7 +1064,7 @@ function StatsTab({ store, sessions, go }) {
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div className="num" style={{ fontSize: 22, color: UI.gold }}>{Math.round(LB.totalVolume(bestSession)).toLocaleString('en-US')}</div>
-                <div className="micro" style={{ color: UI.inkFaint }}>kg</div>
+                <div className="micro" style={{ color: UI.inkFaint }}>{UI.unit()}</div>
               </div>
             </div>
           </Frame>
@@ -1188,7 +1188,7 @@ function HistoryScreen({ store, go, initialTab }) {
                     <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
                       {Math.round(vol).toLocaleString('en-US')}
                     </div>
-                    <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>kg</div>
+                    <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>{UI.unit()}</div>
                   </div>
                 </div>
                 </React.Fragment>
@@ -1387,7 +1387,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 <div className="knurl" style={{ marginBottom: 16 }} />
                 <div style={{ display: 'flex', gap: 0 }}>
                   {[
-                    { label: 'Volume', value: `${Math.round(vol).toLocaleString('en-US')} kg`, gold: true },
+                    { label: 'Volume', value: `${Math.round(vol).toLocaleString('en-US')} ${UI.unit()}`, gold: true },
                     ...(duration ? [{ label: 'Duration', value: `${duration} min`, gold: false }] : []),
                     { label: 'Sets', value: String(LB.doneSetCount(s)), gold: false },
                   ].map((st, k, arr) => (
@@ -1410,13 +1410,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {!justFinished && !capturing && (
           <div style={{ display: 'flex', justifyContent: 'space-around' }}>
             <SubDial label="Duration" value={duration ?? '—'} sub={duration ? 'min' : ''} size={90} />
-            <SubDial label="Volume" value={Math.round(vol).toLocaleString('en-US')} sub="kg" size={90} gold />
+            <SubDial label="Volume" value={Math.round(vol).toLocaleString('en-US')} sub={UI.unit()} size={90} gold />
             <SubDial label="Sets" value={LB.doneSetCount(s)} size={90} />
           </div>
         )}
         {capturing && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', marginTop: -8 }}>
-            {[['DURATION', duration != null ? `${duration} min` : '—', false], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} kg`, true], ['SETS', LB.doneSetCount(s), false]].map(([label, value, gold], idx) => (
+            {[['DURATION', duration != null ? `${duration} min` : '—', false], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} ${UI.unit()}`, true], ['SETS', LB.doneSetCount(s), false]].map(([label, value, gold], idx) => (
               <div key={label} style={{ padding: '6px 12px', borderRight: idx < 2 ? `0.5px solid ${UI.hair}` : 'none', textAlign: 'center' }}>
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{label}</div>
                 <div className="num" style={{ fontSize: 16, color: gold ? UI.gold : UI.ink }}>{value}</div>
@@ -1428,7 +1428,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {/* Volume delta vs previous same-day session */}
         {volDelta != null && (
           <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
-            {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} kg · vs last {s.dayName}
+            {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} · vs last {s.dayName}
           </div>
         )}
 
@@ -1504,7 +1504,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           color: isWarm ? UI.inkFaint : highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,
                         }}>
                           {isWarm && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkFaint, marginRight: 4 }}>W</span>}
-                          {st.kg ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>kg</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
+                          {st.kg ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
                         </span>
                       );
                     })}
@@ -1645,7 +1645,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
                               placeholder="—" onFocus={e => e.target.select()}
                               onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
                               style={numInputStyle} />
-                            <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>kg</span>
+                            <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>{UI.unit()}</span>
                             <span style={{ color: UI.hair, fontSize: 14, margin: '0 2px', fontFamily: UI.fontDisplay, fontStyle: 'italic' }}>×</span>
                             {isUnilateral ? (
                               <>
@@ -1723,7 +1723,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
             const repsStr = (s.repsL != null || s.repsR != null)
               ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
               : (s.reps ?? '—');
-            return `${s.kg != null ? s.kg + 'kg' : '—'} × ${repsStr}`;
+            return `${s.kg != null ? s.kg + UI.unit() : '—'} × ${repsStr}`;
           };
           return (
             <div key={ei} style={{ marginBottom: 20 }}>
@@ -1959,7 +1959,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                     <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>
                       {s.kg != null ? s.kg : '—'}
                     </span>
-                    {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em' }}>kg</span>}
+                    {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em' }}>{UI.unit()}</span>}
                   </div>
                   <div style={{ textAlign: 'center' }}>
                     {unilateral ? (
@@ -2022,7 +2022,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                           {s.skipped
                             ? <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>skipped</span>
                             : <><span className="num" style={{ fontSize: 16, color: UI.inkSoft }}>{s.kg != null ? s.kg : '—'}</span>
-                               {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>kg</span>}</>
+                               {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{UI.unit()}</span>}</>
                           }
                         </div>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, justifyContent: 'center' }}>

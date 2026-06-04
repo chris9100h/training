@@ -1220,8 +1220,9 @@ async function submitCheckin(coachingId, clientId, data, userId, weekStartArg = 
     const lines = [weekLabel, '------------'];
     // Weight
     const wLines = [];
-    if (data.weightToday != null) wLines.push(`Weight: ${data.weightToday} kg`);
-    if (data.weightAvgLastWeek != null) wLines.push(`Avg last week: ${data.weightAvgLastWeek} kg`);
+    const wUnit = (typeof window !== 'undefined' && window.__UNIT) || 'kg';
+    if (data.weightToday != null) wLines.push(`Weight: ${data.weightToday} ${wUnit}`);
+    if (data.weightAvgLastWeek != null) wLines.push(`Avg last week: ${data.weightAvgLastWeek} ${wUnit}`);
     if (wLines.length) lines.push('', ...wLines);
     // Training
     const tLines = [];
