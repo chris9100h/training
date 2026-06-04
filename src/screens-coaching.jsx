@@ -2405,7 +2405,7 @@ function MarkerRow({ label, value, onChange, readOnly }) {
   );
 }
 
-function CheckInCard({ ci, defaultOpen = false }) {
+function CheckInCard({ ci, defaultOpen = false, onEdit, onDelete, confirmingDelete = false }) {
   const [open, setOpen] = useStateC(defaultOpen);
   const hasActivity = ci.daysTrained != null || ci.steps != null || ci.cardioMinutes != null || ci.performanceVsLastWeek != null;
   const hasMarkers = ci.hunger != null || ci.sleepQuality != null || ci.lifeStress != null || ci.workStress != null || ci.tiredness != null;
@@ -2505,6 +2505,22 @@ function CheckInCard({ ci, defaultOpen = false }) {
           {ci.generalNote && (
             <div><div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>NOTE</div>
               <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ci.generalNote}</div>
+            </div>
+          )}
+
+          {/* Edit / delete (only in the client/self view, which passes the handlers) */}
+          {(onEdit || onDelete) && (
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 12, borderTop: `0.5px solid ${UI.hair}` }}>
+              {onDelete && (
+                <button onClick={onDelete}
+                  style={{ background: confirmingDelete ? 'rgba(var(--danger-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${confirmingDelete ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 8, padding: '8px 16px', fontSize: 12, color: confirmingDelete ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                  {confirmingDelete ? 'Confirm?' : 'Delete'}
+                </button>
+              )}
+              {onEdit && (
+                <button onClick={onEdit}
+                  style={{ background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.4)', borderRadius: 8, padding: '8px 18px', fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Edit</button>
+              )}
             </div>
           )}
         </div>
@@ -2795,18 +2811,8 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
     );
   }
 
-  // ── Overview: every check-in is editable/deletable ──
+  // ── Overview: every check-in is editable/deletable (edit/delete live inside each card) ──
   const recent = [...checkins].reverse();
-  const editBar = (ci) => (
-    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingRight: 4 }}>
-      <button onClick={() => handleDelete(ci)} disabled={deleting}
-        style={{ background: confirmDelete === ci.id ? 'rgba(var(--danger-rgb),0.12)' : UI.bgInset, border: `0.5px solid ${confirmDelete === ci.id ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 8, padding: '8px 16px', fontSize: 12, color: confirmDelete === ci.id ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-        {confirmDelete === ci.id ? 'Confirm?' : 'Delete'}
-      </button>
-      <button onClick={() => setEditTarget(ci)}
-        style={{ background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.4)', borderRadius: 8, padding: '8px 18px', fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Edit</button>
-    </div>
-  );
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
@@ -2819,10 +2825,7 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
 
         <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>THIS WEEK</div>
         {thisWeek ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <CheckInCard ci={thisWeek} defaultOpen />
-            {editBar(thisWeek)}
-          </div>
+          <CheckInCard ci={thisWeek} defaultOpen onEdit={() => setEditTarget(thisWeek)} onDelete={() => handleDelete(thisWeek)} confirmingDelete={confirmDelete === thisWeek.id} />
         ) : (
           <button onClick={() => setEditTarget('new')}
             style={{ background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
@@ -2834,10 +2837,7 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
           <>
             <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>PREVIOUS CHECK-INS</div>
             {past.map(ci => (
-              <div key={ci.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <CheckInCard ci={ci} />
-                {editBar(ci)}
-              </div>
+              <CheckInCard key={ci.id} ci={ci} onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
             ))}
           </>
         )}
