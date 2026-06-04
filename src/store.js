@@ -733,8 +733,7 @@ function doneSetCount(session) {
 }
 
 // Index of the latest exercise whose entry has at least one completed set —
-// used by the Spectator screen to highlight the active row when no
-// currentExIdx broadcast has arrived yet.
+// used by the Spectator screen to highlight the active row from polled session data.
 function inferCurrentExIdx(entries) {
   if (!entries?.length) return 0;
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -890,18 +889,12 @@ function clearLocal(userId) {
 
 let _realtimeChannel = null;
 
-function subscribeToChanges(userId, onSession, onExIdx, onSessionNav, onCoachingNote, onCoachingInvite) {
-  const mapRow = row => ({
-    id: row.id,
-    scheduleId: row.schedule_id,
-    dayId: row.day_id,
-    dayName: row.day_name,
-    date: row.date,
-    startedAt: row.started_at ?? null,
-    ended: row.ended,
-    entries: row.entries,
-    durationMinutes: row.duration_minutes ?? null,
-  });
+// Realtime: coaching invites (zane_coaching) and coaching messages
+// (zane_coaching_notes). Live workout sync across a user's own devices was
+// removed — the local store is the single source of truth for a session, and
+// coaches watch a client's live session via polling (get_active_session_detail),
+// not this channel.
+function subscribeToChanges(userId, onCoachingNote, onCoachingInvite) {
   const mapNote = n => ({
     id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
     type: n.type, entityId: n.entity_id, entityName: n.entity_name,
@@ -909,8 +902,6 @@ function subscribeToChanges(userId, onSession, onExIdx, onSessionNav, onCoaching
   });
   _realtimeChannel = _supabase
     .channel(`rt-${userId}`)
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_sessions', filter: `user_id=eq.${userId}` }, p => onSession(mapRow(p.new)))
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'zane_sessions', filter: `user_id=eq.${userId}` }, p => onSession(mapRow(p.new)))
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_coaching_notes' }, p => {
       if (p.new.author_id !== userId) onCoachingNote?.(mapNote(p.new));
     })
@@ -920,24 +911,8 @@ function subscribeToChanges(userId, onSession, onExIdx, onSessionNav, onCoaching
     .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `coach_id=eq.${userId}` }, () => {
       onCoachingInvite?.();
     })
-    .on('broadcast', { event: 'ex_idx' }, ({ payload }) => onExIdx?.(payload))
-    .on('broadcast', { event: 'session_nav' }, ({ payload }) => onSessionNav?.(payload))
     .subscribe();
   return () => { _supabase.removeChannel(_realtimeChannel); _realtimeChannel = null; };
-}
-
-function broadcastExIdx(sessionId, exIdx) {
-  if (!_realtimeChannel) return;
-  try {
-    _realtimeChannel.send({ type: 'broadcast', event: 'ex_idx', payload: { sessionId, exIdx } });
-  } catch (e) {}
-}
-
-function broadcastSessionNav(action, sessionId) {
-  if (!_realtimeChannel) return;
-  try {
-    _realtimeChannel.send({ type: 'broadcast', event: 'session_nav', payload: { action, sessionId } });
-  } catch (e) {}
 }
 
 // Returns { kg, reps } suggestion when all last sets hit top of rep range, null otherwise.
@@ -1327,7 +1302,7 @@ window.LB = {
   effReps, e1rm, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
-  subscribeToChanges, broadcastExIdx, broadcastSessionNav,
+  subscribeToChanges,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,

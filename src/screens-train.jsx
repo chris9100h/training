@@ -377,21 +377,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
     }));
   };
 
-  // Record local done-edits (check & uncheck) with a timestamp so the realtime
-  // merge in app.jsx can protect them against stale events that arrive out of
-  // order — in BOTH directions. Without this, a delayed done=true event
-  // re-checks a set the user just unchecked, and the completion-protection then
-  // locks in that wrong state.
-  const stampSetDone = (setIdx, done) => {
-    if (!window._setDoneEdits) window._setDoneEdits = {};
-    window._setDoneEdits[`${session.id}:${exIdx}:${setIdx}`] = { done, t: Date.now() };
-  };
-
   const updateSet = (setIdx, patch) => {
-    if ('done' in patch) {
-      _log(`updateSet(${setIdx}, done=${patch.done})`);
-      stampSetDone(setIdx, patch.done);
-    }
+    if ('done' in patch) _log(`updateSet(${setIdx}, done=${patch.done})`);
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
@@ -425,7 +412,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
     armKbShield();
     recentCompleteRef.current[setIdx] = Date.now();
     lastCompleteRef.current = Date.now();
-    stampSetDone(setIdx, true);
     _log(`completeSet(${setIdx}) → lastCompleteRef stamped`);
 
     // Build the done patch inside the functional updater so we can read the
@@ -703,7 +689,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       sessions: s.sessions.filter(x => x.id !== session.id),
       inProgress: null,
     }));
-    LB.broadcastSessionNav('cancel', session.id);
     go({ name: 'home' });
   };
 
@@ -861,7 +846,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
 
   useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); }, [exIdx, sessionId]);
   useEffectT(() => () => stopTempo(), []);
-  useEffectT(() => { if (userId && sessionId) LB.broadcastExIdx(sessionId, exIdx); }, [exIdx]);
 
   // Log ALL document pointer/click events — captures ghost-clicks and shows where they land.
   useEffectT(() => {

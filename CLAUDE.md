@@ -126,7 +126,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`enable_self_coaching()`** → `text` — legt (idempotent) eine Self-Coaching-Zeile (`coach_id = client_id = auth.uid()`, status active, id-Präfix `self_`) an und gibt deren id zurück. Aktiviert „be your own coach"
 
-**Realtime:** `zane_sessions` und `zane_coaching` sind in der `supabase_realtime`-Publikation — ermöglicht Cross-Device Live-Sync laufender Sessions und Live-Coaching-Einladungen.
+**Realtime:** `zane_coaching` und `zane_coaching_notes` sind in der `supabase_realtime`-Publikation — ermöglicht Live-Coaching-Einladungen und -Nachrichten. **Cross-Device Live-Sync laufender Sessions wurde entfernt** (der lokale Store ist die alleinige Quelle für eine laufende Session; ein Coach sieht die Live-Session eines Clients per Polling via `get_active_session_detail`, nicht über Realtime). `subscribeToChanges(userId, onCoachingNote, onCoachingInvite)` abonniert nur noch die Coaching-Tabellen.
 
 ## Deployment
 

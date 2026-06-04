@@ -451,14 +451,16 @@ $$;
 
 -- ── Realtime ──────────────────────────────────────────────────────────────────
 
--- Enable Realtime on zane_sessions for cross-device live sync.
+-- Enable Realtime on zane_coaching_notes so participants receive live messages.
+-- (Cross-device live workout sync was removed; zane_sessions is intentionally
+-- not in the realtime publication — the local store owns the active session.)
 DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_publication_tables
-    WHERE pubname = 'supabase_realtime' AND tablename = 'zane_sessions'
+    WHERE pubname = 'supabase_realtime' AND tablename = 'zane_coaching_notes'
   ) THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE zane_sessions;
+    ALTER PUBLICATION supabase_realtime ADD TABLE zane_coaching_notes;
   END IF;
 END;
 $$;

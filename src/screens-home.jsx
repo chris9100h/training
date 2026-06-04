@@ -315,7 +315,6 @@ function RecentBannerDay({ banner, store, setStore, go, sch, onOpenSkipSheet }) 
         });
         const session = { id: LB.uid(), scheduleId: sch.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
         setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
-        LB.broadcastSessionNav('start', session.id);
         go({ name: 'train', sessionId: session.id });
       }} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 4, background: 'transparent', border: `1px solid ${UI.hairStrong}`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
         Log
@@ -717,7 +716,6 @@ function HomeScreen({ store, setStore, go, userId }) {
       cyclePos,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
-    LB.broadcastSessionNav('start', session.id);
     go({ name: 'train', sessionId: session.id });
   };
 
@@ -1164,7 +1162,6 @@ function HomeScreen({ store, setStore, go, userId }) {
               });
               const session = { id: LB.uid(), scheduleId: sch.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
               setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
-              LB.broadcastSessionNav('start', session.id);
               go({ name: 'train', sessionId: session.id });
             }}>Log session</Btn>
             <Btn kind="ghost" onClick={() => {
