@@ -156,7 +156,6 @@ function App() {
   const pendingStore              = useRefA(null);  // latest state awaiting sync
   const syncing                   = useRefA(false); // true while a sync is in flight
   const localDirty                = useRefA(false); // true if user changed store after cache load
-  const pendingTrainNav           = useRefA(null);  // sessionId to navigate to once its data arrives
 
   useEffectA(() => {
     if (store?.user?.email && store?.user?.name) {
@@ -403,81 +402,12 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Real-time session sync across devices.
-  // When another device writes to zane_sessions, apply the update locally.
-  // For the active session: update DB fields (entries, ended) but keep local
-  // UI state (currentExIdx, restStart) so the training screen isn't disrupted.
+  // Realtime: coaching invites + messages only. (Cross-device live workout sync
+  // was removed — the local store is the single source of truth for a session.)
   useEffectA(() => {
     if (!userId) return;
     return LB.subscribeToChanges(
       userId,
-      (session) => {
-        setStore(s => {
-          if (!s) return s;
-          const idx = s.sessions.findIndex(x => x.id === session.id);
-          if (idx === -1) {
-            // New session — navigate if we were waiting for it
-            if (pendingTrainNav.current === session.id) {
-              pendingTrainNav.current = null;
-              setRoute({ name: 'train', sessionId: session.id });
-            }
-            return { ...s, sessions: [...s.sessions, session] };
-          }
-          const existing = s.sessions[idx];
-          const sessions = [...s.sessions];
-          // Merge entries: don't let a stale server write uncheck a locally-completed set.
-          // kbApply writes done:false to Supabase on every keystroke; if the realtime event
-          // from that write arrives after completeSet has already set done:true locally,
-          // it would silently revert the checkbox without going through updateSession.
-          const mergedEntries = (session.entries || []).map((serverEntry, ei) => {
-            const localEntry = existing.entries?.[ei];
-            if (!localEntry) return serverEntry;
-            return {
-              ...serverEntry,
-              sets: (serverEntry.sets || []).map((serverSet, si) => {
-                const localSet = localEntry.sets?.[si];
-                if (localSet?.done === true && serverSet.done === false) {
-                  if (window._dbg) window._dbg.push({ t: Date.now(), msg: `⚠ RT ex${ei} set${si}: server done=false blocked (local=true)` });
-                  return localSet;
-                }
-                return serverSet;
-              }),
-            };
-          });
-          sessions[idx] = { ...existing, entries: mergedEntries, ended: session.ended, startedAt: session.startedAt, durationMinutes: session.durationMinutes ?? existing.durationMinutes ?? null };
-          // Session finished remotely — clear inProgress and go to summary
-          if (session.ended && s.inProgress === session.id) {
-            setRoute({ name: 'session', sessionId: session.id });
-            return { ...s, sessions, inProgress: null };
-          }
-          return { ...s, sessions };
-        });
-      },
-      ({ sessionId, exIdx }) => {
-        setStore(s => {
-          if (!s) return s;
-          const idx = s.sessions.findIndex(x => x.id === sessionId);
-          if (idx === -1) return s;
-          const existing = s.sessions[idx];
-          if (existing.currentExIdx === exIdx) return s;
-          const sessions = [...s.sessions];
-          sessions[idx] = { ...existing, currentExIdx: exIdx };
-          return { ...s, sessions };
-        });
-      },
-      ({ action, sessionId }) => {
-        if (action === 'start') {
-          // Mark session as pending navigation; actual nav fires when postgres_changes INSERT arrives
-          pendingTrainNav.current = sessionId;
-          setStore(s => (s && !s.inProgress) ? { ...s, inProgress: sessionId } : s);
-        } else if (action === 'cancel') {
-          pendingTrainNav.current = null;
-          setStore(s => s?.inProgress !== sessionId ? s : {
-            ...s, inProgress: null, sessions: s.sessions.filter(x => x.id !== sessionId),
-          });
-          setRoute({ name: 'home' });
-        }
-      },
       (note) => {
         setStore(s => {
           if (!s?.coaching) return s;
@@ -633,6 +563,7 @@ function App() {
 
   const showCoaching = !!(
     store?.settings?.showCoachingTab ||
+    (store?.settings?.beYourOwnCoach && store?.coaching?.asSelf) ||
     (store?.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0 ||
     store?.coaching?.asClient?.status === 'active'
   );
@@ -676,6 +607,10 @@ function App() {
       </div>
     );
   }
+
+  // Expose the weight-unit label globally so UI.unit() can read it anywhere
+  // (display-only; the stored numbers stay the same).
+  window.__UNIT = store?.settings?.unit || 'kg';
 
   return (
     <>

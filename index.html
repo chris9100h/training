@@ -240,7 +240,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/training/sw.js').catch(() => {});
+      navigator.serviceWorker.register('sw.js').catch(() => {});
     });
   }
 </script>

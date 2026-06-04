@@ -412,18 +412,53 @@ function SettingsScreen({ store, setStore, go, userId }) {
         {/* ─── Coaching ─── */}
         {(() => {
           const hasCoaching = !!((store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0 || store.coaching?.asClient?.status === 'active');
-          const coachingTabOn = !!(store.settings?.showCoachingTab || hasCoaching);
+          const selfOn = !!store.settings?.beYourOwnCoach;
+          // Self implies the tab is pinned — keep the toggle (and the self toggle below) in sync even if show_coaching_tab drifted out of sync across devices.
+          const coachingTabOn = !!(store.settings?.showCoachingTab || hasCoaching || selfOn);
+
+          // Tab off ⇒ self off (coupled). Turning the tab off also disables self-coaching.
+          const toggleTab = () => {
+            const turningOff = coachingTabOn;
+            setStore(s => ({ ...s, settings: { ...s.settings, showCoachingTab: !coachingTabOn, ...(turningOff ? { beYourOwnCoach: false } : {}) } }));
+          };
+
+          // Be your own coach: create the self-coaching row on first enable, then
+          // refresh coaching state so the "Myself" view appears in the coaching tab.
+          const toggleSelf = async () => {
+            const next = !selfOn;
+            setStore(s => ({ ...s, settings: { ...s.settings, beYourOwnCoach: next } }));
+            if (next) {
+              try {
+                await LB.enableSelfCoaching();
+                const cs = await LB.reloadCoachingState(userId);
+                setStore(s => s ? { ...s, coaching: cs } : s);
+              } catch (e) {
+                setStore(s => ({ ...s, settings: { ...s.settings, beYourOwnCoach: false } }));
+              }
+            }
+          };
+
           return (
             <Frame style={{ padding: '12px 14px' }}>
               <SecHead label="Coaching" open={coachingOpen} onToggle={() => setCoachingOpen(v => !v)} />
               {coachingOpen && (
                 <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 0 }}>
                   <Row label="Coaching tab">
-                    <Toggle on={coachingTabOn} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, showCoachingTab: !coachingTabOn } }))} />
+                    <Toggle on={coachingTabOn} onToggle={toggleTab} />
                   </Row>
                   <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
                     Pin the coaching tab to the nav bar. Shows automatically when a coaching relationship is active.
                   </div>
+                  {coachingTabOn && (
+                    <>
+                      <Row label="Be your own coach">
+                        <Toggle on={selfOn} onToggle={toggleSelf} />
+                      </Row>
+                      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+                        Track your own training like a coach would — stats, nutrition, check-ins & notes, just for you.
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </Frame>
@@ -509,6 +544,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <Row label="Warmup sets in summary">
                 <Toggle on={showWarmupInSummary} onToggle={() => { const n = !showWarmupInSummary; setShowWarmupInSummary(n); setStore(s => ({ ...s, settings: { ...s.settings, showWarmupInSummary: n } })); }} />
               </Row>
+              <Row label="Use lbs (pounds)">
+                <Toggle on={store.settings?.unit === 'lbs'} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, unit: s.settings?.unit === 'lbs' ? 'kg' : 'lbs' } }))} />
+              </Row>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+                Show weights in lbs instead of kg. Display label only — enter values directly in lbs (no conversion of existing numbers).
+              </div>
             </div>
           )}
         </Frame>
@@ -672,7 +713,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, padding: '0 4px 8px', borderBottom: `0.5px solid ${UI.hair}` }}>
             <span className="micro">Equipment</span>
             <span className="micro" style={{ textAlign: 'center' }}>Increment</span>
-            <span className="micro" style={{ textAlign: 'center' }}>Max kg</span>
+            <span className="micro" style={{ textAlign: 'center' }}>Max {UI.unit()}</span>
           </div>
           {(window.EQUIPMENT_TYPES || []).map(({ key, label }) => {
             const cfg = store.settings?.equipmentConfig?.[key] ?? {};
@@ -682,11 +723,11 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{label}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: UI.bgInset, borderRadius: 4, padding: '6px 8px', border: `1px solid ${UI.hair}` }}>
                   <NumInput value={cfg.increment ?? null} placeholder="—" onChange={v => setField('increment', v)} style={{ fontSize: 13, width: '100%' }} />
-                  <span className="micro" style={{ flexShrink: 0 }}>kg</span>
+                  <span className="micro" style={{ flexShrink: 0 }}>{UI.unit()}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: UI.bgInset, borderRadius: 4, padding: '6px 8px', border: `1px solid ${UI.hair}` }}>
                   <NumInput value={cfg.maxKg ?? null} placeholder="—" onChange={v => setField('maxKg', v)} style={{ fontSize: 13, width: '100%' }} />
-                  <span className="micro" style={{ flexShrink: 0 }}>kg</span>
+                  <span className="micro" style={{ flexShrink: 0 }}>{UI.unit()}</span>
                 </div>
               </div>
             );

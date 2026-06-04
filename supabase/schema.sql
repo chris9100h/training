@@ -69,7 +69,9 @@ CREATE TABLE IF NOT EXISTS public.zane_user_settings (
   reminder_enabled         boolean NOT NULL DEFAULT false,
   reminder_time            text NOT NULL DEFAULT '07:00',
   next_reminder_at         timestamptz,
-  show_warmup_in_summary   boolean NOT NULL DEFAULT true
+  show_warmup_in_summary   boolean NOT NULL DEFAULT true,
+  show_coaching_tab        boolean NOT NULL DEFAULT false,
+  be_your_own_coach        boolean NOT NULL DEFAULT false
 );
 
 -- Pushover cancellation token — no RLS, never exposed to clients directly.
@@ -442,20 +444,23 @@ AS $$
   FROM zane_user_settings us
   INNER JOIN zane_coaching zc ON zc.client_id = us.user_id
   WHERE zc.coach_id = auth.uid()
+    AND zc.coach_id <> zc.client_id
     AND zc.status = 'active'
     AND us.in_progress_session_id IS NOT NULL;
 $$;
 
 -- ── Realtime ──────────────────────────────────────────────────────────────────
 
--- Enable Realtime on zane_sessions for cross-device live sync.
+-- Enable Realtime on zane_coaching_notes so participants receive live messages.
+-- (Cross-device live workout sync was removed; zane_sessions is intentionally
+-- not in the realtime publication — the local store owns the active session.)
 DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_publication_tables
-    WHERE pubname = 'supabase_realtime' AND tablename = 'zane_sessions'
+    WHERE pubname = 'supabase_realtime' AND tablename = 'zane_coaching_notes'
   ) THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE zane_sessions;
+    ALTER PUBLICATION supabase_realtime ADD TABLE zane_coaching_notes;
   END IF;
 END;
 $$;

@@ -586,7 +586,7 @@ function ClientCard({ client, go }) {
 // ─── CoachClientScreen ────────────────────────────────────────────────────────
 // Full coach view for a single client — 4 tabs: Overview, Plan, Sessions, Notes.
 
-function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName, initialTab, backRoute = 'settings' }) {
+function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName, initialTab, backRoute = 'settings', hideTopBar = false, isSelf = false }) {
   const [tab, setTab] = useStateC(initialTab || 'overview');
   const [selectedSession, setSelectedSession] = useStateC(null);
 
@@ -625,11 +625,15 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
 
   return (
     <Screen scroll={false}>
-      <TopBar
-        title={clientName}
-        sub={<span className="micro" style={{ color: 'var(--accent)', letterSpacing: '0.12em' }}>COACHING</span>}
-        onBack={() => go({ name: backRoute })}
-      />
+      {!hideTopBar && (
+        isSelf
+          ? <TopBar title="Coaching" />
+          : <TopBar
+              title={clientName}
+              sub={<span className="micro" style={{ color: 'var(--accent)', letterSpacing: '0.12em' }}>COACHING</span>}
+              onBack={() => go({ name: backRoute })}
+            />
+      )}
 
       {/* Tab bar */}
       <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0 }}>
@@ -653,8 +657,8 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
         <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
       ) : (
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          {/* Live training banner */}
-          {clientStore.inProgress && (
+          {/* Live training banner (not for self — no point watching yourself) */}
+          {clientStore.inProgress && !isSelf && (
             <div
               onClick={() => go({ name: 'spectator', targetUserId: clientId, userName: clientName })}
               style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: `rgba(var(--accent-rgb), 0.08)`, borderBottom: `0.5px solid rgba(var(--accent-rgb), 0.25)`, cursor: 'pointer' }}
@@ -667,7 +671,9 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'overview'   && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} onSelectSession={openSession} />}
           {tab === 'plan'       && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
           {tab === 'sessions'   && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
-          {tab === 'checkins'   && <ClientCheckInsTab coachingId={coachingId} />}
+          {tab === 'checkins'   && (isSelf
+            ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} />
+            : <ClientCheckInsTab coachingId={coachingId} />)}
           {tab === 'nutrition'  && <ClientNutritionTab coachingId={coachingId} userId={userId} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
@@ -838,9 +844,13 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       monday.setHours(0, 0, 0, 0);
       return ended.filter(s => new Date(s.ended) >= monday);
     } else {
-      const cycleLen = activeSch.days?.length || 7;
-      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - cycleLen);
-      return ended.filter(s => new Date(s.ended) >= cutoff);
+      // Start of the *current* cycle run = today minus today's position in the
+      // cycle. A rolling cycleLen-day window would wrongly drag in the previous
+      // run's sessions (e.g. on day 0 it would still show the whole last cycle).
+      const pos = cyclePosFn(clientStore, new Date());
+      const cycleStart = new Date(); cycleStart.setHours(0, 0, 0, 0);
+      cycleStart.setDate(cycleStart.getDate() - pos);
+      return ended.filter(s => new Date(s.ended) >= cycleStart);
     }
   }, [clientStore]);
 
@@ -849,7 +859,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       {/* Top stats */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, padding: '0 4px' }}>
         <StatBox label="Adherence (6w)" value={overallAdherence != null ? `${overallAdherence}%` : '—'} gold={overallAdherence >= 80} onClick={() => setChartOpen('adherence')} />
-        <StatBox label="Avg Volume" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}kg` : '—'} onClick={() => setChartOpen('volume')} />
+        <StatBox label="Avg Volume" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}${UI.unit()}` : '—'} onClick={() => setChartOpen('volume')} />
         <StatBox label="Sessions (30d)" value={last30.length} onClick={() => setChartOpen('sessions')} />
       </div>
 
@@ -891,7 +901,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
             {trainedToday && todaySession ? (
               <div>
                 <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-                  <StatBox label="Volume" value={`${Math.round(LB.totalVolume(todaySession)).toLocaleString('en-US')}kg`} />
+                  <StatBox label="Volume" value={`${Math.round(LB.totalVolume(todaySession)).toLocaleString('en-US')}${UI.unit()}`} />
                   <StatBox label="Sets" value={LB.doneSetCount(todaySession)} />
                   <StatBox label="Duration" value={todaySession.durationMinutes ? `${todaySession.durationMinutes}m` : '—'} />
                 </div>
@@ -917,7 +927,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                                 borderRadius: 4, padding: '2px 8px',
                                 border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
                               }}>
-                                {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                                {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
                               </span>
                             );
                           })}
@@ -927,7 +937,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                             <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
                             {lastSets.map((s, j) => (
                               <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `0.5px solid ${UI.hair}` }}>
-                                {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                                {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
                               </span>
                             ))}
                             <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
@@ -957,7 +967,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                         {hasWeight ? seeds.map((s, j) => (
                           <span key={j} className="num" style={{ fontSize: 12, color: UI.ink, background: UI.bgInset, borderRadius: 4, padding: '3px 8px', border: `0.5px solid ${UI.hairStrong}` }}>
-                            {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                            {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
                           </span>
                         )) : (
                           <span style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi }}>First time — no weight data yet</span>
@@ -1028,7 +1038,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
               <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{fmtDate(s.date)}</div>
             </div>
-            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(LB.totalVolume(s)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span></span>
+            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(LB.totalVolume(s)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span></span>
             <ChevronRight />
           </div>
         ))
@@ -1093,7 +1103,7 @@ function RollingVolumeChart({ sessions, planStartDate }) {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
         <span style={{ fontSize: 11, color: trend >= 0 ? '#7bc47b' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>
           <i className={`fa-solid fa-arrow-trend-${trend >= 0 ? 'up' : 'down'}`} style={{ marginRight: 4 }} />
-          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}kg since plan start
+          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}{UI.unit()} since plan start
         </span>
       </div>
       <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`}>
@@ -1109,8 +1119,8 @@ function RollingVolumeChart({ sessions, planStartDate }) {
         <circle cx={px(points.length - 1)} cy={py(points[points.length - 1].avg)} r={3} fill="var(--accent)" />
         <text x={0} y={H + 14} fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(points[0].date)}</text>
         <text x={W} y={H + 14} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(points[points.length - 1].date)}</text>
-        <text x={W - 2} y={Math.max(py(maxV) - 3, 8)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{maxV.toLocaleString('en-US')}kg</text>
-        <text x={W - 2} y={Math.min(py(minV) + 10, H - 2)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{minV.toLocaleString('en-US')}kg</text>
+        <text x={W - 2} y={Math.max(py(maxV) - 3, 8)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{maxV.toLocaleString('en-US')}{UI.unit()}</text>
+        <text x={W - 2} y={Math.min(py(minV) + 10, H - 2)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{minV.toLocaleString('en-US')}{UI.unit()}</text>
       </svg>
     </div>
   );
@@ -1354,7 +1364,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
         </div>
         <div style={{ padding: '12px 12px 32px' }}>
           <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-            <StatBox label="Volume" value={`${Math.round(vol).toLocaleString('en-US')}kg`} />
+            <StatBox label="Volume" value={`${Math.round(vol).toLocaleString('en-US')}${UI.unit()}`} />
             <StatBox label="Sets" value={LB.doneSetCount(selected)} />
             <StatBox label="Duration" value={selected.durationMinutes ? `${selected.durationMinutes}m` : '—'} />
           </div>
@@ -1380,7 +1390,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                         borderRadius: 4, padding: '2px 8px',
                         border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
                       }}>
-                        {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                        {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
                       </span>
                     );
                   })}
@@ -1390,7 +1400,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                     <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
                     {lastSets.map((s, j) => (
                       <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `0.5px solid ${UI.hair}` }}>
-                        {s.kg ?? '—'}kg × {s.reps ?? s.repsL ?? '—'}
+                        {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
                       </span>
                     ))}
                     <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
@@ -1422,7 +1432,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
               <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
               <div style={{ fontSize: 11, color: UI.inkFaint }}>{fmtDate(s.date)} · {LB.doneSetCount(s)} sets</div>
             </div>
-            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(vol).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>kg</span></span>
+            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(vol).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span></span>
             <ChevronRight />
           </div>
         );
@@ -1444,6 +1454,10 @@ function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) 
   const maxV = Math.max(...vals);
   const range = maxV - minV || 1;
   const n = entries.length;
+  // Thin out point labels (value + date) so they don't overlap when there are
+  // many check-ins — show roughly 5 across, always including the last point.
+  const labelStep = Math.max(1, Math.round(n / 5));
+  const showLabel = i => i === n - 1 || i % labelStep === 0;
 
   const xOf = i => padX + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
   const yOf = v => padTop + (1 - (v - minV) / range) * plotH;
@@ -1478,11 +1492,12 @@ function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) 
               const cx = xOf(i).toFixed(1);
               const cy = yOf(e.value).toFixed(1);
               const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+              const lbl = showLabel(i);
               return (
                 <g key={i}>
-                  <circle cx={cx} cy={cy} r="4" fill="var(--accent)" />
-                  <text x={cx} y={(yOf(e.value) - 9).toFixed(1)} textAnchor="middle" fontSize="9" fontFamily={UI.fontUi} fill={UI.ink}>{format(e.value)}</text>
-                  <text x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtD(e.weekStart)}</text>
+                  <circle cx={cx} cy={cy} r={lbl ? '4' : '2.5'} fill="var(--accent)" />
+                  {lbl && <text x={cx} y={(yOf(e.value) - 9).toFixed(1)} textAnchor="middle" fontSize="9" fontFamily={UI.fontUi} fill={UI.ink}>{format(e.value)}</text>}
+                  {lbl && <text x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtD(e.weekStart)}</text>}
                 </g>
               );
             })}
@@ -1500,7 +1515,7 @@ function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) 
 
 function CheckInTrendCards({ recent }) {
   const [chartModal, setChartModal] = useStateC(null);
-  const n = Math.min(recent.length, 6);
+  const n = recent.length;
 
   const openChart = (label, icon, values, format, invertColor) => {
     const entries = values
@@ -1621,10 +1636,10 @@ function CheckInTrendCards({ recent }) {
   return (
     <>
       {chartModal && <LineChartSheet {...chartModal} onClose={() => setChartModal(null)} />}
-      <div className="micro" style={{ color: UI.inkFaint }}>TRENDS — LAST {n} CHECK-IN{n !== 1 ? 'S' : ''}</div>
+      <div className="micro" style={{ color: UI.inkFaint }}>TRENDS — {n} CHECK-IN{n !== 1 ? 'S' : ''}</div>
       <TrendSection label="WEIGHT">
-        <TrendCard label="Avg last week" icon="fa-weight-scale" values={recent.map(c => c.weightAvgLastWeek)} format={v => `${v}kg`} invertColor={false} />
-        <TrendCard label="Today" icon="fa-weight-scale" values={recent.map(c => c.weightToday)} format={v => `${v}kg`} invertColor={false} />
+        <TrendCard label="Avg last week" icon="fa-weight-scale" values={recent.map(c => c.weightAvgLastWeek)} format={v => `${Math.round(v * 100) / 100}${UI.unit()}`} invertColor={false} />
+        <TrendCard label="Today" icon="fa-weight-scale" values={recent.map(c => c.weightToday)} format={v => `${Math.round(v * 100) / 100}${UI.unit()}`} invertColor={false} />
       </TrendSection>
       <TrendSection label="MARKERS">
         <TrendCard label="Hunger" icon="fa-bowl-food" values={recent.map(c => c.hunger)} format={v => `${v}`} invertColor={true} />
@@ -1668,7 +1683,7 @@ function ClientCheckInsTab({ coachingId }) {
     );
   }
 
-  const recent = [...checkins].slice(0, 6).reverse();
+  const recent = [...checkins].reverse();
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
@@ -2022,35 +2037,55 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
 function CoachingTabScreen({ store, setStore, userId, go }) {
   const isCoach = (store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0;
   const isClient = store.coaching?.asClient?.status === 'active';
-  const [tab, setTab] = useStateC('clients');
+  const isSelf = !!store.settings?.beYourOwnCoach && !!store.coaching?.asSelf;
 
-  if (isCoach && isClient) {
-    const tabs = [
-      { id: 'clients', label: 'My Clients', icon: 'fa-users' },
-      { id: 'coach',   label: 'My Coach',   icon: 'fa-person-chalkboard' },
-    ];
-    return (
-      <div style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: UI.bg, color: UI.ink }}>
-        <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0, paddingTop: 'env(safe-area-inset-top, 0px)' }}>
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, padding: '10px 4px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent', WebkitTapHighlightColor: 'transparent' }}>
-              <i className={`fa-solid ${t.icon}`} style={{ fontSize: 14, color: tab === t.id ? 'var(--accent)' : UI.inkFaint }} />
-              <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.08em', color: tab === t.id ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase' }}>{t.label}</span>
-            </button>
-          ))}
-        </div>
-        <div style={{ flex: 1, overflow: 'hidden', display: tab === 'clients' ? 'flex' : 'none', flexDirection: 'column' }}>
-          <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} hideTopBar />
-        </div>
-        <div style={{ flex: 1, overflow: 'hidden', display: tab === 'coach' ? 'flex' : 'none', flexDirection: 'column' }}>
-          <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} hideTopBar />
-        </div>
-      </div>
+  const renderView = (id, hideTopBar) => {
+    if (id === 'self') return (
+      <CoachClientScreen
+        store={store} setStore={setStore} userId={userId} go={go}
+        coachingId={store.coaching.asSelf.id} clientId={userId}
+        clientName={store.user?.name || 'You'} isSelf hideTopBar={hideTopBar}
+      />
     );
-  }
+    if (id === 'clients') return <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} hideTopBar={hideTopBar} />;
+    return <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} hideTopBar={hideTopBar} />;
+  };
 
-  if (isClient) return <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} />;
-  return <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} />;
+  const views = [];
+  if (isSelf)   views.push({ id: 'self',    label: 'Myself',     icon: 'fa-chart-line' });
+  if (isCoach)  views.push({ id: 'clients', label: 'My Clients', icon: 'fa-users' });
+  if (isClient) views.push({ id: 'coach',   label: 'My Coach',   icon: 'fa-person-chalkboard' });
+
+  // No active role → default to the coach view (empty client list + invite).
+  if (views.length === 0) return <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} />;
+  // Single role → render it directly with its own top bar.
+  if (views.length === 1) return renderView(views[0].id, false);
+  // Multiple roles → sub-tab bar across the active views.
+  return <CoachingMultiView views={views} renderView={renderView} />;
+}
+
+// Sub-tab bar shown when a user holds several coaching roles at once
+// (e.g. self + real clients). Keeps every view mounted so switching is instant.
+function CoachingMultiView({ views, renderView }) {
+  const [active, setActive] = useStateC(views[0].id);
+  const activeId = views.some(v => v.id === active) ? active : views[0].id;
+  return (
+    <div style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: UI.bg, color: UI.ink }}>
+      <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0, paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+        {views.map(t => (
+          <button key={t.id} onClick={() => setActive(t.id)} style={{ flex: 1, padding: '10px 4px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, borderBottom: activeId === t.id ? '2px solid var(--accent)' : '2px solid transparent', WebkitTapHighlightColor: 'transparent' }}>
+            <i className={`fa-solid ${t.icon}`} style={{ fontSize: 14, color: activeId === t.id ? 'var(--accent)' : UI.inkFaint }} />
+            <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.08em', color: activeId === t.id ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase' }}>{t.label}</span>
+          </button>
+        ))}
+      </div>
+      {views.map(v => (
+        <div key={v.id} style={{ flex: 1, overflow: 'hidden', display: activeId === v.id ? 'flex' : 'none', flexDirection: 'column' }}>
+          {renderView(v.id, true)}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // ─── CoachingTabCoachView ─────────────────────────────────────────────────────
@@ -2370,7 +2405,7 @@ function MarkerRow({ label, value, onChange, readOnly }) {
   );
 }
 
-function CheckInCard({ ci, defaultOpen = false }) {
+function CheckInCard({ ci, defaultOpen = false, onEdit, onDelete, confirmingDelete = false }) {
   const [open, setOpen] = useStateC(defaultOpen);
   const hasActivity = ci.daysTrained != null || ci.steps != null || ci.cardioMinutes != null || ci.performanceVsLastWeek != null;
   const hasMarkers = ci.hunger != null || ci.sleepQuality != null || ci.lifeStress != null || ci.workStress != null || ci.tiredness != null;
@@ -2385,7 +2420,7 @@ function CheckInCard({ ci, defaultOpen = false }) {
           <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>Week of {fmtWeek(ci.weekStart)}</div>
           {ci.weightToday != null && (
             <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginTop: 2 }}>
-              {ci.weightToday} kg{ci.weightAvgLastWeek != null ? ` · avg ${ci.weightAvgLastWeek} kg` : ''}
+              {ci.weightToday} {UI.unit()}{ci.weightAvgLastWeek != null ? ` · avg ${ci.weightAvgLastWeek} ${UI.unit()}` : ''}
             </div>
           )}
         </div>
@@ -2432,8 +2467,8 @@ function CheckInCard({ ci, defaultOpen = false }) {
             <div>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>WEIGHT</div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <StatPill label="Today" value={`${ci.weightToday} kg`} />
-                {ci.weightAvgLastWeek != null && <StatPill label="Last week avg" value={`${ci.weightAvgLastWeek} kg`} />}
+                <StatPill label="Today" value={`${ci.weightToday} ${UI.unit()}`} />
+                {ci.weightAvgLastWeek != null && <StatPill label="Last week avg" value={`${ci.weightAvgLastWeek} ${UI.unit()}`} />}
               </div>
             </div>
           )}
@@ -2472,6 +2507,22 @@ function CheckInCard({ ci, defaultOpen = false }) {
               <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ci.generalNote}</div>
             </div>
           )}
+
+          {/* Edit / delete (only in the client/self view, which passes the handlers) */}
+          {(onEdit || onDelete) && (
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 12, borderTop: `0.5px solid ${UI.hair}` }}>
+              {onDelete && (
+                <button onClick={onDelete}
+                  style={{ background: confirmingDelete ? 'rgba(var(--danger-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${confirmingDelete ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 8, padding: '8px 16px', fontSize: 12, color: confirmingDelete ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                  {confirmingDelete ? 'Confirm?' : 'Delete'}
+                </button>
+              )}
+              {onEdit && (
+                <button onClick={onEdit}
+                  style={{ background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.4)', borderRadius: 8, padding: '8px 18px', fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Edit</button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -2490,7 +2541,10 @@ function StatPill({ label, value }) {
 // ─── CheckInForm ──────────────────────────────────────────────────────────────
 
 function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSaved }) {
-  const REQUIRED = ['hunger', 'sleepQuality', 'lifeStress', 'workStress', 'tiredness', 'weightToday'];
+  const REQUIRED_LABELS = {
+    weightToday: 'Weight (today)', hunger: 'Hunger', sleepQuality: 'Sleep',
+    lifeStress: 'Life Stress', workStress: 'Work Stress', tiredness: 'Tiredness',
+  };
 
   const empty = {
     weightToday: '', weightAvgLastWeek: '',
@@ -2531,12 +2585,13 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
   const num = (v) => v === '' || v == null ? null : Number(v);
 
-  const canSubmit = form.weightToday !== '' && form.weightToday != null &&
-    form.hunger != null && form.sleepQuality != null &&
-    form.lifeStress != null && form.workStress != null && form.tiredness != null;
+  const missing = Object.entries(REQUIRED_LABELS)
+    .filter(([k]) => form[k] === '' || form[k] == null)
+    .map(([, label]) => label);
+  const canSubmit = missing.length === 0;
 
   const handleSubmit = async () => {
-    if (!canSubmit) { setError('Please fill in weight and all markers.'); return; }
+    if (!canSubmit) { setError(`Can't submit — please fill in: ${missing.join(', ')}.`); return; }
     setSaving(true); setError('');
     try {
       await LB.submitCheckin(coachingId, clientId, {
@@ -2559,7 +2614,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         tiredness: form.tiredness,
         issuesNotes: form.issuesNotes || null,
         generalNote: form.generalNote || null,
-      }, userId);
+      }, userId, weekStart, !!existing);
       onSaved();
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
@@ -2576,11 +2631,11 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         <SectionHead label="WEIGHT *" />
         <div style={{ display: 'flex', gap: 8 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Today (kg)</div>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Today ({UI.unit()})</div>
             <input type="number" step="0.1" placeholder="–" value={form.weightToday} onChange={e => set('weightToday', e.target.value)} style={inputStyle} />
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Last week avg (kg)</div>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Last week avg ({UI.unit()})</div>
             <input type="number" step="0.1" placeholder="–" value={form.weightAvgLastWeek} onChange={e => set('weightAvgLastWeek', e.target.value)} style={inputStyle} />
           </div>
         </div>
@@ -2692,7 +2747,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
 
       {error && <div style={{ fontSize: 12, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{error}</div>}
 
-      <Btn onClick={handleSubmit} disabled={saving || !canSubmit}>
+      <Btn onClick={handleSubmit} disabled={saving}>
         {saving ? 'Sending…' : existing ? 'Update Check-in' : 'Submit Check-in'}
       </Btn>
     </div>
@@ -2704,8 +2759,8 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
 function ClientCheckInTab({ coachingId, clientId, userId }) {
   const weekStart = LB.checkinWeekStart();
   const [checkins, setCheckins] = useStateC(null);
-  const [editing, setEditing] = useStateC(false);
-  const [confirmDelete, setConfirmDelete] = useStateC(false);
+  const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
+  const [confirmDelete, setConfirmDelete] = useStateC(null); // id of check-in awaiting delete confirm
   const [deleting, setDeleting] = useStateC(false);
 
   const load = () => LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
@@ -2714,70 +2769,79 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   const thisWeek = (checkins || []).find(c => c.weekStart === weekStart);
   const past = (checkins || []).filter(c => c.weekStart !== weekStart);
 
-  const handleDelete = async () => {
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      setTimeout(() => setConfirmDelete(false), 3000);
+  const handleDelete = async (ci) => {
+    if (confirmDelete !== ci.id) {
+      setConfirmDelete(ci.id);
+      setTimeout(() => setConfirmDelete(c => c === ci.id ? null : c), 3000);
       return;
     }
     setDeleting(true);
-    try { await LB.deleteCheckin(thisWeek.id, userId); await load(); }
-    catch(e) {} finally { setDeleting(false); setConfirmDelete(false); }
+    try { await LB.deleteCheckin(ci.id, userId); await load(); }
+    catch (e) {} finally { setDeleting(false); setConfirmDelete(null); }
   };
 
   if (checkins === null) {
     return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div></div>;
   }
 
-  if ((thisWeek && !editing)) {
-    const recent = [...checkins].slice(0, 6).reverse();
+  // ── Form: new check-in or editing any existing one ──
+  if (editTarget) {
+    const isNew = editTarget === 'new';
+    const target = isNew ? null : editTarget;
+    const formWeek = isNew ? weekStart : target.weekStart;
     return (
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-        <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>This week submitted ✓</div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={handleDelete} disabled={deleting}
-                style={{ background: 'transparent', border: 'none', fontSize: 11, color: confirmDelete ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>
-                {confirmDelete ? 'Confirm?' : 'Delete'}
-              </button>
-              <button onClick={() => setEditing(true)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>Edit</button>
-            </div>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '10px 14px 0', flexShrink: 0 }}>
+          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+            {isNew
+              ? <>Week of <strong>{fmtWeek(formWeek)}</strong> — covers Mon–Sun of last week.</>
+              : <>Editing <strong>week of {fmtWeek(formWeek)}</strong> — the change is logged to your coach.</>}
           </div>
-          {checkins.length >= 2 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-              <CheckInTrendCards recent={recent} />
-            </div>
-          )}
-          <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>THIS WEEK</div>
-          <CheckInCard ci={thisWeek} />
-          {past.length > 0 && (
-            <>
-              <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>PREVIOUS CHECK-INS</div>
-              {past.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
-            </>
-          )}
+          <button onClick={() => setEditTarget(null)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>← Cancel</button>
         </div>
+        <CheckInForm
+          coachingId={coachingId}
+          clientId={clientId}
+          userId={userId}
+          weekStart={formWeek}
+          existing={target}
+          onSaved={() => { setEditTarget(null); load(); }}
+        />
       </div>
     );
   }
 
+  // ── Overview: every check-in is editable/deletable (edit/delete live inside each card) ──
+  const recent = [...checkins].reverse();
+
   return (
-    <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '10px 14px 0', flexShrink: 0 }}>
-        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
-          Week of <strong>{fmtWeek(weekStart)}</strong> — covers Mon–Sun of last week.
-        </div>
-        {editing && <button onClick={() => setEditing(false)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>← Cancel</button>}
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {checkins.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <CheckInTrendCards recent={recent} />
+          </div>
+        )}
+
+        <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>THIS WEEK</div>
+        {thisWeek ? (
+          <CheckInCard ci={thisWeek} defaultOpen onEdit={() => setEditTarget(thisWeek)} onDelete={() => handleDelete(thisWeek)} confirmingDelete={confirmDelete === thisWeek.id} />
+        ) : (
+          <button onClick={() => setEditTarget('new')}
+            style={{ background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+            Submit this week's check-in
+          </button>
+        )}
+
+        {past.length > 0 && (
+          <>
+            <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>PREVIOUS CHECK-INS</div>
+            {past.map(ci => (
+              <CheckInCard key={ci.id} ci={ci} onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
+            ))}
+          </>
+        )}
       </div>
-      <CheckInForm
-        coachingId={coachingId}
-        clientId={clientId}
-        userId={userId}
-        weekStart={weekStart}
-        existing={editing ? thisWeek : null}
-        onSaved={() => { setEditing(false); load(); }}
-      />
     </div>
   );
 }

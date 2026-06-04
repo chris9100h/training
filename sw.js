@@ -1,20 +1,22 @@
-const CACHE = 'zane-v1.956';
+const CACHE = 'zane-v1.972';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
+// Works at any base path (e.g. /training/ on GitHub Pages, / on custom domain)
+const BASE = self.registration.scope.replace(/\/$/, '');
 const ASSETS = [
-  '/training/',
-  '/training/index.html',
-  '/training/src/store.js',
-  '/training/src/supabase.js',
-  '/training/src/ui.jsx',
-  '/training/src/screens-home.jsx',
-  '/training/src/screens-schedule.jsx',
-  '/training/src/screens-train.jsx',
-  '/training/src/screens-lib.jsx',
-  '/training/src/screens-settings.jsx',
-  '/training/src/screens-coaching.jsx',
-  '/training/src/app.jsx',
-  '/training/icons/icon-192.png',
-  '/training/icons/icon-512.png',
+  BASE + '/',
+  BASE + '/index.html',
+  BASE + '/src/store.js',
+  BASE + '/src/supabase.js',
+  BASE + '/src/ui.jsx',
+  BASE + '/src/screens-home.jsx',
+  BASE + '/src/screens-schedule.jsx',
+  BASE + '/src/screens-train.jsx',
+  BASE + '/src/screens-lib.jsx',
+  BASE + '/src/screens-settings.jsx',
+  BASE + '/src/screens-coaching.jsx',
+  BASE + '/src/app.jsx',
+  BASE + '/icons/icon-192.png',
+  BASE + '/icons/icon-512.png',
 ];
 
 self.addEventListener('install', e => {

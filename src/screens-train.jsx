@@ -192,7 +192,7 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
         <span style={{
           position: 'absolute', right: 6, bottom: 14,
           fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.1em',
-        }}>KG</span>
+        }}>{UI.unit().toUpperCase()}</span>
       </div>
       <div className="knurl" style={{ marginBottom: 10 }} />
 
@@ -201,7 +201,7 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
         {tab === 0 && target > 0 && (
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
             <span style={{ fontFamily: UI.fontNum, fontSize: 20, fontWeight: 300, color: UI.gold, letterSpacing: '-0.02em' }}>{perSide}</span>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.14em' }}>KG PER SIDE</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.14em' }}>{UI.unit().toUpperCase()} PER SIDE</span>
           </div>
         )}
       </div>
@@ -243,7 +243,7 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
       {correctionDelta !== null && (
         <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.danger, letterSpacing: '0.1em' }}>
-            CAN'T REACH EXACTLY — {correctionDelta} KG MISSING
+            CAN'T REACH EXACTLY — {correctionDelta} {UI.unit().toUpperCase()} MISSING
           </span>
           <button onClick={() => setRaw(String(correctedTotal).replace('.', ','))} style={{
             padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
@@ -252,7 +252,7 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
             color: '#0a0805', fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '0.06em',
             fontWeight: 700, boxShadow: '0 2px 8px rgba(var(--accent-rgb),0.45)',
           }}>
-            +{correctionDelta} kg
+            +{correctionDelta} {UI.unit()}
           </button>
         </div>
       )}
@@ -689,7 +689,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       sessions: s.sessions.filter(x => x.id !== session.id),
       inProgress: null,
     }));
-    LB.broadcastSessionNav('cancel', session.id);
     go({ name: 'home' });
   };
 
@@ -847,7 +846,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
 
   useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); }, [exIdx, sessionId]);
   useEffectT(() => () => stopTempo(), []);
-  useEffectT(() => { if (userId && sessionId) LB.broadcastExIdx(sessionId, exIdx); }, [exIdx]);
 
   // Log ALL document pointer/click events — captures ghost-clicks and shows where they land.
   useEffectT(() => {
@@ -1228,9 +1226,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8)' }}>PROGRESSION UNLOCKED</span>
           <span style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, marginTop: 4 }}>You've earned the next load.</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
-            <span className="num" style={{ fontSize: 22, color: UI.inkSoft }}>{progressionUnlocked.currentKg}kg</span>
+            <span className="num" style={{ fontSize: 22, color: UI.inkSoft }}>{progressionUnlocked.currentKg}{UI.unit()}</span>
             <span style={{ color: UI.gold, fontSize: 20, lineHeight: 1 }}>→</span>
-            <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(201,169,97,0.8)' }}>{progressionUnlocked.nextKg}kg</span>
+            <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(201,169,97,0.8)' }}>{progressionUnlocked.nextKg}{UI.unit()}</span>
           </div>
           <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, letterSpacing: '0.12em' }}>{progressionUnlocked.exName}</span>
         </div>
@@ -1425,7 +1423,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                 <div style={{ textAlign: 'right' }}>
                   {prevHeroSet && prevHeroSet.kg ? (
                     <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>
-                      LAST TIME <span style={{ color: UI.inkSoft }}>{prevHeroSet.kg}kg × {(prevHeroSet.repsL != null || prevHeroSet.repsR != null) ? `L${prevHeroSet.repsL ?? '?'}/R${prevHeroSet.repsR ?? '?'}` : prevHeroSet.reps}</span>
+                      LAST TIME <span style={{ color: UI.inkSoft }}>{prevHeroSet.kg}{UI.unit()} × {(prevHeroSet.repsL != null || prevHeroSet.repsR != null) ? `L${prevHeroSet.repsL ?? '?'}/R${prevHeroSet.repsR ?? '?'}` : prevHeroSet.reps}</span>
                     </span>
                   ) : null}
                   {progressionTarget && (
@@ -1463,7 +1461,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                       }),
                     }))}
                   />
-                  <div className="micro" style={{ marginTop: 2 }}>KILOGRAMS</div>
+                  <div className="micro" style={{ marginTop: 2 }}>{UI.unit() === 'lbs' ? 'POUNDS' : 'KILOGRAMS'}</div>
                 </div>
                 <div style={{ fontSize: 32, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 700, alignSelf: 'flex-start', marginTop: 6 }}>×</div>
                 {isUnilateral ? (
@@ -1556,7 +1554,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           }}>
             <div />
             <span className="micro" style={{ color: UI.inkFaint }}>Last time</span>
-            <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>kg</span>
+            <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{UI.unit()}</span>
             {isUnilateral ? (
               <>
                 <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>L</span>
@@ -1610,7 +1608,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                     <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                       {isWarmupRow
                         ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
-                        : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${prevSet.kg}kg × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
+                        : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
                       }
                     </div>
 
@@ -1819,7 +1817,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
             <span>Volume</span>
             <span className="num" style={{ color: UI.gold }}>
-              {Math.round(LB.totalVolume(session)).toLocaleString('en-US')} kg
+              {Math.round(LB.totalVolume(session)).toLocaleString('en-US')} {UI.unit()}
             </span>
           </div>
           <div className="knurl" />
@@ -2012,7 +2010,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                       ? <div className="num" style={{ fontSize: 52, fontWeight: 300, color: UI.gold, letterSpacing: '-0.02em', lineHeight: 1 }}>{warmupOverlaySet.kg}</div>
                       : <div className="num" style={{ fontSize: 44, fontWeight: 300, color: UI.inkSoft, letterSpacing: '-0.02em', lineHeight: 1 }}>{warmupOverlaySet.warmupPct}%</div>
                     }
-                    <div className="micro" style={{ marginTop: 4 }}>{warmupOverlayHasKg ? 'KILOGRAMS' : 'NO SEED WEIGHT'}</div>
+                    <div className="micro" style={{ marginTop: 4 }}>{warmupOverlayHasKg ? (UI.unit() === 'lbs' ? 'POUNDS' : 'KILOGRAMS') : 'NO SEED WEIGHT'}</div>
                   </div>
                   <div style={{ fontSize: 28, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 700, alignSelf: 'flex-start', marginTop: 4 }}>×</div>
                   <div style={{ flex: 1, textAlign: 'center' }}>

@@ -35,7 +35,9 @@ BEGIN
 END;
 $$;
 
--- Decline & delete a pending user (admin only) — removes auth user + all profile data
+-- Decline a pending user (admin only) — removes profile only; auth user stays but
+-- lands on pending screen again if they log in, or gets a clean sign-out if profile
+-- creation fails (handled in client code).
 CREATE OR REPLACE FUNCTION public.decline_user(p_user_id uuid)
 RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER
@@ -45,11 +47,9 @@ BEGIN
   IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
     RAISE EXCEPTION 'Unauthorized';
   END IF;
-  -- Only allow deleting unapproved users
   IF NOT EXISTS (SELECT 1 FROM zane_profiles WHERE id = p_user_id AND approved = false) THEN
     RAISE EXCEPTION 'User not found or already approved';
   END IF;
   DELETE FROM zane_profiles WHERE id = p_user_id;
-  DELETE FROM auth.users WHERE id = p_user_id;
 END;
 $$;
