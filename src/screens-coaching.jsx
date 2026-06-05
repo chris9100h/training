@@ -826,10 +826,12 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
     ? Math.round(completedWeeks.reduce((s, w) => s + w.pct, 0) / completedWeeks.length)
     : null;
 
-  const last30 = ended.filter(s => (Date.now() - new Date(s.ended).getTime()) < 30 * 86400000);
-  const last30PlanSessions = last30.filter(s => !planStartDate || s.date?.slice(0, 10) >= planStartDate.slice(0, 10));
-  const avgVol = last30PlanSessions.length > 0
-    ? Math.round(last30PlanSessions.reduce((s, x) => s + LB.totalVolume(x), 0) / last30PlanSessions.length)
+  const last30 = ended.filter(s =>
+    (Date.now() - new Date(s.ended).getTime()) < 30 * 86400000 &&
+    (!planStartDate || s.date?.slice(0, 10) >= planStartDate.slice(0, 10))
+  );
+  const avgVol = last30.length > 0
+    ? Math.round(last30.reduce((s, x) => s + LB.totalVolume(x), 0) / last30.length)
     : null;
 
   const chartTitles = { adherence: 'Adherence (6w)', volume: 'Avg Volume Trend', sessions: 'Sessions per Week' };
@@ -868,7 +870,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
         <div style={{ paddingBottom: 8 }}>
           {chartOpen === 'adherence' && <AdherenceChart weeks={weeks} />}
           {chartOpen === 'volume' && <RollingVolumeChart sessions={ended} planStartDate={planStartDate} clientStore={clientStore} />}
-          {chartOpen === 'sessions' && <SessionsWeekChart sessions={ended} />}
+          {chartOpen === 'sessions' && <SessionsWeekChart sessions={ended} planStartDate={planStartDate} />}
         </div>
       </Sheet>
 
@@ -1203,8 +1205,9 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
   );
 }
 
-function SessionsWeekChart({ sessions }) {
-  const ended = (sessions || []).filter(s => s.ended);
+function SessionsWeekChart({ sessions, planStartDate }) {
+  const cutoff = planStartDate ? planStartDate.slice(0, 10) : null;
+  const ended = (sessions || []).filter(s => s.ended && (!cutoff || s.date?.slice(0, 10) >= cutoff));
   const byWeek = {};
   ended.forEach(s => {
     const d = new Date(s.ended); d.setHours(12, 0, 0, 0);
@@ -1216,8 +1219,19 @@ function SessionsWeekChart({ sessions }) {
   const today = new Date(); today.setHours(12, 0, 0, 0);
   const todayWd = (today.getDay() + 6) % 7;
   const thisMonday = new Date(today); thisMonday.setDate(today.getDate() - todayWd); thisMonday.setHours(0, 0, 0, 0);
-  const weeks = Array.from({ length: 12 }, (_, i) => {
-    const mon = new Date(thisMonday); mon.setDate(thisMonday.getDate() - (11 - i) * 7);
+  let startMonday;
+  if (cutoff) {
+    const cd = new Date(cutoff + 'T12:00:00');
+    const cdWd = (cd.getDay() + 6) % 7;
+    startMonday = new Date(cd); startMonday.setDate(cd.getDate() - cdWd); startMonday.setHours(0, 0, 0, 0);
+  } else {
+    startMonday = new Date(thisMonday); startMonday.setDate(thisMonday.getDate() - 11 * 7);
+  }
+  const totalWeeks = Math.round((thisMonday - startMonday) / (7 * 86400000)) + 1;
+  const weekCount = Math.min(totalWeeks, 16);
+  const offset = totalWeeks - weekCount;
+  const weeks = Array.from({ length: weekCount }, (_, i) => {
+    const mon = new Date(startMonday); mon.setDate(startMonday.getDate() + (offset + i) * 7);
     const key = localDateKey(mon);
     return { key, count: byWeek[key] || 0, label: mon.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) };
   });
