@@ -820,21 +820,22 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
     ? (LB.isWeekdayPlan(activeSch) ? clientStore.weekPlanStartDate : clientStore.cycleStartDate) || null
     : null;
 
-  const weeks = useMemoC(() => computeWeeklyAdherence(clientStore), [clientStore]);
+  const weeks = useMemoC(() => computeWeeklyAdherence(clientStore, 104), [clientStore]);
   const completedWeeks = weeks.filter(w => w.planned > 0 && w.pct !== null);
   const overallAdherence = completedWeeks.length > 0
     ? Math.round(completedWeeks.reduce((s, w) => s + w.pct, 0) / completedWeeks.length)
     : null;
 
-  const last30 = ended.filter(s =>
-    (Date.now() - new Date(s.ended).getTime()) < 30 * 86400000 &&
-    (!planStartDate || s.date?.slice(0, 10) >= planStartDate.slice(0, 10))
+  const planSessions = useMemoC(() =>
+    ended.filter(s => !planStartDate || s.date?.slice(0, 10) >= planStartDate.slice(0, 10)),
+    [ended, planStartDate]
   );
-  const avgVol = last30.length > 0
-    ? Math.round(last30.reduce((s, x) => s + LB.totalVolume(x), 0) / last30.length)
+  const avgVol = planSessions.length > 0
+    ? Math.round(planSessions.reduce((s, x) => s + LB.totalVolume(x), 0) / planSessions.length)
     : null;
 
-  const chartTitles = { adherence: 'Adherence (6w)', volume: 'Avg Volume Trend', sessions: 'Sessions per Week' };
+  const adherenceLabel = `Adherence (${weeks.length}w)`;
+  const chartTitles = { adherence: adherenceLabel, volume: 'Avg Vol / Cycle', sessions: 'Sessions per Week' };
 
   // Sessions to show: current week (weekday plan) or current cycle window (cycle plan)
   const recentSessions = useMemoC(() => {
@@ -861,9 +862,9 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
     <div style={{ overflowY: 'auto', flex: 1, padding: '16px 12px 32px' }}>
       {/* Top stats */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, padding: '0 4px' }}>
-        <StatBox label="Adherence (6w)" value={overallAdherence != null ? `${overallAdherence}%` : '—'} gold={overallAdherence >= 80} onClick={() => setChartOpen('adherence')} />
-        <StatBox label="Avg Vol (30d)" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}${UI.unit()}` : '—'} onClick={() => setChartOpen('volume')} />
-        <StatBox label="Sessions (30d)" value={last30.length} onClick={() => setChartOpen('sessions')} />
+        <StatBox label={adherenceLabel} value={overallAdherence != null ? `${overallAdherence}%` : '—'} gold={overallAdherence >= 80} onClick={() => setChartOpen('adherence')} />
+        <StatBox label="Avg Vol / Cycle" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}${UI.unit()}` : '—'} onClick={() => setChartOpen('volume')} />
+        <StatBox label="Sessions" value={planSessions.length} onClick={() => setChartOpen('sessions')} />
       </div>
 
       <Sheet open={!!chartOpen} onClose={() => setChartOpen(null)} title={chartTitles[chartOpen] || ''}>
