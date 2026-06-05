@@ -2675,13 +2675,13 @@ function MarkerRow({ label, value, onChange, readOnly }) {
   );
 }
 
-function CheckInCard({ ci, defaultOpen = false, onEdit, onDelete, confirmingDelete = false }) {
+function CheckInCard({ ci, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false }) {
   const [open, setOpen] = useStateC(defaultOpen);
   const hasActivity = ci.daysTrained != null || ci.steps != null || ci.cardioMinutes != null || ci.performanceVsLastWeek != null;
   const hasMarkers = ci.hunger != null || ci.sleepQuality != null || ci.lifeStress != null || ci.workStress != null || ci.tiredness != null;
 
   return (
-    <div style={{ background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+    <div style={embedded ? { overflow: 'hidden' } : { background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
       <button
         onClick={() => setOpen(o => !o)}
         style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', gap: 12 }}
@@ -3094,9 +3094,8 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
           </div>
         )}
 
-        <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>THIS WEEK</div>
         {thisWeek ? (
-          <CheckInCard ci={thisWeek} defaultOpen onEdit={() => setEditTarget(thisWeek)} onDelete={() => handleDelete(thisWeek)} confirmingDelete={confirmDelete === thisWeek.id} />
+          <CheckInCard ci={thisWeek} onEdit={() => setEditTarget(thisWeek)} onDelete={() => handleDelete(thisWeek)} confirmingDelete={confirmDelete === thisWeek.id} />
         ) : (
           <button onClick={() => setEditTarget('new')}
             style={{ background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
@@ -3105,18 +3104,29 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
         )}
 
         {past.length > 0 && (
-          <>
-            <div
+          <div style={{ background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+            <button
               onClick={() => setPastOpen(o => !o)}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', marginTop: 4, WebkitTapHighlightColor: 'transparent' }}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', gap: 12 }}
             >
-              <div className="micro" style={{ color: UI.inkFaint }}>PREVIOUS CHECK-INS ({past.length})</div>
-              <i className={`fa-solid fa-chevron-${pastOpen ? 'up' : 'down'}`} style={{ fontSize: 10, color: UI.inkFaint }} />
-            </div>
-            {pastOpen && past.map(ci => (
-              <CheckInCard key={ci.id} ci={ci} onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
-            ))}
-          </>
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>Previous Check-ins ({past.length})</div>
+                <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginTop: 2 }}>
+                  {fmtWeek(past[past.length - 1].weekStart)} – {fmtWeek(past[0].weekStart)}
+                </div>
+              </div>
+              <i className={`fa-solid fa-chevron-${pastOpen ? 'up' : 'down'}`} style={{ fontSize: 11, color: UI.inkFaint }} />
+            </button>
+            {pastOpen && (
+              <div>
+                {past.map(ci => (
+                  <div key={ci.id} style={{ borderTop: `0.5px solid ${UI.hair}` }}>
+                    <CheckInCard ci={ci} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
