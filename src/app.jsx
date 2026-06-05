@@ -529,12 +529,19 @@ function App() {
       Promise.all([LB.loadCoachClientsStatus(), LB.loadCoachCheckinStatus()])
         .then(([statusData, checkinData]) => {
           const anyLive = statusData.some(r => r.inProgressSessionId);
-          const pendingCheckinsCount = checkinData.filter(r => !r.hasCheckin).length;
-          if (anyLive !== prevAnyLiveRef.current || pendingCheckinsCount !== prevPendingRef.current) {
+          setStore(s => {
+            if (!s) return s;
+            const asCoach = s.coaching?.asCoach || [];
+            const pendingCheckinsCount = checkinData.filter(r => {
+              if (r.hasCheckin) return false;
+              const client = asCoach.find(c => c.id === r.coachingId);
+              return client?.checkinEnabled ?? true;
+            }).length;
+            if (anyLive === prevAnyLiveRef.current && pendingCheckinsCount === prevPendingRef.current) return s;
             prevAnyLiveRef.current = anyLive;
             prevPendingRef.current = pendingCheckinsCount;
-            setStore(s => s ? { ...s, coaching: { ...s.coaching, anyClientLive: anyLive, pendingCheckinsCount } } : s);
-          }
+            return { ...s, coaching: { ...s.coaching, anyClientLive: anyLive, pendingCheckinsCount } };
+          });
         })
         .catch(() => {});
     };
