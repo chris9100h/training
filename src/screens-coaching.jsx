@@ -609,8 +609,13 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
     const next = !checkinEnabled;
     setCheckinEnabled(next);
     setCiToggling(true);
-    try { await LB.setCheckinEnabled(coachingId, next); }
-    catch (_) { setCheckinEnabled(!next); }
+    try {
+      await LB.setCheckinEnabled(coachingId, next);
+      const msg = next
+        ? 'Check-ins have been re-enabled. You can submit your weekly check-in again.'
+        : 'Check-ins have been paused by your coach.';
+      await LB.addCoachingNote(coachingId, 'change', null, null, msg, userId);
+    } catch (_) { setCheckinEnabled(!next); }
     finally { setCiToggling(false); }
   };
 
