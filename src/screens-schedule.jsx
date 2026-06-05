@@ -1047,48 +1047,96 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 
 // ─── Day editor (exercises within a day) ─────────────────────────────
 function ExerciseItemEditor({ item, exName, onClose, onSave }) {
-  const initRepsRaw = () =>
-    item.repsPerSet && item.repsPerSet.length > 1 ? item.repsPerSet.join('/') : String(item.reps ?? 8);
-  const [sets, setSets] = useStateS(item.sets);
-  const [repsRaw, setRepsRaw] = useStateS(initRepsRaw);
+  const hasVariable = item.repsPerSet && item.repsPerSet.length > 1;
+  const [mode, setMode] = useStateS(hasVariable ? 'variable' : 'uniform');
+  const [sets, setSetsRaw] = useStateS(item.sets);
+  const [uniformReps, setUniformReps] = useStateS(item.reps ?? 8);
+  const [repsPerSet, setRepsPerSet] = useStateS(
+    hasVariable ? item.repsPerSet : Array.from({ length: item.sets }, () => item.reps ?? 8)
+  );
   const [note, setNote] = useStateS(item.note || '');
 
-  const parseRepsRaw = (raw) => {
-    const parts = raw.split('/').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0);
-    if (parts.length > 1) return { reps: parts[0], repsPerSet: parts };
-    if (parts.length === 1) return { reps: parts[0], repsPerSet: null };
-    return { reps: item.reps ?? 8, repsPerSet: null };
+  const switchMode = (m) => {
+    if (m === 'variable' && mode === 'uniform') {
+      setRepsPerSet(Array.from({ length: sets }, () => uniformReps));
+    }
+    if (m === 'uniform' && mode === 'variable') {
+      setUniformReps(repsPerSet[0] ?? 8);
+    }
+    setMode(m);
   };
 
-  const isVariable = repsRaw.includes('/');
+  const handleSetsChange = (v) => {
+    const n = Math.max(1, Math.round(v));
+    setSetsRaw(n);
+    if (mode === 'variable') {
+      setRepsPerSet(prev => {
+        const next = [...prev];
+        while (next.length < n) next.push(next[next.length - 1] ?? uniformReps);
+        return next.slice(0, n);
+      });
+    }
+  };
 
   const handleSave = () => {
-    const { reps, repsPerSet } = parseRepsRaw(repsRaw);
-    const finalSets = repsPerSet ? repsPerSet.length : sets;
-    onSave({ sets: finalSets, reps, repsPerSet: repsPerSet || undefined, note });
+    if (mode === 'variable') {
+      onSave({ sets, reps: repsPerSet[0] ?? uniformReps, repsPerSet, note });
+    } else {
+      onSave({ sets, reps: uniformReps, repsPerSet: undefined, note });
+    }
   };
+
+  const toggleStyle = (active) => ({
+    flex: 1, padding: '8px 0', borderRadius: 4, cursor: 'pointer',
+    border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
+    background: active ? UI.goldFaint : 'transparent',
+    color: active ? UI.gold : UI.inkFaint,
+    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600,
+    letterSpacing: '0.1em', textTransform: 'uppercase',
+    WebkitTapHighlightColor: 'transparent',
+  });
 
   return (
     <Sheet open={true} onClose={onClose} title={exName}>
-      <div style={{ display: 'flex', gap: 24, justifyContent: 'center', marginBottom: 24 }}>
-        <div style={{ textAlign: 'center', flex: 1, opacity: isVariable ? 0.35 : 1 }}>
-          <span className="label" style={{ display: 'block', textAlign: 'center' }}>Sets</span>
-          <div style={{ marginTop: 8 }}>
-            <Stepper value={isVariable ? parseRepsRaw(repsRaw).repsPerSet?.length ?? sets : sets} onChange={v => !isVariable && setSets(Math.max(1, Math.round(v)))} step={1} min={1} />
-          </div>
-        </div>
-        <div style={{ textAlign: 'center', flex: 1 }}>
-          <span className="label" style={{ display: 'block', textAlign: 'center' }}>Reps</span>
-          <div style={{ marginTop: 8 }}>
-            <TextInput value={repsRaw} onChange={setRepsRaw} placeholder="e.g. 8 or 10/8/6" />
-          </div>
-          {isVariable && (
-            <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, display: 'block' }}>
-              {parseRepsRaw(repsRaw).repsPerSet?.length ?? 0} sets · per-set targets
-            </span>
-          )}
-        </div>
+      {/* Mode toggle */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+        <button style={toggleStyle(mode === 'uniform')} onClick={() => switchMode('uniform')}>Uniform</button>
+        <button style={toggleStyle(mode === 'variable')} onClick={() => switchMode('variable')}>Per Set</button>
       </div>
+
+      {/* Sets stepper — always visible */}
+      <div style={{ textAlign: 'center', marginBottom: 24 }}>
+        <span className="label" style={{ display: 'block', marginBottom: 8 }}>Sets</span>
+        <Stepper value={sets} onChange={handleSetsChange} step={1} min={1} />
+      </div>
+
+      {mode === 'uniform' ? (
+        <div style={{ textAlign: 'center', marginBottom: 24 }}>
+          <span className="label" style={{ display: 'block', marginBottom: 8 }}>Reps</span>
+          <Stepper value={uniformReps} onChange={v => setUniformReps(Math.max(1, Math.round(v)))} step={1} min={1} />
+        </div>
+      ) : (
+        <div style={{ marginBottom: 24 }}>
+          <span className="label" style={{ display: 'block', marginBottom: 12 }}>Reps per set</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {repsPerSet.map((r, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <span className="num" style={{ fontSize: 11, color: UI.inkFaint, width: 22, textAlign: 'right', flexShrink: 0 }}>
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <div style={{ flex: 1 }}>
+                  <Stepper
+                    value={r}
+                    onChange={v => setRepsPerSet(prev => prev.map((x, j) => j === i ? Math.max(1, Math.round(v)) : x))}
+                    step={1} min={1}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <Field label="Note (optional)">
         <TextInput value={note} onChange={setNote} placeholder="e.g. cable pos 4, slow eccentric…" />
       </Field>
