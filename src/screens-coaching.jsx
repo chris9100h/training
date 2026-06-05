@@ -1150,6 +1150,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
         <span style={{ fontSize: 11, color: trend >= 0 ? '#7bc47b' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>
           <i className={`fa-solid fa-arrow-trend-${trend >= 0 ? 'up' : 'down'}`} style={{ marginRight: 4 }} />
           {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}{unit}
+          <span style={{ color: UI.inkFaint, marginLeft: 5 }}>since {isWd ? 'week 1' : 'cycle 1'}</span>
         </span>
         <span className="micro" style={{ color: UI.inkFaint }}>AVG SESSION VOL / {periodLabel}</span>
       </div>
