@@ -1237,22 +1237,23 @@ function SessionsWeekChart({ sessions, planStartDate }) {
     return { key, count: byWeek[key] || 0, label: mon.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) };
   });
 
-  const W = 300, H = 110, gap = 3;
-  const barW = Math.floor((W - gap * 13) / 12);
+  const n = weeks.length;
+  const W = 300, H = 110, gap = 4;
+  const barW = Math.max(6, Math.floor((W - gap * (n + 1)) / n));
   const maxCount = Math.max(...weeks.map(w => w.count), 1);
+  const labelIdxs = new Set([0, Math.floor((n - 1) / 2), n - 1]);
 
   return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`}>
+    <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`} style={{ overflow: 'visible' }}>
       {weeks.map((w, i) => {
         const x = gap + i * (barW + gap);
         const h = (w.count / maxCount) * H;
-        const showLabel = i === 0 || i === 5 || i === 11;
         return (
           <g key={i}>
             <rect x={x} y={0} width={barW} height={H} rx={2} style={{ fill: UI.bgRaised }} />
             {h > 0 && <rect x={x} y={H - h} width={barW} height={h} rx={2} fill="var(--accent)" />}
             {w.count > 0 && <text x={x + barW / 2} y={H - h - 3} textAnchor="middle" fontSize={7} style={{ fill: 'var(--accent)', fontFamily: UI.fontUi }}>{w.count}</text>}
-            {showLabel && <text x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{w.label}</text>}
+            {labelIdxs.has(i) && <text x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{w.label}</text>}
           </g>
         );
       })}
