@@ -1113,6 +1113,8 @@ function ExerciseItemEditor({ item, exName, onClose, onSave }) {
           </div>
         </div>
 
+        <div className="knurl" />
+
         {mode === 'uniform' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Reps</span>
