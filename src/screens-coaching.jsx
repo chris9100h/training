@@ -1325,6 +1325,132 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
   );
 }
 
+// ─── InlineExHistory ──────────────────────────────────────────────────────────
+// Standalone component so hooks are never called conditionally.
+
+function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack }) {
+  const ex = (exercises || []).find(e => e.id === exId);
+  const isUni = !!ex?.unilateral;
+  const [metric, setMetric] = useStateC('kg');
+  const [showCount, setShowCount] = useStateC(20);
+
+  const exSessions = useMemoC(() =>
+    sessions
+      .filter(s => s.dayId === dayId)
+      .map(s => {
+        const entry = (s.entries || []).find(e => e.exId === exId);
+        if (!entry) return null;
+        const working = (entry.sets || []).filter(st => !st.warmup && !st.skipped);
+        if (!working.some(st => st.kg != null || st.reps != null)) return null;
+        return { ended: s.ended, sets: working };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.ended.localeCompare(b.ended)),
+    [sessions, exId, dayId]
+  );
+
+  const getValue = (st) => metric === 'reps'
+    ? (isUni ? (st.repsL != null ? Math.min(st.repsL ?? 0, st.repsR ?? 0) : (st.reps ?? null)) : (st.reps ?? null))
+    : (st.kg ?? null);
+
+  const maxSets = Math.max(...exSessions.map(s => s.sets.length), 1);
+  const allVals = exSessions.flatMap(s => s.sets.map(getValue)).filter(v => v != null);
+  const minVal = allVals.length ? Math.min(...allVals) : 0;
+  const rawMax = allVals.length ? Math.max(...allVals) : 10;
+  const maxVal = rawMax === minVal ? rawMax + 1 : rawMax;
+  const valRange = maxVal - minVal;
+
+  const PAD_L = 36, PAD_R = 12, PAD_T = 14, PAD_B = 26, VW = 320, VH = 170;
+  const plotW = VW - PAD_L - PAD_R, plotH = VH - PAD_T - PAD_B, n = exSessions.length;
+  const xPos = (i) => PAD_L + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+  const yPos = (v) => PAD_T + plotH - ((v - minVal) / valRange) * plotH;
+  const gridVals = Array.from({ length: 4 }, (_, i) => minVal + (valRange / 3) * i);
+  const setAlphas = [1, 0.55, 0.35, 0.22, 0.14];
+  const labelIdxs = (() => {
+    if (n <= 5) return exSessions.map((_, i) => i);
+    const step = Math.floor((n - 1) / 4);
+    const idxs = new Set([0]);
+    for (let i = step; i < n; i += step) idxs.add(Math.min(i, n - 1));
+    idxs.add(n - 1);
+    return [...idxs].sort((a, b) => a - b);
+  })();
+  const fmtD = (ended) => { const d = new Date(ended); return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`; };
+  const listSessions = [...exSessions].reverse();
+
+  return (
+    <div style={{ overflowY: 'auto', flex: 1 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
+        <button onClick={onBack} style={{ width: 32, height: 32, borderRadius: 6, border: `0.5px solid ${UI.hair}`, background: UI.bgRaised, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <i className="fa-solid fa-chevron-left" style={{ fontSize: 12, color: UI.inkSoft }} />
+        </button>
+        <div style={{ flex: 1, fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{exName}</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {['kg', 'reps'].map(m => (
+            <button key={m} onClick={() => setMetric(m)} style={{
+              padding: '4px 10px', borderRadius: 4, cursor: 'pointer',
+              border: `1px solid ${metric === m ? UI.gold : UI.hairStrong}`,
+              background: metric === m ? UI.goldFaint : 'transparent',
+              color: metric === m ? UI.gold : UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
+              WebkitTapHighlightColor: 'transparent',
+            }}>{m === 'kg' ? UI.unit().toUpperCase() : 'REPS'}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ padding: '16px 16px 32px' }}>
+        {exSessions.length === 0 ? (
+          <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, textAlign: 'center', padding: 32 }}>No history yet.</div>
+        ) : (<>
+          <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" style={{ display: 'block', overflow: 'visible', marginBottom: 12, maxWidth: 480 }}>
+            {gridVals.map((v, i) => { const y = yPos(v); return (
+              <g key={i}>
+                <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
+                <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{Math.round(v)}</text>
+              </g>
+            ); })}
+            {Array.from({ length: maxSets }, (_, si) => {
+              const pts = exSessions.map((sess, xi) => { const v = getValue(sess.sets[si]); return v != null ? { x: xPos(xi), y: yPos(v) } : null; }).filter(Boolean);
+              if (!pts.length) return null;
+              const a = setAlphas[si] ?? 0.12;
+              return (
+                <g key={si}>
+                  {pts.length > 1 && <polyline points={pts.map(p => `${p.x},${p.y}`).join(' ')} fill="none" stroke={`rgba(var(--accent-rgb),${a})`} strokeWidth={si === 0 ? 1.5 : 1} strokeLinejoin="round" />}
+                  {pts.map((p, pi) => <circle key={pi} cx={p.x} cy={p.y} r={si === 0 ? 2.5 : 1.8} fill={si === 0 ? 'var(--accent)' : `rgba(var(--accent-rgb),${Math.min(a + 0.15, 1)})`} />)}
+                </g>
+              );
+            })}
+            {labelIdxs.map(xi => (
+              <text key={xi} x={xPos(xi)} y={VH - 4} textAnchor="middle" fontSize="7.5" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{fmtD(exSessions[xi].ended)}</text>
+            ))}
+          </svg>
+          {listSessions.slice(0, showCount).map((sess, i, arr) => (
+            <React.Fragment key={i}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '9px 0' }}>
+                <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0, width: 50 }}>{fmtD(sess.ended)}</span>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {sess.sets.map((st, si) => (
+                    <span key={si} style={{ border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '2px 7px', fontFamily: UI.fontNum, fontSize: 11, color: UI.ink }}>
+                      {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span>
+                      <span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>
+                      {isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              {i < arr.length - 1 && <div className="knurl" />}
+            </React.Fragment>
+          ))}
+          {listSessions.length > showCount && (
+            <button onClick={() => setShowCount(c => c + 20)} style={{ width: '100%', marginTop: 12, padding: '8px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`, color: UI.inkFaint, borderRadius: 4, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' }}>
+              Show more ({listSessions.length - showCount} remaining)
+            </button>
+          )}
+        </>)}
+      </div>
+    </div>
+  );
+}
+
 // ─── Tab: Sessions ────────────────────────────────────────────────────────────
 
 function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initialSelected, onClearSelected }) {
@@ -1359,126 +1485,15 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
 
   // ── Inline exercise history panel ──────────────────────────────────
   if (histEx) {
-    const { exId, dayId, exName } = histEx;
-    const ex = (clientStore.exercises || []).find(e => e.id === exId);
-    const isUni = !!ex?.unilateral;
-    const [metric, setMetric] = useStateC('kg');
-    const [showCount, setShowCount] = useStateC(20);
-
-    const exSessions = useMemoC(() =>
-      sessions
-        .filter(s => s.dayId === dayId)
-        .map(s => {
-          const entry = (s.entries || []).find(e => e.exId === exId);
-          if (!entry) return null;
-          const working = entry.sets.filter(st => !st.warmup && !st.skipped);
-          if (!working.some(st => st.kg != null || st.reps != null)) return null;
-          return { ended: s.ended, sets: working };
-        })
-        .filter(Boolean)
-        .sort((a, b) => a.ended.localeCompare(b.ended)),
-      [sessions, exId, dayId]
-    );
-
-    const getValue = (st) => metric === 'reps'
-      ? (isUni ? (st.repsL != null ? Math.min(st.repsL ?? 0, st.repsR ?? 0) : (st.reps ?? null)) : (st.reps ?? null))
-      : (st.kg ?? null);
-
-    const maxSets = Math.max(...exSessions.map(s => s.sets.length), 1);
-    const allVals = exSessions.flatMap(s => s.sets.map(getValue)).filter(v => v != null);
-    const minVal = allVals.length ? Math.min(...allVals) : 0;
-    const rawMax = allVals.length ? Math.max(...allVals) : 10;
-    const maxVal = rawMax === minVal ? rawMax + 1 : rawMax;
-    const valRange = maxVal - minVal;
-
-    const PAD_L = 36, PAD_R = 12, PAD_T = 14, PAD_B = 26, VW = 320, VH = 170;
-    const plotW = VW - PAD_L - PAD_R, plotH = VH - PAD_T - PAD_B, n = exSessions.length;
-    const xPos = (i) => PAD_L + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
-    const yPos = (v) => PAD_T + plotH - ((v - minVal) / valRange) * plotH;
-    const gridVals = Array.from({ length: 4 }, (_, i) => minVal + (valRange / 3) * i);
-    const setAlphas = [1, 0.55, 0.35, 0.22, 0.14];
-    const labelIdxs = (() => {
-      if (n <= 5) return exSessions.map((_, i) => i);
-      const step = Math.floor((n - 1) / 4);
-      const idxs = new Set([0]);
-      for (let i = step; i < n; i += step) idxs.add(Math.min(i, n - 1));
-      idxs.add(n - 1);
-      return [...idxs].sort((a, b) => a - b);
-    })();
-    const fmtD = (ended) => { const d = new Date(ended); return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`; };
-    const listSessions = [...exSessions].reverse();
-
     return (
-      <div style={{ overflowY: 'auto', flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
-          <button onClick={() => setHistEx(null)} style={{ width: 32, height: 32, borderRadius: 6, border: `0.5px solid ${UI.hair}`, background: UI.bgRaised, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <i className="fa-solid fa-chevron-left" style={{ fontSize: 12, color: UI.inkSoft }} />
-          </button>
-          <div style={{ flex: 1, fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{exName}</div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {['kg', 'reps'].map(m => (
-              <button key={m} onClick={() => setMetric(m)} style={{
-                padding: '4px 10px', borderRadius: 4, cursor: 'pointer',
-                border: `1px solid ${metric === m ? UI.gold : UI.hairStrong}`,
-                background: metric === m ? UI.goldFaint : 'transparent',
-                color: metric === m ? UI.gold : UI.inkFaint,
-                fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
-                WebkitTapHighlightColor: 'transparent',
-              }}>{m === 'kg' ? UI.unit().toUpperCase() : 'REPS'}</button>
-            ))}
-          </div>
-        </div>
-        <div style={{ padding: '16px 16px 32px' }}>
-          {exSessions.length === 0 ? (
-            <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, textAlign: 'center', padding: 32 }}>No history yet.</div>
-          ) : (<>
-            <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" style={{ display: 'block', overflow: 'visible', marginBottom: 12, maxWidth: 480 }}>
-              {gridVals.map((v, i) => { const y = yPos(v); return (
-                <g key={i}>
-                  <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
-                  <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{Math.round(v)}</text>
-                </g>
-              ); })}
-              {Array.from({ length: maxSets }, (_, si) => {
-                const pts = exSessions.map((sess, xi) => { const v = getValue(sess.sets[si]); return v != null ? { x: xPos(xi), y: yPos(v) } : null; }).filter(Boolean);
-                if (!pts.length) return null;
-                const a = setAlphas[si] ?? 0.12;
-                return (
-                  <g key={si}>
-                    {pts.length > 1 && <polyline points={pts.map(p => `${p.x},${p.y}`).join(' ')} fill="none" stroke={`rgba(var(--accent-rgb),${a})`} strokeWidth={si === 0 ? 1.5 : 1} strokeLinejoin="round" />}
-                    {pts.map((p, pi) => <circle key={pi} cx={p.x} cy={p.y} r={si === 0 ? 2.5 : 1.8} fill={si === 0 ? 'var(--accent)' : `rgba(var(--accent-rgb),${Math.min(a + 0.15, 1)})`} />)}
-                  </g>
-                );
-              })}
-              {labelIdxs.map(xi => (
-                <text key={xi} x={xPos(xi)} y={VH - 4} textAnchor="middle" fontSize="7.5" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{fmtD(exSessions[xi].ended)}</text>
-              ))}
-            </svg>
-            {listSessions.slice(0, showCount).map((sess, i, arr) => (
-              <React.Fragment key={i}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '9px 0' }}>
-                  <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0, width: 50 }}>{fmtD(sess.ended)}</span>
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {sess.sets.map((st, si) => (
-                      <span key={si} style={{ border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '2px 7px', fontFamily: UI.fontNum, fontSize: 11, color: UI.ink }}>
-                        {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span>
-                        <span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>
-                        {isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                {i < arr.length - 1 && <div className="knurl" />}
-              </React.Fragment>
-            ))}
-            {listSessions.length > showCount && (
-              <button onClick={() => setShowCount(c => c + 20)} style={{ width: '100%', marginTop: 12, padding: '8px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`, color: UI.inkFaint, borderRadius: 4, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' }}>
-                Show more ({listSessions.length - showCount} remaining)
-              </button>
-            )}
-          </>)}
-        </div>
-      </div>
+      <InlineExHistory
+        exId={histEx.exId}
+        dayId={histEx.dayId}
+        exName={histEx.exName}
+        sessions={sessions}
+        exercises={clientStore.exercises || []}
+        onBack={() => setHistEx(null)}
+      />
     );
   }
 
