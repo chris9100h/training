@@ -925,7 +925,7 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite) {
 }
 
 // Returns { kg, reps } suggestion when all last sets hit top of rep range, null otherwise.
-function progressionSuggestion(store, exId, dayId, plannedReps) {
+function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSet) {
   if (!store.settings?.smartProgression) return null;
   const ex = findExercise(store, exId);
   const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
@@ -935,12 +935,17 @@ function progressionSuggestion(store, exId, dayId, plannedReps) {
   const last = lastSessionForExercise(store, exId, dayId);
   if (!last) return null;
 
-  const baseReps = ex?.progression_reps ?? plannedReps;
-  const targetRepsTop = (baseReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+  const range = store.settings?.progressionRangeTop ?? 4;
   const doneSets = (last.entry.sets || []).filter(s => !s.skipped && !s.warmup && s.kg != null);
   if (!doneSets.length) return null;
 
-  const allHitTop = doneSets.every(s => (effReps(s) ?? 0) >= targetRepsTop);
+  const allHitTop = doneSets.every((s, i) => {
+    const perSet = plannedRepsPerSet && plannedRepsPerSet.length > 1
+      ? (plannedRepsPerSet[i] ?? plannedRepsPerSet[plannedRepsPerSet.length - 1])
+      : null;
+    const baseReps = ex?.progression_reps ?? perSet ?? plannedReps;
+    return (effReps(s) ?? 0) >= (baseReps ?? 0) + range;
+  });
   if (!allHitTop) return null;
 
   const refKg = doneSets[0].kg;
@@ -948,7 +953,8 @@ function progressionSuggestion(store, exId, dayId, plannedReps) {
   const cappedKg = maxKg ? Math.min(newKg, maxKg) : newKg;
   if (cappedKg <= refKg) return null;
 
-  return { kg: cappedKg, reps: baseReps ?? null };
+  const baseRepsFirst = ex?.progression_reps ?? (plannedRepsPerSet?.[0] ?? plannedReps);
+  return { kg: cappedKg, reps: baseRepsFirst ?? null };
 }
 
 // ─── COACHING ────────────────────────────────────────────────────────────────

@@ -360,12 +360,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
   const exercise = entry ? LB.findExercise(store, entry.exId) : null;
   const last = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayId) : null;
   const isUnilateral = !!exercise?.unilateral;
-  const progressionTarget = (() => {
+  const progressionTargetForSet = (workingSetIdx) => {
     if (!store.settings?.smartProgression) return null;
-    const base = (exercise?.progression_reps ?? entry?.plannedReps) ?? 0;
+    const perSet = entry?.plannedRepsPerSet;
+    const perSetVal = perSet && perSet.length > 1
+      ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
+      : null;
+    const base = (exercise?.progression_reps ?? perSetVal ?? entry?.plannedReps) ?? 0;
     const target = base + (store.settings?.progressionRangeTop ?? 4);
     return target > 0 ? target : null;
-  })();
+  };
 
   // Keep the reducer pure — no logging or Error().stack side effects inside
   // setStore (React may invoke updaters more than once). fn only runs for the
@@ -455,13 +459,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? null;
       if (!increment) return null;
-      const baseReps = exercise?.progression_reps ?? entry.plannedReps;
-      const targetRepsTop = (baseReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+      const range = store.settings?.progressionRangeTop ?? 4;
       const doneSets = updatedSets.filter(s => s.done && !s.skipped && !s.warmup && s.kg != null);
       if (!doneSets.length) return null;
-      const allHitTop = doneSets.every(s => {
+      const allHitTop = doneSets.every((s, i) => {
         const reps = s.repsL != null ? Math.min(s.repsL ?? 0, s.repsR ?? 0) : (s.reps ?? 0);
-        return reps >= targetRepsTop;
+        return reps >= (progressionTargetForSet(i) ?? 0);
       });
       if (!allHitTop) return null;
       const refKg = doneSets[0].kg;
@@ -1110,6 +1113,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
   const heroSet = bgSetIdx >= 0 ? entry.sets[bgSetIdx] : null;
   // For warmup sets there's no meaningful "last session" comparison
   const prevHeroSet = isCurrentWarmup ? null : (last?.entry?.sets || []).filter(s => !s.warmup)[bgSetIdx >= 0 ? bgSetIdx - warmupCount : 0];
+  const progressionTarget = progressionTargetForSet(Math.max(0, bgSetIdx - warmupCount));
 
   const workingSetsArr = entry.sets.filter(s => !s.warmup);
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);

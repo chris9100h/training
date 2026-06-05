@@ -309,7 +309,7 @@ function RecentBannerDay({ banner, store, setStore, go, sch, onOpenSkipSheet }) 
           const ex = LB.findExercise(store, it.exId);
           const last = LB.lastSessionForExercise(store, it.exId, dayId);
           const isUni = ex?.unilateral || false;
-          const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps);
+          const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet);
           const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
           return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
         });
@@ -1156,7 +1156,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                 const ex = LB.findExercise(store, it.exId);
                 const last = LB.lastSessionForExercise(store, it.exId, dayId);
                 const isUni = ex?.unilateral || false;
-                const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps);
+                const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet);
                 const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
                 return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
               });
