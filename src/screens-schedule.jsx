@@ -1047,30 +1047,52 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 
 // ─── Day editor (exercises within a day) ─────────────────────────────
 function ExerciseItemEditor({ item, exName, onClose, onSave }) {
+  const initRepsRaw = () =>
+    item.repsPerSet && item.repsPerSet.length > 1 ? item.repsPerSet.join('/') : String(item.reps ?? 8);
   const [sets, setSets] = useStateS(item.sets);
-  const [reps, setReps] = useStateS(item.reps);
+  const [repsRaw, setRepsRaw] = useStateS(initRepsRaw);
   const [note, setNote] = useStateS(item.note || '');
+
+  const parseRepsRaw = (raw) => {
+    const parts = raw.split('/').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0);
+    if (parts.length > 1) return { reps: parts[0], repsPerSet: parts };
+    if (parts.length === 1) return { reps: parts[0], repsPerSet: null };
+    return { reps: item.reps ?? 8, repsPerSet: null };
+  };
+
+  const isVariable = repsRaw.includes('/');
+
+  const handleSave = () => {
+    const { reps, repsPerSet } = parseRepsRaw(repsRaw);
+    const finalSets = repsPerSet ? repsPerSet.length : sets;
+    onSave({ sets: finalSets, reps, repsPerSet: repsPerSet || undefined, note });
+  };
 
   return (
     <Sheet open={true} onClose={onClose} title={exName}>
       <div style={{ display: 'flex', gap: 24, justifyContent: 'center', marginBottom: 24 }}>
-        <div style={{ textAlign: 'center', flex: 1 }}>
+        <div style={{ textAlign: 'center', flex: 1, opacity: isVariable ? 0.35 : 1 }}>
           <span className="label" style={{ display: 'block', textAlign: 'center' }}>Sets</span>
           <div style={{ marginTop: 8 }}>
-            <Stepper value={sets} onChange={v => setSets(Math.max(1, Math.round(v)))} step={1} min={1} />
+            <Stepper value={isVariable ? parseRepsRaw(repsRaw).repsPerSet?.length ?? sets : sets} onChange={v => !isVariable && setSets(Math.max(1, Math.round(v)))} step={1} min={1} />
           </div>
         </div>
         <div style={{ textAlign: 'center', flex: 1 }}>
           <span className="label" style={{ display: 'block', textAlign: 'center' }}>Reps</span>
           <div style={{ marginTop: 8 }}>
-            <Stepper value={reps} onChange={v => setReps(Math.max(1, Math.round(v)))} step={1} min={1} />
+            <TextInput value={repsRaw} onChange={setRepsRaw} placeholder="e.g. 8 or 10/8/6" />
           </div>
+          {isVariable && (
+            <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, display: 'block' }}>
+              {parseRepsRaw(repsRaw).repsPerSet?.length ?? 0} sets · per-set targets
+            </span>
+          )}
         </div>
       </div>
       <Field label="Note (optional)">
         <TextInput value={note} onChange={setNote} placeholder="e.g. cable pos 4, slow eccentric…" />
       </Field>
-      <Btn onClick={() => onSave({ sets, reps, note })} style={{ width: '100%', marginTop: 20 }}>Apply</Btn>
+      <Btn onClick={handleSave} style={{ width: '100%', marginTop: 20 }}>Apply</Btn>
     </Sheet>
   );
 }
@@ -1215,7 +1237,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                     fontSize: 12, color: UI.gold, background: UI.goldFaint,
                     border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
                     padding: '3px 8px', whiteSpace: 'nowrap',
-                  }}>{it.sets}×{it.reps}</div>
+                  }}>{it.repsPerSet && it.repsPerSet.length > 1 ? it.repsPerSet.join('/') : `${it.sets}×${it.reps}`}</div>
                   <button onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...dayEditIconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
                 </div>
               );

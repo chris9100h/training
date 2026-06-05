@@ -262,6 +262,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
             name: e.name,
             plannedSets: e.planned_sets,
             plannedReps: e.planned_reps,
+            plannedRepsPerSet: e.planned_reps_per_set || null,
             note: e.note || '',
             supersetGroup: e.superset_group || null,
             sets: (e.sets || [])
@@ -439,6 +440,7 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
         name: e.name || '',
         planned_sets: e.plannedSets || null,
         planned_reps: e.plannedReps || null,
+        planned_reps_per_set: e.plannedRepsPerSet || null,
         note: e.note || '',
         superset_group: e.supersetGroup || null,
       });
@@ -774,8 +776,10 @@ function calcBlended(startedAt, avgDurSec, avgSetsTotal, setsDone, setsTotal, no
 // Honors smart-progression suggestions and falls back to last-session values.
 function buildSeedSets(it, last, suggestion, isUni, smartProgression) {
   const workingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
+  const repsPerSet = it.repsPerSet;
   return Array.from({ length: it.sets }).map((_, i) => {
     const prev = workingSets[i];
+    const targetReps = repsPerSet ? (repsPerSet[i] ?? repsPerSet[repsPerSet.length - 1]) : null;
     if (suggestion) {
       return isUni
         ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false }
@@ -785,6 +789,11 @@ function buildSeedSets(it, last, suggestion, isUni, smartProgression) {
       return isUni
         ? { kg: prev.kg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
         : { kg: prev.kg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
+    }
+    if (!prev && targetReps != null) {
+      return isUni
+        ? { kg: null, repsL: targetReps, repsR: targetReps, done: false }
+        : { kg: null, reps: targetReps, done: false };
     }
     return isUni
       ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }

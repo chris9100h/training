@@ -311,7 +311,7 @@ function RecentBannerDay({ banner, store, setStore, go, sch, onOpenSkipSheet }) 
           const isUni = ex?.unilateral || false;
           const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps);
           const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
-          return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+          return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
         });
         const session = { id: LB.uid(), scheduleId: sch.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
         setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
@@ -681,7 +681,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       const seedSets = LB.buildSeedSets(it, last, suggestion, isUnilateral, !!store.settings?.smartProgression);
       return {
         exId: it.exId, name: ex?.name || '?',
-        plannedSets: it.sets, plannedReps: it.reps,
+        plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null,
         sets: seedSets, note: '',
         supersetGroup: it.supersetGroup || null,
       };
@@ -1158,7 +1158,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                 const isUni = ex?.unilateral || false;
                 const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps);
                 const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
-                return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+                return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
               });
               const session = { id: LB.uid(), scheduleId: sch.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
               setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
