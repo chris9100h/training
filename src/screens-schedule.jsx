@@ -1106,7 +1106,7 @@ function ExerciseItemEditor({ item, exName, onClose, onSave }) {
 
       {/* Sets stepper — always visible, same layout as per-set rows */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Sets</span>
           <div style={{ flex: 1 }}>
             <Stepper value={sets} onChange={handleSetsChange} step={1} min={1} />
@@ -1114,7 +1114,7 @@ function ExerciseItemEditor({ item, exName, onClose, onSave }) {
         </div>
 
         {mode === 'uniform' ? (
-          <div style={{ display: 'flex', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Reps</span>
             <div style={{ flex: 1 }}>
               <Stepper value={uniformReps} onChange={v => setUniformReps(Math.max(1, Math.round(v)))} step={1} min={1} />
@@ -1122,7 +1122,7 @@ function ExerciseItemEditor({ item, exName, onClose, onSave }) {
           </div>
         ) : (
           repsPerSet.map((r, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <span className="num" style={{ fontSize: 11, color: UI.inkFaint, width: 36, textAlign: 'right', flexShrink: 0 }}>
                 {String(i + 1).padStart(2, '0')}
               </span>
