@@ -1480,15 +1480,15 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   const wIdx = filteredSets.slice(0, j + 1).filter(st => !st.warmup).length - 1;
                   return wIdx >= 0 ? prevWorking[wIdx] : undefined;
                 };
+                const canHistory = !!s.dayId;
                 return (
-                <div key={i}>
+                <div key={i}
+                  onClick={() => canHistory && go({ name: 'exerciseHistory', exId: e.exId, dayId: s.dayId, exName, back: { name: 'session', sessionId: s.id } })}
+                  style={{ cursor: canHistory ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}
+                >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-                    <div
-                      className="display"
-                      onClick={() => s.dayId && go({ name: 'exerciseHistory', exId: e.exId, dayId: s.dayId, exName, back: { name: 'session', sessionId: s.id } })}
-                      style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1, cursor: s.dayId ? 'pointer' : 'default' }}
-                    >
-                      {exName}{s.dayId && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
+                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>
+                      {exName}{canHistory && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -2249,8 +2249,8 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back }) {
             </span>
           </div>
 
-          {/* SVG Chart */}
-          <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" style={{ display: 'block', overflow: 'visible', marginBottom: 12 }}>
+          {/* SVG Chart — maxWidth keeps it from ballooning on iPad */}
+          <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" style={{ display: 'block', overflow: 'visible', marginBottom: 12, maxWidth: 480 }}>
             {/* Horizontal grid lines + Y labels */}
             {gridVals.map((v, i) => {
               const y = yPos(v);
