@@ -673,7 +673,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'sessions'   && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
           {tab === 'checkins'   && (isSelf
             ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} />
-            : <ClientCheckInsTab coachingId={coachingId} />)}
+            : <ClientCheckInsTab coachingId={coachingId} initialCheckinEnabled={store?.coaching?.asCoach?.find(c => c.id === coachingId)?.checkinEnabled ?? true} />)}
           {tab === 'nutrition'  && <ClientNutritionTab coachingId={coachingId} userId={userId} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
@@ -1933,22 +1933,59 @@ function CheckInTrendCards({ recent }) {
 
 // ─── ClientCheckInsTab (coach view) ───────────────────────────────────────────
 
-function ClientCheckInsTab({ coachingId }) {
+function ClientCheckInsTab({ coachingId, initialCheckinEnabled = true }) {
   const [checkins, setCheckins] = useStateC(null);
+  const [checkinEnabled, setCheckinEnabled] = useStateC(initialCheckinEnabled);
+  const [toggling, setToggling] = useStateC(false);
 
   useEffectC(() => {
     LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
   }, [coachingId]);
 
+  const handleToggle = async () => {
+    if (toggling) return;
+    const next = !checkinEnabled;
+    setCheckinEnabled(next);
+    setToggling(true);
+    try { await LB.setCheckinEnabled(coachingId, next); }
+    catch (_) { setCheckinEnabled(!next); }
+    finally { setToggling(false); }
+  };
+
+  const toggleRow = (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
+      <div>
+        <div style={{ fontSize: 13, fontFamily: UI.fontUi, fontWeight: 600, color: UI.ink }}>Check-ins enabled</div>
+        <div style={{ fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, marginTop: 2 }}>Allow client to submit weekly check-ins</div>
+      </div>
+      <div
+        onClick={handleToggle}
+        style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: checkinEnabled ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${checkinEnabled ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent', opacity: toggling ? 0.6 : 1 }}
+      >
+        <div style={{ position: 'absolute', top: 3, left: checkinEnabled ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: checkinEnabled ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
+      </div>
+    </div>
+  );
+
   if (checkins === null) {
-    return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div></div>;
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {toggleRow}
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div>
+        </div>
+      </div>
+    );
   }
 
   if (!checkins.length) {
     return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
-        <i className="fa-solid fa-clipboard-list" style={{ fontSize: 28, color: UI.inkGhost }} />
-        <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center' }}>No check-ins yet.</div>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {toggleRow}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
+          <i className="fa-solid fa-clipboard-list" style={{ fontSize: 28, color: UI.inkGhost }} />
+          <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center' }}>No check-ins yet.</div>
+        </div>
       </div>
     );
   }
@@ -1956,12 +1993,15 @@ function ClientCheckInsTab({ coachingId }) {
   const recent = [...checkins].reverse();
 
   return (
-    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-      <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-        <CheckInTrendCards recent={recent} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
-          {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
+    <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      {toggleRow}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <CheckInTrendCards recent={recent} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
+            {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
+          </div>
         </div>
       </div>
     </div>
@@ -2543,7 +2583,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           {allClients.map(c => {
             const inProgress = liveMap[c.clientId];
             const clientUnread = unreadNotes.filter(n => n.authorId === c.clientId).length;
-            const checkinDue = c.status === 'active' && checkinMap[c.id] === false;
+            const checkinDue = c.status === 'active' && (c.checkinEnabled ?? true) && checkinMap[c.id] === false;
             const weekStart = LB.checkinWeekStart();
             const checkinNew = c.status === 'active' && checkinMap[c.id] === true && (() => {
               try { return localStorage.getItem(`logbook-coach-ci-seen-${c.id}`) !== weekStart; } catch (_) { return false; }
@@ -3026,7 +3066,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
 
 // ─── ClientCheckInTab ─────────────────────────────────────────────────────────
 
-function ClientCheckInTab({ coachingId, clientId, userId }) {
+function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true }) {
   const weekStart = LB.checkinWeekStart();
   const [checkins, setCheckins] = useStateC(null);
   const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
@@ -3094,14 +3134,19 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
           </div>
         )}
 
+        {!checkinEnabled && (
+          <div style={{ background: UI.bgInset, borderRadius: 10, padding: '11px 14px', border: `0.5px solid ${UI.hair}` }}>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Check-ins are currently paused by your coach.</div>
+          </div>
+        )}
         {thisWeek ? (
-          <CheckInCard ci={thisWeek} onEdit={() => setEditTarget(thisWeek)} onDelete={() => handleDelete(thisWeek)} confirmingDelete={confirmDelete === thisWeek.id} />
-        ) : (
+          <CheckInCard ci={thisWeek} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} />
+        ) : checkinEnabled ? (
           <button onClick={() => setEditTarget('new')}
             style={{ background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
             Submit this week's check-in
           </button>
-        )}
+        ) : null}
 
         {past.length > 0 && (
           <div style={{ background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
@@ -3279,7 +3324,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
       {tab === 'nutrition' && <ClientNutritionReadView coachingId={coaching.id} />}
       {tab === 'checkin' && (
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <ClientCheckInTab coachingId={coaching.id} clientId={userId} userId={userId} />
+          <ClientCheckInTab coachingId={coaching.id} clientId={userId} userId={userId} checkinEnabled={coaching.checkinEnabled ?? true} />
         </div>
       )}
     </Screen>

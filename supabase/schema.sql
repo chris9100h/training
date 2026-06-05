@@ -434,6 +434,20 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION get_coaching_clients()
+RETURNS TABLE (coaching_id text, client_id uuid, client_email text, client_name text, status text, checkin_enabled boolean)
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+AS $$
+  SELECT c.id, c.client_id, u.email, COALESCE(p.name, u.email), c.status, c.checkin_enabled
+  FROM zane_coaching c
+  JOIN auth.users u ON u.id = c.client_id
+  LEFT JOIN zane_profiles p ON p.id = c.client_id
+  WHERE c.coach_id = auth.uid()
+    AND c.coach_id <> c.client_id
+$$;
+
 CREATE OR REPLACE FUNCTION public.get_coach_clients_status()
 RETURNS TABLE(client_id uuid, in_progress_session_id text)
 LANGUAGE sql

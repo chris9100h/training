@@ -200,7 +200,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       .neq('author_id', userId),
     // Real coaching row (for check-in requests) — exclude the self-coaching row
     // so maybeSingle() never trips when both a real coach and self-coaching exist.
-    isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
+    isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
     // Self-coaching row (coach_id = client_id), if the user is their own coach
     isCoachLoad ? null : _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
   ];
@@ -333,6 +333,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         coachName: coachInfoRes.data[0].coach_name,
         status: coachInfoRes.data[0].status,
         checkinRequestedAt: coachingRowRes?.data?.checkin_requested_at ?? null,
+        checkinEnabled: coachingRowRes?.data?.checkin_enabled ?? true,
       } : null,
       asCoach: (coachClientsRes?.data || []).map(r => ({
         id: r.coaching_id,
@@ -340,6 +341,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         clientEmail: r.client_email,
         clientName: r.client_name,
         status: r.status,
+        checkinEnabled: r.checkin_enabled ?? true,
       })),
       asSelf: selfRowRes?.data ? { id: selfRowRes.data.id } : null,
       unreadNotes: (unreadNotesRes?.data || []).map(n => ({
@@ -977,7 +979,7 @@ async function reloadCoachingState(userId) {
       .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
       .is('read_at', null)
       .neq('author_id', userId),
-    _supabase.from('zane_coaching').select('id, checkin_requested_at').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
+    _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
     _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
   ]);
   return {
@@ -988,10 +990,11 @@ async function reloadCoachingState(userId) {
       coachName: coachInfoRes.data[0].coach_name,
       status: coachInfoRes.data[0].status,
       checkinRequestedAt: coachingRowRes?.data?.checkin_requested_at ?? null,
+      checkinEnabled: coachingRowRes?.data?.checkin_enabled ?? true,
     } : null,
     asCoach: (coachClientsRes?.data || []).map(r => ({
       id: r.coaching_id, clientId: r.client_id, clientEmail: r.client_email,
-      clientName: r.client_name, status: r.status,
+      clientName: r.client_name, status: r.status, checkinEnabled: r.checkin_enabled ?? true,
     })),
     asSelf: selfRowRes?.data ? { id: selfRowRes.data.id } : null,
     unreadNotes: (unreadRes?.data || []).map(n => ({
@@ -1174,6 +1177,11 @@ async function loadCoachCheckinStatus() {
   return (data || []).map(r => ({ coachingId: r.coaching_id, hasCheckin: r.has_checkin }));
 }
 
+async function setCheckinEnabled(coachingId, enabled) {
+  const { error } = await _supabase.from('zane_coaching').update({ checkin_enabled: enabled }).eq('id', coachingId);
+  if (error) throw new Error(error.message);
+}
+
 async function requestCheckin(coachingId, userId) {
   const threadId = await getOrCreateCoachingThread(coachingId, 'Weekly Check-in', userId);
   await addCoachingNote(coachingId, 'general', null, null,
@@ -1323,5 +1331,5 @@ window.LB = {
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
-  checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin,
+  checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled,
 };
