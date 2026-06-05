@@ -1103,11 +1103,24 @@ function StatsTab({ store, sessions, go }) {
 // ─── HISTORY ─────────────────────────────────────────────────────────
 function HistoryScreen({ store, go, initialTab }) {
   const [tab, setTab] = useStateL(initialTab || 'workouts');
+  const [dayFilter, setDayFilter] = useStateL(null);
   const sessions = useMemoL(() => {
     return [...store.sessions]
       .filter(s => s.ended)
       .sort((a,b) => (b.ended||'').localeCompare(a.ended||''));
   }, [store.sessions]);
+
+  // Unique day names sorted by frequency
+  const dayNames = useMemoL(() => {
+    const counts = {};
+    sessions.forEach(s => { if (s.dayName && s.dayName !== 'REST') counts[s.dayName] = (counts[s.dayName] || 0) + 1; });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([name]) => name);
+  }, [sessions]);
+
+  const filteredSessions = useMemoL(() =>
+    dayFilter ? sessions.filter(s => s.dayName === dayFilter) : sessions,
+    [sessions, dayFilter]
+  );
 
   return (
     <Screen scroll={false}>
@@ -1128,9 +1141,29 @@ function HistoryScreen({ store, go, initialTab }) {
       </div>
 
       {tab === 'workouts' && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px', display: 'flex', flexDirection: 'column' }}>
-          {sessions.length === 0 && (
-            <Empty title="No sessions" sub="Log your first workout to see your history." icon={ICON_HISTORY} />
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {/* Day filter chips */}
+          {dayNames.length > 1 && (
+            <div style={{ flexShrink: 0, padding: '8px 22px 0', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
+              {dayNames.map(name => {
+                const active = dayFilter === name;
+                return (
+                  <button key={name} onClick={() => setDayFilter(active ? null : name)} style={{
+                    flexShrink: 0, padding: '5px 12px', borderRadius: 4, cursor: 'pointer',
+                    border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
+                    background: active ? UI.goldFaint : 'transparent',
+                    color: active ? UI.gold : UI.inkFaint,
+                    fontFamily: UI.fontUi, fontSize: 10, fontWeight: active ? 600 : 400,
+                    letterSpacing: '0.1em', textTransform: 'uppercase',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>{name}</button>
+                );
+              })}
+            </div>
+          )}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px', display: 'flex', flexDirection: 'column' }}>
+          {filteredSessions.length === 0 && (
+            <Empty title="No sessions" sub={dayFilter ? `No "${dayFilter}" sessions logged yet.` : 'Log your first workout to see your history.'} icon={ICON_HISTORY} />
           )}
           {(() => {
             const now = new Date(); now.setHours(12,0,0,0);
@@ -1145,7 +1178,7 @@ function HistoryScreen({ store, go, initialTab }) {
             };
             const items = [];
             let lastGroup = null;
-            sessions.forEach(s => {
+            filteredSessions.forEach(s => {
               const group = getGroup(s.date);
               const firstInGroup = group !== lastGroup;
               if (firstInGroup) { items.push({ type: 'header', label: group, key: `h-${group}`, isFirst: items.length === 0 }); lastGroup = group; }
@@ -1195,6 +1228,7 @@ function HistoryScreen({ store, go, initialTab }) {
               );
             });
           })()}
+          </div>
         </div>
       )}
 
