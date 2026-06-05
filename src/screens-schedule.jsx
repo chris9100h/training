@@ -1120,8 +1120,8 @@ function ExerciseItemEditor({ item, exName, onClose, onSave }) {
           <span className="label" style={{ display: 'block', marginBottom: 12 }}>Reps per set</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {repsPerSet.map((r, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <span className="num" style={{ fontSize: 11, color: UI.inkFaint, width: 22, textAlign: 'right', flexShrink: 0 }}>
+              <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
+                <span className="num" style={{ fontSize: 11, color: UI.inkFaint, width: 28, textAlign: 'right', flexShrink: 0 }}>
                   {String(i + 1).padStart(2, '0')}
                 </span>
                 <div style={{ flex: 1 }}>
@@ -1131,6 +1131,7 @@ function ExerciseItemEditor({ item, exName, onClose, onSave }) {
                     step={1} min={1}
                   />
                 </div>
+                <div style={{ width: 28, flexShrink: 0 }} />
               </div>
             ))}
           </div>
