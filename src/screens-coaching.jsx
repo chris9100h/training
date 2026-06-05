@@ -790,7 +790,10 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
     planStartMonday = new Date(earliest);
     planStartMonday.setDate(earliest.getDate() - earliestWd);
     planStartMonday.setHours(0, 0, 0, 0);
-    planStartDateStr = localDateKey(earliest);
+    // Use the Monday of the first week, not the first session date.
+    // If the client missed training days earlier in that first week (before their
+    // first session), those days should still count as planned-but-missed.
+    planStartDateStr = localDateKey(planStartMonday);
   }
   if (!planStartMonday) return [];
 
