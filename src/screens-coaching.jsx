@@ -601,6 +601,19 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
   const [clientStore, setClientStore] = useStateC(null);
   const [loadError, setLoadError] = useStateC(null);
 
+  const coachingEntry = store?.coaching?.asCoach?.find(c => c.id === coachingId);
+  const [checkinEnabled, setCheckinEnabled] = useStateC(coachingEntry?.checkinEnabled ?? true);
+  const [ciToggling, setCiToggling] = useStateC(false);
+  const handleToggleCheckin = async () => {
+    if (ciToggling) return;
+    const next = !checkinEnabled;
+    setCheckinEnabled(next);
+    setCiToggling(true);
+    try { await LB.setCheckinEnabled(coachingId, next); }
+    catch (_) { setCheckinEnabled(!next); }
+    finally { setCiToggling(false); }
+  };
+
   useEffectC(() => {
     LB.loadClientStore(clientId)
       .then(data => setClientStore(data))
@@ -673,7 +686,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'sessions'   && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
           {tab === 'checkins'   && (isSelf
             ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} />
-            : <ClientCheckInsTab coachingId={coachingId} initialCheckinEnabled={store?.coaching?.asCoach?.find(c => c.id === coachingId)?.checkinEnabled ?? true} />)}
+            : <ClientCheckInsTab coachingId={coachingId} checkinEnabled={checkinEnabled} onToggle={handleToggleCheckin} toggling={ciToggling} />)}
           {tab === 'nutrition'  && <ClientNutritionTab coachingId={coachingId} userId={userId} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
@@ -1933,24 +1946,12 @@ function CheckInTrendCards({ recent }) {
 
 // ─── ClientCheckInsTab (coach view) ───────────────────────────────────────────
 
-function ClientCheckInsTab({ coachingId, initialCheckinEnabled = true }) {
+function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggling = false }) {
   const [checkins, setCheckins] = useStateC(null);
-  const [checkinEnabled, setCheckinEnabled] = useStateC(initialCheckinEnabled);
-  const [toggling, setToggling] = useStateC(false);
 
   useEffectC(() => {
     LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
   }, [coachingId]);
-
-  const handleToggle = async () => {
-    if (toggling) return;
-    const next = !checkinEnabled;
-    setCheckinEnabled(next);
-    setToggling(true);
-    try { await LB.setCheckinEnabled(coachingId, next); }
-    catch (_) { setCheckinEnabled(!next); }
-    finally { setToggling(false); }
-  };
 
   const toggleRow = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
@@ -1959,7 +1960,7 @@ function ClientCheckInsTab({ coachingId, initialCheckinEnabled = true }) {
         <div style={{ fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, marginTop: 2 }}>Allow client to submit weekly check-ins</div>
       </div>
       <div
-        onClick={handleToggle}
+        onClick={onToggle}
         style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: checkinEnabled ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${checkinEnabled ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent', opacity: toggling ? 0.6 : 1 }}
       >
         <div style={{ position: 'absolute', top: 3, left: checkinEnabled ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: checkinEnabled ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
