@@ -3032,6 +3032,7 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
   const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
   const [confirmDelete, setConfirmDelete] = useStateC(null); // id of check-in awaiting delete confirm
   const [deleting, setDeleting] = useStateC(false);
+  const [pastOpen, setPastOpen] = useStateC(false);
 
   const load = () => LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
   useEffectC(() => { load(); }, [coachingId]);
@@ -3105,8 +3106,14 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
 
         {past.length > 0 && (
           <>
-            <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>PREVIOUS CHECK-INS</div>
-            {past.map(ci => (
+            <div
+              onClick={() => setPastOpen(o => !o)}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', marginTop: 4, WebkitTapHighlightColor: 'transparent' }}
+            >
+              <div className="micro" style={{ color: UI.inkFaint }}>PREVIOUS CHECK-INS ({past.length})</div>
+              <i className={`fa-solid fa-chevron-${pastOpen ? 'up' : 'down'}`} style={{ fontSize: 10, color: UI.inkFaint }} />
+            </div>
+            {pastOpen && past.map(ci => (
               <CheckInCard key={ci.id} ci={ci} onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
             ))}
           </>
