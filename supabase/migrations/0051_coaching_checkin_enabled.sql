@@ -1,7 +1,9 @@
 -- Add per-client check-in enable/disable flag to zane_coaching
 ALTER TABLE zane_coaching ADD COLUMN IF NOT EXISTS checkin_enabled boolean NOT NULL DEFAULT true;
 
--- Update get_coaching_clients to return the new flag
+-- Return type changed — must drop before recreating
+DROP FUNCTION IF EXISTS get_coaching_clients();
+
 CREATE OR REPLACE FUNCTION get_coaching_clients()
 RETURNS TABLE (coaching_id text, client_id uuid, client_email text, client_name text, status text, checkin_enabled boolean)
 LANGUAGE sql
