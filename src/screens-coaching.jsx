@@ -866,7 +866,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       <Sheet open={!!chartOpen} onClose={() => setChartOpen(null)} title={chartTitles[chartOpen] || ''}>
         <div style={{ paddingBottom: 8 }}>
           {chartOpen === 'adherence' && <AdherenceChart weeks={weeks} />}
-          {chartOpen === 'volume' && <RollingVolumeChart sessions={ended} planStartDate={planStartDate} />}
+          {chartOpen === 'volume' && <RollingVolumeChart sessions={ended} planStartDate={planStartDate} clientStore={clientStore} />}
           {chartOpen === 'sessions' && <SessionsWeekChart sessions={ended} />}
         </div>
       </Sheet>
@@ -1074,37 +1074,80 @@ function AdherenceChart({ weeks }) {
   );
 }
 
-function RollingVolumeChart({ sessions, planStartDate }) {
+function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
+  const activeSch = clientStore?.schedules?.find(s => s.id === clientStore?.activeScheduleId);
+  const isWd = activeSch && LB.isWeekdayPlan(activeSch);
+  const cycleLen = (!isWd && activeSch?.days?.length) || 7;
   const cutoff = planStartDate ? planStartDate.slice(0, 10) : null;
-  const ended = (sessions || []).filter(s => s.ended && s.date && (!cutoff || s.date.slice(0, 10) >= cutoff)).sort((a, b) => a.date.slice(0, 10).localeCompare(b.date.slice(0, 10)));
-  const allPoints = ended.map(s => {
-    const dateKey = s.date.slice(0, 10);
-    const d = new Date(dateKey + 'T12:00:00');
-    const from = new Date(d); from.setDate(from.getDate() - 30);
-    const win = ended.filter(x => { const xd = new Date(x.date.slice(0, 10) + 'T12:00:00'); return xd >= from && xd <= d; });
-    return { avg: win.length ? Math.round(win.reduce((sum, x) => sum + LB.totalVolume(x), 0) / win.length) : 0, date: dateKey };
-  });
-  const points = allPoints.slice(-40);
 
-  if (points.length < 2) return <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Not enough sessions yet.</div>;
+  const ended = (sessions || [])
+    .filter(s => s.ended && s.date && (!cutoff || s.date.slice(0, 10) >= cutoff))
+    .sort((a, b) => a.date.slice(0, 10).localeCompare(b.date.slice(0, 10)));
+
+  const fmtShort = (dateStr) => {
+    const d = new Date(dateStr + 'T12:00:00');
+    return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`;
+  };
+
+  const getGroupKey = (dateStr) => {
+    const d = new Date(dateStr + 'T12:00:00');
+    if (isWd) {
+      const wd = (d.getDay() + 6) % 7;
+      const mon = new Date(d); mon.setDate(d.getDate() - wd);
+      return localDateKey(mon);
+    }
+    const ref = clientStore?.cycleStartDate
+      ? new Date(clientStore.cycleStartDate.slice(0, 10) + 'T12:00:00')
+      : ended.length ? new Date(ended[0].date.slice(0, 10) + 'T12:00:00') : d;
+    const daysDiff = Math.round((d.getTime() - ref.getTime()) / 86400000);
+    const runIdx = Math.floor(daysDiff / cycleLen);
+    const runStart = new Date(ref); runStart.setDate(ref.getDate() + runIdx * cycleLen);
+    return localDateKey(runStart);
+  };
+
+  const byGroup = {};
+  ended.forEach(s => {
+    const key = getGroupKey(s.date.slice(0, 10));
+    if (!byGroup[key]) byGroup[key] = { date: key, vol: 0, count: 0 };
+    byGroup[key].vol += LB.totalVolume(s);
+    byGroup[key].count++;
+  });
+
+  const allGroups = Object.values(byGroup)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((g, i) => ({ ...g, avg: Math.round(g.vol / g.count), label: isWd ? fmtShort(g.date) : fmtShort(g.date) }));
+
+  const points = allGroups.slice(-16);
+
+  if (points.length < 2) return (
+    <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
+      Not enough {isWd ? 'weeks' : 'cycles'} yet.
+    </div>
+  );
 
   const W = 300, H = 110;
   const maxV = Math.max(...points.map(p => p.avg));
   const minV = Math.min(...points.map(p => p.avg));
   const vRange = maxV - minV || 1;
-  const px = i => (i / (points.length - 1)) * W;
+  const n = points.length;
+  const px = i => n > 1 ? (i / (n - 1)) * W : W / 2;
   const py = v => H - 8 - ((v - minV) / vRange) * (H - 16);
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(p.avg).toFixed(1)}`).join(' ');
-  const areaPath = `${linePath} L${W},${H} L0,${H} Z`;
-  const trend = allPoints[allPoints.length - 1].avg - allPoints[0].avg;
+  const areaPath = `${linePath} L${px(n - 1).toFixed(1)},${H} L${px(0).toFixed(1)},${H} Z`;
+  const trend = allGroups[allGroups.length - 1].avg - allGroups[0].avg;
+  const unit = UI.unit();
+  const periodLabel = isWd ? 'WEEK' : `CYCLE (${cycleLen}d)`;
+
+  const labelIdxs = n <= 5 ? points.map((_, i) => i) : [0, Math.floor((n - 1) / 2), n - 1];
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <span style={{ fontSize: 11, color: trend >= 0 ? '#7bc47b' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>
           <i className={`fa-solid fa-arrow-trend-${trend >= 0 ? 'up' : 'down'}`} style={{ marginRight: 4 }} />
-          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}{UI.unit()} since plan start
+          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}{unit}
         </span>
+        <span className="micro" style={{ color: UI.inkFaint }}>AVG SESSION VOL / {periodLabel}</span>
       </div>
       <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`}>
         <defs>
@@ -1115,12 +1158,14 @@ function RollingVolumeChart({ sessions, planStartDate }) {
         </defs>
         <path d={areaPath} fill="url(#volGrad)" />
         <path d={linePath} fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx={px(0)} cy={py(points[0].avg)} r={3} fill="var(--accent)" />
-        <circle cx={px(points.length - 1)} cy={py(points[points.length - 1].avg)} r={3} fill="var(--accent)" />
-        <text x={0} y={H + 14} fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(points[0].date)}</text>
-        <text x={W} y={H + 14} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(points[points.length - 1].date)}</text>
-        <text x={W - 2} y={Math.max(py(maxV) - 3, 8)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{maxV.toLocaleString('en-US')}{UI.unit()}</text>
-        <text x={W - 2} y={Math.min(py(minV) + 10, H - 2)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{minV.toLocaleString('en-US')}{UI.unit()}</text>
+        {points.map((p, i) => (
+          <circle key={i} cx={px(i).toFixed(1)} cy={py(p.avg).toFixed(1)} r={i === 0 || i === n - 1 ? 3 : 2} fill="var(--accent)" />
+        ))}
+        {labelIdxs.map(i => (
+          <text key={i} x={px(i).toFixed(1)} y={H + 14} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{points[i].label}</text>
+        ))}
+        <text x={W - 2} y={Math.max(py(maxV) - 3, 8)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{maxV.toLocaleString('en-US')}{unit}</text>
+        <text x={W - 2} y={Math.min(py(minV) + 10, H - 2)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{minV.toLocaleString('en-US')}{unit}</text>
       </svg>
     </div>
   );
