@@ -859,7 +859,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       {/* Top stats */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, padding: '0 4px' }}>
         <StatBox label="Adherence (6w)" value={overallAdherence != null ? `${overallAdherence}%` : '—'} gold={overallAdherence >= 80} onClick={() => setChartOpen('adherence')} />
-        <StatBox label="Avg Volume" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}${UI.unit()}` : '—'} onClick={() => setChartOpen('volume')} />
+        <StatBox label="Avg Vol (30d)" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}${UI.unit()}` : '—'} onClick={() => setChartOpen('volume')} />
         <StatBox label="Sessions (30d)" value={last30.length} onClick={() => setChartOpen('sessions')} />
       </div>
 
@@ -1075,6 +1075,7 @@ function AdherenceChart({ weeks }) {
 }
 
 function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
+  const [showCount, setShowCount] = useStateC(20);
   const activeSch = clientStore?.schedules?.find(s => s.id === clientStore?.activeScheduleId);
   const isWd = activeSch && LB.isWeekdayPlan(activeSch);
   const cycleLen = (!isWd && activeSch?.days?.length) || 7;
@@ -1167,6 +1168,30 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
         <text x={W - 2} y={Math.max(py(maxV) - 3, 8)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{maxV.toLocaleString('en-US')}{unit}</text>
         <text x={W - 2} y={Math.min(py(minV) + 10, H - 2)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{minV.toLocaleString('en-US')}{unit}</text>
       </svg>
+      {(() => {
+        const listSessions = [...ended].reverse();
+        return (<>
+          {listSessions.slice(0, showCount).map((s, i, arr) => (
+            <React.Fragment key={s.id || i}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '9px 0' }}>
+                <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0, width: 50 }}>{fmtShort(s.date.slice(0, 10))}</span>
+                <div style={{ flex: 1, display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span style={{ border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '2px 7px', fontFamily: UI.fontNum, fontSize: 11, color: UI.ink }}>
+                    {Math.round(LB.totalVolume(s)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{unit}</span>
+                  </span>
+                  <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{s.dayName}</span>
+                </div>
+              </div>
+              {i < arr.length - 1 && <div className="knurl" />}
+            </React.Fragment>
+          ))}
+          {listSessions.length > showCount && (
+            <button onClick={() => setShowCount(c => c + 20)} style={{ width: '100%', marginTop: 8, padding: '8px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`, color: UI.inkFaint, borderRadius: 4, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' }}>
+              Show more ({listSessions.length - showCount} remaining)
+            </button>
+          )}
+        </>);
+      })()}
     </div>
   );
 }
