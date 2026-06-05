@@ -753,8 +753,16 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
 
   const isWd = LB.isWeekdayPlan(activeSch);
 
-  // Only count sessions for the active plan — ignore old plan sessions.
-  const planSessions = (clientStore.sessions || []).filter(s => s.ended && s.scheduleId === activeSch.id);
+  // For weekday plans, weekPlanStartDate marks when this plan was (re-)activated.
+  // Exclude sessions before that date so a previous run of the same schedule
+  // can't bleed into the current plan's adherence.
+  const planActivationStr = isWd ? clientStore.weekPlanStartDate?.slice(0, 10) : null;
+
+  const planSessions = (clientStore.sessions || []).filter(s =>
+    s.ended &&
+    s.scheduleId === activeSch.id &&
+    (!planActivationStr || !s.date || s.date.slice(0, 10) >= planActivationStr)
+  );
 
   // Session date set — both stored date field and local-time of ended timestamp.
   const sessionDates = new Set();
