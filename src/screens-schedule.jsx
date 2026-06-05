@@ -1104,39 +1104,39 @@ function ExerciseItemEditor({ item, exName, onClose, onSave }) {
         <button style={toggleStyle(mode === 'variable')} onClick={() => switchMode('variable')}>Per Set</button>
       </div>
 
-      {/* Sets stepper — always visible */}
-      <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <span className="label" style={{ display: 'block', marginBottom: 8 }}>Sets</span>
-        <Stepper value={sets} onChange={handleSetsChange} step={1} min={1} />
-      </div>
-
-      {mode === 'uniform' ? (
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <span className="label" style={{ display: 'block', marginBottom: 8 }}>Reps</span>
-          <Stepper value={uniformReps} onChange={v => setUniformReps(Math.max(1, Math.round(v)))} step={1} min={1} />
-        </div>
-      ) : (
-        <div style={{ marginBottom: 24 }}>
-          <span className="label" style={{ display: 'block', marginBottom: 12 }}>Reps per set</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {repsPerSet.map((r, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
-                <span className="num" style={{ fontSize: 11, color: UI.inkFaint, width: 28, textAlign: 'right', flexShrink: 0 }}>
-                  {String(i + 1).padStart(2, '0')}
-                </span>
-                <div style={{ flex: 1 }}>
-                  <Stepper
-                    value={r}
-                    onChange={v => setRepsPerSet(prev => prev.map((x, j) => j === i ? Math.max(1, Math.round(v)) : x))}
-                    step={1} min={1}
-                  />
-                </div>
-                <div style={{ width: 28, flexShrink: 0 }} />
-              </div>
-            ))}
+      {/* Sets stepper — always visible, same layout as per-set rows */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Sets</span>
+          <div style={{ flex: 1 }}>
+            <Stepper value={sets} onChange={handleSetsChange} step={1} min={1} />
           </div>
         </div>
-      )}
+
+        {mode === 'uniform' ? (
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Reps</span>
+            <div style={{ flex: 1 }}>
+              <Stepper value={uniformReps} onChange={v => setUniformReps(Math.max(1, Math.round(v)))} step={1} min={1} />
+            </div>
+          </div>
+        ) : (
+          repsPerSet.map((r, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
+              <span className="num" style={{ fontSize: 11, color: UI.inkFaint, width: 36, textAlign: 'right', flexShrink: 0 }}>
+                {String(i + 1).padStart(2, '0')}
+              </span>
+              <div style={{ flex: 1 }}>
+                <Stepper
+                  value={r}
+                  onChange={v => setRepsPerSet(prev => prev.map((x, j) => j === i ? Math.max(1, Math.round(v)) : x))}
+                  step={1} min={1}
+                />
+              </div>
+            </div>
+          ))
+        )}
+      </div>
 
       <Field label="Note (optional)">
         <TextInput value={note} onChange={setNote} placeholder="e.g. cable pos 4, slow eccentric…" />
