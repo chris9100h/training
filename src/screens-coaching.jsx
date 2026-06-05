@@ -767,12 +767,14 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   // Weekday plans: weekPlanStartDate is set when the plan was activated → most accurate.
   // Cycle plans / fallback: earliest session for this plan.
   let planStartMonday = null;
+  let planStartDateStr = null; // actual plan start date — days before this are ignored even within the first week
   if (isWd && clientStore.weekPlanStartDate) {
     const d = new Date(clientStore.weekPlanStartDate); d.setHours(12, 0, 0, 0);
     const wd = (d.getDay() + 6) % 7;
     planStartMonday = new Date(d);
     planStartMonday.setDate(d.getDate() - wd);
     planStartMonday.setHours(0, 0, 0, 0);
+    planStartDateStr = clientStore.weekPlanStartDate.slice(0, 10);
   } else if (planSessions.length > 0) {
     const earliestMs = Math.min(...planSessions.map(s => new Date(s.ended).getTime()));
     const earliest = new Date(earliestMs); earliest.setHours(12, 0, 0, 0);
@@ -780,6 +782,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
     planStartMonday = new Date(earliest);
     planStartMonday.setDate(earliest.getDate() - earliestWd);
     planStartMonday.setHours(0, 0, 0, 0);
+    planStartDateStr = localDateKey(earliest);
   }
   if (!planStartMonday) return [];
 
@@ -814,6 +817,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
       }
 
       if (isTrainingDay) {
+        if (planStartDateStr && dateStr < planStartDateStr) continue;
         planned++;
         if (sessionDates.has(dateStr)) done++;
       }
