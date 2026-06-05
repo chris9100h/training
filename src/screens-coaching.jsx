@@ -1116,7 +1116,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
 
   const allGroups = Object.values(byGroup)
     .sort((a, b) => a.date.localeCompare(b.date))
-    .map((g, i) => ({ ...g, avg: Math.round(g.vol / g.count), label: isWd ? fmtShort(g.date) : fmtShort(g.date) }));
+    .map(g => ({ ...g, avg: Math.round(g.vol / g.count), label: fmtShort(g.date) }));
 
   const points = allGroups.slice(-16);
 
@@ -1126,20 +1126,23 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
     </div>
   );
 
-  const W = 300, H = 110;
+  const PAD_L = 38, PAD_R = 8, PAD_T = 12, PAD_B = 22, VW = 320, VH = 150;
+  const plotW = VW - PAD_L - PAD_R, plotH = VH - PAD_T - PAD_B;
+  const n = points.length;
   const maxV = Math.max(...points.map(p => p.avg));
   const minV = Math.min(...points.map(p => p.avg));
   const vRange = maxV - minV || 1;
-  const n = points.length;
-  const px = i => n > 1 ? (i / (n - 1)) * W : W / 2;
-  const py = v => H - 8 - ((v - minV) / vRange) * (H - 16);
+  const px = i => PAD_L + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+  const py = v => PAD_T + plotH - ((v - minV) / vRange) * plotH;
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(p.avg).toFixed(1)}`).join(' ');
-  const areaPath = `${linePath} L${px(n - 1).toFixed(1)},${H} L${px(0).toFixed(1)},${H} Z`;
+  const areaPath = `${linePath} L${px(n-1).toFixed(1)},${PAD_T + plotH} L${px(0).toFixed(1)},${PAD_T + plotH} Z`;
   const trend = allGroups[allGroups.length - 1].avg - allGroups[0].avg;
   const unit = UI.unit();
   const periodLabel = isWd ? 'WEEK' : `CYCLE (${cycleLen}d)`;
-
+  const fmtY = v => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`;
+  const gridVals = [minV, minV + vRange / 2, maxV];
   const labelIdxs = n <= 5 ? points.map((_, i) => i) : [0, Math.floor((n - 1) / 2), n - 1];
+  const listGroups = [...allGroups].reverse();
 
   return (
     <div>
@@ -1150,48 +1153,50 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
         </span>
         <span className="micro" style={{ color: UI.inkFaint }}>AVG SESSION VOL / {periodLabel}</span>
       </div>
-      <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`}>
+      <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" style={{ display: 'block', overflow: 'visible', marginBottom: 12 }}>
         <defs>
           <linearGradient id="volGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.2" />
             <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
           </linearGradient>
         </defs>
+        {gridVals.map((v, i) => {
+          const y = py(v);
+          return (
+            <g key={i}>
+              <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
+              <text x={PAD_L - 4} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{fmtY(v)}</text>
+            </g>
+          );
+        })}
         <path d={areaPath} fill="url(#volGrad)" />
         <path d={linePath} fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
         {points.map((p, i) => (
           <circle key={i} cx={px(i).toFixed(1)} cy={py(p.avg).toFixed(1)} r={i === 0 || i === n - 1 ? 3 : 2} fill="var(--accent)" />
         ))}
         {labelIdxs.map(i => (
-          <text key={i} x={px(i).toFixed(1)} y={H + 14} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{points[i].label}</text>
+          <text key={i} x={px(i).toFixed(1)} y={VH - 4} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{points[i].label}</text>
         ))}
-        <text x={W - 2} y={Math.max(py(maxV) - 3, 8)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{maxV.toLocaleString('en-US')}{unit}</text>
-        <text x={W - 2} y={Math.min(py(minV) + 10, H - 2)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{minV.toLocaleString('en-US')}{unit}</text>
       </svg>
-      {(() => {
-        const listSessions = [...ended].reverse();
-        return (<>
-          {listSessions.slice(0, showCount).map((s, i, arr) => (
-            <React.Fragment key={s.id || i}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '9px 0' }}>
-                <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0, width: 50 }}>{fmtShort(s.date.slice(0, 10))}</span>
-                <div style={{ flex: 1, display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <span style={{ border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '2px 7px', fontFamily: UI.fontNum, fontSize: 11, color: UI.ink }}>
-                    {Math.round(LB.totalVolume(s)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{unit}</span>
-                  </span>
-                  <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{s.dayName}</span>
-                </div>
-              </div>
-              {i < arr.length - 1 && <div className="knurl" />}
-            </React.Fragment>
-          ))}
-          {listSessions.length > showCount && (
-            <button onClick={() => setShowCount(c => c + 20)} style={{ width: '100%', marginTop: 8, padding: '8px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`, color: UI.inkFaint, borderRadius: 4, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' }}>
-              Show more ({listSessions.length - showCount} remaining)
-            </button>
-          )}
-        </>);
-      })()}
+      {listGroups.slice(0, showCount).map((g, i, arr) => (
+        <React.Fragment key={g.date}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '9px 0' }}>
+            <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0, width: 50 }}>{g.label}</span>
+            <div style={{ flex: 1, display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '2px 7px', fontFamily: UI.fontNum, fontSize: 11, color: UI.ink }}>
+                {g.avg.toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{unit}</span>
+              </span>
+              <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{g.count} session{g.count !== 1 ? 's' : ''}</span>
+            </div>
+          </div>
+          {i < arr.length - 1 && <div className="knurl" />}
+        </React.Fragment>
+      ))}
+      {listGroups.length > showCount && (
+        <button onClick={() => setShowCount(c => c + 20)} style={{ width: '100%', marginTop: 8, padding: '8px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`, color: UI.inkFaint, borderRadius: 4, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' }}>
+          Show more ({listGroups.length - showCount} remaining)
+        </button>
+      )}
     </div>
   );
 }
