@@ -826,7 +826,10 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
     ? Math.round(completedWeeks.reduce((s, w) => s + w.pct, 0) / completedWeeks.length)
     : null;
 
-  const last30 = ended.filter(s => (Date.now() - new Date(s.ended).getTime()) < 30 * 86400000);
+  const last30 = ended.filter(s =>
+    (Date.now() - new Date(s.ended).getTime()) < 30 * 86400000 &&
+    (!planStartDate || s.date?.slice(0, 10) >= planStartDate.slice(0, 10))
+  );
   const avgVol = last30.length > 0
     ? Math.round(last30.reduce((s, x) => s + LB.totalVolume(x), 0) / last30.length)
     : null;
