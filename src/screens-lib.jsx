@@ -1350,15 +1350,15 @@ function HistoryScreen({ store, go, initialTab }) {
                 </div>
               )}
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8, borderTop: `0.5px solid ${UI.hair}` }}>
-                <span className="micro" style={{ color: UI.inkFaint }}>{filteredSessions.length} session{filteredSessions.length !== 1 ? 's' : ''}</span>
-                {filterCount > 0 && (
-                  <button onClick={() => { setPlanFilter(null); setPeriodFilter(null); setDayFilter(null); }}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.danger, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-                    Clear all
-                  </button>
-                )}
-              </div>
+              {filterCount > 0 && (
+                <button onClick={() => { setPlanFilter(null); setPeriodFilter(null); setDayFilter(null); }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.danger, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', alignSelf: 'flex-start' }}>
+                  Clear all
+                </button>
+              )}
+              <Btn onClick={() => setFiltersOpen(false)} disabled={filteredSessions.length === 0} style={{ opacity: filteredSessions.length === 0 ? 0.4 : 1 }}>
+                {filteredSessions.length === 0 ? 'No results' : `Show ${filteredSessions.length} workout${filteredSessions.length === 1 ? '' : 's'}`}
+              </Btn>
             </div>
           </Sheet>
         );
