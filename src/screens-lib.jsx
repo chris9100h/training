@@ -1103,24 +1103,85 @@ function StatsTab({ store, sessions, go }) {
 // ─── HISTORY ─────────────────────────────────────────────────────────
 function HistoryScreen({ store, go, initialTab }) {
   const [tab, setTab] = useStateL(initialTab || 'workouts');
+  const [planFilter, setPlanFilter] = useStateL(null);
+  const [periodFilter, setPeriodFilter] = useStateL(null);
   const [dayFilter, setDayFilter] = useStateL(null);
+
   const sessions = useMemoL(() => {
     return [...store.sessions]
       .filter(s => s.ended)
       .sort((a,b) => (b.ended||'').localeCompare(a.ended||''));
   }, [store.sessions]);
 
-  // Unique day names sorted by frequency
-  const dayNames = useMemoL(() => {
-    const counts = {};
-    sessions.forEach(s => { if (s.dayName && s.dayName !== 'REST') counts[s.dayName] = (counts[s.dayName] || 0) + 1; });
-    return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([name]) => name);
-  }, [sessions]);
+  // Plans that appear in sessions
+  const planOptions = useMemoL(() => {
+    const seen = new Map();
+    sessions.forEach(s => {
+      if (s.scheduleId && !seen.has(s.scheduleId)) {
+        const sch = store.schedules.find(x => x.id === s.scheduleId);
+        seen.set(s.scheduleId, sch?.name || '?');
+      }
+    });
+    return [...seen.entries()].map(([id, name]) => ({ id, name }));
+  }, [sessions, store.schedules]);
 
-  const filteredSessions = useMemoL(() =>
-    dayFilter ? sessions.filter(s => s.dayName === dayFilter) : sessions,
-    [sessions, dayFilter]
-  );
+  // Compute "Cycle N" / "Week N" label for each session
+  const sessionPeriods = useMemoL(() => {
+    const map = new Map();
+    const bySchedule = {};
+    sessions.forEach(s => { if (s.scheduleId) (bySchedule[s.scheduleId] = bySchedule[s.scheduleId] || []).push(s); });
+    Object.entries(bySchedule).forEach(([schedId, schSessions]) => {
+      const sch = store.schedules.find(x => x.id === schedId);
+      if (!sch) return;
+      const isWd = LB.isWeekdayPlan(sch);
+      let startStr = schedId === store.activeScheduleId
+        ? (isWd ? store.weekPlanStartDate : store.cycleStartDate)
+        : null;
+      if (!startStr)
+        startStr = schSessions.reduce((min, s) => s.date < min ? s.date : min, schSessions[0].date);
+      const startD = new Date(startStr.slice(0, 10) + 'T12:00:00');
+      schSessions.forEach(s => {
+        const sDate = new Date(s.date.slice(0, 10) + 'T12:00:00');
+        if (isWd) {
+          const startWd = (startD.getDay() + 6) % 7;
+          const startMon = new Date(startD); startMon.setDate(startD.getDate() - startWd); startMon.setHours(0,0,0,0);
+          const weekNum = Math.floor((sDate - startMon) / (7 * 86400000)) + 1;
+          if (weekNum > 0) map.set(s.id, `Week ${weekNum}`);
+        } else {
+          const cycleLen = sch.days.length || 1;
+          const daysDiff = Math.round((sDate - startD) / 86400000);
+          if (daysDiff >= 0) map.set(s.id, `Cycle ${Math.floor(daysDiff / cycleLen) + 1}`);
+        }
+      });
+    });
+    return map;
+  }, [sessions, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate]);
+
+  // Period options depend on planFilter
+  const periodOptions = useMemoL(() => {
+    const base = planFilter ? sessions.filter(s => s.scheduleId === planFilter) : sessions;
+    const seen = new Set();
+    base.forEach(s => { const p = sessionPeriods.get(s.id); if (p) seen.add(p); });
+    return [...seen].sort((a, b) => parseInt(a.split(' ')[1]) - parseInt(b.split(' ')[1]));
+  }, [sessions, planFilter, sessionPeriods]);
+
+  // Day options depend on planFilter + periodFilter
+  const dayOptions = useMemoL(() => {
+    let base = sessions;
+    if (planFilter) base = base.filter(s => s.scheduleId === planFilter);
+    if (periodFilter) base = base.filter(s => sessionPeriods.get(s.id) === periodFilter);
+    const counts = {};
+    base.forEach(s => { if (s.dayName && s.dayName !== 'REST') counts[s.dayName] = (counts[s.dayName] || 0) + 1; });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([name]) => name);
+  }, [sessions, planFilter, periodFilter, sessionPeriods]);
+
+  const filteredSessions = useMemoL(() => {
+    let s = sessions;
+    if (planFilter) s = s.filter(x => x.scheduleId === planFilter);
+    if (periodFilter) s = s.filter(x => sessionPeriods.get(x.id) === periodFilter);
+    if (dayFilter) s = s.filter(x => x.dayName === dayFilter);
+    return s;
+  }, [sessions, planFilter, periodFilter, dayFilter, sessionPeriods]);
 
   return (
     <Screen scroll={false}>
@@ -1142,28 +1203,56 @@ function HistoryScreen({ store, go, initialTab }) {
 
       {tab === 'workouts' && (
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          {/* Day filter chips */}
-          {dayNames.length > 1 && (
-            <div style={{ flexShrink: 0, padding: '8px 22px 0', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
-              {dayNames.map(name => {
-                const active = dayFilter === name;
-                return (
-                  <button key={name} onClick={() => setDayFilter(active ? null : name)} style={{
-                    flexShrink: 0, padding: '5px 12px', borderRadius: 4, cursor: 'pointer',
-                    border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
-                    background: active ? UI.goldFaint : 'transparent',
-                    color: active ? UI.gold : UI.inkFaint,
-                    fontFamily: UI.fontUi, fontSize: 10, fontWeight: active ? 600 : 400,
-                    letterSpacing: '0.1em', textTransform: 'uppercase',
-                    WebkitTapHighlightColor: 'transparent',
-                  }}>{name}</button>
-                );
-              })}
-            </div>
-          )}
+          {/* Filters: Plan / Cycle/Week / Day */}
+          {planOptions.length > 0 && (() => {
+            const selStyle = (active) => ({
+              appearance: 'none', WebkitAppearance: 'none',
+              background: active ? 'rgba(var(--accent-rgb),0.10)' : 'transparent',
+              border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
+              borderRadius: 4, color: active ? 'var(--accent)' : UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 10, fontWeight: active ? 600 : 400,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              padding: '5px 22px 5px 9px', cursor: 'pointer', outline: 'none',
+              colorScheme: 'dark', maxWidth: 130,
+            });
+            const wrap = { position: 'relative', flexShrink: 0 };
+            const chevron = { position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', fontSize: 8, color: UI.inkFaint };
+            return (
+              <div style={{ flexShrink: 0, padding: '8px 22px 0', display: 'flex', gap: 6 }}>
+                <div style={wrap}>
+                  <select value={planFilter || ''} style={selStyle(!!planFilter)}
+                    onChange={e => { const v = e.target.value || null; setPlanFilter(v); setPeriodFilter(null); setDayFilter(null); }}>
+                    <option value="">Plan</option>
+                    {planOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                  <i className="fa-solid fa-chevron-down" style={chevron} />
+                </div>
+                {periodOptions.length > 0 && (
+                  <div style={wrap}>
+                    <select value={periodFilter || ''} style={selStyle(!!periodFilter)}
+                      onChange={e => { const v = e.target.value || null; setPeriodFilter(v); setDayFilter(null); }}>
+                      <option value="">Cycle / Week</option>
+                      {periodOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    <i className="fa-solid fa-chevron-down" style={chevron} />
+                  </div>
+                )}
+                {dayOptions.length > 1 && (
+                  <div style={wrap}>
+                    <select value={dayFilter || ''} style={selStyle(!!dayFilter)}
+                      onChange={e => setDayFilter(e.target.value || null)}>
+                      <option value="">Day</option>
+                      {dayOptions.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    <i className="fa-solid fa-chevron-down" style={chevron} />
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px', display: 'flex', flexDirection: 'column' }}>
           {filteredSessions.length === 0 && (
-            <Empty title="No sessions" sub={dayFilter ? `No "${dayFilter}" sessions logged yet.` : 'Log your first workout to see your history.'} icon={ICON_HISTORY} />
+            <Empty title="No sessions" sub={planFilter || periodFilter || dayFilter ? 'No sessions match the selected filters.' : 'Log your first workout to see your history.'} icon={ICON_HISTORY} />
           )}
           {(() => {
             const now = new Date(); now.setHours(12,0,0,0);
