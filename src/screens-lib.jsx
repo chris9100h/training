@@ -1247,6 +1247,13 @@ function HistoryScreen({ store, go, initialTab }) {
                     <i className="fa-solid fa-chevron-down" style={chevron} />
                   </div>
                 )}
+                {(planFilter || periodFilter || dayFilter) && (
+                  <button onClick={() => { setPlanFilter(null); setPeriodFilter(null); setDayFilter(null); }} style={{
+                    marginLeft: 'auto', flexShrink: 0, background: 'none', border: 'none',
+                    cursor: 'pointer', padding: '5px 4px', color: UI.inkFaint,
+                    fontSize: 14, lineHeight: 1, WebkitTapHighlightColor: 'transparent',
+                  }}>×</button>
+                )}
               </div>
             );
           })()}
