@@ -1249,10 +1249,12 @@ function HistoryScreen({ store, go, initialTab }) {
                 )}
                 {(planFilter || periodFilter || dayFilter) && (
                   <button onClick={() => { setPlanFilter(null); setPeriodFilter(null); setDayFilter(null); }} style={{
-                    marginLeft: 'auto', flexShrink: 0, background: 'none', border: 'none',
-                    cursor: 'pointer', padding: '5px 4px', color: UI.inkFaint,
-                    fontSize: 14, lineHeight: 1, WebkitTapHighlightColor: 'transparent',
-                  }}>×</button>
+                    marginLeft: 'auto', flexShrink: 0, cursor: 'pointer',
+                    border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
+                    background: 'transparent', color: UI.inkFaint,
+                    fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em',
+                    padding: '5px 9px', WebkitTapHighlightColor: 'transparent',
+                  }}>RESET</button>
                 )}
               </div>
             );
