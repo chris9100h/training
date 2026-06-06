@@ -1103,11 +1103,24 @@ function StatsTab({ store, sessions, go }) {
 // ─── HISTORY ─────────────────────────────────────────────────────────
 function HistoryScreen({ store, go, initialTab }) {
   const [tab, setTab] = useStateL(initialTab || 'workouts');
+  const [dayFilter, setDayFilter] = useStateL(null);
   const sessions = useMemoL(() => {
     return [...store.sessions]
       .filter(s => s.ended)
       .sort((a,b) => (b.ended||'').localeCompare(a.ended||''));
   }, [store.sessions]);
+
+  // Unique day names sorted by frequency
+  const dayNames = useMemoL(() => {
+    const counts = {};
+    sessions.forEach(s => { if (s.dayName && s.dayName !== 'REST') counts[s.dayName] = (counts[s.dayName] || 0) + 1; });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([name]) => name);
+  }, [sessions]);
+
+  const filteredSessions = useMemoL(() =>
+    dayFilter ? sessions.filter(s => s.dayName === dayFilter) : sessions,
+    [sessions, dayFilter]
+  );
 
   return (
     <Screen scroll={false}>
@@ -1128,9 +1141,29 @@ function HistoryScreen({ store, go, initialTab }) {
       </div>
 
       {tab === 'workouts' && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px', display: 'flex', flexDirection: 'column' }}>
-          {sessions.length === 0 && (
-            <Empty title="No sessions" sub="Log your first workout to see your history." icon={ICON_HISTORY} />
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {/* Day filter chips */}
+          {dayNames.length > 1 && (
+            <div style={{ flexShrink: 0, padding: '8px 22px 0', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
+              {dayNames.map(name => {
+                const active = dayFilter === name;
+                return (
+                  <button key={name} onClick={() => setDayFilter(active ? null : name)} style={{
+                    flexShrink: 0, padding: '5px 12px', borderRadius: 4, cursor: 'pointer',
+                    border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
+                    background: active ? UI.goldFaint : 'transparent',
+                    color: active ? UI.gold : UI.inkFaint,
+                    fontFamily: UI.fontUi, fontSize: 10, fontWeight: active ? 600 : 400,
+                    letterSpacing: '0.1em', textTransform: 'uppercase',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>{name}</button>
+                );
+              })}
+            </div>
+          )}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px', display: 'flex', flexDirection: 'column' }}>
+          {filteredSessions.length === 0 && (
+            <Empty title="No sessions" sub={dayFilter ? `No "${dayFilter}" sessions logged yet.` : 'Log your first workout to see your history.'} icon={ICON_HISTORY} />
           )}
           {(() => {
             const now = new Date(); now.setHours(12,0,0,0);
@@ -1145,7 +1178,7 @@ function HistoryScreen({ store, go, initialTab }) {
             };
             const items = [];
             let lastGroup = null;
-            sessions.forEach(s => {
+            filteredSessions.forEach(s => {
               const group = getGroup(s.date);
               const firstInGroup = group !== lastGroup;
               if (firstInGroup) { items.push({ type: 'header', label: group, key: `h-${group}`, isFirst: items.length === 0 }); lastGroup = group; }
@@ -1195,6 +1228,7 @@ function HistoryScreen({ store, go, initialTab }) {
               );
             });
           })()}
+          </div>
         </div>
       )}
 
@@ -1480,10 +1514,16 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   const wIdx = filteredSets.slice(0, j + 1).filter(st => !st.warmup).length - 1;
                   return wIdx >= 0 ? prevWorking[wIdx] : undefined;
                 };
+                const canHistory = !!s.dayId;
                 return (
-                <div key={i}>
+                <div key={i}
+                  onClick={() => canHistory && go({ name: 'exerciseHistory', exId: e.exId, dayId: s.dayId, exName, back: { name: 'session', sessionId: s.id } })}
+                  style={{ cursor: canHistory ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}
+                >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{exName}</div>
+                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>
+                      {exName}{canHistory && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
+                    </div>
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {filteredSets.map((st, j) => {
@@ -2142,5 +2182,207 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
 }
 
 
-Object.assign(window.Screens, { LibraryScreen, ExerciseCreator, ExerciseDetailScreen, HistoryScreen, SessionDetailScreen, SpectatorScreen });
+function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back }) {
+  const [metric, setMetric] = useStateL('kg');
+  const [showCount, setShowCount] = useStateL(20);
+
+  const ex = store.exercises.find(e => e.id === exId);
+  const isUni = !!ex?.unilateral;
+  const displayName = exName || ex?.name || '?';
+
+  const allSessions = useMemoL(() =>
+    store.sessions
+      .filter(s => s.ended && s.dayId === dayId)
+      .map(s => {
+        const entry = s.entries.find(e => e.exId === exId);
+        if (!entry) return null;
+        const working = entry.sets.filter(st => !st.warmup && !st.skipped);
+        if (!working.some(st => st.kg != null || st.reps != null)) return null;
+        return { ended: s.ended, sets: working };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.ended.localeCompare(b.ended)),
+    [store.sessions, exId, dayId]
+  );
+
+  const maxSets = Math.max(...allSessions.map(s => s.sets.length), 1);
+
+  const getValue = (st) => {
+    if (metric === 'reps') return isUni
+      ? (st.repsL != null ? Math.min(st.repsL ?? 0, st.repsR ?? 0) : (st.reps ?? null))
+      : (st.reps ?? null);
+    return st.kg ?? null;
+  };
+
+  const allVals = allSessions.flatMap(s => s.sets.map(getValue)).filter(v => v != null);
+  const minVal = allVals.length ? Math.min(...allVals) : 0;
+  const rawMax = allVals.length ? Math.max(...allVals) : 10;
+  const maxVal = rawMax === minVal ? rawMax + 1 : rawMax;
+  const valRange = maxVal - minVal;
+
+  const PAD_L = 36, PAD_R = 12, PAD_T = 14, PAD_B = 26;
+  const VW = 320, VH = 180;
+  const plotW = VW - PAD_L - PAD_R;
+  const plotH = VH - PAD_T - PAD_B;
+  const n = allSessions.length;
+  const xPos = (i) => PAD_L + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+  const yPos = (v) => PAD_T + plotH - ((v - minVal) / valRange) * plotH;
+
+  const gridVals = Array.from({ length: 4 }, (_, i) => minVal + (valRange / 3) * i);
+  const setAlphas = [1, 0.55, 0.35, 0.22, 0.14];
+
+  const labelIdxs = (() => {
+    if (n <= 5) return allSessions.map((_, i) => i);
+    const step = Math.floor((n - 1) / 4);
+    const idxs = new Set([0]);
+    for (let i = step; i < n; i += step) idxs.add(Math.min(i, n - 1));
+    idxs.add(n - 1);
+    return [...idxs].sort((a, b) => a - b);
+  })();
+
+  const fmtDate = (ended) => {
+    const d = new Date(ended);
+    return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`;
+  };
+
+  const listSessions = [...allSessions].reverse();
+  const visible = listSessions.slice(0, showCount);
+
+  return (
+    <Screen>
+      <TopBar title={displayName} onBack={() => back ? go(back) : go({ name: 'hist' })} />
+
+      {(ex?.category || ex?.equipment || (ex?.tags || []).length > 0) && (
+        <div style={{ padding: '4px 22px 12px', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {ex?.category && <Pill gold>{ex.category}</Pill>}
+          {ex?.equipment && <Pill>{(window.EQUIPMENT_TYPES || []).find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill>}
+          {(ex?.tags || []).map(t => <Pill key={t}>{t}</Pill>)}
+        </div>
+      )}
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '0 22px 40px' }}>
+        {allSessions.length === 0 ? (
+          <Empty title="No history yet" />
+        ) : (<>
+
+          {/* Metric toggle + session count */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+            {['kg', 'reps'].map(m => (
+              <button key={m} onClick={() => setMetric(m)} style={{
+                padding: '5px 14px', borderRadius: 4, cursor: 'pointer',
+                border: `1px solid ${metric === m ? UI.gold : UI.hairStrong}`,
+                background: metric === m ? UI.goldFaint : 'transparent',
+                color: metric === m ? UI.gold : UI.inkFaint,
+                fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600,
+                letterSpacing: '0.12em', textTransform: 'uppercase',
+                WebkitTapHighlightColor: 'transparent',
+              }}>{m === 'kg' ? UI.unit().toUpperCase() : 'REPS'}</button>
+            ))}
+            <span className="micro" style={{ marginLeft: 'auto', color: UI.inkFaint }}>
+              {n} SESSION{n !== 1 ? 'S' : ''}
+            </span>
+          </div>
+
+          {/* SVG Chart — maxWidth keeps it from ballooning on iPad */}
+          <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" style={{ display: 'block', overflow: 'visible', marginBottom: 12, maxWidth: 480 }}>
+            {/* Horizontal grid lines + Y labels */}
+            {gridVals.map((v, i) => {
+              const y = yPos(v);
+              return (
+                <g key={i}>
+                  <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
+                  <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>
+                    {Math.round(v)}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Per-set polylines + dots */}
+            {Array.from({ length: maxSets }, (_, si) => {
+              const pts = allSessions
+                .map((sess, xi) => { const v = getValue(sess.sets[si]); return v != null ? { x: xPos(xi), y: yPos(v) } : null; })
+                .filter(Boolean);
+              if (!pts.length) return null;
+              const a = setAlphas[si] ?? 0.12;
+              return (
+                <g key={si}>
+                  {pts.length > 1 && (
+                    <polyline points={pts.map(p => `${p.x},${p.y}`).join(' ')} fill="none"
+                      stroke={`rgba(var(--accent-rgb),${a})`} strokeWidth={si === 0 ? 1.5 : 1} strokeLinejoin="round" />
+                  )}
+                  {pts.map((p, pi) => (
+                    <circle key={pi} cx={p.x} cy={p.y} r={si === 0 ? 2.5 : 1.8}
+                      fill={si === 0 ? 'var(--accent)' : `rgba(var(--accent-rgb),${Math.min(a + 0.15, 1)})`} />
+                  ))}
+                </g>
+              );
+            })}
+
+            {/* X-axis date labels */}
+            {labelIdxs.map(xi => (
+              <text key={xi} x={xPos(xi)} y={VH - 4} textAnchor="middle" fontSize="7.5"
+                fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>
+                {fmtDate(allSessions[xi].ended)}
+              </text>
+            ))}
+          </svg>
+
+          {/* Set legend */}
+          {maxSets > 1 && (
+            <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+              {Array.from({ length: maxSets }, (_, si) => (
+                <div key={si} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <div style={{ width: 14, height: 2, borderRadius: 1, background: `rgba(var(--accent-rgb),${setAlphas[si] ?? 0.12})` }} />
+                  <span className="micro" style={{ color: UI.inkFaint }}>Set {si + 1}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Session list */}
+          <div className="knurl" style={{ marginBottom: 2 }} />
+          {visible.map((sess, i) => (
+            <React.Fragment key={i}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '10px 0' }}>
+                <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0, width: 50 }}>
+                  {fmtDate(sess.ended)}
+                </span>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {sess.sets.map((st, si) => (
+                    <span key={si} style={{
+                      border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '2px 7px',
+                      fontFamily: UI.fontNum, fontSize: 11, color: UI.ink,
+                    }}>
+                      {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span>
+                      <span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>
+                      {isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              {i < visible.length - 1 && <div className="knurl" />}
+            </React.Fragment>
+          ))}
+
+          {listSessions.length > showCount && (
+            <button onClick={() => setShowCount(c => c + 20)} style={{
+              width: '100%', marginTop: 16, padding: '10px 0',
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              color: UI.inkFaint, borderRadius: 4, cursor: 'pointer',
+              fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              Show more ({listSessions.length - showCount} remaining)
+            </button>
+          )}
+        </>)}
+      </div>
+    </Screen>
+  );
+}
+
+
+Object.assign(window.Screens, { LibraryScreen, ExerciseCreator, ExerciseDetailScreen, HistoryScreen, SessionDetailScreen, SpectatorScreen, ExerciseHistoryScreen });
+
 window.EQUIPMENT_TYPES = EQUIPMENT_TYPES;

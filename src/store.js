@@ -200,7 +200,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       .neq('author_id', userId),
     // Real coaching row (for check-in requests) — exclude the self-coaching row
     // so maybeSingle() never trips when both a real coach and self-coaching exist.
-    isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
+    isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
     // Self-coaching row (coach_id = client_id), if the user is their own coach
     isCoachLoad ? null : _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
   ];
@@ -262,6 +262,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
             name: e.name,
             plannedSets: e.planned_sets,
             plannedReps: e.planned_reps,
+            plannedRepsPerSet: e.planned_reps_per_set || null,
             note: e.note || '',
             supersetGroup: e.superset_group || null,
             sets: (e.sets || [])
@@ -332,6 +333,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         coachName: coachInfoRes.data[0].coach_name,
         status: coachInfoRes.data[0].status,
         checkinRequestedAt: coachingRowRes?.data?.checkin_requested_at ?? null,
+        checkinEnabled: coachingRowRes?.data?.checkin_enabled ?? true,
       } : null,
       asCoach: (coachClientsRes?.data || []).map(r => ({
         id: r.coaching_id,
@@ -339,6 +341,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         clientEmail: r.client_email,
         clientName: r.client_name,
         status: r.status,
+        checkinEnabled: r.checkin_enabled ?? true,
       })),
       asSelf: selfRowRes?.data ? { id: selfRowRes.data.id } : null,
       unreadNotes: (unreadNotesRes?.data || []).map(n => ({
@@ -439,6 +442,7 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
         name: e.name || '',
         planned_sets: e.plannedSets || null,
         planned_reps: e.plannedReps || null,
+        planned_reps_per_set: e.plannedRepsPerSet || null,
         note: e.note || '',
         superset_group: e.supersetGroup || null,
       });
@@ -774,8 +778,10 @@ function calcBlended(startedAt, avgDurSec, avgSetsTotal, setsDone, setsTotal, no
 // Honors smart-progression suggestions and falls back to last-session values.
 function buildSeedSets(it, last, suggestion, isUni, smartProgression) {
   const workingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
+  const repsPerSet = it.repsPerSet;
   return Array.from({ length: it.sets }).map((_, i) => {
     const prev = workingSets[i];
+    const targetReps = repsPerSet ? (repsPerSet[i] ?? repsPerSet[repsPerSet.length - 1]) : null;
     if (suggestion) {
       return isUni
         ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false }
@@ -785,6 +791,11 @@ function buildSeedSets(it, last, suggestion, isUni, smartProgression) {
       return isUni
         ? { kg: prev.kg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
         : { kg: prev.kg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
+    }
+    if (!prev && targetReps != null) {
+      return isUni
+        ? { kg: null, repsL: targetReps, repsR: targetReps, done: false }
+        : { kg: null, reps: targetReps, done: false };
     }
     return isUni
       ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
@@ -916,7 +927,7 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite) {
 }
 
 // Returns { kg, reps } suggestion when all last sets hit top of rep range, null otherwise.
-function progressionSuggestion(store, exId, dayId, plannedReps) {
+function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSet) {
   if (!store.settings?.smartProgression) return null;
   const ex = findExercise(store, exId);
   const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
@@ -926,12 +937,17 @@ function progressionSuggestion(store, exId, dayId, plannedReps) {
   const last = lastSessionForExercise(store, exId, dayId);
   if (!last) return null;
 
-  const baseReps = ex?.progression_reps ?? plannedReps;
-  const targetRepsTop = (baseReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+  const range = store.settings?.progressionRangeTop ?? 4;
   const doneSets = (last.entry.sets || []).filter(s => !s.skipped && !s.warmup && s.kg != null);
   if (!doneSets.length) return null;
 
-  const allHitTop = doneSets.every(s => (effReps(s) ?? 0) >= targetRepsTop);
+  const allHitTop = doneSets.every((s, i) => {
+    const perSet = plannedRepsPerSet && plannedRepsPerSet.length > 1
+      ? (plannedRepsPerSet[i] ?? plannedRepsPerSet[plannedRepsPerSet.length - 1])
+      : null;
+    const baseReps = ex?.progression_reps ?? perSet ?? plannedReps;
+    return (effReps(s) ?? 0) >= (baseReps ?? 0) + range;
+  });
   if (!allHitTop) return null;
 
   const refKg = doneSets[0].kg;
@@ -939,7 +955,8 @@ function progressionSuggestion(store, exId, dayId, plannedReps) {
   const cappedKg = maxKg ? Math.min(newKg, maxKg) : newKg;
   if (cappedKg <= refKg) return null;
 
-  return { kg: cappedKg, reps: baseReps ?? null };
+  const baseRepsFirst = ex?.progression_reps ?? (plannedRepsPerSet?.[0] ?? plannedReps);
+  return { kg: cappedKg, reps: baseRepsFirst ?? null };
 }
 
 // ─── COACHING ────────────────────────────────────────────────────────────────
@@ -962,7 +979,7 @@ async function reloadCoachingState(userId) {
       .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
       .is('read_at', null)
       .neq('author_id', userId),
-    _supabase.from('zane_coaching').select('id, checkin_requested_at').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
+    _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
     _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
   ]);
   return {
@@ -973,10 +990,11 @@ async function reloadCoachingState(userId) {
       coachName: coachInfoRes.data[0].coach_name,
       status: coachInfoRes.data[0].status,
       checkinRequestedAt: coachingRowRes?.data?.checkin_requested_at ?? null,
+      checkinEnabled: coachingRowRes?.data?.checkin_enabled ?? true,
     } : null,
     asCoach: (coachClientsRes?.data || []).map(r => ({
       id: r.coaching_id, clientId: r.client_id, clientEmail: r.client_email,
-      clientName: r.client_name, status: r.status,
+      clientName: r.client_name, status: r.status, checkinEnabled: r.checkin_enabled ?? true,
     })),
     asSelf: selfRowRes?.data ? { id: selfRowRes.data.id } : null,
     unreadNotes: (unreadRes?.data || []).map(n => ({
@@ -1159,6 +1177,11 @@ async function loadCoachCheckinStatus() {
   return (data || []).map(r => ({ coachingId: r.coaching_id, hasCheckin: r.has_checkin }));
 }
 
+async function setCheckinEnabled(coachingId, enabled) {
+  const { error } = await _supabase.from('zane_coaching').update({ checkin_enabled: enabled }).eq('id', coachingId);
+  if (error) throw new Error(error.message);
+}
+
 async function requestCheckin(coachingId, userId) {
   const threadId = await getOrCreateCoachingThread(coachingId, 'Weekly Check-in', userId);
   await addCoachingNote(coachingId, 'general', null, null,
@@ -1308,5 +1331,5 @@ window.LB = {
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
-  checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin,
+  checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled,
 };

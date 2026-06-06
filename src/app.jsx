@@ -529,12 +529,19 @@ function App() {
       Promise.all([LB.loadCoachClientsStatus(), LB.loadCoachCheckinStatus()])
         .then(([statusData, checkinData]) => {
           const anyLive = statusData.some(r => r.inProgressSessionId);
-          const pendingCheckinsCount = checkinData.filter(r => !r.hasCheckin).length;
-          if (anyLive !== prevAnyLiveRef.current || pendingCheckinsCount !== prevPendingRef.current) {
+          setStore(s => {
+            if (!s) return s;
+            const asCoach = s.coaching?.asCoach || [];
+            const pendingCheckinsCount = checkinData.filter(r => {
+              if (r.hasCheckin) return false;
+              const client = asCoach.find(c => c.id === r.coachingId);
+              return client?.checkinEnabled ?? true;
+            }).length;
+            if (anyLive === prevAnyLiveRef.current && pendingCheckinsCount === prevPendingRef.current) return s;
             prevAnyLiveRef.current = anyLive;
             prevPendingRef.current = pendingCheckinsCount;
-            setStore(s => s ? { ...s, coaching: { ...s.coaching, anyClientLive: anyLive, pendingCheckinsCount } } : s);
-          }
+            return { ...s, coaching: { ...s.coaching, anyClientLive: anyLive, pendingCheckinsCount } };
+          });
         })
         .catch(() => {});
     };
@@ -582,7 +589,8 @@ function App() {
     case 'lib':           screen = <window.Screens.LibraryScreen {...props} />; break;
     case 'exercise':      screen = <window.Screens.ExerciseDetailScreen key={route.exId} {...props} exId={route.exId} back={route.back} editQueue={route.editQueue || []} editQueueTotal={route.editQueueTotal || 0} autoEdit={!!route.autoEdit} />; break;
     case 'hist':          screen = <window.Screens.HistoryScreen {...props} initialTab={route.initialTab} />; break;
-    case 'session':       screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
+    case 'session':          screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
+    case 'exerciseHistory':  screen = <window.Screens.ExerciseHistoryScreen {...props} exId={route.exId} dayId={route.dayId} exName={route.exName} back={route.back} />; break;
     case 'settings':          screen = <window.Screens.SettingsScreen {...props} />; break;
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
     case 'coaching':            screen = <window.Screens.CoachingTabScreen {...props} />; break;

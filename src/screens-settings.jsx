@@ -660,8 +660,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
               </div>
             ))}
           </div>
+          <Btn onClick={() => setRestSheet(false)}>Done</Btn>
         </div>
-        <Btn onClick={() => setRestSheet(false)} style={{ marginTop: 8 }}>Done</Btn>
       </Sheet>
 
       {/* ══ Paceguard sheet ══ */}
@@ -683,8 +683,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
             </div>
           )}
           <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>Beeps subdivide each phase evenly · count increases each beat</div>
+          <Btn onClick={() => setPaceguardSheet(false)}>Done</Btn>
         </div>
-        <Btn onClick={() => setPaceguardSheet(false)}>Done</Btn>
       </Sheet>
 
       {/* ══ Smart progression sheet ══ */}

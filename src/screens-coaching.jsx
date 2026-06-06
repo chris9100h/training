@@ -601,6 +601,31 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
   const [clientStore, setClientStore] = useStateC(null);
   const [loadError, setLoadError] = useStateC(null);
 
+  const coachingEntry = store?.coaching?.asCoach?.find(c => c.id === coachingId);
+  const [checkinEnabled, setCheckinEnabled] = useStateC(coachingEntry?.checkinEnabled ?? true);
+  const [ciToggling, setCiToggling] = useStateC(false);
+  const handleToggleCheckin = async () => {
+    if (ciToggling) return;
+    const next = !checkinEnabled;
+    setCheckinEnabled(next);
+    setCiToggling(true);
+    try {
+      await LB.setCheckinEnabled(coachingId, next);
+    } catch (_) {
+      setCheckinEnabled(!next);
+      setCiToggling(false);
+      return;
+    }
+    try {
+      const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Weekly Check-in', userId);
+      const msg = next
+        ? 'Check-ins have been re-enabled. You can submit your weekly check-in again.'
+        : 'Check-ins have been paused by your coach.';
+      await LB.addCoachingNote(coachingId, 'general', null, null, msg, userId, threadId);
+    } catch (_) {}
+    finally { setCiToggling(false); }
+  };
+
   useEffectC(() => {
     LB.loadClientStore(clientId)
       .then(data => setClientStore(data))
@@ -673,7 +698,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'sessions'   && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
           {tab === 'checkins'   && (isSelf
             ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} />
-            : <ClientCheckInsTab coachingId={coachingId} />)}
+            : <ClientCheckInsTab coachingId={coachingId} checkinEnabled={checkinEnabled} onToggle={handleToggleCheckin} toggling={ciToggling} />)}
           {tab === 'nutrition'  && <ClientNutritionTab coachingId={coachingId} userId={userId} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
@@ -728,8 +753,16 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
 
   const isWd = LB.isWeekdayPlan(activeSch);
 
-  // Only count sessions for the active plan — ignore old plan sessions.
-  const planSessions = (clientStore.sessions || []).filter(s => s.ended && s.scheduleId === activeSch.id);
+  // For weekday plans, weekPlanStartDate marks when this plan was (re-)activated.
+  // Exclude sessions before that date so a previous run of the same schedule
+  // can't bleed into the current plan's adherence.
+  const planActivationStr = isWd ? clientStore.weekPlanStartDate?.slice(0, 10) : null;
+
+  const planSessions = (clientStore.sessions || []).filter(s =>
+    s.ended &&
+    s.scheduleId === activeSch.id &&
+    (!planActivationStr || !s.date || s.date.slice(0, 10) >= planActivationStr)
+  );
 
   // Session date set — both stored date field and local-time of ended timestamp.
   const sessionDates = new Set();
@@ -739,15 +772,17 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   });
 
   // Determine the Monday from which adherence starts — don't penalize weeks before the plan was active.
-  // Weekday plans: weekPlanStartDate is set when the plan was activated → most accurate.
-  // Cycle plans / fallback: earliest session for this plan.
+  // Use weekPlanStartDate / cycleStartDate when set; fall back to earliest session.
   let planStartMonday = null;
-  if (isWd && clientStore.weekPlanStartDate) {
-    const d = new Date(clientStore.weekPlanStartDate); d.setHours(12, 0, 0, 0);
+  let planStartDateStr = null; // actual plan start date — days before this are ignored even within the first week
+  const activationDateStr = isWd ? clientStore.weekPlanStartDate : clientStore.cycleStartDate;
+  if (activationDateStr) {
+    const d = new Date(activationDateStr); d.setHours(12, 0, 0, 0);
     const wd = (d.getDay() + 6) % 7;
     planStartMonday = new Date(d);
     planStartMonday.setDate(d.getDate() - wd);
     planStartMonday.setHours(0, 0, 0, 0);
+    planStartDateStr = activationDateStr.slice(0, 10);
   } else if (planSessions.length > 0) {
     const earliestMs = Math.min(...planSessions.map(s => new Date(s.ended).getTime()));
     const earliest = new Date(earliestMs); earliest.setHours(12, 0, 0, 0);
@@ -755,6 +790,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
     planStartMonday = new Date(earliest);
     planStartMonday.setDate(earliest.getDate() - earliestWd);
     planStartMonday.setHours(0, 0, 0, 0);
+    planStartDateStr = localDateKey(planStartMonday);
   }
   if (!planStartMonday) return [];
 
@@ -789,6 +825,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
       }
 
       if (isTrainingDay) {
+        if (planStartDateStr && dateStr < planStartDateStr) continue;
         planned++;
         if (sessionDates.has(dateStr)) done++;
       }
@@ -820,18 +857,22 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
     ? (LB.isWeekdayPlan(activeSch) ? clientStore.weekPlanStartDate : clientStore.cycleStartDate) || null
     : null;
 
-  const weeks = useMemoC(() => computeWeeklyAdherence(clientStore), [clientStore]);
+  const weeks = useMemoC(() => computeWeeklyAdherence(clientStore, 104), [clientStore]);
   const completedWeeks = weeks.filter(w => w.planned > 0 && w.pct !== null);
   const overallAdherence = completedWeeks.length > 0
     ? Math.round(completedWeeks.reduce((s, w) => s + w.pct, 0) / completedWeeks.length)
     : null;
 
-  const last30 = ended.filter(s => (Date.now() - new Date(s.ended).getTime()) < 30 * 86400000);
-  const avgVol = last30.length > 0
-    ? Math.round(last30.reduce((s, x) => s + LB.totalVolume(x), 0) / last30.length)
+  const planSessions = useMemoC(() =>
+    ended.filter(s => !planStartDate || s.date?.slice(0, 10) >= planStartDate.slice(0, 10)),
+    [ended, planStartDate]
+  );
+  const avgVol = planSessions.length > 0
+    ? Math.round(planSessions.reduce((s, x) => s + LB.totalVolume(x), 0) / planSessions.length)
     : null;
 
-  const chartTitles = { adherence: 'Adherence (6w)', volume: 'Avg Volume Trend', sessions: 'Sessions per Week' };
+  const adherenceLabel = `Adherence (${weeks.length}w)`;
+  const chartTitles = { adherence: adherenceLabel, volume: 'Avg Vol / Cycle', sessions: 'Sessions per Week' };
 
   // Sessions to show: current week (weekday plan) or current cycle window (cycle plan)
   const recentSessions = useMemoC(() => {
@@ -858,16 +899,16 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
     <div style={{ overflowY: 'auto', flex: 1, padding: '16px 12px 32px' }}>
       {/* Top stats */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, padding: '0 4px' }}>
-        <StatBox label="Adherence (6w)" value={overallAdherence != null ? `${overallAdherence}%` : '—'} gold={overallAdherence >= 80} onClick={() => setChartOpen('adherence')} />
-        <StatBox label="Avg Volume" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}${UI.unit()}` : '—'} onClick={() => setChartOpen('volume')} />
-        <StatBox label="Sessions (30d)" value={last30.length} onClick={() => setChartOpen('sessions')} />
+        <StatBox label={adherenceLabel} value={overallAdherence != null ? `${overallAdherence}%` : '—'} gold={overallAdherence >= 80} onClick={() => setChartOpen('adherence')} />
+        <StatBox label="Avg Vol / Cycle" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}${UI.unit()}` : '—'} onClick={() => setChartOpen('volume')} />
+        <StatBox label="Sessions" value={planSessions.length} onClick={() => setChartOpen('sessions')} />
       </div>
 
       <Sheet open={!!chartOpen} onClose={() => setChartOpen(null)} title={chartTitles[chartOpen] || ''}>
         <div style={{ paddingBottom: 8 }}>
           {chartOpen === 'adherence' && <AdherenceChart weeks={weeks} />}
-          {chartOpen === 'volume' && <RollingVolumeChart sessions={ended} planStartDate={planStartDate} />}
-          {chartOpen === 'sessions' && <SessionsWeekChart sessions={ended} />}
+          {chartOpen === 'volume' && <RollingVolumeChart sessions={ended} planStartDate={planStartDate} clientStore={clientStore} />}
+          {chartOpen === 'sessions' && <SessionsWeekChart sessions={ended} planStartDate={planStartDate} />}
         </div>
       </Sheet>
 
@@ -1074,60 +1115,137 @@ function AdherenceChart({ weeks }) {
   );
 }
 
-function RollingVolumeChart({ sessions, planStartDate }) {
+function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
+  const [showCount, setShowCount] = useStateC(20);
+  const activeSch = clientStore?.schedules?.find(s => s.id === clientStore?.activeScheduleId);
+  const isWd = activeSch && LB.isWeekdayPlan(activeSch);
+  const cycleLen = (!isWd && activeSch?.days?.length) || 7;
   const cutoff = planStartDate ? planStartDate.slice(0, 10) : null;
-  const ended = (sessions || []).filter(s => s.ended && s.date && (!cutoff || s.date.slice(0, 10) >= cutoff)).sort((a, b) => a.date.slice(0, 10).localeCompare(b.date.slice(0, 10)));
-  const allPoints = ended.map(s => {
-    const dateKey = s.date.slice(0, 10);
-    const d = new Date(dateKey + 'T12:00:00');
-    const from = new Date(d); from.setDate(from.getDate() - 30);
-    const win = ended.filter(x => { const xd = new Date(x.date.slice(0, 10) + 'T12:00:00'); return xd >= from && xd <= d; });
-    return { avg: win.length ? Math.round(win.reduce((sum, x) => sum + LB.totalVolume(x), 0) / win.length) : 0, date: dateKey };
+
+  const ended = (sessions || [])
+    .filter(s => s.ended && s.date && (!cutoff || s.date.slice(0, 10) >= cutoff))
+    .sort((a, b) => a.date.slice(0, 10).localeCompare(b.date.slice(0, 10)));
+
+  const fmtShort = (dateStr) => {
+    const d = new Date(dateStr + 'T12:00:00');
+    return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`;
+  };
+
+  const getGroupKey = (dateStr) => {
+    const d = new Date(dateStr + 'T12:00:00');
+    if (isWd) {
+      const wd = (d.getDay() + 6) % 7;
+      const mon = new Date(d); mon.setDate(d.getDate() - wd);
+      return localDateKey(mon);
+    }
+    const ref = clientStore?.cycleStartDate
+      ? new Date(clientStore.cycleStartDate.slice(0, 10) + 'T12:00:00')
+      : ended.length ? new Date(ended[0].date.slice(0, 10) + 'T12:00:00') : d;
+    const daysDiff = Math.round((d.getTime() - ref.getTime()) / 86400000);
+    const runIdx = Math.floor(daysDiff / cycleLen);
+    const runStart = new Date(ref); runStart.setDate(ref.getDate() + runIdx * cycleLen);
+    return localDateKey(runStart);
+  };
+
+  const byGroup = {};
+  ended.forEach(s => {
+    const key = getGroupKey(s.date.slice(0, 10));
+    if (!byGroup[key]) byGroup[key] = { date: key, vol: 0, count: 0 };
+    byGroup[key].vol += LB.totalVolume(s);
+    byGroup[key].count++;
   });
-  const points = allPoints.slice(-40);
 
-  if (points.length < 2) return <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Not enough sessions yet.</div>;
+  const allGroups = Object.values(byGroup)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(g => ({ ...g, avg: Math.round(g.vol / g.count), label: fmtShort(g.date) }));
 
-  const W = 300, H = 110;
+  const points = allGroups.slice(-16);
+
+  if (points.length < 2) return (
+    <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
+      Not enough {isWd ? 'weeks' : 'cycles'} yet.
+    </div>
+  );
+
+  const PAD_L = 38, PAD_R = 8, PAD_T = 12, PAD_B = 22, VW = 320, VH = 150;
+  const plotW = VW - PAD_L - PAD_R, plotH = VH - PAD_T - PAD_B;
+  const n = points.length;
   const maxV = Math.max(...points.map(p => p.avg));
   const minV = Math.min(...points.map(p => p.avg));
   const vRange = maxV - minV || 1;
-  const px = i => (i / (points.length - 1)) * W;
-  const py = v => H - 8 - ((v - minV) / vRange) * (H - 16);
+  const px = i => PAD_L + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+  const py = v => PAD_T + plotH - ((v - minV) / vRange) * plotH;
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(p.avg).toFixed(1)}`).join(' ');
-  const areaPath = `${linePath} L${W},${H} L0,${H} Z`;
-  const trend = allPoints[allPoints.length - 1].avg - allPoints[0].avg;
+  const areaPath = `${linePath} L${px(n-1).toFixed(1)},${PAD_T + plotH} L${px(0).toFixed(1)},${PAD_T + plotH} Z`;
+  const trend = allGroups[allGroups.length - 1].avg - allGroups[0].avg;
+  const unit = UI.unit();
+  const periodLabel = isWd ? 'WEEK' : `CYCLE (${cycleLen}d)`;
+  const fmtY = v => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`;
+  const gridVals = [minV, minV + vRange / 2, maxV];
+  const labelIdxs = n <= 5 ? points.map((_, i) => i) : [0, Math.floor((n - 1) / 2), n - 1];
+  const listGroups = [...allGroups].reverse();
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <span style={{ fontSize: 11, color: trend >= 0 ? '#7bc47b' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>
           <i className={`fa-solid fa-arrow-trend-${trend >= 0 ? 'up' : 'down'}`} style={{ marginRight: 4 }} />
-          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}{UI.unit()} since plan start
+          {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}{unit}
+          <span style={{ color: UI.inkFaint, marginLeft: 5 }}>since {isWd ? 'week 1' : 'cycle 1'}</span>
         </span>
+        <span className="micro" style={{ color: UI.inkFaint }}>AVG SESSION VOL / {periodLabel}</span>
       </div>
-      <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`}>
+      <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" style={{ display: 'block', overflow: 'visible', marginBottom: 12 }}>
         <defs>
           <linearGradient id="volGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.2" />
             <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
           </linearGradient>
         </defs>
+        {gridVals.map((v, i) => {
+          const y = py(v);
+          return (
+            <g key={i}>
+              <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
+              <text x={PAD_L - 4} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{fmtY(v)}</text>
+            </g>
+          );
+        })}
         <path d={areaPath} fill="url(#volGrad)" />
         <path d={linePath} fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx={px(0)} cy={py(points[0].avg)} r={3} fill="var(--accent)" />
-        <circle cx={px(points.length - 1)} cy={py(points[points.length - 1].avg)} r={3} fill="var(--accent)" />
-        <text x={0} y={H + 14} fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(points[0].date)}</text>
-        <text x={W} y={H + 14} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(points[points.length - 1].date)}</text>
-        <text x={W - 2} y={Math.max(py(maxV) - 3, 8)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{maxV.toLocaleString('en-US')}{UI.unit()}</text>
-        <text x={W - 2} y={Math.min(py(minV) + 10, H - 2)} textAnchor="end" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{minV.toLocaleString('en-US')}{UI.unit()}</text>
+        {points.map((p, i) => (
+          <circle key={i} cx={px(i).toFixed(1)} cy={py(p.avg).toFixed(1)} r={i === 0 || i === n - 1 ? 3 : 2} fill="var(--accent)" />
+        ))}
+        {labelIdxs.map(i => (
+          <text key={i} x={px(i).toFixed(1)} y={VH - 4} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{points[i].label}</text>
+        ))}
       </svg>
+      {listGroups.slice(0, showCount).map((g, i, arr) => (
+        <React.Fragment key={g.date}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '9px 0' }}>
+            <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0, width: 50 }}>{g.label}</span>
+            <div style={{ flex: 1, display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '2px 7px', fontFamily: UI.fontNum, fontSize: 11, color: UI.ink }}>
+                {g.avg.toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{unit}</span>
+              </span>
+              <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{g.count} session{g.count !== 1 ? 's' : ''}</span>
+            </div>
+          </div>
+          {i < arr.length - 1 && <div className="knurl" />}
+        </React.Fragment>
+      ))}
+      {listGroups.length > showCount && (
+        <button onClick={() => setShowCount(c => c + 20)} style={{ width: '100%', marginTop: 8, padding: '8px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`, color: UI.inkFaint, borderRadius: 4, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' }}>
+          Show more ({listGroups.length - showCount} remaining)
+        </button>
+      )}
     </div>
   );
 }
 
-function SessionsWeekChart({ sessions }) {
-  const ended = (sessions || []).filter(s => s.ended);
+function SessionsWeekChart({ sessions, planStartDate }) {
+  const cutoff = planStartDate ? planStartDate.slice(0, 10) : null;
+  const ended = (sessions || []).filter(s => s.ended && (!cutoff || s.date?.slice(0, 10) >= cutoff));
   const byWeek = {};
   ended.forEach(s => {
     const d = new Date(s.ended); d.setHours(12, 0, 0, 0);
@@ -1139,28 +1257,40 @@ function SessionsWeekChart({ sessions }) {
   const today = new Date(); today.setHours(12, 0, 0, 0);
   const todayWd = (today.getDay() + 6) % 7;
   const thisMonday = new Date(today); thisMonday.setDate(today.getDate() - todayWd); thisMonday.setHours(0, 0, 0, 0);
-  const weeks = Array.from({ length: 12 }, (_, i) => {
-    const mon = new Date(thisMonday); mon.setDate(thisMonday.getDate() - (11 - i) * 7);
+  let startMonday;
+  if (cutoff) {
+    const cd = new Date(cutoff + 'T12:00:00');
+    const cdWd = (cd.getDay() + 6) % 7;
+    startMonday = new Date(cd); startMonday.setDate(cd.getDate() - cdWd); startMonday.setHours(0, 0, 0, 0);
+  } else {
+    startMonday = new Date(thisMonday); startMonday.setDate(thisMonday.getDate() - 11 * 7);
+  }
+  const totalWeeks = Math.round((thisMonday - startMonday) / (7 * 86400000)) + 1;
+  const weekCount = Math.min(totalWeeks, 16);
+  const offset = totalWeeks - weekCount;
+  const weeks = Array.from({ length: weekCount }, (_, i) => {
+    const mon = new Date(startMonday); mon.setDate(startMonday.getDate() + (offset + i) * 7);
     const key = localDateKey(mon);
     return { key, count: byWeek[key] || 0, label: mon.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) };
   });
 
-  const W = 300, H = 110, gap = 3;
-  const barW = Math.floor((W - gap * 13) / 12);
+  const n = weeks.length;
+  const W = 300, H = 110, gap = 4;
+  const barW = Math.max(6, Math.floor((W - gap * (n + 1)) / n));
   const maxCount = Math.max(...weeks.map(w => w.count), 1);
+  const labelIdxs = new Set([0, Math.floor((n - 1) / 2), n - 1]);
 
   return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`}>
+    <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`} style={{ overflow: 'visible' }}>
       {weeks.map((w, i) => {
         const x = gap + i * (barW + gap);
         const h = (w.count / maxCount) * H;
-        const showLabel = i === 0 || i === 5 || i === 11;
         return (
           <g key={i}>
             <rect x={x} y={0} width={barW} height={H} rx={2} style={{ fill: UI.bgRaised }} />
             {h > 0 && <rect x={x} y={H - h} width={barW} height={h} rx={2} fill="var(--accent)" />}
             {w.count > 0 && <text x={x + barW / 2} y={H - h - 3} textAnchor="middle" fontSize={7} style={{ fill: 'var(--accent)', fontFamily: UI.fontUi }}>{w.count}</text>}
-            {showLabel && <text x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{w.label}</text>}
+            {labelIdxs.has(i) && <text x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{w.label}</text>}
           </g>
         );
       })}
@@ -1325,6 +1455,132 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
   );
 }
 
+// ─── InlineExHistory ──────────────────────────────────────────────────────────
+// Standalone component so hooks are never called conditionally.
+
+function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack }) {
+  const ex = (exercises || []).find(e => e.id === exId);
+  const isUni = !!ex?.unilateral;
+  const [metric, setMetric] = useStateC('kg');
+  const [showCount, setShowCount] = useStateC(20);
+
+  const exSessions = useMemoC(() =>
+    sessions
+      .filter(s => s.dayId === dayId)
+      .map(s => {
+        const entry = (s.entries || []).find(e => e.exId === exId);
+        if (!entry) return null;
+        const working = (entry.sets || []).filter(st => !st.warmup && !st.skipped);
+        if (!working.some(st => st.kg != null || st.reps != null)) return null;
+        return { ended: s.ended, sets: working };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.ended.localeCompare(b.ended)),
+    [sessions, exId, dayId]
+  );
+
+  const getValue = (st) => metric === 'reps'
+    ? (isUni ? (st.repsL != null ? Math.min(st.repsL ?? 0, st.repsR ?? 0) : (st.reps ?? null)) : (st.reps ?? null))
+    : (st.kg ?? null);
+
+  const maxSets = Math.max(...exSessions.map(s => s.sets.length), 1);
+  const allVals = exSessions.flatMap(s => s.sets.map(getValue)).filter(v => v != null);
+  const minVal = allVals.length ? Math.min(...allVals) : 0;
+  const rawMax = allVals.length ? Math.max(...allVals) : 10;
+  const maxVal = rawMax === minVal ? rawMax + 1 : rawMax;
+  const valRange = maxVal - minVal;
+
+  const PAD_L = 36, PAD_R = 12, PAD_T = 14, PAD_B = 26, VW = 320, VH = 170;
+  const plotW = VW - PAD_L - PAD_R, plotH = VH - PAD_T - PAD_B, n = exSessions.length;
+  const xPos = (i) => PAD_L + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+  const yPos = (v) => PAD_T + plotH - ((v - minVal) / valRange) * plotH;
+  const gridVals = Array.from({ length: 4 }, (_, i) => minVal + (valRange / 3) * i);
+  const setAlphas = [1, 0.55, 0.35, 0.22, 0.14];
+  const labelIdxs = (() => {
+    if (n <= 5) return exSessions.map((_, i) => i);
+    const step = Math.floor((n - 1) / 4);
+    const idxs = new Set([0]);
+    for (let i = step; i < n; i += step) idxs.add(Math.min(i, n - 1));
+    idxs.add(n - 1);
+    return [...idxs].sort((a, b) => a - b);
+  })();
+  const fmtD = (ended) => { const d = new Date(ended); return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`; };
+  const listSessions = [...exSessions].reverse();
+
+  return (
+    <div style={{ overflowY: 'auto', flex: 1 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
+        <button onClick={onBack} style={{ width: 32, height: 32, borderRadius: 6, border: `0.5px solid ${UI.hair}`, background: UI.bgRaised, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <i className="fa-solid fa-chevron-left" style={{ fontSize: 12, color: UI.inkSoft }} />
+        </button>
+        <div style={{ flex: 1, fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{exName}</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {['kg', 'reps'].map(m => (
+            <button key={m} onClick={() => setMetric(m)} style={{
+              padding: '4px 10px', borderRadius: 4, cursor: 'pointer',
+              border: `1px solid ${metric === m ? UI.gold : UI.hairStrong}`,
+              background: metric === m ? UI.goldFaint : 'transparent',
+              color: metric === m ? UI.gold : UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
+              WebkitTapHighlightColor: 'transparent',
+            }}>{m === 'kg' ? UI.unit().toUpperCase() : 'REPS'}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ padding: '16px 16px 32px' }}>
+        {exSessions.length === 0 ? (
+          <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, textAlign: 'center', padding: 32 }}>No history yet.</div>
+        ) : (<>
+          <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" style={{ display: 'block', overflow: 'visible', marginBottom: 12, maxWidth: 480 }}>
+            {gridVals.map((v, i) => { const y = yPos(v); return (
+              <g key={i}>
+                <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
+                <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{Math.round(v)}</text>
+              </g>
+            ); })}
+            {Array.from({ length: maxSets }, (_, si) => {
+              const pts = exSessions.map((sess, xi) => { const v = getValue(sess.sets[si]); return v != null ? { x: xPos(xi), y: yPos(v) } : null; }).filter(Boolean);
+              if (!pts.length) return null;
+              const a = setAlphas[si] ?? 0.12;
+              return (
+                <g key={si}>
+                  {pts.length > 1 && <polyline points={pts.map(p => `${p.x},${p.y}`).join(' ')} fill="none" stroke={`rgba(var(--accent-rgb),${a})`} strokeWidth={si === 0 ? 1.5 : 1} strokeLinejoin="round" />}
+                  {pts.map((p, pi) => <circle key={pi} cx={p.x} cy={p.y} r={si === 0 ? 2.5 : 1.8} fill={si === 0 ? 'var(--accent)' : `rgba(var(--accent-rgb),${Math.min(a + 0.15, 1)})`} />)}
+                </g>
+              );
+            })}
+            {labelIdxs.map(xi => (
+              <text key={xi} x={xPos(xi)} y={VH - 4} textAnchor="middle" fontSize="7.5" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{fmtD(exSessions[xi].ended)}</text>
+            ))}
+          </svg>
+          {listSessions.slice(0, showCount).map((sess, i, arr) => (
+            <React.Fragment key={i}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '9px 0' }}>
+                <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0, width: 50 }}>{fmtD(sess.ended)}</span>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {sess.sets.map((st, si) => (
+                    <span key={si} style={{ border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '2px 7px', fontFamily: UI.fontNum, fontSize: 11, color: UI.ink }}>
+                      {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span>
+                      <span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>
+                      {isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              {i < arr.length - 1 && <div className="knurl" />}
+            </React.Fragment>
+          ))}
+          {listSessions.length > showCount && (
+            <button onClick={() => setShowCount(c => c + 20)} style={{ width: '100%', marginTop: 12, padding: '8px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`, color: UI.inkFaint, borderRadius: 4, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' }}>
+              Show more ({listSessions.length - showCount} remaining)
+            </button>
+          )}
+        </>)}
+      </div>
+    </div>
+  );
+}
+
 // ─── Tab: Sessions ────────────────────────────────────────────────────────────
 
 function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initialSelected, onClearSelected }) {
@@ -1332,7 +1588,18 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
   const [noteOpen, setNoteOpen] = useStateC(false);
   const [noteBody, setNoteBody] = useStateC('');
   const [noteSaving, setNoteSaving] = useStateC(false);
+  const [dayFilter, setDayFilter] = useStateC(null);
+  const [histEx, setHistEx] = useStateC(null); // { exId, dayId, exName }
+
   const sessions = (clientStore.sessions || []).filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+
+  const dayNames = useMemoC(() => {
+    const counts = {};
+    sessions.forEach(s => { if (s.dayName && s.dayName !== 'REST') counts[s.dayName] = (counts[s.dayName] || 0) + 1; });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([n]) => n);
+  }, [sessions]);
+
+  const filteredSessions = dayFilter ? sessions.filter(s => s.dayName === dayFilter) : sessions;
 
   const saveNote = async () => {
     if (!noteBody.trim() || !selected) return;
@@ -1346,9 +1613,23 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
     } catch (e) { alert(e.message); } finally { setNoteSaving(false); }
   };
 
+  // ── Inline exercise history panel ──────────────────────────────────
+  if (histEx) {
+    return (
+      <InlineExHistory
+        exId={histEx.exId}
+        dayId={histEx.dayId}
+        exName={histEx.exName}
+        sessions={sessions}
+        exercises={clientStore.exercises || []}
+        onBack={() => setHistEx(null)}
+      />
+    );
+  }
+
+  // ── Session detail ─────────────────────────────────────────────────
   if (selected) {
     const vol = LB.totalVolume(selected);
-    // Only sessions that ended strictly before the selected session — prev must be in the past.
     const storeWithoutSelected = { ...clientStore, sessions: clientStore.sessions.filter(s => s.ended && s.ended < selected.ended) };
     return (
       <div style={{ overflowY: 'auto', flex: 1 }}>
@@ -1369,13 +1650,16 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             <StatBox label="Duration" value={selected.durationMinutes ? `${selected.durationMinutes}m` : '—'} />
           </div>
           {(selected.entries || []).map((e, i) => {
-            const lastResult = e.exId
-              ? LB.lastSessionForExercise(storeWithoutSelected, e.exId, selected.dayId)
-              : null;
+            const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutSelected, e.exId, selected.dayId) : null;
             const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null));
             return (
-              <div key={i} style={{ padding: '10px 14px', borderBottom: `0.5px solid ${UI.hair}` }}>
-                <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>{e.name}</div>
+              <div key={i}
+                onClick={() => e.exId && selected.dayId && setHistEx({ exId: e.exId, dayId: selected.dayId, exName: e.name })}
+                style={{ padding: '10px 14px', borderBottom: `0.5px solid ${UI.hair}`, cursor: e.exId ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}
+              >
+                <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>
+                  {e.name}{e.exId && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
+                </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: lastSets.length ? 5 : 0 }}>
                   {(e.sets || []).filter(s => !s.warmup).map((s, j) => {
                     const prev = lastSets[j];
@@ -1420,23 +1704,46 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
     );
   }
 
+  // ── Session list ───────────────────────────────────────────────────
   return (
-    <div style={{ overflowY: 'auto', flex: 1, padding: '8px 12px 32px' }}>
-      {sessions.length === 0 ? (
-        <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '32px 14px', textAlign: 'center' }}>No sessions yet.</div>
-      ) : sessions.map(s => {
-        const vol = LB.totalVolume(s);
-        return (
-          <div key={s.id} onClick={() => setSelected(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
-              <div style={{ fontSize: 11, color: UI.inkFaint }}>{fmtDate(s.date)} · {LB.doneSetCount(s)} sets</div>
-            </div>
-            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(vol).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span></span>
-            <ChevronRight />
+    <div style={{ overflowY: 'auto', flex: 1 }}>
+      {dayNames.length > 1 && (
+        <div style={{ flexShrink: 0, padding: '8px 12px 0', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
+          {dayNames.map(name => {
+            const active = dayFilter === name;
+            return (
+              <button key={name} onClick={() => setDayFilter(active ? null : name)} style={{
+                flexShrink: 0, padding: '5px 12px', borderRadius: 4, cursor: 'pointer',
+                border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
+                background: active ? UI.goldFaint : 'transparent',
+                color: active ? UI.gold : UI.inkFaint,
+                fontFamily: UI.fontUi, fontSize: 10, fontWeight: active ? 600 : 400,
+                letterSpacing: '0.1em', textTransform: 'uppercase',
+                WebkitTapHighlightColor: 'transparent',
+              }}>{name}</button>
+            );
+          })}
+        </div>
+      )}
+      <div style={{ padding: '4px 12px 32px' }}>
+        {filteredSessions.length === 0 ? (
+          <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '32px 14px', textAlign: 'center' }}>
+            {dayFilter ? `No "${dayFilter}" sessions yet.` : 'No sessions yet.'}
           </div>
-        );
-      })}
+        ) : filteredSessions.map(s => {
+          const vol = LB.totalVolume(s);
+          return (
+            <div key={s.id} onClick={() => setSelected(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
+                <div style={{ fontSize: 11, color: UI.inkFaint }}>{fmtDate(s.date)} · {LB.doneSetCount(s)} sets</div>
+              </div>
+              <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(vol).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span></span>
+              <ChevronRight />
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1663,22 +1970,47 @@ function CheckInTrendCards({ recent }) {
 
 // ─── ClientCheckInsTab (coach view) ───────────────────────────────────────────
 
-function ClientCheckInsTab({ coachingId }) {
+function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggling = false }) {
   const [checkins, setCheckins] = useStateC(null);
 
   useEffectC(() => {
     LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
   }, [coachingId]);
 
+  const toggleRow = (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
+      <div>
+        <div style={{ fontSize: 13, fontFamily: UI.fontUi, fontWeight: 600, color: UI.ink }}>Check-ins enabled</div>
+        <div style={{ fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, marginTop: 2 }}>Allow client to submit weekly check-ins</div>
+      </div>
+      <div
+        onClick={onToggle}
+        style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: checkinEnabled ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${checkinEnabled ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent', opacity: toggling ? 0.6 : 1 }}
+      >
+        <div style={{ position: 'absolute', top: 3, left: checkinEnabled ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: checkinEnabled ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
+      </div>
+    </div>
+  );
+
   if (checkins === null) {
-    return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div></div>;
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {toggleRow}
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div>
+        </div>
+      </div>
+    );
   }
 
   if (!checkins.length) {
     return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
-        <i className="fa-solid fa-clipboard-list" style={{ fontSize: 28, color: UI.inkGhost }} />
-        <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center' }}>No check-ins yet.</div>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {toggleRow}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
+          <i className="fa-solid fa-clipboard-list" style={{ fontSize: 28, color: UI.inkGhost }} />
+          <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center' }}>No check-ins yet.</div>
+        </div>
       </div>
     );
   }
@@ -1686,12 +2018,15 @@ function ClientCheckInsTab({ coachingId }) {
   const recent = [...checkins].reverse();
 
   return (
-    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-      <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-        <CheckInTrendCards recent={recent} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
-          {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
+    <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      {toggleRow}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <CheckInTrendCards recent={recent} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
+            {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
+          </div>
         </div>
       </div>
     </div>
@@ -2273,7 +2608,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           {allClients.map(c => {
             const inProgress = liveMap[c.clientId];
             const clientUnread = unreadNotes.filter(n => n.authorId === c.clientId).length;
-            const checkinDue = c.status === 'active' && checkinMap[c.id] === false;
+            const checkinDue = c.status === 'active' && (c.checkinEnabled ?? true) && checkinMap[c.id] === false;
             const weekStart = LB.checkinWeekStart();
             const checkinNew = c.status === 'active' && checkinMap[c.id] === true && (() => {
               try { return localStorage.getItem(`logbook-coach-ci-seen-${c.id}`) !== weekStart; } catch (_) { return false; }
@@ -2405,13 +2740,13 @@ function MarkerRow({ label, value, onChange, readOnly }) {
   );
 }
 
-function CheckInCard({ ci, defaultOpen = false, onEdit, onDelete, confirmingDelete = false }) {
+function CheckInCard({ ci, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false }) {
   const [open, setOpen] = useStateC(defaultOpen);
   const hasActivity = ci.daysTrained != null || ci.steps != null || ci.cardioMinutes != null || ci.performanceVsLastWeek != null;
   const hasMarkers = ci.hunger != null || ci.sleepQuality != null || ci.lifeStress != null || ci.workStress != null || ci.tiredness != null;
 
   return (
-    <div style={{ background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+    <div style={embedded ? { overflow: 'hidden' } : { background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
       <button
         onClick={() => setOpen(o => !o)}
         style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', gap: 12 }}
@@ -2756,12 +3091,13 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
 
 // ─── ClientCheckInTab ─────────────────────────────────────────────────────────
 
-function ClientCheckInTab({ coachingId, clientId, userId }) {
+function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true }) {
   const weekStart = LB.checkinWeekStart();
   const [checkins, setCheckins] = useStateC(null);
   const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
   const [confirmDelete, setConfirmDelete] = useStateC(null); // id of check-in awaiting delete confirm
   const [deleting, setDeleting] = useStateC(false);
+  const [pastOpen, setPastOpen] = useStateC(false);
 
   const load = () => LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
   useEffectC(() => { load(); }, [coachingId]);
@@ -2823,23 +3159,44 @@ function ClientCheckInTab({ coachingId, clientId, userId }) {
           </div>
         )}
 
-        <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>THIS WEEK</div>
+        {!checkinEnabled && (
+          <div style={{ background: UI.bgInset, borderRadius: 10, padding: '11px 14px', border: `0.5px solid ${UI.hair}` }}>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Check-ins are currently paused by your coach.</div>
+          </div>
+        )}
         {thisWeek ? (
-          <CheckInCard ci={thisWeek} defaultOpen onEdit={() => setEditTarget(thisWeek)} onDelete={() => handleDelete(thisWeek)} confirmingDelete={confirmDelete === thisWeek.id} />
-        ) : (
+          <CheckInCard ci={thisWeek} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} />
+        ) : checkinEnabled ? (
           <button onClick={() => setEditTarget('new')}
             style={{ background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
             Submit this week's check-in
           </button>
-        )}
+        ) : null}
 
         {past.length > 0 && (
-          <>
-            <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>PREVIOUS CHECK-INS</div>
-            {past.map(ci => (
-              <CheckInCard key={ci.id} ci={ci} onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
-            ))}
-          </>
+          <div style={{ background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+            <button
+              onClick={() => setPastOpen(o => !o)}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', gap: 12 }}
+            >
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>Previous Check-ins ({past.length})</div>
+                <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginTop: 2 }}>
+                  {fmtWeek(past[past.length - 1].weekStart)} – {fmtWeek(past[0].weekStart)}
+                </div>
+              </div>
+              <i className={`fa-solid fa-chevron-${pastOpen ? 'up' : 'down'}`} style={{ fontSize: 11, color: UI.inkFaint }} />
+            </button>
+            {pastOpen && (
+              <div>
+                {past.map(ci => (
+                  <div key={ci.id} style={{ borderTop: `0.5px solid ${UI.hair}` }}>
+                    <CheckInCard ci={ci} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -2992,7 +3349,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
       {tab === 'nutrition' && <ClientNutritionReadView coachingId={coaching.id} />}
       {tab === 'checkin' && (
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <ClientCheckInTab coachingId={coaching.id} clientId={userId} userId={userId} />
+          <ClientCheckInTab coachingId={coaching.id} clientId={userId} userId={userId} checkinEnabled={coaching.checkinEnabled ?? true} />
         </div>
       )}
     </Screen>

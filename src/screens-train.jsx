@@ -360,12 +360,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
   const exercise = entry ? LB.findExercise(store, entry.exId) : null;
   const last = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayId) : null;
   const isUnilateral = !!exercise?.unilateral;
-  const progressionTarget = (() => {
+  const progressionTargetForSet = (workingSetIdx) => {
     if (!store.settings?.smartProgression) return null;
-    const base = (exercise?.progression_reps ?? entry?.plannedReps) ?? 0;
+    const perSet = entry?.plannedRepsPerSet;
+    const perSetVal = perSet && perSet.length > 1
+      ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
+      : null;
+    const base = (exercise?.progression_reps ?? perSetVal ?? entry?.plannedReps) ?? 0;
     const target = base + (store.settings?.progressionRangeTop ?? 4);
     return target > 0 ? target : null;
-  })();
+  };
 
   // Keep the reducer pure — no logging or Error().stack side effects inside
   // setStore (React may invoke updaters more than once). fn only runs for the
@@ -455,13 +459,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? null;
       if (!increment) return null;
-      const baseReps = exercise?.progression_reps ?? entry.plannedReps;
-      const targetRepsTop = (baseReps ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+      const range = store.settings?.progressionRangeTop ?? 4;
       const doneSets = updatedSets.filter(s => s.done && !s.skipped && !s.warmup && s.kg != null);
       if (!doneSets.length) return null;
-      const allHitTop = doneSets.every(s => {
+      const allHitTop = doneSets.every((s, i) => {
         const reps = s.repsL != null ? Math.min(s.repsL ?? 0, s.repsR ?? 0) : (s.reps ?? 0);
-        return reps >= targetRepsTop;
+        return reps >= (progressionTargetForSet(i) ?? 0);
       });
       if (!allHitTop) return null;
       const refKg = doneSets[0].kg;
@@ -1110,6 +1113,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
   const heroSet = bgSetIdx >= 0 ? entry.sets[bgSetIdx] : null;
   // For warmup sets there's no meaningful "last session" comparison
   const prevHeroSet = isCurrentWarmup ? null : (last?.entry?.sets || []).filter(s => !s.warmup)[bgSetIdx >= 0 ? bgSetIdx - warmupCount : 0];
+  const progressionTarget = progressionTargetForSet(Math.max(0, bgSetIdx - warmupCount));
 
   const workingSetsArr = entry.sets.filter(s => !s.warmup);
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
@@ -1429,6 +1433,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                   {progressionTarget && (
                     <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>≥{progressionTarget} reps · next weight</div>
                   )}
+                  {!progressionTarget && entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1 && (() => {
+                    const workingIdx = bgSetIdx - warmupCount;
+                    const target = entry.plannedRepsPerSet[workingIdx] ?? entry.plannedRepsPerSet[entry.plannedRepsPerSet.length - 1];
+                    return <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>Target: {target} reps</div>;
+                  })()}
                 </div>
               </div>
 
@@ -1578,6 +1587,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
               const showWorkingSep = !isWarmupRow && i === warmupCount && warmupCount > 0 && warmupActive;
               const warmupRowNum = isWarmupRow ? entry.sets.slice(0, i + 1).filter(x => x.warmup).length : 0;
               const workingRowNum = !isWarmupRow ? entry.sets.slice(0, i + 1).filter(x => !x.warmup).length : 0;
+              const rpsTargets = entry.plannedRepsPerSet;
+              const repPlaceholder = rpsTargets && rpsTargets.length > 1
+                ? String(rpsTargets[workingRowNum - 1] ?? rpsTargets[rpsTargets.length - 1])
+                : '—';
               return (
                 <React.Fragment key={i}>
                   {showWorkingSep && (
@@ -1638,7 +1651,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                         <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsR'); }} />
                       </>
                     ) : (
-                      <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder="—" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
+                      <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
                     )}
 
                     <button

@@ -91,11 +91,11 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_sessions`:** `id` (text), `user_id` (uuid), `schedule_id`, `day_id`, `day_name` (text), `date`, `started_at`, `ended` (timestamptz), `entries` (jsonb), `duration_minutes` (int)
 
-**`zane_session_entries`:** `id` (text), `session_id` (text), `user_id` (uuid), `entry_idx` (int), `ex_id` (text), `name` (text), `planned_sets` (int), `planned_reps` (int), `note` (text), `superset_group` (text)
+**`zane_session_entries`:** `id` (text), `session_id` (text), `user_id` (uuid), `entry_idx` (int), `ex_id` (text), `name` (text), `planned_sets` (int), `planned_reps` (int), `planned_reps_per_set` (integer[]), `note` (text), `superset_group` (text)
 
 **`zane_sets`:** `id` (text), `session_id` (text), `entry_id` (text), `user_id` (uuid), `set_idx` (int), `kg` (numeric), `reps` (int), `reps_l` (int), `reps_r` (int), `done` (boolean), `skipped` (boolean), `warmup` (boolean), `updated_at` (timestamptz)
 
-**`zane_coaching`:** `id` (text), `coach_id` (uuid), `client_id` (uuid), `status` (text: pending|active), `created_at` (timestamptz), `checkin_requested_at` (timestamptz, nullable) — Sonderfall **Self-Coaching**: eine Zeile mit `coach_id == client_id` (id-Präfix `self_`) bedeutet „be your own coach". Sie wird aus allen Coach-/Client-Listen herausgefiltert (`get_coach_info`, `get_coaching_clients`, `get_coach_clients_status`, `get_coach_checkin_status`) und ermöglicht das volle Coaching-Dashboard für die eigenen Daten.
+**`zane_coaching`:** `id` (text), `coach_id` (uuid), `client_id` (uuid), `status` (text: pending|active), `created_at` (timestamptz), `checkin_requested_at` (timestamptz, nullable), `checkin_enabled` (boolean, default true) — Sonderfall **Self-Coaching**: eine Zeile mit `coach_id == client_id` (id-Präfix `self_`) bedeutet „be your own coach". Sie wird aus allen Coach-/Client-Listen herausgefiltert (`get_coach_info`, `get_coaching_clients`, `get_coach_clients_status`, `get_coach_checkin_status`) und ermöglicht das volle Coaching-Dashboard für die eigenen Daten.
 
 **`zane_coaching_threads`:** `id` (text), `coaching_id` (text), `name` (text), `created_by` (uuid), `created_at` (timestamptz)
 
@@ -122,6 +122,8 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 **`get_active_session_detail(p_user_id uuid, p_session_id text)`** → `TABLE(...)` — Volldetail einer Session inkl. Historienvergleich (avg. Dauer, Sets, letzte Session; gated by feature grant)
 
 **`sync_sets_batch(p_sets jsonb)`** → `void` — batch-upsert sets with updated_at guard; only updates a row if the incoming updated_at is newer than what's stored (prevents stale kbApply writes from overwriting completed sets)
+
+**`get_coaching_clients()`** → `TABLE(coaching_id text, client_id uuid, client_email text, client_name text, status text, checkin_enabled boolean)` — listet alle Clients des aufrufenden Coaches inkl. `checkin_enabled`-Flag; Self-Coaching-Zeilen ausgeschlossen
 
 **`get_coach_clients_status()`** → `TABLE(client_id uuid, in_progress_session_id text)` — gibt live-Trainingsstatus aller aktiven Clients eines Coaches zurück (SECURITY DEFINER, umgeht RLS auf zane_user_settings); Self-Coaching-Zeilen (`coach_id == client_id`) ausgeschlossen
 

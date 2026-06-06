@@ -1047,30 +1047,103 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 
 // ─── Day editor (exercises within a day) ─────────────────────────────
 function ExerciseItemEditor({ item, exName, onClose, onSave }) {
-  const [sets, setSets] = useStateS(item.sets);
-  const [reps, setReps] = useStateS(item.reps);
+  const hasVariable = item.repsPerSet && item.repsPerSet.length > 1;
+  const [mode, setMode] = useStateS(hasVariable ? 'variable' : 'uniform');
+  const [sets, setSetsRaw] = useStateS(item.sets);
+  const [uniformReps, setUniformReps] = useStateS(item.reps ?? 8);
+  const [repsPerSet, setRepsPerSet] = useStateS(
+    hasVariable ? item.repsPerSet : Array.from({ length: item.sets }, () => item.reps ?? 8)
+  );
   const [note, setNote] = useStateS(item.note || '');
+
+  const switchMode = (m) => {
+    if (m === 'variable' && mode === 'uniform') {
+      setRepsPerSet(Array.from({ length: sets }, () => uniformReps));
+    }
+    if (m === 'uniform' && mode === 'variable') {
+      setUniformReps(repsPerSet[0] ?? 8);
+    }
+    setMode(m);
+  };
+
+  const handleSetsChange = (v) => {
+    const n = Math.max(1, Math.round(v));
+    setSetsRaw(n);
+    if (mode === 'variable') {
+      setRepsPerSet(prev => {
+        const next = [...prev];
+        while (next.length < n) next.push(next[next.length - 1] ?? uniformReps);
+        return next.slice(0, n);
+      });
+    }
+  };
+
+  const handleSave = () => {
+    if (mode === 'variable') {
+      onSave({ sets, reps: repsPerSet[0] ?? uniformReps, repsPerSet, note });
+    } else {
+      onSave({ sets, reps: uniformReps, repsPerSet: undefined, note });
+    }
+  };
+
+  const toggleStyle = (active) => ({
+    flex: 1, padding: '8px 0', borderRadius: 4, cursor: 'pointer',
+    border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
+    background: active ? UI.goldFaint : 'transparent',
+    color: active ? UI.gold : UI.inkFaint,
+    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600,
+    letterSpacing: '0.1em', textTransform: 'uppercase',
+    WebkitTapHighlightColor: 'transparent',
+  });
 
   return (
     <Sheet open={true} onClose={onClose} title={exName}>
-      <div style={{ display: 'flex', gap: 24, justifyContent: 'center', marginBottom: 24 }}>
-        <div style={{ textAlign: 'center', flex: 1 }}>
-          <span className="label" style={{ display: 'block', textAlign: 'center' }}>Sets</span>
-          <div style={{ marginTop: 8 }}>
-            <Stepper value={sets} onChange={v => setSets(Math.max(1, Math.round(v)))} step={1} min={1} />
-          </div>
-        </div>
-        <div style={{ textAlign: 'center', flex: 1 }}>
-          <span className="label" style={{ display: 'block', textAlign: 'center' }}>Reps</span>
-          <div style={{ marginTop: 8 }}>
-            <Stepper value={reps} onChange={v => setReps(Math.max(1, Math.round(v)))} step={1} min={1} />
-          </div>
-        </div>
+      {/* Mode toggle */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+        <button style={toggleStyle(mode === 'uniform')} onClick={() => switchMode('uniform')}>Uniform</button>
+        <button style={toggleStyle(mode === 'variable')} onClick={() => switchMode('variable')}>Per Set</button>
       </div>
+
+      {/* Sets stepper — always visible, same layout as per-set rows */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Sets</span>
+          <div style={{ flex: 1 }}>
+            <Stepper value={sets} onChange={handleSetsChange} step={1} min={1} />
+          </div>
+        </div>
+
+        <div className="knurl" />
+
+        {mode === 'uniform' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Reps</span>
+            <div style={{ flex: 1 }}>
+              <Stepper value={uniformReps} onChange={v => setUniformReps(Math.max(1, Math.round(v)))} step={1} min={1} />
+            </div>
+          </div>
+        ) : (
+          repsPerSet.map((r, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span className="num" style={{ fontSize: 11, color: UI.inkFaint, width: 36, textAlign: 'right', flexShrink: 0 }}>
+                {String(i + 1).padStart(2, '0')}
+              </span>
+              <div style={{ flex: 1 }}>
+                <Stepper
+                  value={r}
+                  onChange={v => setRepsPerSet(prev => prev.map((x, j) => j === i ? Math.max(1, Math.round(v)) : x))}
+                  step={1} min={1}
+                />
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
       <Field label="Note (optional)">
         <TextInput value={note} onChange={setNote} placeholder="e.g. cable pos 4, slow eccentric…" />
       </Field>
-      <Btn onClick={() => onSave({ sets, reps, note })} style={{ width: '100%', marginTop: 20 }}>Apply</Btn>
+      <Btn onClick={handleSave} style={{ width: '100%', marginTop: 20 }}>Apply</Btn>
     </Sheet>
   );
 }
@@ -1215,7 +1288,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                     fontSize: 12, color: UI.gold, background: UI.goldFaint,
                     border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
                     padding: '3px 8px', whiteSpace: 'nowrap',
-                  }}>{it.sets}×{it.reps}</div>
+                  }}>{it.repsPerSet && it.repsPerSet.length > 1 ? it.repsPerSet.join('/') : `${it.sets}×${it.reps}`}</div>
                   <button onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...dayEditIconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
                 </div>
               );
