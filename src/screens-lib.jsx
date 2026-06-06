@@ -1274,7 +1274,11 @@ function HistoryScreen({ store, go, initialTab }) {
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                    {s.feel && <div style={{ width: 7, height: 7, borderRadius: '50%', background: feelColor(s.feel), flexShrink: 0 }} title={feelLabel(s.feel)} />}
+                    {s.feel && (
+                      <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.08em', color: feelColor(s.feel), lineHeight: 1 }}>
+                        {feelLabel(s.feel) === 'VERY HARD' ? 'V.HARD' : feelLabel(s.feel)}
+                      </span>
+                    )}
                     <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
                       {Math.round(vol).toLocaleString('en-US')}
                     </div>
