@@ -183,7 +183,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived').eq('user_id', userId),
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries, duration_minutes, feel')
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries, duration_minutes')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
