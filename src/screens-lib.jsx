@@ -1274,11 +1274,7 @@ function HistoryScreen({ store, go, initialTab }) {
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                    {s.feel && (
-                      <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.08em', color: feelColor(s.feel), lineHeight: 1 }}>
-                        {feelLabel(s.feel) === 'VERY HARD' ? 'V.HARD' : feelLabel(s.feel)}
-                      </span>
-                    )}
+                    {s.feel && <div style={{ width: 9, height: 9, borderRadius: '50%', background: feelColor(s.feel), flexShrink: 0 }} />}
                     <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
                       {Math.round(vol).toLocaleString('en-US')}
                     </div>
@@ -1374,10 +1370,10 @@ function HistoryScreen({ store, go, initialTab }) {
 
 // ─── FEEL ────────────────────────────────────────────────────────────
 const FEEL_LEVELS = [
-  { key: 'easy',      label: 'EASY',      color: '#6b7280' },
-  { key: 'good',      label: 'GOOD',      color: '#4e9e6b' },
+  { key: 'easy',      label: 'EASY',      color: '#94a3b8' },
+  { key: 'good',      label: 'GOOD',      color: '#22c55e' },
   { key: 'hard',      label: 'HARD',      color: UI.gold   },
-  { key: 'very_hard', label: 'VERY HARD', color: '#c97b30' },
+  { key: 'very_hard', label: 'VERY HARD', color: '#f97316' },
   { key: 'max',       label: 'MAX',       color: UI.danger },
 ];
 

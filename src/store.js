@@ -486,7 +486,7 @@ function sessionToRow(s, userId) {
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
-  if (feel != null) row.feel = feel;
+  row.feel = feel ?? null;
   return row;
 }
 
