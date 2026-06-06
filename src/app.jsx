@@ -244,9 +244,30 @@ function App() {
       const keys = await caches.keys();
       await Promise.all(keys.map(k => caches.delete(k)));
     }
-    if (waitingWorker.current) {
+
+    // Prefer the worker we already tracked; fall back to live reg state
+    let worker = waitingWorker.current ?? swReg.current?.waiting;
+
+    if (!worker && swReg.current) {
+      // New SW might still be installing — wait up to 6 s for it to reach waiting
+      const installing = swReg.current.installing;
+      if (installing) {
+        worker = await new Promise(resolve => {
+          const t = setTimeout(() => resolve(null), 6000);
+          installing.addEventListener('statechange', function h() {
+            if (installing.state === 'installed') {
+              installing.removeEventListener('statechange', h);
+              clearTimeout(t);
+              resolve(swReg.current?.waiting ?? installing);
+            }
+          });
+        });
+      }
+    }
+
+    if (worker) {
       intentionalUpdate.current = true;
-      waitingWorker.current.postMessage({ type: 'SKIP_WAITING' });
+      worker.postMessage({ type: 'SKIP_WAITING' });
     } else {
       window.location.reload(true);
     }
