@@ -1183,9 +1183,32 @@ function HistoryScreen({ store, go, initialTab }) {
     return s;
   }, [sessions, planFilter, periodFilter, dayFilter, sessionPeriods]);
 
+  const [filtersOpen, setFiltersOpen] = useStateL(false);
+  const filterCount = [planFilter, periodFilter, dayFilter].filter(Boolean).length;
+
+  const chipSt = (active) => ({
+    padding: '5px 12px', borderRadius: 20, cursor: 'pointer',
+    border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
+    background: active ? UI.goldFaint : 'transparent',
+    color: active ? UI.gold : UI.inkFaint,
+    fontFamily: UI.fontUi, fontSize: 10, fontWeight: active ? 600 : 400,
+    letterSpacing: '0.08em', WebkitTapHighlightColor: 'transparent',
+  });
+
   return (
     <Screen scroll={false}>
-      <TopBar title="History" />
+      <TopBar title="History" right={tab === 'workouts' && planOptions.length > 0 ? (
+        <button onClick={() => setFiltersOpen(true)} style={{
+          background: filterCount > 0 ? UI.goldFaint : 'transparent',
+          border: `1px solid ${filterCount > 0 ? UI.goldSoft : UI.hairStrong}`,
+          borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
+          color: filterCount > 0 ? UI.gold : UI.inkSoft,
+          fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+          display: 'flex', alignItems: 'center', gap: 5, WebkitTapHighlightColor: 'transparent',
+        }}>
+          Filter{filterCount > 0 && <span style={{ background: UI.gold, color: '#0a0805', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{filterCount}</span>}
+        </button>
+      ) : null} />
       {/* Tab strip */}
       <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
         {[['workouts','Workouts'],['stats','Stats']].map(([id, label]) => (
@@ -1203,62 +1226,6 @@ function HistoryScreen({ store, go, initialTab }) {
 
       {tab === 'workouts' && (
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          {/* Filters: Plan / Cycle/Week / Day */}
-          {planOptions.length > 0 && (() => {
-            const selStyle = (active) => ({
-              appearance: 'none', WebkitAppearance: 'none',
-              background: active ? 'rgba(var(--accent-rgb),0.10)' : 'transparent',
-              border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
-              borderRadius: 4, color: active ? 'var(--accent)' : UI.inkFaint,
-              fontFamily: UI.fontUi, fontSize: 10, fontWeight: active ? 600 : 400,
-              letterSpacing: '0.08em', textTransform: 'uppercase',
-              padding: '5px 22px 5px 9px', cursor: 'pointer', outline: 'none',
-              colorScheme: 'dark', maxWidth: 130,
-            });
-            const wrap = { position: 'relative', flexShrink: 0 };
-            const chevron = { position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', fontSize: 8, color: UI.inkFaint };
-            return (
-              <div style={{ flexShrink: 0, padding: '8px 22px 0', display: 'flex', gap: 6 }}>
-                <div style={wrap}>
-                  <select value={planFilter || ''} style={selStyle(!!planFilter)}
-                    onChange={e => { const v = e.target.value || null; setPlanFilter(v); setPeriodFilter(null); setDayFilter(null); }}>
-                    <option value="">Plan</option>
-                    {planOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                  <i className="fa-solid fa-chevron-down" style={chevron} />
-                </div>
-                {periodOptions.length > 0 && (
-                  <div style={wrap}>
-                    <select value={periodFilter || ''} style={selStyle(!!periodFilter)}
-                      onChange={e => { const v = e.target.value || null; setPeriodFilter(v); setDayFilter(null); }}>
-                      <option value="">Cycle / Week</option>
-                      {periodOptions.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                    <i className="fa-solid fa-chevron-down" style={chevron} />
-                  </div>
-                )}
-                {dayOptions.length > 1 && (
-                  <div style={wrap}>
-                    <select value={dayFilter || ''} style={selStyle(!!dayFilter)}
-                      onChange={e => setDayFilter(e.target.value || null)}>
-                      <option value="">Day</option>
-                      {dayOptions.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
-                    <i className="fa-solid fa-chevron-down" style={chevron} />
-                  </div>
-                )}
-                {(planFilter || periodFilter || dayFilter) && (
-                  <button onClick={() => { setPlanFilter(null); setPeriodFilter(null); setDayFilter(null); }} style={{
-                    marginLeft: 'auto', flexShrink: 0, cursor: 'pointer',
-                    border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
-                    background: 'transparent', color: UI.danger,
-                    fontSize: 14, lineHeight: 1,
-                    padding: '4px 8px', WebkitTapHighlightColor: 'transparent',
-                  }}>×</button>
-                )}
-              </div>
-            );
-          })()}
           <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px', display: 'flex', flexDirection: 'column' }}>
           {filteredSessions.length === 0 && (
             <Empty title="No sessions" sub={planFilter || periodFilter || dayFilter ? 'No sessions match the selected filters.' : 'Log your first workout to see your history.'} icon={ICON_HISTORY} />
@@ -1331,6 +1298,68 @@ function HistoryScreen({ store, go, initialTab }) {
       )}
 
       {tab === 'stats' && <StatsTab store={store} sessions={sessions} go={go} />}
+
+      {filtersOpen && (
+        <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div>
+              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                <span className="micro" style={{ color: UI.gold }}>PLAN</span>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {planOptions.map(p => (
+                  <button key={p.id} style={chipSt(planFilter === p.id)}
+                    onClick={() => { const v = planFilter === p.id ? null : p.id; setPlanFilter(v); setPeriodFilter(null); setDayFilter(null); }}>
+                    {p.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {periodOptions.length > 0 && (
+              <div>
+                <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                  <span className="micro" style={{ color: UI.gold }}>CYCLE / WEEK</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {periodOptions.map(p => (
+                    <button key={p} style={chipSt(periodFilter === p)}
+                      onClick={() => { const v = periodFilter === p ? null : p; setPeriodFilter(v); setDayFilter(null); }}>
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {dayOptions.length > 1 && (
+              <div>
+                <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                  <span className="micro" style={{ color: UI.gold }}>DAY</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {dayOptions.map(d => (
+                    <button key={d} style={chipSt(dayFilter === d)}
+                      onClick={() => setDayFilter(dayFilter === d ? null : d)}>
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8, borderTop: `0.5px solid ${UI.hair}` }}>
+              <span className="micro" style={{ color: UI.inkFaint }}>{filteredSessions.length} session{filteredSessions.length !== 1 ? 's' : ''}</span>
+              {filterCount > 0 && (
+                <button onClick={() => { setPlanFilter(null); setPeriodFilter(null); setDayFilter(null); }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.danger, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                  Clear all
+                </button>
+              )}
+            </div>
+          </div>
+        </Sheet>
+      )}
     </Screen>
   );
 }
