@@ -1273,7 +1273,8 @@ function HistoryScreen({ store, go, initialTab }) {
                       {s.entries.length} Exercises · {setsLogged} Sets
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                    {s.feel && <div style={{ width: 7, height: 7, borderRadius: '50%', background: feelColor(s.feel), flexShrink: 0 }} title={feelLabel(s.feel)} />}
                     <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
                       {Math.round(vol).toLocaleString('en-US')}
                     </div>
@@ -1367,6 +1368,45 @@ function HistoryScreen({ store, go, initialTab }) {
   );
 }
 
+// ─── FEEL ────────────────────────────────────────────────────────────
+const FEEL_LEVELS = [
+  { key: 'easy',      label: 'EASY',      color: '#6b7280' },
+  { key: 'good',      label: 'GOOD',      color: '#4e9e6b' },
+  { key: 'hard',      label: 'HARD',      color: UI.gold   },
+  { key: 'very_hard', label: 'VERY HARD', color: '#c97b30' },
+  { key: 'max',       label: 'MAX',       color: UI.danger },
+];
+
+function feelColor(key) {
+  return FEEL_LEVELS.find(f => f.key === key)?.color ?? UI.inkFaint;
+}
+function feelLabel(key) {
+  return FEEL_LEVELS.find(f => f.key === key)?.label ?? null;
+}
+
+function FeelSelector({ value, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 6 }}>
+      {FEEL_LEVELS.map(f => {
+        const active = value === f.key;
+        return (
+          <button key={f.key} onClick={() => onChange(active ? null : f.key)}
+            style={{
+              flex: 1, padding: '7px 2px', borderRadius: 4, cursor: 'pointer',
+              border: `1px solid ${active ? f.color : UI.hairStrong}`,
+              background: active ? `${f.color}22` : 'transparent',
+              color: active ? f.color : UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 9, fontWeight: active ? 600 : 400,
+              letterSpacing: '0.07em', WebkitTapHighlightColor: 'transparent',
+            }}>
+            {f.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── SET COMPARISON HELPERS ──────────────────────────────────────────
 // Shared by SessionDetailScreen, ComparisonScreen, and the LAST TIME card.
 function isImprovement(curr, prev) {
@@ -1389,6 +1429,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const [confirmEl, confirm] = useConfirm();
   const [editing, setEditing] = useStateL(false);
   const [capturing, setCapturing] = useStateL(false);
+  const [feelOpen, setFeelOpen] = useStateL(false);
   const captureRef = useRefL(null);
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
@@ -1397,6 +1438,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const duration = s.durationMinutes != null
     ? s.durationMinutes
     : (s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null);
+
+  const setFeel = (feel) => {
+    setStore(st => ({ ...st, sessions: st.sessions.map(x => x.id === sessionId ? { ...x, feel } : x) }));
+  };
 
   const deleteSession = async () => {
     if (!await confirm('This session will be permanently deleted.', { title: 'Delete session?', ok: 'Delete', danger: true })) return;
@@ -1569,6 +1614,28 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             </BracketFrame>
           );
         })()}
+
+        {/* Feel — prompt after finish, always editable */}
+        {!capturing && (
+          <div style={{ marginBottom: 4 }}>
+            {justFinished && !s.feel && (
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, letterSpacing: '0.12em' }}>HOW DID IT FEEL?</div>
+            )}
+            {!justFinished && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: s.feel && !feelOpen ? 0 : 8 }}>
+                <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em' }}>FEEL</span>
+                {s.feel && !feelOpen && (
+                  <button onClick={() => setFeelOpen(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', color: feelColor(s.feel) }}>
+                    {feelLabel(s.feel)} <span style={{ color: UI.inkFaint, fontWeight: 400 }}>· EDIT</span>
+                  </button>
+                )}
+              </div>
+            )}
+            {(justFinished || feelOpen || !s.feel) && (
+              <FeelSelector value={s.feel} onChange={(v) => { setFeel(v); setFeelOpen(false); }} />
+            )}
+          </div>
+        )}
 
         {/* Stats — circle dials on screen, flat grid in screenshot */}
         {!justFinished && !capturing && (
