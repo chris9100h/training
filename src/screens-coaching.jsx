@@ -3188,7 +3188,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true 
               <i className={`fa-solid fa-chevron-${pastOpen ? 'up' : 'down'}`} style={{ fontSize: 11, color: UI.inkFaint }} />
             </button>
             {pastOpen && (
-              <div>
+              <div style={{ paddingLeft: 16 }}>
                 {past.map(ci => (
                   <div key={ci.id} style={{ borderTop: `0.5px solid ${UI.hair}` }}>
                     <CheckInCard ci={ci} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
