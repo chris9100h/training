@@ -1619,7 +1619,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {!capturing && (
           <div style={{ marginBottom: 4 }}>
             {justFinished && !s.feel && (
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, letterSpacing: '0.12em' }}>HOW DID IT FEEL?</div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, letterSpacing: '0.12em' }}>RATE WORKOUT EFFORT</div>
             )}
             {!justFinished && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: s.feel && !feelOpen ? 0 : 8 }}>
