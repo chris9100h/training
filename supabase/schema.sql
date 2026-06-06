@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS public.zane_sessions (
   started_at       timestamptz,
   ended            timestamptz,
   entries          jsonb NOT NULL DEFAULT '[]',
-  duration_minutes integer
+  duration_minutes integer,
+  feel             text CHECK (feel IN ('easy','good','hard','very_hard','max'))
 );
 
 CREATE TABLE IF NOT EXISTS public.zane_user_settings (
