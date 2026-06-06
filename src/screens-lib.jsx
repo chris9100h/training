@@ -1186,15 +1186,6 @@ function HistoryScreen({ store, go, initialTab }) {
   const [filtersOpen, setFiltersOpen] = useStateL(false);
   const filterCount = [planFilter, periodFilter, dayFilter].filter(Boolean).length;
 
-  const chipSt = (active) => ({
-    padding: '5px 12px', borderRadius: 20, cursor: 'pointer',
-    border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
-    background: active ? UI.goldFaint : 'transparent',
-    color: active ? UI.gold : UI.inkFaint,
-    fontFamily: UI.fontUi, fontSize: 10, fontWeight: active ? 600 : 400,
-    letterSpacing: '0.08em', WebkitTapHighlightColor: 'transparent',
-  });
-
   return (
     <Screen scroll={false}>
       <TopBar title="History" right={tab === 'workouts' && planOptions.length > 0 ? (
@@ -1299,67 +1290,79 @@ function HistoryScreen({ store, go, initialTab }) {
 
       {tab === 'stats' && <StatsTab store={store} sessions={sessions} go={go} />}
 
-      {filtersOpen && (
-        <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <div>
-              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
-                <span className="micro" style={{ color: UI.gold }}>PLAN</span>
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {planOptions.map(p => (
-                  <button key={p.id} style={chipSt(planFilter === p.id)}
-                    onClick={() => { const v = planFilter === p.id ? null : p.id; setPlanFilter(v); setPeriodFilter(null); setDayFilter(null); }}>
-                    {p.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {periodOptions.length > 0 && (
+      {filtersOpen && (() => {
+        const selSt = (active) => ({
+          width: '100%', appearance: 'none', WebkitAppearance: 'none',
+          background: active ? 'rgba(var(--accent-rgb),0.08)' : 'transparent',
+          border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
+          borderRadius: 4, color: active ? UI.gold : UI.ink,
+          fontFamily: UI.fontUi, fontSize: 13, padding: '10px 36px 10px 12px',
+          cursor: 'pointer', outline: 'none', colorScheme: 'dark',
+        });
+        const selWrap = { position: 'relative' };
+        const selChevron = { position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', fontSize: 10, color: UI.inkFaint };
+        return (
+          <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <div>
                 <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
-                  <span className="micro" style={{ color: UI.gold }}>CYCLE / WEEK</span>
+                  <span className="micro" style={{ color: UI.gold }}>PLAN</span>
                 </div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {periodOptions.map(p => (
-                    <button key={p} style={chipSt(periodFilter === p)}
-                      onClick={() => { const v = periodFilter === p ? null : p; setPeriodFilter(v); setDayFilter(null); }}>
-                      {p}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {dayOptions.length > 1 && (
-              <div>
-                <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
-                  <span className="micro" style={{ color: UI.gold }}>DAY</span>
-                </div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {dayOptions.map(d => (
-                    <button key={d} style={chipSt(dayFilter === d)}
-                      onClick={() => setDayFilter(dayFilter === d ? null : d)}>
-                      {d}
-                    </button>
-                  ))}
+                <div style={selWrap}>
+                  <select value={planFilter || ''} style={selSt(!!planFilter)}
+                    onChange={e => { const v = e.target.value || null; setPlanFilter(v); setPeriodFilter(null); setDayFilter(null); }}>
+                    <option value="">All plans</option>
+                    {planOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                  <i className="fa-solid fa-chevron-down" style={selChevron} />
                 </div>
               </div>
-            )}
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8, borderTop: `0.5px solid ${UI.hair}` }}>
-              <span className="micro" style={{ color: UI.inkFaint }}>{filteredSessions.length} session{filteredSessions.length !== 1 ? 's' : ''}</span>
-              {filterCount > 0 && (
-                <button onClick={() => { setPlanFilter(null); setPeriodFilter(null); setDayFilter(null); }}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.danger, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-                  Clear all
-                </button>
+              {periodOptions.length > 0 && (
+                <div>
+                  <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                    <span className="micro" style={{ color: UI.gold }}>CYCLE / WEEK</span>
+                  </div>
+                  <div style={selWrap}>
+                    <select value={periodFilter || ''} style={selSt(!!periodFilter)}
+                      onChange={e => { const v = e.target.value || null; setPeriodFilter(v); setDayFilter(null); }}>
+                      <option value="">All cycles / weeks</option>
+                      {periodOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    <i className="fa-solid fa-chevron-down" style={selChevron} />
+                  </div>
+                </div>
               )}
+
+              {dayOptions.length > 1 && (
+                <div>
+                  <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                    <span className="micro" style={{ color: UI.gold }}>DAY</span>
+                  </div>
+                  <div style={selWrap}>
+                    <select value={dayFilter || ''} style={selSt(!!dayFilter)}
+                      onChange={e => setDayFilter(e.target.value || null)}>
+                      <option value="">All days</option>
+                      {dayOptions.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    <i className="fa-solid fa-chevron-down" style={selChevron} />
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8, borderTop: `0.5px solid ${UI.hair}` }}>
+                <span className="micro" style={{ color: UI.inkFaint }}>{filteredSessions.length} session{filteredSessions.length !== 1 ? 's' : ''}</span>
+                {filterCount > 0 && (
+                  <button onClick={() => { setPlanFilter(null); setPeriodFilter(null); setDayFilter(null); }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.danger, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                    Clear all
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        </Sheet>
-      )}
+          </Sheet>
+        );
+      })()}
     </Screen>
   );
 }
