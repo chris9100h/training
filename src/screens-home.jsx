@@ -389,8 +389,11 @@ function HomeScreen({ store, setStore, go, userId }) {
       const trueStart = oldestVersionStart
         ? LB.parseDate(oldestVersionStart)
         : new Date(LB.parseDate(store.cycleStartDate).getTime() - dayCount * 86400000);
+      const oldestDayCount = oldestVersionStart
+        ? (sch.versions[sch.versions.length - 1]?.days?.length || dayCount)
+        : dayCount;
       const startWd = (trueStart.getDay() + 6) % 7;
-      const startMondayMs = trueStart.getTime() - startWd * 86400000 - 7 * 86400000;
+      const startMondayMs = trueStart.getTime() - startWd * 86400000 - oldestDayCount * 86400000;
       return Math.round((startMondayMs - currentMondayMs) / (7 * 86400000));
     }
     return -(currentCycleNum + 1);
