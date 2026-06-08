@@ -869,31 +869,57 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
 
   useEffectT(() => {
     if (!session?.dayId || !session?.id || !userId) return;
-    LB.supabase
-      .from('zane_sessions')
-      .select('started_at, ended, entries, duration_minutes')
-      .eq('user_id', userId)
-      .eq('day_id', session.dayId)
-      .not('ended', 'is', null)
-      .neq('id', session.id)
-      .then(({ data }) => {
-        if (!data?.length) return;
-        const valid = data.filter(s => {
-          const durSec = s.duration_minutes != null
-            ? s.duration_minutes * 60
-            : (s.started_at ? (new Date(s.ended) - new Date(s.started_at)) / 1000 : null);
-          return durSec != null && durSec > 0;
-        });
-        if (!valid.length) return;
-        const avgDurSec = valid.reduce((sum, s) => {
-          const sec = s.duration_minutes != null
-            ? s.duration_minutes * 60
-            : (new Date(s.ended) - new Date(s.started_at)) / 1000;
-          return sum + sec;
-        }, 0) / valid.length;
-        const avgSetsTotal = valid.reduce((sum, s) => sum + (s.entries || []).reduce((t, e) => t + (e.sets?.filter(st => st.done).length || 0), 0), 0) / valid.length;
-        setAvgStats({ avgDurSec, avgSetsTotal });
+    (async () => {
+      const { data: prevSessions } = await LB.supabase
+        .from('zane_sessions')
+        .select('id, started_at, ended, duration_minutes')
+        .eq('user_id', userId)
+        .eq('day_id', session.dayId)
+        .not('ended', 'is', null)
+        .neq('id', session.id)
+        .order('ended', { ascending: false })
+        .limit(5);
+      if (!prevSessions?.length) return;
+
+      const valid = prevSessions.filter(s => {
+        const dur = s.duration_minutes != null
+          ? s.duration_minutes * 60
+          : (s.started_at ? (new Date(s.ended) - new Date(s.started_at)) / 1000 : null);
+        return dur != null && dur > 0;
       });
+      const avgDurSec = valid.length
+        ? valid.reduce((sum, s) => {
+            const sec = s.duration_minutes != null
+              ? s.duration_minutes * 60
+              : (new Date(s.ended) - new Date(s.started_at)) / 1000;
+            return sum + sec;
+          }, 0) / valid.length
+        : null;
+
+      // Build positional timeline from the most recent session that has started_at
+      const lastSess = prevSessions.find(s => s.started_at);
+      let timeline = null;
+      if (lastSess) {
+        const { data: entries } = await LB.supabase
+          .from('zane_session_entries')
+          .select('entry_idx, sets:zane_sets(set_idx, updated_at, done, warmup, skipped)')
+          .eq('session_id', lastSess.id)
+          .order('entry_idx');
+        if (entries?.length) {
+          const t0 = new Date(lastSess.started_at).getTime();
+          timeline = entries
+            .flatMap(e => (e.sets || [])
+              .filter(s => s.done && !s.warmup && !s.skipped)
+              .sort((a, b) => a.set_idx - b.set_idx)
+              .map(s => (new Date(s.updated_at).getTime() - t0) / 1000)
+            )
+            .filter(t => t > 0);
+          if (!timeline.length) timeline = null;
+        }
+      }
+
+      setAvgStats({ avgDurSec, timeline });
+    })();
   }, [session?.id]);
 
   // No document-level dismiss: the auto-dismiss fired during digit presses (iOS
@@ -1287,32 +1313,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         </button>
       </div>
 
-      {/* Pace bar — only when historical avg is available */}
+      {/* Pace bar — positional comparison vs same point in last session */}
       {avgStats && (() => {
-        const totalSetsDone  = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done && !x.warmup).length || 0), 0);
-        const totalSetsTotal = session.entries.reduce((s, e) => s + (e.sets?.filter(x => !x.skipped && !x.warmup).length || 0), 0);
-        const avgDurSec = avgStats.avgDurSec;
-        const avgSetsTotal = avgStats.avgSetsTotal;
-        if (!avgDurSec || !session.startedAt) return null;
-        const elapsedSec = (now - new Date(session.startedAt).getTime()) / 1000;
-        const remainingSets = Math.max(0, totalSetsTotal - totalSetsDone);
-        const histPace = avgSetsTotal > 0 ? avgDurSec / avgSetsTotal : null;
-        const currPace = totalSetsDone >= 2 ? elapsedSec / totalSetsDone : null;
-        let remainingSec;
-        if (!histPace || totalSetsTotal === 0) {
-          remainingSec = Math.max(0, avgDurSec - elapsedSec);
-        } else if (!currPace) {
-          remainingSec = Math.max(0, avgDurSec - elapsedSec);
-        } else {
-          const w = Math.min(totalSetsDone / 8, 0.7);
-          remainingSec = Math.max(0, (w * currPace + (1 - w) * histPace) * remainingSets);
-        }
-        const remMin = Math.round(remainingSec / 60);
-        const avgDurMin = avgDurSec / 60;
-        const elapsedMin = elapsedSec / 60;
+        const { timeline } = avgStats;
+        if (!timeline || !session.startedAt) return null;
+        const totalSetsDone = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done && !x.warmup).length || 0), 0);
         if (totalSetsDone < 2) return null;
+        const remainingSets = session.entries.reduce((s, e) => s + (e.sets?.filter(x => !x.done && !x.skipped && !x.warmup).length || 0), 0);
         if (remainingSets === 0) return null;
-        const diffMin = Math.round(elapsedMin + remMin - avgDurMin);
+        const expectedSec = timeline[totalSetsDone - 1];
+        if (expectedSec == null) return null; // beyond historical set count
+        const elapsedSec = (now - new Date(session.startedAt).getTime()) / 1000;
+        const diffMin = Math.round((elapsedSec - expectedSec) / 60);
         if (Math.abs(diffMin) < 2) return null;
         const ahead = diffMin < 0;
         const pct = Math.min(Math.abs(diffMin) / 20 * 50, 50);
