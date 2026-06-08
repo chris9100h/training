@@ -832,6 +832,7 @@ function getPlanDaysForDate(schedule, dateStr) {
 
 // Returns 1-indexed cycle number for dateStr within its active plan version.
 // Each version resets the count to 1 from its own validFrom.
+// Returns 0 for dates before the plan started (pre-plan scroll buffer).
 function getCycleNumForDate(schedule, dateStr) {
   const versions = schedule.versions;
   if (!versions?.length) return null;
@@ -843,7 +844,7 @@ function getCycleNumForDate(schedule, dateStr) {
       return Math.floor(Math.max(0, daysDiff) / daysLen) + 1;
     }
   }
-  return 1;
+  return 0; // before plan started
 }
 
 function getCyclePosForDate(schedule, dateStr) {
