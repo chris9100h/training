@@ -88,23 +88,24 @@ function LoginScreen() {
           ))}
         </div>
 
-        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
+        <form onSubmit={e => { e.preventDefault(); isLogin ? submitLogin() : submitRegister(); }}
+          style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
           {!isLogin && (
             <Field label="Name">
-              <TextInput value={name} onChange={setName} placeholder="Your name" autoFocus={!isLogin} />
+              <TextInput value={name} onChange={setName} placeholder="Your name" autoFocus={!isLogin} autoComplete="name" />
             </Field>
           )}
           <Field label="Email">
-            <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus={isLogin} />
+            <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus={isLogin} autoComplete="email" />
           </Field>
           <Field label="Password">
             <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters"
-              onKeyDown={e => e.key === 'Enter' && isLogin && submitLogin()} />
+              autoComplete={isLogin ? 'current-password' : 'new-password'} />
           </Field>
           {!isLogin && (
             <Field label="Repeat password">
               <TextInput value={confirm} onChange={setConfirm} type="password" placeholder="repeat password"
-                onKeyDown={e => e.key === 'Enter' && submitRegister()} />
+                autoComplete="new-password" />
             </Field>
           )}
 
@@ -121,15 +122,15 @@ function LoginScreen() {
           )}
 
           {isLogin ? (
-            <Btn onClick={submitLogin} disabled={!canLogin || loading} style={{ marginTop: 4, opacity: canLogin && !loading ? 1 : 0.4 }}>
+            <Btn disabled={!canLogin || loading} style={{ marginTop: 4, opacity: canLogin && !loading ? 1 : 0.4 }}>
               {loading ? 'Signing in…' : 'Log in'}
             </Btn>
           ) : (
-            <Btn onClick={submitRegister} disabled={!canRegister || loading} style={{ marginTop: 4, opacity: canRegister && !loading ? 1 : 0.4 }}>
+            <Btn disabled={!canRegister || loading} style={{ marginTop: 4, opacity: canRegister && !loading ? 1 : 0.4 }}>
               {loading ? 'Creating account…' : 'Create account'}
             </Btn>
           )}
-        </div>
+        </form>
       </div>
 
       <div style={{ flexShrink: 0, padding: '0 22px calc(env(safe-area-inset-bottom, 8px) + 18px)', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
