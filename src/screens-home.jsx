@@ -970,7 +970,11 @@ function HomeScreen({ store, setStore, go, userId }) {
           <div style={{ flexShrink: 0, display: 'flex', gap: 4, marginTop: -4 }}>
             {cycleBarSegments.map((seg, i) => {
               const selDay = week.find(d => d.weekday === selectedWd);
-              const selCycleNum = selDay ? Math.floor(selDay.daysFromStart / dayCount) + 1 : null;
+              const selCycleNum = selDay
+                ? (sch?.versions?.length
+                    ? LB.getCycleNumForDate(sch, selDay.date.toISOString().slice(0, 10))
+                    : Math.floor(selDay.daysFromStart / dayCount) + 1)
+                : null;
               const isActive = seg.cycleNum === selCycleNum;
               return (
                 <div key={i} style={{
