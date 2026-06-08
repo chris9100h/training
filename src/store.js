@@ -827,7 +827,7 @@ function getPlanDaysForDate(schedule, dateStr) {
   for (const v of versions) {
     if (v.validFrom <= dateStr) return v.days || [];
   }
-  return schedule.days || [];
+  return []; // before plan started — no days scheduled
 }
 
 // Returns 1-indexed cycle number for dateStr within its active plan version.
