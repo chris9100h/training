@@ -831,21 +831,36 @@ function getPlanDaysForDate(schedule, dateStr) {
   return versions[versions.length - 1]?.days || [];
 }
 
-// Returns 1-indexed cycle number for dateStr within its active plan version.
-// Each version resets the count to 1 from its own validFrom.
-// Returns 0 for dates before the plan started (pre-plan scroll buffer).
+// Returns cumulative 1-indexed cycle number for dateStr across all plan versions.
+// When a new version starts it continues the count from where the previous left off
+// (cycle number on the last day of the previous version + 1), so cycle numbering
+// never resets. Returns 0 for dates before the plan started (pre-plan scroll buffer).
 function getCycleNumForDate(schedule, dateStr) {
   const versions = schedule.versions;
   if (!versions?.length) return null;
-  for (const v of versions) {
-    if (v.validFrom <= dateStr) {
-      const daysLen = (v.days || []).length;
-      if (!daysLen) return 1;
+
+  const sorted = [...versions].sort((a, b) => a.validFrom.localeCompare(b.validFrom));
+  if (dateStr < sorted[0].validFrom) return 0;
+
+  let totalPriorCycles = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const v = sorted[i];
+    const nextV = sorted[i + 1];
+    const daysLen = (v.days || []).length;
+    if (!daysLen) continue;
+
+    if (!nextV || dateStr < nextV.validFrom) {
+      // dateStr is within this version's period
       const daysDiff = Math.round((new Date(dateStr + 'T12:00:00') - new Date(v.validFrom + 'T12:00:00')) / 86400000);
-      return Math.floor(Math.max(0, daysDiff) / daysLen) + 1;
+      return totalPriorCycles + Math.floor(Math.max(0, daysDiff) / daysLen) + 1;
     }
+    // Add the cycle number of this version's last day (= the highest cycle it reached)
+    const vStart = new Date(v.validFrom + 'T12:00:00');
+    const vEnd = new Date(nextV.validFrom + 'T12:00:00');
+    const daysInVersion = Math.round((vEnd - vStart) / 86400000);
+    totalPriorCycles += Math.floor((daysInVersion - 1) / daysLen) + 1;
   }
-  return 0; // before plan started
+  return totalPriorCycles + 1;
 }
 
 function getCyclePosForDate(schedule, dateStr) {
