@@ -339,6 +339,10 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const jsDay = new Date().getDay();
   const todayWd = jsDay === 0 ? 6 : jsDay - 1;
+  // Oldest version = original plan start; null when no versioning
+  const oldestVersionStart = sch?.versions?.length
+    ? sch.versions[sch.versions.length - 1].validFrom
+    : null;
 
   // Auto-migrate from cycleIndex to cycleStartDate on first load
   useEffect(() => {
@@ -368,10 +372,11 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const minOffset = (() => {
     if (weekdayMode) {
-      if (store.weekPlanStartDate) {
+      const startDateStr = oldestVersionStart || store.weekPlanStartDate;
+      if (startDateStr) {
         const now = new Date(); now.setHours(12, 0, 0, 0);
         const currentMondayMs = now.getTime() - todayWd * 86400000;
-        const start = LB.parseDate(store.weekPlanStartDate);
+        const start = LB.parseDate(startDateStr);
         const planMondayMs = start.getTime() - ((start.getDay() + 6) % 7) * 86400000;
         const week0MondayMs = planMondayMs - 7 * 86400000;
         return Math.round((week0MondayMs - currentMondayMs) / (7 * 86400000));
@@ -381,10 +386,12 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (cycleWeekView && store.cycleStartDate && dayCount > 0) {
       const now = new Date(); now.setHours(12, 0, 0, 0);
       const currentMondayMs = now.getTime() - todayWd * 86400000;
-      const cycle0StartMs = LB.parseDate(store.cycleStartDate).getTime() - dayCount * 86400000;
-      const cycle0Wd = (new Date(cycle0StartMs).getDay() + 6) % 7;
-      const cycle0MondayMs = cycle0StartMs - cycle0Wd * 86400000;
-      return Math.round((cycle0MondayMs - currentMondayMs) / (7 * 86400000));
+      const trueStart = oldestVersionStart
+        ? LB.parseDate(oldestVersionStart)
+        : new Date(LB.parseDate(store.cycleStartDate).getTime() - dayCount * 86400000);
+      const startWd = (trueStart.getDay() + 6) % 7;
+      const startMondayMs = trueStart.getTime() - startWd * 86400000;
+      return Math.round((startMondayMs - currentMondayMs) / (7 * 86400000));
     }
     return -(currentCycleNum + 1);
   })();
@@ -409,15 +416,17 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (!sch) return [];
     if (weekdayMode) {
       return Array.from({ length: 7 }).map((_, i) => {
-        const trainingDay = sch.days.find(d => d.weekday === i);
         const diff = i - todayWd + weekOffset * 7;
         const date = new Date(); date.setDate(date.getDate() + diff);
+        const dateStr = date.toISOString().slice(0, 10);
+        const vDays = LB.getPlanDaysForDate(sch, dateStr);
+        const trainingDay = vDays.find(d => d.weekday === i) || null;
         return {
           id: `wd-${i}`, weekday: i,
           isToday: i === todayWd && weekOffset === 0,
           name: trainingDay?.name ?? 'REST',
           items: trainingDay?.items ?? [],
-          date,
+          date, _dayData: trainingDay,
         };
       });
     }
@@ -427,15 +436,20 @@ function HomeScreen({ store, setStore, go, userId }) {
       monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
       return Array.from({ length: 7 }).map((_, i) => {
         const date = new Date(monday); date.setDate(monday.getDate() + i);
+        const dateStr = date.toISOString().slice(0, 10);
         const daysFromStart = Math.round((date - start) / 86400000);
-        const slotIdx = ((daysFromStart % dayCount) + dayCount) % dayCount;
-        const dayData = sch.days[slotIdx];
+        const vDays = LB.getPlanDaysForDate(sch, dateStr);
+        const cyclePosForDate = LB.getCyclePosForDate(sch, dateStr);
+        const slotIdx = cyclePosForDate !== null
+          ? cyclePosForDate
+          : ((daysFromStart % dayCount) + dayCount) % dayCount;
+        const dayData = vDays[slotIdx] || null;
         return {
           id: `cwv-${i}`, weekday: i,
           isToday: i === todayWd && weekOffset === 0,
           name: dayData?.name ?? 'REST',
           items: dayData?.items ?? [],
-          date, slotIdx, daysFromStart,
+          date, slotIdx, daysFromStart, _dayData: dayData,
         };
       });
     }
@@ -449,13 +463,12 @@ function HomeScreen({ store, setStore, go, userId }) {
   const activeDay = useMemo(() => {
     if (!sch) return day;
     if (weekdayMode) {
-      const found = sch.days.find(d => d.weekday === selectedWd);
-      return found ?? { id: 'rest-virtual', name: 'REST', items: [], weekday: selectedWd };
+      const sel = week.find(d => d.weekday === selectedWd);
+      return sel?._dayData ?? { id: 'rest-virtual', name: 'REST', items: [], weekday: selectedWd };
     }
     if (cycleWeekView) {
       const sel = week.find(d => d.weekday === selectedWd);
-      if (sel?.slotIdx != null) return sch.days[sel.slotIdx];
-      return { id: 'rest-virtual', name: 'REST', items: [] };
+      return sel?._dayData ?? { id: 'rest-virtual', name: 'REST', items: [] };
     }
     return sch.days[selectedSlot] ?? sch.days[0];
   }, [weekdayMode, cycleWeekView, sch, selectedWd, selectedSlot, day, week]);
@@ -658,11 +671,19 @@ function HomeScreen({ store, setStore, go, userId }) {
         const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
         trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
       } else if (store.cycleStartDate) {
-        const start = LB.parseDate(store.cycleStartDate);
-        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-        if (n < 0) continue;
-        const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
-        const dayData = sch.days[idx];
+        const vDays = LB.getPlanDaysForDate(sch, dateKey);
+        if (!vDays.length) continue;
+        const cyclePosForDate = LB.getCyclePosForDate(sch, dateKey);
+        let idx;
+        if (cyclePosForDate !== null) {
+          idx = cyclePosForDate;
+        } else {
+          const start = LB.parseDate(store.cycleStartDate);
+          const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+          if (n < 0) continue;
+          idx = ((n % vDays.length) + vDays.length) % vDays.length;
+        }
+        const dayData = vDays[idx];
         if (dayData?.items?.length > 0) trainingDay = dayData;
       }
       if (!trainingDay) continue;
@@ -888,9 +909,9 @@ function HomeScreen({ store, setStore, go, userId }) {
             }
             const dateKey = d.date.toISOString().slice(0, 10);
             const isPast = !d.isToday && d.date < new Date();
-            const isBeforePlanStart = weekdayMode
-              ? (store.weekPlanStartDate ? d.date < LB.parseDate(store.weekPlanStartDate) : false)
-              : (store.cycleStartDate ? d.date < LB.parseDate(store.cycleStartDate) : false);
+            const planStartStr = oldestVersionStart
+              || (weekdayMode ? store.weekPlanStartDate : store.cycleStartDate);
+            const isBeforePlanStart = planStartStr ? d.date < LB.parseDate(planStartStr) : false;
             const isMissed = !r && isPast && !isCompleted && !skipsMap.has(dateKey) && !isBeforePlanStart;
             const isSkipped = !r && isPast && !isCompleted && skipsMap.has(dateKey);
             return (

@@ -821,6 +821,29 @@ function isWeekdayPlan(sch) {
   return sch.mode === 'weekday' || (sch.days.length > 0 && sch.days.some(d => d.weekday != null));
 }
 
+function getPlanDaysForDate(schedule, dateStr) {
+  const versions = schedule.versions;
+  if (!versions?.length) return schedule.days || [];
+  for (const v of versions) {
+    if (v.validFrom <= dateStr) return v.days || [];
+  }
+  return schedule.days || [];
+}
+
+function getCyclePosForDate(schedule, dateStr) {
+  const versions = schedule.versions;
+  if (!versions?.length) return null;
+  for (const v of versions) {
+    if (v.validFrom <= dateStr) {
+      const daysLen = (v.days || []).length;
+      if (!daysLen) return 0;
+      const daysDiff = Math.round((new Date(dateStr + 'T12:00:00') - new Date(v.validFrom + 'T12:00:00')) / 86400000);
+      return ((daysDiff % daysLen) + daysLen) % daysLen;
+    }
+  }
+  return null;
+}
+
 function todaysDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
@@ -1324,7 +1347,7 @@ window.LB = {
   signIn, signUp, signOut, deleteAllData, importFromBackup,
   loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan,
+  uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate,
   effReps, e1rm, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
