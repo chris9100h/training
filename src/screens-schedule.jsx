@@ -366,9 +366,13 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
       {confirmEl}
       <TopBar
         title={sch.name}
-        sub={isWeekday
-          ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ')
-          : `${sch.days.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`}
+        sub={(() => {
+          const vn = (sch.versions?.length || 0) + 1;
+          const vLabel = vn > 1 ? ` · V${vn}` : '';
+          return isWeekday
+            ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ') + vLabel
+            : `${sch.days.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}${vLabel}`;
+        })()}
         onBack={() => go({ name: fromPlan ? 'plan' : 'home' })}
         right={fromPlan ? (
           <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })} style={{

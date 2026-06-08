@@ -43,6 +43,60 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+function AutoCloseBanner({ notify, onDismiss }) {
+  const { dayName, date, durationMinutes } = notify;
+  const dateLabel = date ? new Date(date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }) : '';
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9998,
+      background: 'rgba(0,0,0,0.72)',
+      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 32,
+    }}>
+      <div style={{
+        width: '100%', maxWidth: 320,
+        background: UI.bgRaised,
+        border: `1px solid ${UI.hairStrong}`,
+        borderRadius: 6,
+        padding: '32px 28px',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        gap: 10, textAlign: 'center',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
+        animation: 'fadeUp 0.3s ease',
+      }}>
+        <div style={{
+          width: 48, height: 48, borderRadius: 6,
+          background: UI.bgInset,
+          border: `1px solid ${UI.hairStrong}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          marginBottom: 6,
+        }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </div>
+        <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 400 }}>
+          Session auto-ended
+        </div>
+        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
+          Your <strong style={{ color: UI.ink }}>{dayName}</strong> session{dateLabel ? ` on ${dateLabel}` : ''} was automatically ended — <strong style={{ color: UI.ink }}>{durationMinutes} min</strong> recorded.
+        </div>
+        <button onClick={onDismiss} style={{
+          marginTop: 10, width: '100%', padding: '14px 0',
+          borderRadius: 6, border: 'none', cursor: 'pointer',
+          background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+          boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
+          color: '#0a0805', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
+          letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent',
+        }}>
+          GOT IT
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function UpdateBanner({ onUpdate }) {
   return (
     <div style={{
@@ -147,6 +201,7 @@ function App() {
   const [userId, setUserId]       = useStateA(null);
   const [route, setRoute]         = useStateA({ name: 'home' });
   const [updateAvailable, setUpdateAvailable] = useStateA(false);
+  const [autoCloseNotify, setAutoCloseNotify] = useStateA(null);
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
   const swReg                     = useRefA(null);
@@ -304,8 +359,16 @@ function App() {
       setPhase('ready');
       LB.loadFromSupabase(uid)
         .then(fresh => {
-          // Skip if the user made local changes while the fetch was in flight
+          // Notification is independent of the store merge — show it regardless
+          // of localDirty, and clear it from DB immediately (fire-and-forget).
+          const pendingNotify = fresh.autoCloseNotify ?? null;
+          if (pendingNotify) {
+            LB.supabase.from('zane_user_settings').update({ auto_close_notify: null }).eq('user_id', uid).catch(() => {});
+            setAutoCloseNotify(pendingNotify);
+          }
+          // Skip store update if the user made local changes while the fetch was in flight
           if (localDirty.current) return;
+          fresh = { ...fresh, autoCloseNotify: null };
           const cur = prevStore.current;
           // fresh is the pristine server state — use it as the sync diff base
           syncBase.current = fresh;
@@ -377,11 +440,17 @@ function App() {
       try {
         const loaded = await LB.loadFromSupabase(uid);
         if (!loaded.user.approved) { setPhase('pending'); return; }
-        prevStore.current = loaded;
-        syncBase.current = loaded;
-        LB.saveBase(loaded, uid);
-        setStore(loaded);
+        const pendingNotify = loaded.autoCloseNotify ?? null;
+        if (pendingNotify) {
+          await LB.supabase.from('zane_user_settings').update({ auto_close_notify: null }).eq('user_id', uid).catch(() => {});
+        }
+        const storeToSave = { ...loaded, autoCloseNotify: null };
+        prevStore.current = storeToSave;
+        syncBase.current = storeToSave;
+        LB.saveBase(storeToSave, uid);
+        setStore(storeToSave);
         setPhase('ready');
+        if (pendingNotify) setAutoCloseNotify(pendingNotify);
       } catch (e) {
         console.error('loadFromSupabase failed', e);
         setPhase('error');
@@ -632,6 +701,7 @@ function App() {
           </ErrorBoundary>
         </div>
         {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
+        {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
         {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
       </div>
     );
@@ -647,6 +717,7 @@ function App() {
         {screen}
       </ErrorBoundary>
       {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
+      {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
     </>

@@ -324,8 +324,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         showWarmupInSummary: sett.show_warmup_in_summary ?? true,
         showCoachingTab: sett.show_coaching_tab ?? false,
         beYourOwnCoach: sett.be_your_own_coach ?? false,
+        sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
+    autoCloseNotify: sett.auto_close_notify ?? null,
     coaching: isCoachLoad ? undefined : {
       asClient: (coachInfoRes?.data?.[0]) ? {
         id: coachInfoRes.data[0].coaching_id,
@@ -570,8 +572,9 @@ async function syncStore(prev, next, userId) {
     prev.settings?.reminderTime         !== next.settings?.reminderTime         ||
     prev.settings?.showWarmupInSummary  !== next.settings?.showWarmupInSummary  ||
     prev.settings?.showCoachingTab      !== next.settings?.showCoachingTab      ||
-    prev.settings?.beYourOwnCoach       !== next.settings?.beYourOwnCoach       ||
-    prev.nextReminderAt                 !== next.nextReminderAt;
+    prev.settings?.beYourOwnCoach         !== next.settings?.beYourOwnCoach         ||
+    prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
+    prev.nextReminderAt                   !== next.nextReminderAt;
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
@@ -603,6 +606,7 @@ async function syncStore(prev, next, userId) {
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
       show_coaching_tab: next.settings?.showCoachingTab ?? false,
       be_your_own_coach: next.settings?.beYourOwnCoach ?? false,
+      session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
     }));
