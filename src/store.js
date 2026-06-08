@@ -827,7 +827,8 @@ function getPlanDaysForDate(schedule, dateStr) {
   for (const v of versions) {
     if (v.validFrom <= dateStr) return v.days || [];
   }
-  return []; // before plan started — no days scheduled
+  // Before plan started: extend oldest version backwards so Cycle 0 can be used for migration
+  return versions[versions.length - 1]?.days || [];
 }
 
 // Returns 1-indexed cycle number for dateStr within its active plan version.
@@ -858,7 +859,12 @@ function getCyclePosForDate(schedule, dateStr) {
       return ((daysDiff % daysLen) + daysLen) % daysLen;
     }
   }
-  return null;
+  // Before plan started: extend oldest version backwards (negative daysDiff wraps correctly)
+  const oldest = versions[versions.length - 1];
+  const daysLen = (oldest.days || []).length;
+  if (!daysLen) return 0;
+  const daysDiff = Math.round((new Date(dateStr + 'T12:00:00') - new Date(oldest.validFrom + 'T12:00:00')) / 86400000);
+  return ((daysDiff % daysLen) + daysLen) % daysLen;
 }
 
 function todaysDay(state) {
