@@ -17,6 +17,7 @@ function LoginScreen() {
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
   const [swVersion, setSwVersion] = useState('');
+  const formRef = useRef(null);
 
   useEffect(() => {
     if (!('caches' in window)) return;
@@ -24,6 +25,19 @@ function LoginScreen() {
       const k = keys.find(k => k.startsWith('zane-'));
       if (k) setSwVersion(k.replace('zane-', ''));
     });
+  }, []);
+
+  // Safari autofill fires native DOM input events but not React synthetic ones.
+  // Sync autofilled values to React state so canLogin is correct when tapping the button.
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    const handler = (e) => {
+      if (e.target.name === 'email') setEmail(e.target.value);
+      if (e.target.name === 'password') setPassword(e.target.value);
+    };
+    form.addEventListener('input', handler);
+    return () => form.removeEventListener('input', handler);
   }, []);
 
   const switchMode = (m) => { setMode(m); setError(''); setPassword(''); setConfirm(''); };
@@ -90,7 +104,7 @@ function LoginScreen() {
           ))}
         </div>
 
-        <form onSubmit={e => {
+        <form ref={formRef} onSubmit={e => {
             e.preventDefault();
             if (isLogin) {
               const els = e.target.elements;
@@ -106,7 +120,7 @@ function LoginScreen() {
             </Field>
           )}
           <Field label="Email">
-            <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus={isLogin} autoComplete="email" name="email" />
+            <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus={isLogin} autoComplete="email" name="email" type="email" />
           </Field>
           <Field label="Password">
             <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters"
