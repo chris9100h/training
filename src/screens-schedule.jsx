@@ -174,9 +174,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
   const isActivePlan = !!sch && sch.id === store.activeScheduleId;
 
   const activeCycleDayIdx = isActivePlan && !isWeekday
-    ? (store.cycleStartDate
-        ? (() => { const t = new Date(); t.setHours(12, 0, 0, 0); const st = LB.parseDate(store.cycleStartDate); return ((Math.round((t - st) / 86400000) % sch.days.length) + sch.days.length) % sch.days.length; })()
-        : (store.cycleIndex || 0) % sch.days.length)
+    ? (() => { const t = new Date(); t.setHours(12, 0, 0, 0); return LB.getCyclePosForDate(sch, t.toISOString().slice(0, 10)); })()
     : -1;
 
   const todayDayId = isActivePlan

@@ -384,11 +384,7 @@ async function autoArchiveMissedDays(userId, state) {
       const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
       trainingDay = activeSch.days.find(day => day.weekday === wd && (day.items || []).length > 0) || null;
     } else {
-      const start = parseDate(state.cycleStartDate);
-      const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-      if (n < 0) continue;
-      const idx = ((n % activeSch.days.length) + activeSch.days.length) % activeSch.days.length;
-      const dayData = activeSch.days[idx];
+      const dayData = getPlanDaysForDate(activeSch, dateKey)[getCyclePosForDate(activeSch, dateKey)];
       if ((dayData?.items || []).length > 0) trainingDay = dayData;
     }
     if (!trainingDay) continue;
@@ -628,12 +624,9 @@ function computeNextTrainingDate(state) {
       const day = sch.days.find(x => x.weekday === wd);
       training = !!(day && (day.items || []).length > 0);
     } else {
-      if (!state.cycleStartDate) return null;
-      const start = parseDate(state.cycleStartDate);
-      const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-      if (n < 0) continue;
-      const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
-      training = (sch.days[idx]?.items || []).length > 0;
+      const days = getPlanDaysForDate(sch, dateStr);
+      const idx = getCyclePosForDate(sch, dateStr);
+      training = (days[idx]?.items || []).length > 0;
     }
     if (training) return dateStr;
   }
@@ -665,12 +658,9 @@ function computeNextReminderAt(state) {
       const day = sch.days.find(x => x.weekday === wd);
       training = !!(day && (day.items || []).length > 0);
     } else {
-      if (!state.cycleStartDate) return null;
-      const start = parseDate(state.cycleStartDate);
-      const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-      if (n < 0) continue;
-      const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
-      training = (sch.days[idx]?.items || []).length > 0;
+      const days = getPlanDaysForDate(sch, dateStr);
+      const idx = getCyclePosForDate(sch, dateStr);
+      training = (days[idx]?.items || []).length > 0;
     }
     if (training) return new Date(dateStr + 'T' + time + ':00').toISOString();
   }
