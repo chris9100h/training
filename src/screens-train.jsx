@@ -1330,7 +1330,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         const pct = Math.min(Math.abs(diffMin) / 20 * 50, 50);
         return (
           <div style={{ flexShrink: 0, padding: '0 22px 8px' }}>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+              <span className="micro" style={{ color: UI.inkFaint }}>VS LAST {session.dayName} · SET {totalSetsDone}</span>
               <span className="num" style={{ fontSize: 10, color: ahead ? 'var(--accent)' : UI.inkFaint }}>
                 {ahead ? `${Math.abs(diffMin)}m ahead` : `+${diffMin}m behind`}
               </span>
