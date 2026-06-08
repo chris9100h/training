@@ -1103,28 +1103,103 @@ function StatsTab({ store, sessions, go }) {
 // ─── HISTORY ─────────────────────────────────────────────────────────
 function HistoryScreen({ store, go, initialTab }) {
   const [tab, setTab] = useStateL(initialTab || 'workouts');
+  const [planFilter, setPlanFilter] = useStateL(null);
+  const [periodFilter, setPeriodFilter] = useStateL(null);
   const [dayFilter, setDayFilter] = useStateL(null);
+
   const sessions = useMemoL(() => {
     return [...store.sessions]
       .filter(s => s.ended)
       .sort((a,b) => (b.ended||'').localeCompare(a.ended||''));
   }, [store.sessions]);
 
-  // Unique day names sorted by frequency
-  const dayNames = useMemoL(() => {
-    const counts = {};
-    sessions.forEach(s => { if (s.dayName && s.dayName !== 'REST') counts[s.dayName] = (counts[s.dayName] || 0) + 1; });
-    return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([name]) => name);
-  }, [sessions]);
+  // Plans that appear in sessions
+  const planOptions = useMemoL(() => {
+    const seen = new Map();
+    sessions.forEach(s => {
+      if (s.scheduleId && !seen.has(s.scheduleId)) {
+        const sch = store.schedules.find(x => x.id === s.scheduleId);
+        seen.set(s.scheduleId, sch?.name || '?');
+      }
+    });
+    return [...seen.entries()].map(([id, name]) => ({ id, name }));
+  }, [sessions, store.schedules]);
 
-  const filteredSessions = useMemoL(() =>
-    dayFilter ? sessions.filter(s => s.dayName === dayFilter) : sessions,
-    [sessions, dayFilter]
-  );
+  // Compute "Cycle N" / "Week N" label for each session
+  const sessionPeriods = useMemoL(() => {
+    const map = new Map();
+    const bySchedule = {};
+    sessions.forEach(s => { if (s.scheduleId) (bySchedule[s.scheduleId] = bySchedule[s.scheduleId] || []).push(s); });
+    Object.entries(bySchedule).forEach(([schedId, schSessions]) => {
+      const sch = store.schedules.find(x => x.id === schedId);
+      if (!sch) return;
+      const isWd = LB.isWeekdayPlan(sch);
+      let startStr = schedId === store.activeScheduleId
+        ? (isWd ? store.weekPlanStartDate : store.cycleStartDate)
+        : null;
+      if (!startStr)
+        startStr = schSessions.reduce((min, s) => s.date < min ? s.date : min, schSessions[0].date);
+      const startD = new Date(startStr.slice(0, 10) + 'T12:00:00');
+      schSessions.forEach(s => {
+        const sDate = new Date(s.date.slice(0, 10) + 'T12:00:00');
+        if (isWd) {
+          const startWd = (startD.getDay() + 6) % 7;
+          const startMon = new Date(startD); startMon.setDate(startD.getDate() - startWd); startMon.setHours(0,0,0,0);
+          const weekNum = Math.floor((sDate - startMon) / (7 * 86400000)) + 1;
+          if (weekNum > 0) map.set(s.id, `Week ${weekNum}`);
+        } else {
+          const cycleLen = sch.days.length || 1;
+          const daysDiff = Math.round((sDate - startD) / 86400000);
+          if (daysDiff >= 0) map.set(s.id, `Cycle ${Math.floor(daysDiff / cycleLen) + 1}`);
+        }
+      });
+    });
+    return map;
+  }, [sessions, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate]);
+
+  // Period options depend on planFilter
+  const periodOptions = useMemoL(() => {
+    const base = planFilter ? sessions.filter(s => s.scheduleId === planFilter) : sessions;
+    const seen = new Set();
+    base.forEach(s => { const p = sessionPeriods.get(s.id); if (p) seen.add(p); });
+    return [...seen].sort((a, b) => parseInt(a.split(' ')[1]) - parseInt(b.split(' ')[1]));
+  }, [sessions, planFilter, sessionPeriods]);
+
+  // Day options depend on planFilter + periodFilter
+  const dayOptions = useMemoL(() => {
+    let base = sessions;
+    if (planFilter) base = base.filter(s => s.scheduleId === planFilter);
+    if (periodFilter) base = base.filter(s => sessionPeriods.get(s.id) === periodFilter);
+    const counts = {};
+    base.forEach(s => { if (s.dayName && s.dayName !== 'REST') counts[s.dayName] = (counts[s.dayName] || 0) + 1; });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([name]) => name);
+  }, [sessions, planFilter, periodFilter, sessionPeriods]);
+
+  const filteredSessions = useMemoL(() => {
+    let s = sessions;
+    if (planFilter) s = s.filter(x => x.scheduleId === planFilter);
+    if (periodFilter) s = s.filter(x => sessionPeriods.get(x.id) === periodFilter);
+    if (dayFilter) s = s.filter(x => x.dayName === dayFilter);
+    return s;
+  }, [sessions, planFilter, periodFilter, dayFilter, sessionPeriods]);
+
+  const [filtersOpen, setFiltersOpen] = useStateL(false);
+  const filterCount = [planFilter, periodFilter, dayFilter].filter(Boolean).length;
 
   return (
     <Screen scroll={false}>
-      <TopBar title="History" />
+      <TopBar title="History" right={tab === 'workouts' && planOptions.length > 0 ? (
+        <button onClick={() => setFiltersOpen(true)} style={{
+          background: filterCount > 0 ? UI.goldFaint : 'transparent',
+          border: `1px solid ${filterCount > 0 ? UI.goldSoft : UI.hairStrong}`,
+          borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
+          color: filterCount > 0 ? UI.gold : UI.inkSoft,
+          fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+          display: 'flex', alignItems: 'center', gap: 5, WebkitTapHighlightColor: 'transparent',
+        }}>
+          Filter{filterCount > 0 && <span style={{ background: UI.gold, color: '#0a0805', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{filterCount}</span>}
+        </button>
+      ) : null} />
       {/* Tab strip */}
       <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
         {[['workouts','Workouts'],['stats','Stats']].map(([id, label]) => (
@@ -1142,28 +1217,9 @@ function HistoryScreen({ store, go, initialTab }) {
 
       {tab === 'workouts' && (
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          {/* Day filter chips */}
-          {dayNames.length > 1 && (
-            <div style={{ flexShrink: 0, padding: '8px 22px 0', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
-              {dayNames.map(name => {
-                const active = dayFilter === name;
-                return (
-                  <button key={name} onClick={() => setDayFilter(active ? null : name)} style={{
-                    flexShrink: 0, padding: '5px 12px', borderRadius: 4, cursor: 'pointer',
-                    border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
-                    background: active ? UI.goldFaint : 'transparent',
-                    color: active ? UI.gold : UI.inkFaint,
-                    fontFamily: UI.fontUi, fontSize: 10, fontWeight: active ? 600 : 400,
-                    letterSpacing: '0.1em', textTransform: 'uppercase',
-                    WebkitTapHighlightColor: 'transparent',
-                  }}>{name}</button>
-                );
-              })}
-            </div>
-          )}
           <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px', display: 'flex', flexDirection: 'column' }}>
           {filteredSessions.length === 0 && (
-            <Empty title="No sessions" sub={dayFilter ? `No "${dayFilter}" sessions logged yet.` : 'Log your first workout to see your history.'} icon={ICON_HISTORY} />
+            <Empty title="No sessions" sub={planFilter || periodFilter || dayFilter ? 'No sessions match the selected filters.' : 'Log your first workout to see your history.'} icon={ICON_HISTORY} />
           )}
           {(() => {
             const now = new Date(); now.setHours(12,0,0,0);
@@ -1217,7 +1273,8 @@ function HistoryScreen({ store, go, initialTab }) {
                       {s.entries.length} Exercises · {setsLogged} Sets
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                    {s.feel && <div style={{ width: 9, height: 9, borderRadius: '50%', background: feelColor(s.feel), flexShrink: 0 }} />}
                     <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
                       {Math.round(vol).toLocaleString('en-US')}
                     </div>
@@ -1233,7 +1290,120 @@ function HistoryScreen({ store, go, initialTab }) {
       )}
 
       {tab === 'stats' && <StatsTab store={store} sessions={sessions} go={go} />}
+
+      {filtersOpen && (() => {
+        const selSt = (active) => ({
+          width: '100%', appearance: 'none', WebkitAppearance: 'none',
+          background: active ? 'rgba(var(--accent-rgb),0.08)' : 'transparent',
+          border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
+          borderRadius: 4, color: active ? UI.gold : UI.ink,
+          fontFamily: UI.fontUi, fontSize: 13, padding: '10px 36px 10px 12px',
+          cursor: 'pointer', outline: 'none', colorScheme: 'dark',
+        });
+        const selWrap = { position: 'relative' };
+        const selChevron = { position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', fontSize: 10, color: UI.inkFaint };
+        return (
+          <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div>
+                <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                  <span className="micro" style={{ color: UI.gold }}>PLAN</span>
+                </div>
+                <div style={selWrap}>
+                  <select value={planFilter || ''} style={selSt(!!planFilter)}
+                    onChange={e => { const v = e.target.value || null; setPlanFilter(v); setPeriodFilter(null); setDayFilter(null); }}>
+                    <option value="">All plans</option>
+                    {planOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                  <i className="fa-solid fa-chevron-down" style={selChevron} />
+                </div>
+              </div>
+
+              {periodOptions.length > 0 && (
+                <div>
+                  <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                    <span className="micro" style={{ color: UI.gold }}>CYCLE / WEEK</span>
+                  </div>
+                  <div style={selWrap}>
+                    <select value={periodFilter || ''} style={selSt(!!periodFilter)}
+                      onChange={e => { const v = e.target.value || null; setPeriodFilter(v); setDayFilter(null); }}>
+                      <option value="">All cycles / weeks</option>
+                      {periodOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    <i className="fa-solid fa-chevron-down" style={selChevron} />
+                  </div>
+                </div>
+              )}
+
+              {dayOptions.length > 1 && (
+                <div>
+                  <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
+                    <span className="micro" style={{ color: UI.gold }}>DAY</span>
+                  </div>
+                  <div style={selWrap}>
+                    <select value={dayFilter || ''} style={selSt(!!dayFilter)}
+                      onChange={e => setDayFilter(e.target.value || null)}>
+                      <option value="">All days</option>
+                      {dayOptions.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    <i className="fa-solid fa-chevron-down" style={selChevron} />
+                  </div>
+                </div>
+              )}
+
+              {filterCount > 0 && (
+                <button onClick={() => { setPlanFilter(null); setPeriodFilter(null); setDayFilter(null); }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.danger, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', alignSelf: 'flex-start' }}>
+                  Clear all
+                </button>
+              )}
+              <Btn onClick={() => setFiltersOpen(false)} disabled={filteredSessions.length === 0} style={{ opacity: filteredSessions.length === 0 ? 0.4 : 1 }}>
+                {filteredSessions.length === 0 ? 'No results' : `Show ${filteredSessions.length} workout${filteredSessions.length === 1 ? '' : 's'}`}
+              </Btn>
+            </div>
+          </Sheet>
+        );
+      })()}
     </Screen>
+  );
+}
+
+// ─── FEEL ────────────────────────────────────────────────────────────
+const FEEL_LEVELS = [
+  { key: 'easy',      label: 'EASY',      color: '#94a3b8' },
+  { key: 'good',      label: 'GOOD',      color: '#22c55e' },
+  { key: 'hard',      label: 'HARD',      color: UI.gold   },
+  { key: 'very_hard', label: 'VERY HARD', color: '#f97316' },
+  { key: 'max',       label: 'MAX',       color: UI.danger },
+];
+
+function feelColor(key) {
+  return FEEL_LEVELS.find(f => f.key === key)?.color ?? UI.inkFaint;
+}
+function feelLabel(key) {
+  return FEEL_LEVELS.find(f => f.key === key)?.label ?? null;
+}
+
+function FeelSelector({ value, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 6 }}>
+      {FEEL_LEVELS.map(f => {
+        const active = value === f.key;
+        return (
+          <button key={f.key} onClick={() => onChange(active ? null : f.key)}
+            style={{
+              flex: 1, padding: '7px 2px', borderRadius: 4, cursor: 'pointer',
+              border: `1px solid ${active ? f.color : UI.hairStrong}`,
+              background: active ? `${f.color}22` : 'transparent',
+              color: active ? f.color : UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 9, fontWeight: active ? 600 : 400,
+              letterSpacing: '0.07em', WebkitTapHighlightColor: 'transparent',
+            }}>
+            {f.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1259,6 +1429,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const [confirmEl, confirm] = useConfirm();
   const [editing, setEditing] = useStateL(false);
   const [capturing, setCapturing] = useStateL(false);
+  const [feelOpen, setFeelOpen] = useStateL(false);
   const captureRef = useRefL(null);
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
@@ -1267,6 +1438,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const duration = s.durationMinutes != null
     ? s.durationMinutes
     : (s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null);
+
+  const setFeel = (feel) => {
+    setStore(st => ({ ...st, sessions: st.sessions.map(x => x.id === sessionId ? { ...x, feel } : x) }));
+  };
 
   const deleteSession = async () => {
     if (!await confirm('This session will be permanently deleted.', { title: 'Delete session?', ok: 'Delete', danger: true })) return;
@@ -1439,6 +1614,28 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             </BracketFrame>
           );
         })()}
+
+        {/* Feel — prompt after finish, always editable */}
+        {!capturing && (
+          <div style={{ marginBottom: 4 }}>
+            {justFinished && !s.feel && (
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, letterSpacing: '0.12em' }}>RATE WORKOUT EFFORT</div>
+            )}
+            {!justFinished && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: s.feel && !feelOpen ? 0 : 8 }}>
+                <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em' }}>FEEL</span>
+                {s.feel && !feelOpen && (
+                  <button onClick={() => setFeelOpen(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', color: feelColor(s.feel) }}>
+                    {feelLabel(s.feel)} <span style={{ color: UI.inkFaint, fontWeight: 400 }}>· EDIT</span>
+                  </button>
+                )}
+              </div>
+            )}
+            {(justFinished || feelOpen || !s.feel) && (
+              <FeelSelector value={s.feel} onChange={(v) => { setFeel(v); setFeelOpen(false); }} />
+            )}
+          </div>
+        )}
 
         {/* Stats — circle dials on screen, flat grid in screenshot */}
         {!justFinished && !capturing && (

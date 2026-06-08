@@ -1820,9 +1820,143 @@ function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) 
 // Shared trend cards component used by both coach and client check-in views.
 // recent = last 6 check-ins sorted oldest → newest.
 
+async function exportCheckinCharts(recent) {
+  const cs = getComputedStyle(document.documentElement);
+  const accent    = cs.getPropertyValue('--accent').trim();
+  const accentRgb = cs.getPropertyValue('--accent-rgb').trim();
+  const ink       = cs.getPropertyValue('--ink').trim();
+  const inkFaint  = cs.getPropertyValue('--ink-faint').trim();
+  const bgColor   = cs.getPropertyValue('--bg').trim();
+  const unit = UI.unit();
+
+  const metrics = [
+    { label: 'Weight – avg last week', values: recent.map(c => c.weightAvgLastWeek), format: v => `${Math.round(v * 10) / 10}${unit}` },
+    { label: 'Weight – today',         values: recent.map(c => c.weightToday),        format: v => `${Math.round(v * 10) / 10}${unit}` },
+    { label: 'Training days',          values: recent.map(c => c.daysTrained),        format: v => `${v}d` },
+    { label: 'Steps',                  values: recent.map(c => c.steps),              format: v => `${Math.round(v / 1000)}k` },
+    { label: 'Cardio',                 values: recent.map(c => c.cardioMinutes),      format: v => `${v} min` },
+    { label: 'Pace feeling',           values: recent.map(c => c.cardioPaceFeeling),  format: v => `${v}/6` },
+    { label: 'Cardio effort',          values: recent.map(c => c.cardioEffort),       format: v => `${v}/10` },
+    { label: 'Hunger',                 values: recent.map(c => c.hunger),             format: v => `${v}` },
+    { label: 'Sleep quality',          values: recent.map(c => c.sleepQuality),       format: v => `${v}` },
+    { label: 'Life stress',            values: recent.map(c => c.lifeStress),         format: v => `${v}` },
+    { label: 'Work stress',            values: recent.map(c => c.workStress),         format: v => `${v}` },
+    { label: 'Tiredness',              values: recent.map(c => c.tiredness),          format: v => `${v}` },
+  ];
+
+  const charts = metrics.map(m => {
+    const entries = m.values
+      .map((v, i) => v != null ? { weekStart: recent[i].weekStart, value: v } : null)
+      .filter(Boolean);
+    return { ...m, entries };
+  }).filter(c => c.entries.length >= 2);
+
+  if (!charts.length) return;
+
+  const W = 320, padX = 24, padTop = 32, padBottom = 22, plotH = 90;
+  const chartH = padTop + plotH + padBottom;
+  const blockH = 22 + chartH + 20;
+  const cW = W + 48;
+  const cH = 40 + charts.length * blockH + 24;
+
+  const canvas = document.createElement('canvas');
+  canvas.width  = cW * 2;
+  canvas.height = cH * 2;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(2, 2);
+
+  ctx.fillStyle = bgColor || '#0f0e0b';
+  ctx.fillRect(0, 0, cW, cH);
+
+  ctx.fillStyle = inkFaint || '#8b7d6b';
+  ctx.font = '700 9px Arial, sans-serif';
+  ctx.fillText('CHECK-IN PROGRESS', 24, 22);
+
+  const fmtD = s => {
+    const d = new Date(s + 'T12:00:00');
+    return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`;
+  };
+
+  const svgToImg = str => new Promise((resolve, reject) => {
+    const blob = new Blob([str], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(); };
+    img.src = url;
+  });
+
+  const a = accent || '#b8902b';
+  const aRgb = accentRgb || '184,144,43';
+  const fg = ink || '#f0ebe0';
+  const fi = inkFaint || '#8b7d6b';
+
+  let y = 40;
+  for (const { label, entries, format } of charts) {
+    const n = entries.length;
+    const vals = entries.map(e => e.value);
+    const minV = Math.min(...vals), maxV = Math.max(...vals);
+    const range = maxV - minV || 1;
+    const plotW = W - 2 * padX;
+    const xOf = i => padX + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+    const yOf = v => padTop + (1 - (v - minV) / range) * plotH;
+    const step = Math.max(1, Math.round(n / 5));
+    const showLbl = i => i === n - 1 || i % step === 0;
+    const pts = entries.map((e, i) => `${xOf(i).toFixed(1)},${yOf(e.value).toFixed(1)}`).join(' ');
+    const base = (padTop + plotH).toFixed(1);
+
+    const nodes = entries.map((e, i) => {
+      const cx = xOf(i).toFixed(1), cy = yOf(e.value).toFixed(1);
+      const lbl = showLbl(i);
+      const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+      return `<circle cx="${cx}" cy="${cy}" r="${lbl ? 4 : 2.5}" fill="${a}"/>` +
+        (lbl ? `<text x="${cx}" y="${(yOf(e.value) - 9).toFixed(1)}" text-anchor="middle" font-size="9" font-family="Arial,sans-serif" fill="${fg}">${format(e.value)}</text>` : '') +
+        (lbl ? `<text x="${cx}" y="${(padTop + plotH + 16).toFixed(1)}" text-anchor="${anchor}" font-size="8" font-family="Arial,sans-serif" fill="${fi}">${fmtD(e.weekStart)}</text>` : '');
+    }).join('');
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${chartH}">` +
+      `<polygon points="${xOf(0).toFixed(1)},${base} ${pts} ${xOf(n-1).toFixed(1)},${base}" fill="rgba(${aRgb},0.15)"/>` +
+      `<polyline points="${pts}" fill="none" stroke="${a}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` +
+      nodes + `</svg>`;
+
+    ctx.fillStyle = fi;
+    ctx.font = '700 9px Arial, sans-serif';
+    ctx.fillText(label.toUpperCase(), 24, y + 14);
+
+    try {
+      const img = await svgToImg(svg);
+      ctx.drawImage(img, 24, y + 22, W, chartH);
+    } catch (_) {}
+    y += blockH;
+  }
+
+  await new Promise(resolve => canvas.toBlob(async blob => {
+    if (!blob) return resolve();
+    const file = new File([blob], 'checkin-progress.png', { type: 'image/png' });
+    try {
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Check-in Progress' });
+        return resolve();
+      }
+    } catch (_) {}
+    const url = URL.createObjectURL(blob);
+    const a2 = document.createElement('a');
+    a2.href = url; a2.download = 'checkin-progress.png'; a2.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    resolve();
+  }, 'image/png'));
+}
+
 function CheckInTrendCards({ recent }) {
   const [chartModal, setChartModal] = useStateC(null);
+  const [exporting, setExporting] = useStateC(false);
   const n = recent.length;
+
+  const handleExport = () => {
+    if (exporting || n < 2) return;
+    setExporting(true);
+    exportCheckinCharts(recent).catch(() => {}).finally(() => setExporting(false));
+  };
 
   const openChart = (label, icon, values, format, invertColor) => {
     const entries = values
@@ -1943,7 +2077,14 @@ function CheckInTrendCards({ recent }) {
   return (
     <>
       {chartModal && <LineChartSheet {...chartModal} onClose={() => setChartModal(null)} />}
-      <div className="micro" style={{ color: UI.inkFaint }}>TRENDS — {n} CHECK-IN{n !== 1 ? 'S' : ''}</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="micro" style={{ color: UI.inkFaint }}>TRENDS — {n} CHECK-IN{n !== 1 ? 'S' : ''}</div>
+        {n >= 2 && (
+          <button onClick={handleExport} disabled={exporting} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: exporting ? UI.inkFaint : UI.gold, fontSize: 13, lineHeight: 1 }}>
+            <i className={`fa-solid ${exporting ? 'fa-spinner fa-spin' : 'fa-share-from-square'}`} />
+          </button>
+        )}
+      </div>
       <TrendSection label="WEIGHT">
         <TrendCard label="Avg last week" icon="fa-weight-scale" values={recent.map(c => c.weightAvgLastWeek)} format={v => `${Math.round(v * 100) / 100}${UI.unit()}`} invertColor={false} />
         <TrendCard label="Today" icon="fa-weight-scale" values={recent.map(c => c.weightToday)} format={v => `${Math.round(v * 100) / 100}${UI.unit()}`} invertColor={false} />
@@ -3153,6 +3294,13 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {!thisWeek && checkinEnabled && (
+          <button onClick={() => setEditTarget('new')}
+            style={{ background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+            Submit this week's check-in
+          </button>
+        )}
+
         {checkins.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <CheckInTrendCards recent={recent} />
@@ -3166,11 +3314,6 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true 
         )}
         {thisWeek ? (
           <CheckInCard ci={thisWeek} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} />
-        ) : checkinEnabled ? (
-          <button onClick={() => setEditTarget('new')}
-            style={{ background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
-            Submit this week's check-in
-          </button>
         ) : null}
 
         {past.length > 0 && (
@@ -3188,7 +3331,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true 
               <i className={`fa-solid fa-chevron-${pastOpen ? 'up' : 'down'}`} style={{ fontSize: 11, color: UI.inkFaint }} />
             </button>
             {pastOpen && (
-              <div>
+              <div style={{ paddingLeft: 16 }}>
                 {past.map(ci => (
                   <div key={ci.id} style={{ borderTop: `0.5px solid ${UI.hair}` }}>
                     <CheckInCard ci={ci} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
