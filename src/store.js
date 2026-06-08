@@ -830,6 +830,22 @@ function getPlanDaysForDate(schedule, dateStr) {
   return schedule.days || [];
 }
 
+// Returns 1-indexed cycle number for dateStr within its active plan version.
+// Each version resets the count to 1 from its own validFrom.
+function getCycleNumForDate(schedule, dateStr) {
+  const versions = schedule.versions;
+  if (!versions?.length) return null;
+  for (const v of versions) {
+    if (v.validFrom <= dateStr) {
+      const daysLen = (v.days || []).length;
+      if (!daysLen) return 1;
+      const daysDiff = Math.round((new Date(dateStr + 'T12:00:00') - new Date(v.validFrom + 'T12:00:00')) / 86400000);
+      return Math.floor(Math.max(0, daysDiff) / daysLen) + 1;
+    }
+  }
+  return 1;
+}
+
 function getCyclePosForDate(schedule, dateStr) {
   const versions = schedule.versions;
   if (!versions?.length) return null;
@@ -1365,7 +1381,7 @@ window.LB = {
   signIn, signUp, signOut, deleteAllData, importFromBackup,
   loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate,
+  uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate,
   effReps, e1rm, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,

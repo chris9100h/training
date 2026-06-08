@@ -507,13 +507,20 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (cycleWeekView && store.cycleStartDate && dayCount > 0) {
       const monday = new Date(); monday.setHours(12, 0, 0, 0);
       monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
+      if (sch?.versions?.length) {
+        return `CYCLE ${LB.getCycleNumForDate(sch, monday.toISOString().slice(0, 10))}`;
+      }
       const start = LB.parseDate(store.cycleStartDate);
       const dfs = Math.round((monday - start) / 86400000);
       return `CYCLE ${Math.floor(dfs / dayCount) + 1}`;
     }
+    if (sch?.versions?.length) {
+      const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + weekOffset * dayCount);
+      return `CYCLE ${LB.getCycleNumForDate(sch, d.toISOString().slice(0, 10))}`;
+    }
     const cycleNum = currentCycleNum + weekOffset + 1;
     return `CYCLE ${cycleNum}`;
-  }, [weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount]);
+  }, [weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch]);
 
   const cardLabel = useMemo(() => {
     if (isViewingToday) {
@@ -617,6 +624,9 @@ function HomeScreen({ store, setStore, go, userId }) {
     monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
     const cycleNums = Array.from({ length: 7 }).map((_, i) => {
       const date = new Date(monday); date.setDate(monday.getDate() + i);
+      if (sch?.versions?.length) {
+        return LB.getCycleNumForDate(sch, date.toISOString().slice(0, 10));
+      }
       const dfs = Math.round((date - start) / 86400000);
       return Math.floor(dfs / dayCount) + 1;
     });
