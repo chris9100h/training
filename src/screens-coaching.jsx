@@ -747,16 +747,50 @@ function getTodayDay(clientStore) {
   return (activeSch.days || [])[idx] || null;
 }
 
+// Returns the plan days active on a given date — uses versions if present, falls back to schedule.days
+function getPlanDaysForDate(schedule, dateStr) {
+  const versions = schedule.versions;
+  if (!versions?.length) return schedule.days || [];
+  for (const v of versions) {
+    if (v.validFrom <= dateStr) return v.days || [];
+  }
+  return schedule.days || [];
+}
+
+// Returns cycle position for a date using the version's validFrom as cycle start reference.
+// Returns null when no versions exist (caller falls back to cyclePosFn).
+function getCyclePosForDate(schedule, dateStr) {
+  const versions = schedule.versions;
+  if (!versions?.length) return null;
+  for (const v of versions) {
+    if (v.validFrom <= dateStr) {
+      const daysLen = (v.days || []).length;
+      if (!daysLen) return 0;
+      const start = new Date(v.validFrom + 'T12:00:00');
+      const target = new Date(dateStr + 'T12:00:00');
+      const daysDiff = Math.round((target - start) / 86400000);
+      return ((daysDiff % daysLen) + daysLen) % daysLen;
+    }
+  }
+  return null;
+}
+
 function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   if (!activeSch) return [];
 
   const isWd = LB.isWeekdayPlan(activeSch);
 
-  // For weekday plans, weekPlanStartDate marks when this plan was (re-)activated.
-  // Exclude sessions before that date so a previous run of the same schedule
-  // can't bleed into the current plan's adherence.
-  const planActivationStr = isWd ? clientStore.weekPlanStartDate?.slice(0, 10) : null;
+  // When versions exist, the oldest entry's validFrom is the plan's true origin date —
+  // use it instead of the (potentially reset) cycleStartDate / weekPlanStartDate.
+  const oldestVersion = activeSch.versions?.length
+    ? activeSch.versions[activeSch.versions.length - 1]
+    : null;
+
+  // For weekday plans, exclude sessions before the original plan activation.
+  const planActivationStr = isWd
+    ? (oldestVersion?.validFrom ?? clientStore.weekPlanStartDate?.slice(0, 10))
+    : null;
 
   const planSessions = (clientStore.sessions || []).filter(s =>
     s.ended &&
@@ -775,7 +809,8 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   // Use weekPlanStartDate / cycleStartDate when set; fall back to earliest session.
   let planStartMonday = null;
   let planStartDateStr = null; // actual plan start date — days before this are ignored even within the first week
-  const activationDateStr = isWd ? clientStore.weekPlanStartDate : clientStore.cycleStartDate;
+  const activationDateStr = oldestVersion?.validFrom
+    ?? (isWd ? clientStore.weekPlanStartDate : clientStore.cycleStartDate);
   if (activationDateStr) {
     const d = new Date(activationDateStr); d.setHours(12, 0, 0, 0);
     const wd = (d.getDay() + 6) % 7;
@@ -816,12 +851,14 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
       let isTrainingDay = false;
 
       if (isWd) {
-        // App stores weekdays as 0=Mon … 6=Sun; convert from JS 0=Sun.
         const wd = (date.getDay() + 6) % 7;
-        isTrainingDay = (activeSch.days || []).some(day => day.weekday === wd && day.items?.length > 0);
+        const daysForDate = getPlanDaysForDate(activeSch, dateStr);
+        isTrainingDay = daysForDate.some(day => day.weekday === wd && day.items?.length > 0);
       } else {
-        const pos = cyclePosFn(clientStore, date);
-        isTrainingDay = !!(activeSch.days?.[pos]?.items?.length > 0);
+        const daysForDate = getPlanDaysForDate(activeSch, dateStr);
+        const versionedPos = getCyclePosForDate(activeSch, dateStr);
+        const pos = versionedPos !== null ? versionedPos : cyclePosFn(clientStore, date);
+        isTrainingDay = !!(daysForDate[pos]?.items?.length > 0);
       }
 
       if (isTrainingDay) {

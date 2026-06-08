@@ -457,6 +457,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
   const original = store.schedules.find(s => s.id === scheduleId);
   const [draft, setDraft] = useStateS(original ? JSON.parse(JSON.stringify(original)) : null);
   const [pickingType, setPickingType] = useStateS(false);
+  const [applyFromSheet, setApplyFromSheet] = useStateS(false);
+  const [applyFromDate, setApplyFromDate] = useStateS('');
   const [editingDay, setEditingDay] = useStateS(null);
   if (!draft) return null;
 
@@ -488,11 +490,44 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
     setPickingType(false);
   };
 
-  const save = async () => {
-    setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === draft.id ? draft : x) }));
-    const isActivePlan = store.activeScheduleId === draft.id;
+  const doSave = async (effectiveFrom) => {
+    let savedDraft = draft;
+    if (effectiveFrom) {
+      // Snapshot the original plan as a version entry
+      const originalDays = original.days;
+      // Find the original plan's start date for the snapshot's validFrom
+      const isWd = LB.isWeekdayPlan(original);
+      const originalStart = isWd
+        ? (store.weekPlanStartDate || null)
+        : (store.cycleStartDate || null);
+      const existingVersions = original.versions || [];
+      const newVersionEntry = { validFrom: effectiveFrom, days: draft.days };
+      let versions;
+      if (existingVersions.length === 0) {
+        // First versioned change — anchor the original plan
+        const anchorDate = originalStart || LB.todayISO();
+        versions = [newVersionEntry, { validFrom: anchorDate, days: originalDays }];
+      } else {
+        // Already versioned — prepend new version, keep rest
+        versions = [newVersionEntry, ...existingVersions];
+      }
+      // Sort newest first
+      versions.sort((a, b) => b.validFrom.localeCompare(a.validFrom));
+      savedDraft = { ...draft, versions };
+      // Reset cycle/week start to the effectiveFrom date
+      if (!isWd) {
+        setStore(s => ({ ...s, cycleStartDate: effectiveFrom, cycleIndex: 0,
+          schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
+      } else {
+        setStore(s => ({ ...s, weekPlanStartDate: effectiveFrom,
+          schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
+      }
+    } else {
+      setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
+    }
+
     const asClient = store.coaching?.asClient;
-    if (isActivePlan && asClient?.status === 'active') {
+    if (store.activeScheduleId === draft.id && asClient?.status === 'active') {
       try {
         const diff = LB.diffSchedule(original, draft, store.exercises);
         if (diff) {
@@ -503,6 +538,12 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
       } catch (e) { console.error('Failed to send plan change note', e); }
     }
     go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
+  };
+
+  const save = () => {
+    if (!dirty || store.activeScheduleId !== draft.id) { doSave(null); return; }
+    setApplyFromDate('');
+    setApplyFromSheet(true);
   };
   const deleteSch = async () => {
     if (!await confirm(`This cannot be undone.`, { title: `Delete "${draft.name}"?`, ok: 'Delete', danger: true })) return;
@@ -735,6 +776,38 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
         />
       )}
       {confirmEl}
+
+      {applyFromSheet && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
+          onClick={() => setApplyFromSheet(false)}>
+          <div style={{ background: UI.bg, borderRadius: '14px 14px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="label" style={{ color: UI.inkFaint, marginBottom: 18 }}>WHEN SHOULD THIS TAKE EFFECT?</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <Btn onClick={() => { setApplyFromSheet(false); doSave(null); }}>
+                From the beginning
+              </Btn>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${applyFromDate ? UI.goldSoft : UI.hairStrong}` }}>
+                  <input
+                    type="date"
+                    value={applyFromDate}
+                    onChange={e => setApplyFromDate(e.target.value)}
+                    style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: applyFromDate ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
+                  />
+                </div>
+                <Btn
+                  disabled={!applyFromDate}
+                  onClick={() => { if (!applyFromDate) return; setApplyFromSheet(false); doSave(applyFromDate); }}
+                  style={{ flexShrink: 0 }}
+                >
+                  Apply from date
+                </Btn>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </Screen>
   );
 }
