@@ -32,11 +32,13 @@ function LoginScreen() {
   const canLogin    = email.trim() && password.length >= 6;
   const canRegister = name.trim() && email.trim() && password.length >= 6 && pwMatch;
 
-  const submitLogin = async () => {
-    if (!canLogin || loading) return;
+  const submitLogin = async (emailVal, passwordVal) => {
+    const e2 = (emailVal || email).trim();
+    const p2 = passwordVal || password;
+    if (!e2 || p2.length < 6 || loading) return;
     setLoading(true); setError('');
     try {
-      await LB.signIn(email.trim(), password);
+      await LB.signIn(e2, p2);
     } catch (e) {
       setError(e.message || 'Sign in failed');
     } finally {
@@ -88,19 +90,27 @@ function LoginScreen() {
           ))}
         </div>
 
-        <form onSubmit={e => { e.preventDefault(); isLogin ? submitLogin() : submitRegister(); }}
+        <form onSubmit={e => {
+            e.preventDefault();
+            if (isLogin) {
+              const els = e.target.elements;
+              submitLogin(els.namedItem('email')?.value, els.namedItem('password')?.value);
+            } else {
+              submitRegister();
+            }
+          }}
           style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
           {!isLogin && (
             <Field label="Name">
-              <TextInput value={name} onChange={setName} placeholder="Your name" autoFocus={!isLogin} autoComplete="name" />
+              <TextInput value={name} onChange={setName} placeholder="Your name" autoFocus={!isLogin} autoComplete="name" name="name" />
             </Field>
           )}
           <Field label="Email">
-            <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus={isLogin} autoComplete="email" />
+            <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus={isLogin} autoComplete="email" name="email" />
           </Field>
           <Field label="Password">
             <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters"
-              autoComplete={isLogin ? 'current-password' : 'new-password'} />
+              autoComplete={isLogin ? 'current-password' : 'new-password'} name="password" />
           </Field>
           {!isLogin && (
             <Field label="Repeat password">
@@ -122,7 +132,7 @@ function LoginScreen() {
           )}
 
           {isLogin ? (
-            <Btn disabled={!canLogin || loading} style={{ marginTop: 4, opacity: canLogin && !loading ? 1 : 0.4 }}>
+            <Btn style={{ marginTop: 4, opacity: canLogin && !loading ? 1 : 0.4 }}>
               {loading ? 'Signing in…' : 'Log in'}
             </Btn>
           ) : (
