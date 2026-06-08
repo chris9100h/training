@@ -384,7 +384,18 @@ async function autoArchiveMissedDays(userId, state) {
       const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
       trainingDay = activeSch.days.find(day => day.weekday === wd && (day.items || []).length > 0) || null;
     } else {
-      const dayData = getPlanDaysForDate(activeSch, dateKey)[getCyclePosForDate(activeSch, dateKey)];
+      const days = getPlanDaysForDate(activeSch, dateKey);
+      const pos = getCyclePosForDate(activeSch, dateKey);
+      let dayData;
+      if (pos !== null) {
+        dayData = days[pos];
+      } else {
+        if (!state.cycleStartDate) continue;
+        const start = parseDate(state.cycleStartDate);
+        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+        if (n < 0) continue;
+        dayData = activeSch.days[((n % activeSch.days.length) + activeSch.days.length) % activeSch.days.length];
+      }
       if ((dayData?.items || []).length > 0) trainingDay = dayData;
     }
     if (!trainingDay) continue;
@@ -626,7 +637,15 @@ function computeNextTrainingDate(state) {
     } else {
       const days = getPlanDaysForDate(sch, dateStr);
       const idx = getCyclePosForDate(sch, dateStr);
-      training = (days[idx]?.items || []).length > 0;
+      if (idx !== null) {
+        training = (days[idx]?.items || []).length > 0;
+      } else {
+        if (!state.cycleStartDate) return null;
+        const start = parseDate(state.cycleStartDate);
+        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+        if (n < 0) continue;
+        training = (sch.days[((n % sch.days.length) + sch.days.length) % sch.days.length]?.items || []).length > 0;
+      }
     }
     if (training) return dateStr;
   }
@@ -660,7 +679,15 @@ function computeNextReminderAt(state) {
     } else {
       const days = getPlanDaysForDate(sch, dateStr);
       const idx = getCyclePosForDate(sch, dateStr);
-      training = (days[idx]?.items || []).length > 0;
+      if (idx !== null) {
+        training = (days[idx]?.items || []).length > 0;
+      } else {
+        if (!state.cycleStartDate) return null;
+        const start = parseDate(state.cycleStartDate);
+        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+        if (n < 0) continue;
+        training = (sch.days[((n % sch.days.length) + sch.days.length) % sch.days.length]?.items || []).length > 0;
+      }
     }
     if (training) return new Date(dateStr + 'T' + time + ':00').toISOString();
   }

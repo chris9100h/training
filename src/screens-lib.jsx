@@ -884,7 +884,13 @@ function StatsTab({ store, sessions, go }) {
     const dateStr = date.toISOString().slice(0, 10);
     const days = LB.getPlanDaysForDate(sch, dateStr);
     const idx = LB.getCyclePosForDate(sch, dateStr);
-    return (days[idx]?.items || []).length > 0;
+    if (idx !== null) return (days[idx]?.items || []).length > 0;
+    if (!store.cycleStartDate) return true;
+    const start = LB.parseDate(store.cycleStartDate);
+    const n = Math.round((date.getTime() - start.getTime()) / 86400000);
+    if (n < 0) return false;
+    const day = sch.days[((n % sch.days.length) + sch.days.length) % sch.days.length];
+    return day ? day.items.length > 0 : false;
   };
 
   const oldestVersion = sch?.versions?.length ? sch.versions[sch.versions.length - 1] : null;

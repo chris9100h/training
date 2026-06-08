@@ -174,7 +174,26 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
   const isActivePlan = !!sch && sch.id === store.activeScheduleId;
 
   const activeCycleDayIdx = isActivePlan && !isWeekday
-    ? (() => { const t = new Date(); t.setHours(12, 0, 0, 0); return LB.getCyclePosForDate(sch, t.toISOString().slice(0, 10)); })()
+    ? (() => {
+        const t = new Date(); t.setHours(12, 0, 0, 0);
+        const today = t.toISOString().slice(0, 10);
+        const pos = LB.getCyclePosForDate(sch, today);
+        if (pos !== null) {
+          // Get the day that is actually active today (may be from an older version)
+          const todayDays = LB.getPlanDaysForDate(sch, today);
+          const todayDay = todayDays[pos];
+          if (!todayDay) return -1;
+          // Find that day by ID in displayDays (the current/future version shown in the chip row)
+          const idx = displayDays.findIndex(d => d.id === todayDay.id);
+          return idx;
+        }
+        // Fallback: no versions
+        if (store.cycleStartDate) {
+          const st = LB.parseDate(store.cycleStartDate);
+          return ((Math.round((t - st) / 86400000) % sch.days.length) + sch.days.length) % sch.days.length;
+        }
+        return (store.cycleIndex || 0) % sch.days.length;
+      })()
     : -1;
 
   const todayDayId = isActivePlan
