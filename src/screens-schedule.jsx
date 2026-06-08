@@ -542,6 +542,13 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
 
   const save = () => {
     if (!dirty || store.activeScheduleId !== draft.id) { doSave(null); return; }
+    const isWdPlan = LB.isWeekdayPlan(original);
+    const structurallyChanged = isWdPlan
+      ? JSON.stringify([...(original.days || [])].map(d => d.weekday).sort()) !==
+        JSON.stringify([...(draft.days || [])].map(d => d.weekday).sort())
+      : draft.days.length !== original.days.length ||
+        draft.days.some((d, i) => d.id !== (original.days[i] || {}).id);
+    if (!structurallyChanged) { doSave(null); return; }
     setApplyFromDate('');
     setApplyFromSheet(true);
   };
