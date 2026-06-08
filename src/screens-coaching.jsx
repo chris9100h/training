@@ -3171,11 +3171,11 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         <div style={{ display: 'flex', gap: 8 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Today ({UI.unit()})</div>
-            <input type="number" step="0.1" placeholder="–" value={form.weightToday} onChange={e => set('weightToday', e.target.value)} style={inputStyle} />
+            <input type="number" inputMode="decimal" step="0.1" placeholder="–" value={form.weightToday} onChange={e => set('weightToday', e.target.value)} style={inputStyle} />
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Last week avg ({UI.unit()})</div>
-            <input type="number" step="0.1" placeholder="–" value={form.weightAvgLastWeek} onChange={e => set('weightAvgLastWeek', e.target.value)} style={inputStyle} />
+            <input type="number" inputMode="decimal" step="0.1" placeholder="–" value={form.weightAvgLastWeek} onChange={e => set('weightAvgLastWeek', e.target.value)} style={inputStyle} />
           </div>
         </div>
       </div>
@@ -3224,18 +3224,18 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         {/* Steps */}
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Steps</div>
-          <input type="number" placeholder="–" value={form.steps} onChange={e => set('steps', e.target.value)} style={inputStyle} />
+          <input type="number" inputMode="numeric" placeholder="–" value={form.steps} onChange={e => set('steps', e.target.value)} style={inputStyle} />
         </div>
 
         {/* Cardio */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Cardio (min)</div>
-            <input type="number" placeholder="–" value={form.cardioMinutes} onChange={e => set('cardioMinutes', e.target.value)} style={inputStyle} />
+            <input type="number" inputMode="numeric" placeholder="–" value={form.cardioMinutes} onChange={e => set('cardioMinutes', e.target.value)} style={inputStyle} />
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Distance (m)</div>
-            <input type="number" placeholder="–" value={form.cardioDistanceM} onChange={e => set('cardioDistanceM', e.target.value)} style={inputStyle} />
+            <input type="number" inputMode="numeric" placeholder="–" value={form.cardioDistanceM} onChange={e => set('cardioDistanceM', e.target.value)} style={inputStyle} />
           </div>
         </div>
 
