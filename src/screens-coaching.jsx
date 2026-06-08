@@ -3153,6 +3153,13 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {!thisWeek && checkinEnabled && (
+          <button onClick={() => setEditTarget('new')}
+            style={{ background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+            Submit this week's check-in
+          </button>
+        )}
+
         {checkins.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <CheckInTrendCards recent={recent} />
@@ -3166,11 +3173,6 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true 
         )}
         {thisWeek ? (
           <CheckInCard ci={thisWeek} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} />
-        ) : checkinEnabled ? (
-          <button onClick={() => setEditTarget('new')}
-            style={{ background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
-            Submit this week's check-in
-          </button>
         ) : null}
 
         {past.length > 0 && (
