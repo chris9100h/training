@@ -440,9 +440,12 @@ function App() {
       try {
         const loaded = await LB.loadFromSupabase(uid);
         if (!loaded.user.approved) { setPhase('pending'); return; }
+        // Clear the notification fire-and-forget — never await it in the login
+        // path, so a slow/stalled write can't block or fail the load. Mirrors
+        // the cached path's handling.
         const pendingNotify = loaded.autoCloseNotify ?? null;
         if (pendingNotify) {
-          await LB.supabase.from('zane_user_settings').update({ auto_close_notify: null }).eq('user_id', uid).catch(() => {});
+          LB.supabase.from('zane_user_settings').update({ auto_close_notify: null }).eq('user_id', uid).catch(() => {});
         }
         const storeToSave = { ...loaded, autoCloseNotify: null };
         prevStore.current = storeToSave;
