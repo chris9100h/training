@@ -491,10 +491,15 @@ function App() {
         const n = data?.auto_close_notify;
         if (n) {
           setAutoCloseNotify(n);
-          LB.supabase.from('zane_user_settings').update({ auto_close_notify: null }).eq('user_id', userId).catch(() => {});
+          // Fire-and-forget clear. The PostgREST builder is a thenable that only
+          // implements `then` — `.catch()` doesn't reliably trigger the request,
+          // so use `.then(resolve, reject)` (the codebase pattern) to actually
+          // send the UPDATE. Without this the notification is never cleared and
+          // re-appears on every load.
+          LB.supabase.from('zane_user_settings').update({ auto_close_notify: null }).eq('user_id', userId).then(() => {}, () => {});
         }
       })
-      .catch(() => {});
+      .then(undefined, () => {});
     return () => { cancelled = true; };
   }, [phase, userId]);
 
