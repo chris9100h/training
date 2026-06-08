@@ -847,13 +847,22 @@ function getCyclePosForDate(schedule, dateStr) {
 function todaysDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
+  const todayStr = todayISO();
   if (isWeekdayPlan(sch)) {
     const js = new Date().getDay();
     const todayWd = js === 0 ? 6 : js - 1; // 0=Mo … 6=So
-    const day = sch.days.find(d => d.weekday === todayWd);
+    const vDays = getPlanDaysForDate(sch, todayStr);
+    const day = vDays.find(d => d.weekday === todayWd);
     if (day) return { schedule: sch, day, idx: todayWd };
     return { schedule: sch, day: { id: 'rest-virtual', name: 'REST', items: [], weekday: todayWd }, idx: todayWd };
   }
+  // When versions exist, derive today's position from the version active today
+  const cyclePosToday = getCyclePosForDate(sch, todayStr);
+  if (cyclePosToday !== null) {
+    const vDays = getPlanDaysForDate(sch, todayStr);
+    return { schedule: sch, day: vDays[cyclePosToday] || sch.days[0], idx: cyclePosToday };
+  }
+  // Fall back: no versions → use cycleStartDate or cycleIndex
   let idx;
   if (state.cycleStartDate) {
     const today = new Date(); today.setHours(12, 0, 0, 0);
@@ -869,6 +878,15 @@ function todaysDay(state) {
 function nextDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
+  if (sch.versions?.length) {
+    const tomorrow = new Date(); tomorrow.setHours(12, 0, 0, 0); tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+    const pos = getCyclePosForDate(sch, tomorrowStr);
+    if (pos !== null) {
+      const vDays = getPlanDaysForDate(sch, tomorrowStr);
+      return { schedule: sch, day: vDays[pos] || sch.days[0], idx: pos };
+    }
+  }
   let curIdx;
   if (state.cycleStartDate) {
     const today = new Date(); today.setHours(12, 0, 0, 0);

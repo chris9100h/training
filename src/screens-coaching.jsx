@@ -890,9 +890,12 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
     [clientStore, activeSch]
   );
   const trainedToday = !!todaySession;
-  const planStartDate = activeSch
-    ? (LB.isWeekdayPlan(activeSch) ? clientStore.weekPlanStartDate : clientStore.cycleStartDate) || null
-    : null;
+  const planStartDate = (() => {
+    if (!activeSch) return null;
+    if (activeSch.versions?.length)
+      return activeSch.versions[activeSch.versions.length - 1].validFrom;
+    return (LB.isWeekdayPlan(activeSch) ? clientStore.weekPlanStartDate : clientStore.cycleStartDate) || null;
+  })();
 
   const weeks = useMemoC(() => computeWeeklyAdherence(clientStore, 104), [clientStore]);
   const completedWeeks = weeks.filter(w => w.planned > 0 && w.pct !== null);
@@ -1175,8 +1178,11 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
       const mon = new Date(d); mon.setDate(d.getDate() - wd);
       return localDateKey(mon);
     }
-    const ref = clientStore?.cycleStartDate
-      ? new Date(clientStore.cycleStartDate.slice(0, 10) + 'T12:00:00')
+    const cycleRef = activeSch?.versions?.length
+      ? activeSch.versions[activeSch.versions.length - 1].validFrom
+      : clientStore?.cycleStartDate;
+    const ref = cycleRef
+      ? new Date(cycleRef.slice(0, 10) + 'T12:00:00')
       : ended.length ? new Date(ended[0].date.slice(0, 10) + 'T12:00:00') : d;
     const daysDiff = Math.round((d.getTime() - ref.getTime()) / 86400000);
     const runIdx = Math.floor(daysDiff / cycleLen);

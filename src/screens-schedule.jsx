@@ -514,14 +514,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
       // Sort newest first
       versions.sort((a, b) => b.validFrom.localeCompare(a.validFrom));
       savedDraft = { ...draft, versions };
-      // Reset cycle/week start to the effectiveFrom date
-      if (!isWd) {
-        setStore(s => ({ ...s, cycleStartDate: effectiveFrom, cycleIndex: 0,
-          schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
-      } else {
-        setStore(s => ({ ...s, weekPlanStartDate: effectiveFrom,
-          schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
-      }
+      // Don't touch cycleStartDate / weekPlanStartDate: versions[] encodes
+      // when each plan version takes effect; getPlanDaysForDate /
+      // getCyclePosForDate derive the correct position for any given date.
+      setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
     } else {
       setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
     }
