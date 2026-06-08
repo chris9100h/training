@@ -359,16 +359,8 @@ function App() {
       setPhase('ready');
       LB.loadFromSupabase(uid)
         .then(fresh => {
-          // Notification is independent of the store merge — show it regardless
-          // of localDirty, and clear it from DB immediately (fire-and-forget).
-          const pendingNotify = fresh.autoCloseNotify ?? null;
-          if (pendingNotify) {
-            LB.supabase.from('zane_user_settings').update({ auto_close_notify: null }).eq('user_id', uid).catch(() => {});
-            setAutoCloseNotify(pendingNotify);
-          }
-          // Skip store update if the user made local changes while the fetch was in flight
+          // Skip if the user made local changes while the fetch was in flight
           if (localDirty.current) return;
-          fresh = { ...fresh, autoCloseNotify: null };
           const cur = prevStore.current;
           // fresh is the pristine server state — use it as the sync diff base
           syncBase.current = fresh;
@@ -440,20 +432,11 @@ function App() {
       try {
         const loaded = await LB.loadFromSupabase(uid);
         if (!loaded.user.approved) { setPhase('pending'); return; }
-        // Clear the notification fire-and-forget — never await it in the login
-        // path, so a slow/stalled write can't block or fail the load. Mirrors
-        // the cached path's handling.
-        const pendingNotify = loaded.autoCloseNotify ?? null;
-        if (pendingNotify) {
-          LB.supabase.from('zane_user_settings').update({ auto_close_notify: null }).eq('user_id', uid).catch(() => {});
-        }
-        const storeToSave = { ...loaded, autoCloseNotify: null };
-        prevStore.current = storeToSave;
-        syncBase.current = storeToSave;
-        LB.saveBase(storeToSave, uid);
-        setStore(storeToSave);
+        prevStore.current = loaded;
+        syncBase.current = loaded;
+        LB.saveBase(loaded, uid);
+        setStore(loaded);
         setPhase('ready');
-        if (pendingNotify) setAutoCloseNotify(pendingNotify);
       } catch (e) {
         console.error('loadFromSupabase failed', e);
         setPhase('error');
@@ -494,6 +477,26 @@ function App() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // Auto-close notification — fully decoupled from the login/load path. It runs
+  // only once the app is already 'ready', as an isolated query OUTSIDE the
+  // onAuthStateChange flow, so it never contends for the auth lock and can never
+  // block or fail login. If the query fails or hangs, login is unaffected.
+  useEffectA(() => {
+    if (phase !== 'ready' || !userId) return;
+    let cancelled = false;
+    LB.supabase.from('zane_user_settings').select('auto_close_notify').eq('user_id', userId).maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return;
+        const n = data?.auto_close_notify;
+        if (n) {
+          setAutoCloseNotify(n);
+          LB.supabase.from('zane_user_settings').update({ auto_close_notify: null }).eq('user_id', userId).catch(() => {});
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [phase, userId]);
 
   // Realtime: coaching invites + messages only. (Cross-device live workout sync
   // was removed — the local store is the single source of truth for a session.)

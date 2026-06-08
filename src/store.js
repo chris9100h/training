@@ -327,7 +327,6 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
-    autoCloseNotify: sett.auto_close_notify ?? null,
     coaching: isCoachLoad ? undefined : {
       asClient: (coachInfoRes?.data?.[0]) ? {
         id: coachInfoRes.data[0].coaching_id,
