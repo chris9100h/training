@@ -711,8 +711,14 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
 
 function cyclePosFn(clientStore, date) {
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
-  const cycleLen = activeSch?.days?.length || 1;
+  if (!activeSch) return 0;
   const d = new Date(date); d.setHours(12, 0, 0, 0);
+  const dateStr = d.toISOString().slice(0, 10);
+  if (activeSch.versions?.length) {
+    const pos = LB.getCyclePosForDate(activeSch, dateStr);
+    if (pos !== null) return pos;
+  }
+  const cycleLen = activeSch.days?.length || 1;
   if (clientStore.cycleStartDate) {
     const start = LB.parseDate(clientStore.cycleStartDate);
     const n = Math.round((d.getTime() - start.getTime()) / 86400000);
@@ -731,9 +737,18 @@ function localDateKey(d) {
 function getTodayDay(clientStore) {
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   if (!activeSch) return null;
+  const todayStr = LB.todayISO();
   if (LB.isWeekdayPlan(activeSch)) {
     const todayWd = (new Date().getDay() + 6) % 7;
-    return (activeSch.days || []).find(d => d.weekday === todayWd) || { id: 'rest-virtual', name: 'REST', items: [] };
+    const vDays = LB.getPlanDaysForDate(activeSch, todayStr);
+    return vDays.find(d => d.weekday === todayWd) || { id: 'rest-virtual', name: 'REST', items: [] };
+  }
+  if (activeSch.versions?.length) {
+    const pos = LB.getCyclePosForDate(activeSch, todayStr);
+    if (pos !== null) {
+      const vDays = LB.getPlanDaysForDate(activeSch, todayStr);
+      return vDays[pos] || null;
+    }
   }
   let idx;
   if (clientStore.cycleStartDate) {
@@ -1178,9 +1193,14 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
       const mon = new Date(d); mon.setDate(d.getDate() - wd);
       return localDateKey(mon);
     }
-    const cycleRef = activeSch?.versions?.length
-      ? activeSch.versions[activeSch.versions.length - 1].validFrom
-      : clientStore?.cycleStartDate;
+    if (activeSch?.versions?.length) {
+      const pos = LB.getCyclePosForDate(activeSch, dateStr);
+      if (pos !== null) {
+        const cycleStart = new Date(d); cycleStart.setDate(d.getDate() - pos);
+        return localDateKey(cycleStart);
+      }
+    }
+    const cycleRef = clientStore?.cycleStartDate;
     const ref = cycleRef
       ? new Date(cycleRef.slice(0, 10) + 'T12:00:00')
       : ended.length ? new Date(ended[0].date.slice(0, 10) + 'T12:00:00') : d;
