@@ -245,7 +245,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
       <Screen>
         <TopBar title={sch.name} onBack={() => go({ name: fromPlan ? 'plan' : 'home' })}
           right={fromPlan ? (
-            <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })} style={{
+            <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id, versionFrom: selectedVersion?.validFrom })} style={{
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
               color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
@@ -467,7 +467,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
         })()}
         onBack={() => go({ name: fromPlan ? 'plan' : 'home' })}
         right={fromPlan ? (
-          <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })} style={{
+          <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id, versionFrom: selectedVersion?.validFrom })} style={{
             background: 'transparent', border: `1px solid ${UI.hairStrong}`,
             borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
             color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
@@ -593,10 +593,23 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
 }
 
 // ─── Edit screen — rename, manage pattern ─
-function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
+function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFrom }) {
   const [confirmEl, confirm] = useConfirm();
   const original = store.schedules.find(s => s.id === scheduleId);
-  const [draft, setDraft] = useStateS(original ? JSON.parse(JSON.stringify(original)) : null);
+  // Which version is being edited (identified by validFrom). -1 = unversioned
+  // or the newest version → default save flow; >0 = an older version, edited
+  // in place (its days are replaced directly, no "from date" / new version).
+  const editVerIdx = (original?.versions?.length && versionFrom)
+    ? original.versions.findIndex(v => v.validFrom === versionFrom)
+    : -1;
+  const [draft, setDraft] = useStateS(() => {
+    if (!original) return null;
+    const clone = JSON.parse(JSON.stringify(original));
+    if (editVerIdx > 0 && original.versions[editVerIdx]) {
+      clone.days = JSON.parse(JSON.stringify(original.versions[editVerIdx].days || []));
+    }
+    return clone;
+  });
   const [pickingType, setPickingType] = useStateS(false);
   const [applyFromSheet, setApplyFromSheet] = useStateS(false);
   const [applyFromDate, setApplyFromDate] = useStateS('');
@@ -663,6 +676,12 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
       // getCyclePosForDate derive the correct position for any given date.
       setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
     } else {
+      // Non-structural save (e.g. exercise swap) on the newest/unversioned plan.
+      // Keep the newest version's days in sync with sch.days so the
+      // version-aware viewer reflects the change.
+      if (draft.versions?.length) {
+        savedDraft = { ...draft, versions: draft.versions.map((v, i) => i === 0 ? { ...v, days: draft.days } : v) };
+      }
       setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
     }
 
@@ -680,7 +699,32 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
     go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
   };
 
+  // In-place edit of an older (non-newest) version: replace just that version's
+  // days; sch.days stays the newest version (untouched). No "from date" flow.
+  const doSaveVersion = async () => {
+    const versions = (original.versions || []).map((v, i) =>
+      i === editVerIdx ? { ...v, days: draft.days } : v
+    );
+    const savedDraft = { ...draft, versions, days: versions[0].days };
+    setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
+
+    const asClient = store.coaching?.asClient;
+    if (store.activeScheduleId === draft.id && asClient?.status === 'active') {
+      try {
+        const before = { ...original, days: (original.versions[editVerIdx] || {}).days || [] };
+        const diff = LB.diffSchedule(before, { ...draft }, store.exercises);
+        if (diff) {
+          const threadId = await LB.getOrCreateCoachingThread(asClient.id, `Changes on ${draft.name}`, userId);
+          const body = `Modified plan: ${draft.name}\n\n${diff.split('\n').map(l => `• ${l}`).join('\n')}`;
+          await LB.addCoachingNote(asClient.id, 'plan', draft.id, draft.name, body, userId, threadId);
+        }
+      } catch (e) { console.error('Failed to send plan change note', e); }
+    }
+    go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
+  };
+
   const save = () => {
+    if (editVerIdx > 0) { doSaveVersion(); return; } // older version → update in place, no date prompt
     if (!dirty || store.activeScheduleId !== draft.id) { doSave(null); return; }
     const isWdPlan = LB.isWeekdayPlan(original);
     const structurallyChanged = isWdPlan
@@ -749,6 +793,9 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
     <Screen>
       <TopBar
         title="Edit plan"
+        sub={editVerIdx > 0
+          ? `V${original.versions.length - editVerIdx} · from ${new Date(versionFrom + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+          : null}
         onBack={async () => {
           if (dirty && !await confirm('Unsaved changes will be lost.', { title: 'Discard changes?', ok: 'Discard', danger: true })) return;
           go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
