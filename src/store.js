@@ -902,6 +902,18 @@ function getCyclePosForDate(schedule, dateStr) {
   return ((daysDiff % daysLen) + daysLen) % daysLen;
 }
 
+// Index in schedule.versions (newest-first) of the version active on dateStr —
+// the newest version whose validFrom is on or before dateStr. Returns the oldest
+// version's index for dates before the plan started, or -1 if unversioned.
+function getActiveVersionIdx(schedule, dateStr) {
+  const versions = schedule.versions;
+  if (!versions?.length) return -1;
+  for (let i = 0; i < versions.length; i++) {
+    if (versions[i].validFrom <= dateStr) return i;
+  }
+  return versions.length - 1;
+}
+
 function todaysDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
@@ -1423,7 +1435,7 @@ window.LB = {
   signIn, signUp, signOut, deleteAllData, importFromBackup,
   loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate,
+  uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx,
   effReps, e1rm, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,

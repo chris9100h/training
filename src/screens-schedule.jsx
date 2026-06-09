@@ -170,38 +170,55 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
   const isWeekday = sch ? LB.isWeekdayPlan(sch) : false;
   const jsDay = new Date().getDay();
   const todayWeekday = jsDay === 0 ? 6 : jsDay - 1;
-  const displayDays = sch ? (isWeekday ? [...sch.days].sort((a, b) => a.weekday - b.weekday) : sch.days) : [];
   const isActivePlan = !!sch && sch.id === store.activeScheduleId;
+  const today = LB.todayISO();
 
-  const activeCycleDayIdx = isActivePlan && !isWeekday
+  // Versions are stored newest-first. The viewer shows one version at a time and
+  // defaults to the one in effect today — so a not-yet-effective future version
+  // never hijacks the displayed position (the bug: today showed the new version's
+  // day instead of the one actually active today).
+  const versions = sch?.versions?.length ? sch.versions : null;
+  const activeVerIdx = versions ? LB.getActiveVersionIdx(sch, today) : -1;
+  const [verIdx, setVerIdx] = useStateS(() => (activeVerIdx >= 0 ? activeVerIdx : 0));
+  const safeVerIdx = versions ? Math.max(0, Math.min(verIdx, versions.length - 1)) : 0;
+  const selectedVersion = versions ? versions[safeVerIdx] : null;
+  const versionDays = selectedVersion ? (selectedVersion.days || []) : (sch?.days || []);
+  const displayDays = sch ? (isWeekday ? [...versionDays].sort((a, b) => a.weekday - b.weekday) : versionDays) : [];
+
+  // True when the version being viewed is the one actually in effect today.
+  const viewingActiveVersion = !versions || safeVerIdx === activeVerIdx;
+
+  // TODAY marker — only when this is the active plan AND we're viewing the
+  // version in effect today. Position is read straight from the displayed
+  // version, so there's no cross-version id translation to get wrong.
+  const todayDayId = (isActivePlan && viewingActiveVersion)
     ? (() => {
-        const t = new Date(); t.setHours(12, 0, 0, 0);
-        const today = t.toISOString().slice(0, 10);
-        const pos = LB.getCyclePosForDate(sch, today);
-        if (pos !== null) {
-          // Get the day that is actually active today (may be from an older version)
-          const todayDays = LB.getPlanDaysForDate(sch, today);
-          const todayDay = todayDays[pos];
-          if (!todayDay) return -1;
-          // Find that day by ID in displayDays (the current/future version shown in the chip row)
-          const idx = displayDays.findIndex(d => d.id === todayDay.id);
-          return idx;
-        }
-        // Fallback: no versions
-        if (store.cycleStartDate) {
+        if (isWeekday) return displayDays.find(d => d.weekday === todayWeekday)?.id ?? null;
+        let pos;
+        if (versions) {
+          pos = LB.getCyclePosForDate(sch, today);
+        } else if (store.cycleStartDate) {
           const st = LB.parseDate(store.cycleStartDate);
-          return ((Math.round((t - st) / 86400000) % sch.days.length) + sch.days.length) % sch.days.length;
+          const t = new Date(); t.setHours(12, 0, 0, 0);
+          pos = ((Math.round((t - st) / 86400000) % sch.days.length) + sch.days.length) % sch.days.length;
+        } else {
+          pos = (store.cycleIndex || 0) % sch.days.length;
         }
-        return (store.cycleIndex || 0) % sch.days.length;
+        return pos == null ? null : (displayDays[pos]?.id ?? null);
       })()
-    : -1;
-
-  const todayDayId = isActivePlan
-    ? (isWeekday ? (displayDays.find(d => d.weekday === todayWeekday)?.id ?? null) : (displayDays[activeCycleDayIdx]?.id ?? null))
     : null;
 
   const [selectedDayId, setSelectedDayId] = useStateS(() => todayDayId || displayDays[0]?.id || null);
   const chipRowRef = React.useRef(null);
+
+  // Switching versions moves the selection to today's day (if shown) or the
+  // first day of the newly displayed version.
+  React.useEffect(() => {
+    setSelectedDayId(todayDayId || displayDays[0]?.id || null);
+  }, [safeVerIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [reactivateSheet, setReactivateSheet] = useStateS(false);
+  const [reactivateDate, setReactivateDate] = useStateS('');
 
   React.useEffect(() => {
     const row = chipRowRef.current;
@@ -246,7 +263,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
   const isRest = !day.items.length;
   const isTodaySel = day.id === todayDayId;
   const dayLabel = isWeekday ? WEEKDAYS_FULL[day.weekday] : `Day ${dayIdx + 1}`;
-  const trainingDayCount = sch.days.filter(d => d.items.length).length;
+  const trainingDayCount = displayDays.filter(d => d.items.length).length;
 
   const isPad = useIsPadS();
   const [confirmEl, confirm] = useConfirm();
@@ -284,6 +301,22 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
     a.download = `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // Reactivate the version being viewed: snapshot its days as a new version
+  // effective from the chosen date (same model as an "apply from date" save).
+  const doReactivate = (date) => {
+    if (!selectedVersion || !date) return;
+    const newVer = { validFrom: date, days: JSON.parse(JSON.stringify(selectedVersion.days || [])) };
+    const newVersions = [newVer, ...(sch.versions || [])].sort((a, b) => b.validFrom.localeCompare(a.validFrom));
+    const newIdx = newVersions.indexOf(newVer);
+    setStore(s => ({
+      ...s,
+      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, days: newVersions[0].days, versions: newVersions } : x),
+    }));
+    setReactivateSheet(false);
+    setReactivateDate('');
+    setVerIdx(newIdx >= 0 ? newIdx : 0);
   };
 
   const planActions = fromPlan && (
@@ -361,17 +394,69 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
     </>
   );
 
+  const fmtVDate = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const versionBar = versions && (() => {
+    const vNum = versions.length - safeVerIdx;
+    // The version that supersedes the one being viewed (next-newer), if any.
+    const newer = safeVerIdx > 0 ? versions[safeVerIdx - 1] : null;
+    const status = viewingActiveVersion ? 'ACTIVE' : (selectedVersion.validFrom > today ? 'SCHEDULED' : 'PAST');
+    const banner = (() => {
+      if (viewingActiveVersion) {
+        return newer ? `In effect now · V${vNum + 1} takes over ${fmtVDate(newer.validFrom)}` : null;
+      }
+      if (status === 'SCHEDULED') return `Scheduled · takes effect ${fmtVDate(selectedVersion.validFrom)}`;
+      if (newer) {
+        const d = new Date(newer.validFrom + 'T12:00:00'); d.setDate(d.getDate() - 1);
+        return `Was active ${fmtVDate(selectedVersion.validFrom)} – ${fmtVDate(d.toISOString().slice(0, 10))}`;
+      }
+      return null;
+    })();
+    const stepBtn = (disabled) => ({
+      width: 30, height: 30, flexShrink: 0, borderRadius: 4,
+      border: `1px solid ${UI.hairStrong}`, background: 'transparent',
+      color: disabled ? UI.inkGhost : UI.gold, cursor: disabled ? 'default' : 'pointer',
+      fontSize: 17, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      WebkitTapHighlightColor: 'transparent',
+    });
+    return (
+      <div style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: 6, background: UI.bgRaised }}>
+          <button onClick={() => setVerIdx(safeVerIdx + 1)} disabled={safeVerIdx >= versions.length - 1} style={stepBtn(safeVerIdx >= versions.length - 1)}>‹</button>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, minWidth: 0 }}>
+            <span className="num" style={{ fontSize: 12, color: UI.ink }}>V{vNum}</span>
+            <span style={{ width: 3, height: 3, borderRadius: '50%', background: UI.hairStrong }} />
+            <span className="label" style={{ marginBottom: 0, color: viewingActiveVersion ? UI.gold : UI.inkFaint }}>{status}</span>
+            <span style={{ width: 3, height: 3, borderRadius: '50%', background: UI.hairStrong }} />
+            <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{fmtVDate(selectedVersion.validFrom)}</span>
+          </div>
+          <button onClick={() => setVerIdx(safeVerIdx - 1)} disabled={safeVerIdx <= 0} style={stepBtn(safeVerIdx <= 0)}>›</button>
+        </div>
+        {banner && (
+          <div className="micro" style={{ color: viewingActiveVersion ? UI.gold : UI.inkFaint, textAlign: 'center', letterSpacing: '0.08em', lineHeight: 1.5 }}>
+            {banner}
+          </div>
+        )}
+        {!viewingActiveVersion && (
+          <button onClick={() => setReactivateSheet(true)} style={{
+            alignSelf: 'center', background: 'transparent', border: `1px solid ${UI.goldSoft}`,
+            borderRadius: 4, padding: '6px 14px', cursor: 'pointer', color: UI.gold,
+            fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+            WebkitTapHighlightColor: 'transparent',
+          }}>Reactivate this version</button>
+        )}
+      </div>
+    );
+  })();
+
   return (
     <Screen scroll={false}>
       {confirmEl}
       <TopBar
         title={sch.name}
         sub={(() => {
-          const vn = (sch.versions?.length || 0) + 1;
-          const vLabel = vn > 1 ? ` · V${vn}` : '';
           return isWeekday
-            ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ') + vLabel
-            : `${sch.days.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}${vLabel}`;
+            ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ')
+            : `${displayDays.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`;
         })()}
         onBack={() => go({ name: fromPlan ? 'plan' : 'home' })}
         right={fromPlan ? (
@@ -382,6 +467,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
           }}>Edit</button>
         ) : null}
       />
+
+      {versionBar}
 
       {isPad ? (
         <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
@@ -467,6 +554,32 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
             {exerciseList}
           </div>
         </>
+      )}
+
+      {reactivateSheet && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setReactivateSheet(false)}>
+          <div style={{ background: UI.bg, borderRadius: '14px 14px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="label" style={{ color: UI.inkFaint, marginBottom: 6 }}>REACTIVATE THIS VERSION</div>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 18, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
+              A copy of this version's days becomes active from the date you pick. Your existing versions stay in the history.
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${reactivateDate ? UI.goldSoft : UI.hairStrong}` }}>
+                <input
+                  type="date"
+                  value={reactivateDate}
+                  onChange={e => setReactivateDate(e.target.value)}
+                  style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: reactivateDate ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
+                />
+              </div>
+              <Btn disabled={!reactivateDate} onClick={() => doReactivate(reactivateDate)} style={{ flexShrink: 0 }}>
+                Apply
+              </Btn>
+            </div>
+          </div>
+        </div>
       )}
     </Screen>
   );
