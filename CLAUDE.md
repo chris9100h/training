@@ -14,6 +14,8 @@
   - `window.UI` — UI-Primitives und Farb-Tokens (aus `ui.jsx`)
   - `window.ACCENT_PALETTE`, `window.applyAccentColor` — Akzentfarben-System (aus `index.html`)
 - **Babel Standalone** — JSX funktioniert, TypeScript nicht. Syntaxfehler crashen die gesamte App ohne hilfreiche Fehlermeldung.
+- **Boot über Precompile-Cache (Performance).** Die `screens-*.jsx`/`ui.jsx`/`app.jsx` werden **nicht** mehr als `<script type="text/babel">` geladen. Stattdessen transpiliert ein Loader in `index.html` jede Datei **einmal** (Presets `react` + `env`, sourceType `script` — identisch zum alten Babel-Default), cacht das fertige JS in IndexedDB (`zane-precompile`, Key = Pfad + Content-Hash) und führt bei Folgestarts das gecachte JS direkt aus. **Babel Standalone wird nur noch bei Cache-Miss (neue/geänderte Datei) lazy geladen**, `html2canvas` erst beim ersten Screenshot. React läuft als **Production-Build**. Schlägt der Loader fehl, fällt er automatisch auf den alten „Babel transpiliert alles"-Pfad zurück.
+  - **Neue `.jsx`-Datei hinzufügen:** an **drei** Stellen eintragen — `SOURCES` im Loader (`index.html`, in Ausführungsreihenfolge), `ASSETS` in `sw.js`, und das `<script>` entfällt (der Loader lädt sie). Content-Hash invalidiert den Cache bei jeder Änderung automatisch.
 - **Dateistruktur:**
   - `index.html` — CSS-Variablen, globale Styles, Animationen, Skripte
   - `sw.js` — Service Worker
@@ -23,6 +25,7 @@
   - `src/screens-home.jsx`, `src/screens-schedule.jsx`, `src/screens-train.jsx`, `src/screens-lib.jsx` — einzelne Screens
   - `src/store.js` — Supabase-Lesen/Schreiben, Auth-Funktionen
   - `src/supabase.js` — Supabase JS Client (vendored)
+  - `src/whatsnew.js` — Changelog-Historie (`window.WHATS_NEW`-Array, siehe „What's New / Changelog")
   - `supabase/` — Migrationen, Edge Functions, Schema
 
 ## Screens & Navigation
@@ -63,6 +66,20 @@
   - `logbook-accent-color`
   - `logbook-push-enabled`
   - `logbook-cycle-week-view`
+  - `logbook-whatsnew-seen` — zuletzt gesehene `WHATS_NEW.id` (siehe „What's New / Changelog")
+
+## What's New / Changelog
+
+- **Changelog-Historie in `src/whatsnew.js`** — `window.WHATS_NEW`, ein **Array** von Einträgen, **neueste zuerst**. Jeder Eintrag: `{ id, title, items: [...] }`. `app.jsx` referenziert nur dieses Array; `WhatsNewModal` rendert es. Die Datei ist die vollständige History auf einen Blick.
+- **Anzeige-Logik:** Sobald die App nach einem Update `ready` ist (eingeloggt + Daten geladen), zeigt sie **alle noch nicht gesehenen Einträge** — gebündelt in **einer** Karte (jeder Eintrag ein eigener Abschnitt mit Titel + Punkten). So holt ein Rückkehrer, der mehrere Releases übersprungen hat, alles auf einmal nach. Beim Schließen wird die `id` des **neuesten** Eintrags in `localStorage` (`logbook-whatsnew-seen`) gespeichert; alles bis dahin gilt als gesehen. Tracking **pro Gerät** (keine DB). Neue Nutzer / erster Lauf nach Einführung (keine gespeicherte id) sehen nur den **neuesten** Eintrag, nicht die ganze Historie.
+- **Leeres Array (`[]`) = es wird nichts angezeigt.** Die Karte erscheint nur für Einträge, die wir bewusst hinzufügen.
+- **Workflow — nur auf ausdrückliche Nutzeranfrage** eine Ankündigung einspielen. Niemals ungefragt. Wenn der Nutzer eine wünscht:
+  1. Neuen Eintrag **oben** ins Array in `src/whatsnew.js` einfügen — mit **neuer, eindeutiger `id`** (typischerweise im Gleichschritt mit der kommenden SW-Cache-Version, z.B. `'v2.066'`).
+  2. **Alte Einträge nie entfernen** — sie sind die Historie, die Rückkehrer nachholen.
+  3. SW-Cache-Version in `sw.js` wie üblich bumpen (deployt das Update).
+  4. **Texte gut schreiben — das ist der Punkt der Funktion:** Das neue Feature klar und nutzerorientiert erklären — *was* ist neu, *welchen Nutzen* es bringt, *wie* man es benutzt. Knackige Stichpunkte (`items`), kein Tech-Jargon, keine internen Begriffe (Tabellen, Funktionsnamen). Der `title` benennt das Feature, die Punkte vermitteln den Mehrwert. Lieber 2–4 starke Punkte als eine lange Liste.
+- Wird ein Release ohne Ankündigungs-Wunsch gemacht, bleibt das Array unverändert (kein neuer Eintrag → keine Karte).
+- **`whatsnew.js` ist plain JS** (kein JSX): wird wie `store.js` als normales `<script>` in `index.html` geladen (nicht über den Precompile-Loader) und ist in `ASSETS` in `sw.js` für Offline gelistet — beides bereits eingerichtet.
 
 ## Datenbank (Supabase)
 

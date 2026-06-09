@@ -2,6 +2,23 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useCallback: useCallbackA } = React;
 
+// What's New — changelog entries live in src/whatsnew.js (window.WHATS_NEW, an
+// array, newest first). On 'ready' after an update we show every entry the user
+// hasn't seen yet, bundled into one card. Tracked per device by the newest id.
+const WHATS_NEW_KEY = 'logbook-whatsnew-seen';
+
+// Entries newer than the last-seen id. New users / first run after the feature
+// shipped (no stored id) get just the latest, not the whole back catalogue.
+function unseenWhatsNew() {
+  const all = window.WHATS_NEW || [];
+  if (!all.length) return [];
+  let seen = null;
+  try { seen = localStorage.getItem(WHATS_NEW_KEY); } catch (_) {}
+  if (!seen) return [all[0]];
+  const idx = all.findIndex(e => e.id === seen);
+  return idx === -1 ? [all[0]] : all.slice(0, idx); // newest-first: before the seen entry = unseen
+}
+
 function useIsPad() {
   const [isPad, setIsPad] = useStateA(() => window.innerWidth >= 768);
   useEffectA(() => {
@@ -148,6 +165,60 @@ function UpdateBanner({ onUpdate }) {
   );
 }
 
+function WhatsNewModal({ entries, onDismiss }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9997,
+      background: 'rgba(0,0,0,0.72)',
+      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 32,
+    }}>
+      <div style={{
+        width: '100%', maxWidth: 340, maxHeight: '82vh',
+        background: UI.bgRaised,
+        border: `1px solid ${UI.goldSoft}`,
+        borderRadius: 6,
+        padding: '28px 26px',
+        display: 'flex', flexDirection: 'column', gap: 18,
+        overflowY: 'auto',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(201,169,97,0.2)',
+        animation: 'fadeUp 0.3s ease',
+      }}>
+        <div className="micro-gold">WHAT'S NEW</div>
+        {entries.map((entry, ei) => (
+          <div key={entry.id} style={{
+            display: 'flex', flexDirection: 'column', gap: 12,
+            ...(ei > 0 ? { paddingTop: 18, borderTop: `1px solid ${UI.hair}` } : null),
+          }}>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 23, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
+              {entry.title}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+              {(entry.items || []).map((it, i) => (
+                <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                  <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.gold, marginTop: 7, flexShrink: 0 }} />
+                  <div style={{ fontSize: 13.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{it}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+        <button onClick={onDismiss} style={{
+          marginTop: 4, width: '100%', padding: '14px 0', flexShrink: 0,
+          borderRadius: 6, border: 'none', cursor: 'pointer',
+          background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+          boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
+          color: '#0a0805', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
+          letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent',
+        }}>
+          GOT IT
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function LoadingScreen() {
   return (
     <Screen scroll={false} style={{ justifyContent: 'center', alignItems: 'center' }}>
@@ -202,6 +273,7 @@ function App() {
   const [route, setRoute]         = useStateA({ name: 'home' });
   const [updateAvailable, setUpdateAvailable] = useStateA(false);
   const [autoCloseNotify, setAutoCloseNotify] = useStateA(null);
+  const [whatsNew, setWhatsNew] = useStateA(null); // array of unseen changelog entries, or null
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
   const swReg                     = useRefA(null);
@@ -503,6 +575,22 @@ function App() {
     return () => { cancelled = true; };
   }, [phase, userId]);
 
+  // What's New — the first time the app is 'ready' after an update, show every
+  // changelog entry the user hasn't seen yet (bundled into one card), so anyone
+  // returning after several releases catches up on all of them at once.
+  useEffectA(() => {
+    if (phase !== 'ready') return;
+    const unseen = unseenWhatsNew();
+    if (unseen.length) setWhatsNew(unseen);
+  }, [phase]);
+
+  const dismissWhatsNew = useCallbackA(() => {
+    // Mark everything up to the newest entry as seen.
+    const newest = (window.WHATS_NEW || [])[0];
+    try { if (newest?.id) localStorage.setItem(WHATS_NEW_KEY, newest.id); } catch (_) {}
+    setWhatsNew(null);
+  }, []);
+
   // Realtime: coaching invites + messages only. (Cross-device live workout sync
   // was removed — the local store is the single source of truth for a session.)
   useEffectA(() => {
@@ -685,7 +773,7 @@ function App() {
     case 'plan':          screen = <window.Screens.PlanScreen {...props} />; break;
     case 'plan-view':     screen = <window.Screens.PlanViewerScreen {...props} scheduleId={route.scheduleId} fromPlan={route.fromPlan} />; break;
     case 'schedule-new':  screen = <window.Screens.ScheduleNewScreen {...props} />; break;
-    case 'schedule-edit': screen = <window.Screens.ScheduleEditScreen {...props} scheduleId={route.scheduleId} />; break;
+    case 'schedule-edit': screen = <window.Screens.ScheduleEditScreen {...props} scheduleId={route.scheduleId} versionFrom={route.versionFrom} />; break;
     case 'train':         screen = <window.Screens.TrainingScreen {...props} sessionId={route.sessionId} />; break;
     case 'lib':           screen = <window.Screens.LibraryScreen {...props} />; break;
     case 'exercise':      screen = <window.Screens.ExerciseDetailScreen key={route.exId} {...props} exId={route.exId} back={route.back} editQueue={route.editQueue || []} editQueueTotal={route.editQueueTotal || 0} autoEdit={!!route.autoEdit} />; break;
@@ -713,6 +801,7 @@ function App() {
         </div>
         {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
         {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
+        {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
         {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
       </div>
     );
@@ -729,6 +818,7 @@ function App() {
       </ErrorBoundary>
       {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
+      {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
     </>

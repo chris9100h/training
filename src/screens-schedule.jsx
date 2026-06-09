@@ -170,38 +170,55 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
   const isWeekday = sch ? LB.isWeekdayPlan(sch) : false;
   const jsDay = new Date().getDay();
   const todayWeekday = jsDay === 0 ? 6 : jsDay - 1;
-  const displayDays = sch ? (isWeekday ? [...sch.days].sort((a, b) => a.weekday - b.weekday) : sch.days) : [];
   const isActivePlan = !!sch && sch.id === store.activeScheduleId;
+  const today = LB.todayISO();
 
-  const activeCycleDayIdx = isActivePlan && !isWeekday
+  // Versions are stored newest-first. The viewer shows one version at a time and
+  // defaults to the one in effect today — so a not-yet-effective future version
+  // never hijacks the displayed position (the bug: today showed the new version's
+  // day instead of the one actually active today).
+  const versions = sch?.versions?.length ? sch.versions : null;
+  const activeVerIdx = versions ? LB.getActiveVersionIdx(sch, today) : -1;
+  const [verIdx, setVerIdx] = useStateS(() => (activeVerIdx >= 0 ? activeVerIdx : 0));
+  const safeVerIdx = versions ? Math.max(0, Math.min(verIdx, versions.length - 1)) : 0;
+  const selectedVersion = versions ? versions[safeVerIdx] : null;
+  const versionDays = selectedVersion ? (selectedVersion.days || []) : (sch?.days || []);
+  const displayDays = sch ? (isWeekday ? [...versionDays].sort((a, b) => a.weekday - b.weekday) : versionDays) : [];
+
+  // True when the version being viewed is the one actually in effect today.
+  const viewingActiveVersion = !versions || safeVerIdx === activeVerIdx;
+
+  // TODAY marker — only when this is the active plan AND we're viewing the
+  // version in effect today. Position is read straight from the displayed
+  // version, so there's no cross-version id translation to get wrong.
+  const todayDayId = (isActivePlan && viewingActiveVersion)
     ? (() => {
-        const t = new Date(); t.setHours(12, 0, 0, 0);
-        const today = t.toISOString().slice(0, 10);
-        const pos = LB.getCyclePosForDate(sch, today);
-        if (pos !== null) {
-          // Get the day that is actually active today (may be from an older version)
-          const todayDays = LB.getPlanDaysForDate(sch, today);
-          const todayDay = todayDays[pos];
-          if (!todayDay) return -1;
-          // Find that day by ID in displayDays (the current/future version shown in the chip row)
-          const idx = displayDays.findIndex(d => d.id === todayDay.id);
-          return idx;
-        }
-        // Fallback: no versions
-        if (store.cycleStartDate) {
+        if (isWeekday) return displayDays.find(d => d.weekday === todayWeekday)?.id ?? null;
+        let pos;
+        if (versions) {
+          pos = LB.getCyclePosForDate(sch, today);
+        } else if (store.cycleStartDate) {
           const st = LB.parseDate(store.cycleStartDate);
-          return ((Math.round((t - st) / 86400000) % sch.days.length) + sch.days.length) % sch.days.length;
+          const t = new Date(); t.setHours(12, 0, 0, 0);
+          pos = ((Math.round((t - st) / 86400000) % sch.days.length) + sch.days.length) % sch.days.length;
+        } else {
+          pos = (store.cycleIndex || 0) % sch.days.length;
         }
-        return (store.cycleIndex || 0) % sch.days.length;
+        return pos == null ? null : (displayDays[pos]?.id ?? null);
       })()
-    : -1;
-
-  const todayDayId = isActivePlan
-    ? (isWeekday ? (displayDays.find(d => d.weekday === todayWeekday)?.id ?? null) : (displayDays[activeCycleDayIdx]?.id ?? null))
     : null;
 
   const [selectedDayId, setSelectedDayId] = useStateS(() => todayDayId || displayDays[0]?.id || null);
   const chipRowRef = React.useRef(null);
+
+  // Switching versions moves the selection to today's day (if shown) or the
+  // first day of the newly displayed version.
+  React.useEffect(() => {
+    setSelectedDayId(todayDayId || displayDays[0]?.id || null);
+  }, [safeVerIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [reactivateSheet, setReactivateSheet] = useStateS(false);
+  const [reactivateDate, setReactivateDate] = useStateS('');
 
   React.useEffect(() => {
     const row = chipRowRef.current;
@@ -228,7 +245,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
       <Screen>
         <TopBar title={sch.name} onBack={() => go({ name: fromPlan ? 'plan' : 'home' })}
           right={fromPlan ? (
-            <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })} style={{
+            <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id, versionFrom: selectedVersion?.validFrom })} style={{
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
               color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
@@ -246,7 +263,12 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
   const isRest = !day.items.length;
   const isTodaySel = day.id === todayDayId;
   const dayLabel = isWeekday ? WEEKDAYS_FULL[day.weekday] : `Day ${dayIdx + 1}`;
-  const trainingDayCount = sch.days.filter(d => d.items.length).length;
+  const trainingDayCount = displayDays.filter(d => d.items.length).length;
+  // In a non-active version no day is live, so the selected (viewed) day gets a
+  // neutral highlight rather than the gold "today/active" accent.
+  const selBorder = viewingActiveVersion ? UI.gold : UI.inkFaint;
+  const selBg     = viewingActiveVersion ? UI.goldFaint : UI.bgInset;
+  const selText   = viewingActiveVersion ? UI.gold : UI.ink;
 
   const isPad = useIsPadS();
   const [confirmEl, confirm] = useConfirm();
@@ -284,6 +306,24 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
     a.download = `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // Reactivate the version being viewed: snapshot its days as a new version
+  // effective from the chosen date (same model as an "apply from date" save).
+  const doReactivate = (date) => {
+    if (!selectedVersion || !date) return;
+    const newVer = { validFrom: date, days: JSON.parse(JSON.stringify(selectedVersion.days || [])) };
+    // One version per date — newVer is first, so it replaces any same-date entry.
+    const newVersions = LB.dedupeVersionsByDate([newVer, ...(sch.versions || [])])
+      .sort((a, b) => b.validFrom.localeCompare(a.validFrom));
+    const newIdx = newVersions.indexOf(newVer);
+    setStore(s => ({
+      ...s,
+      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, days: newVersions[0].days, versions: newVersions } : x),
+    }));
+    setReactivateSheet(false);
+    setReactivateDate('');
+    setVerIdx(newIdx >= 0 ? newIdx : 0);
   };
 
   const planActions = fromPlan && (
@@ -361,27 +401,81 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
     </>
   );
 
+  const fmtVDate = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const versionBar = versions && (() => {
+    const vNum = versions.length - safeVerIdx;
+    // The version that supersedes the one being viewed (next-newer), if any.
+    const newer = safeVerIdx > 0 ? versions[safeVerIdx - 1] : null;
+    const status = viewingActiveVersion ? 'ACTIVE' : (selectedVersion.validFrom > today ? 'SCHEDULED' : 'PAST');
+    const banner = (() => {
+      if (viewingActiveVersion) {
+        return newer ? `In effect now · V${vNum + 1} takes over ${fmtVDate(newer.validFrom)}` : null;
+      }
+      if (status === 'SCHEDULED') return `Scheduled · takes effect ${fmtVDate(selectedVersion.validFrom)}`;
+      if (newer) {
+        const d = new Date(newer.validFrom + 'T12:00:00'); d.setDate(d.getDate() - 1);
+        return `Was active ${fmtVDate(selectedVersion.validFrom)} – ${fmtVDate(d.toISOString().slice(0, 10))}`;
+      }
+      return null;
+    })();
+    const stepBtn = (disabled) => ({
+      width: 30, height: 30, flexShrink: 0, borderRadius: 4,
+      border: `1px solid ${UI.hairStrong}`, background: 'transparent',
+      color: disabled ? UI.inkGhost : UI.gold, cursor: disabled ? 'default' : 'pointer',
+      fontSize: 17, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      WebkitTapHighlightColor: 'transparent',
+    });
+    return (
+      <div style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: 6, background: UI.bgRaised }}>
+          <button onClick={() => setVerIdx(safeVerIdx + 1)} disabled={safeVerIdx >= versions.length - 1} style={stepBtn(safeVerIdx >= versions.length - 1)}>‹</button>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, minWidth: 0 }}>
+            <span className="num" style={{ fontSize: 12, color: UI.ink }}>V{vNum}</span>
+            <span style={{ width: 3, height: 3, borderRadius: '50%', background: UI.hairStrong }} />
+            <span className="label" style={{ marginBottom: 0, color: viewingActiveVersion ? UI.gold : UI.inkFaint }}>{status}</span>
+            <span style={{ width: 3, height: 3, borderRadius: '50%', background: UI.hairStrong }} />
+            <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{fmtVDate(selectedVersion.validFrom)}</span>
+          </div>
+          <button onClick={() => setVerIdx(safeVerIdx - 1)} disabled={safeVerIdx <= 0} style={stepBtn(safeVerIdx <= 0)}>›</button>
+        </div>
+        {banner && (
+          <div className="micro" style={{ color: viewingActiveVersion ? UI.gold : UI.inkFaint, textAlign: 'center', letterSpacing: '0.08em', lineHeight: 1.5 }}>
+            {banner}
+          </div>
+        )}
+        {status === 'PAST' && (
+          <button onClick={() => setReactivateSheet(true)} style={{
+            alignSelf: 'center', background: 'transparent', border: `1px solid ${UI.goldSoft}`,
+            borderRadius: 4, padding: '6px 14px', cursor: 'pointer', color: UI.gold,
+            fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+            WebkitTapHighlightColor: 'transparent',
+          }}>Reactivate this version</button>
+        )}
+      </div>
+    );
+  })();
+
   return (
     <Screen scroll={false}>
       {confirmEl}
       <TopBar
         title={sch.name}
         sub={(() => {
-          const vn = (sch.versions?.length || 0) + 1;
-          const vLabel = vn > 1 ? ` · V${vn}` : '';
           return isWeekday
-            ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ') + vLabel
-            : `${sch.days.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}${vLabel}`;
+            ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ')
+            : `${displayDays.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`;
         })()}
         onBack={() => go({ name: fromPlan ? 'plan' : 'home' })}
         right={fromPlan ? (
-          <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })} style={{
+          <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id, versionFrom: selectedVersion?.validFrom })} style={{
             background: 'transparent', border: `1px solid ${UI.hairStrong}`,
             borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
             color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
           }}>Edit</button>
         ) : null}
       />
+
+      {versionBar}
 
       {isPad ? (
         <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
@@ -401,18 +495,18 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
                 return (
                   <button key={d.id} onClick={() => setSelectedDayId(d.id)} style={{
                     flexShrink: 0, padding: '8px 12px 6px', borderRadius: 4,
-                    border: `1px solid ${active ? UI.gold : isToday ? UI.goldSoft : UI.hairStrong}`,
-                    background: active ? UI.goldFaint : 'transparent',
+                    border: `1px solid ${active ? selBorder : isToday ? UI.goldSoft : UI.hairStrong}`,
+                    background: active ? selBg : 'transparent',
                     cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
                     display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
                   }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
                         fontSize: 11, fontFamily: UI.fontUi, letterSpacing: '0.07em', fontWeight: 600,
-                        color: active ? UI.gold : rest ? UI.inkFaint : UI.inkSoft,
+                        color: active ? selText : rest ? UI.inkFaint : UI.inkSoft,
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}>{d.name}</div>
-                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: active ? UI.gold : UI.inkFaint, marginTop: 1 }}>{sub}</div>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: active ? selText : UI.inkFaint, marginTop: 1 }}>{sub}</div>
                     </div>
                     {isToday && <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.gold, flexShrink: 0 }} />}
                   </button>
@@ -444,16 +538,16 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
               return (
                 <button key={d.id} onClick={() => setSelectedDayId(d.id)} style={{
                   flexShrink: 0, maxWidth: 120, padding: '6px 12px 4px', borderRadius: 4,
-                  border: `1px solid ${active ? UI.gold : isToday ? UI.goldSoft : UI.hairStrong}`,
-                  background: active ? UI.goldFaint : 'transparent',
+                  border: `1px solid ${active ? selBorder : isToday ? UI.goldSoft : UI.hairStrong}`,
+                  background: active ? selBg : 'transparent',
                   cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
                 }}>
                   <div style={{
                     fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em', fontWeight: 600,
-                    color: active ? UI.gold : rest ? UI.inkFaint : UI.inkSoft,
+                    color: active ? selText : rest ? UI.inkFaint : UI.inkSoft,
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}>{d.name}</div>
-                  <div style={{ fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: active ? UI.gold : UI.inkFaint, marginTop: 1 }}>{sub}</div>
+                  <div style={{ fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: active ? selText : UI.inkFaint, marginTop: 1 }}>{sub}</div>
                   <div style={{ height: 3, marginTop: 3, display: 'flex', justifyContent: 'center' }}>
                     {isToday && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold, marginTop: -1 }} />}
                   </div>
@@ -468,15 +562,54 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
           </div>
         </>
       )}
+
+      {reactivateSheet && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setReactivateSheet(false)}>
+          <div style={{ background: UI.bg, borderRadius: '14px 14px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="label" style={{ color: UI.inkFaint, marginBottom: 6 }}>REACTIVATE THIS VERSION</div>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 18, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
+              A copy of this version's days becomes active from the date you pick. Your existing versions stay in the history.
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${reactivateDate ? UI.goldSoft : UI.hairStrong}` }}>
+                <input
+                  type="date"
+                  value={reactivateDate}
+                  onChange={e => setReactivateDate(e.target.value)}
+                  style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: reactivateDate ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
+                />
+              </div>
+              <Btn disabled={!reactivateDate} onClick={() => doReactivate(reactivateDate)} style={{ flexShrink: 0 }}>
+                Apply
+              </Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </Screen>
   );
 }
 
 // ─── Edit screen — rename, manage pattern ─
-function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
+function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFrom }) {
   const [confirmEl, confirm] = useConfirm();
   const original = store.schedules.find(s => s.id === scheduleId);
-  const [draft, setDraft] = useStateS(original ? JSON.parse(JSON.stringify(original)) : null);
+  // Which version is being edited (identified by validFrom). -1 = unversioned
+  // or the newest version → default save flow; >0 = an older version, edited
+  // in place (its days are replaced directly, no "from date" / new version).
+  const editVerIdx = (original?.versions?.length && versionFrom)
+    ? original.versions.findIndex(v => v.validFrom === versionFrom)
+    : -1;
+  const [draft, setDraft] = useStateS(() => {
+    if (!original) return null;
+    const clone = JSON.parse(JSON.stringify(original));
+    if (editVerIdx > 0 && original.versions[editVerIdx]) {
+      clone.days = JSON.parse(JSON.stringify(original.versions[editVerIdx].days || []));
+    }
+    return clone;
+  });
   const [pickingType, setPickingType] = useStateS(false);
   const [applyFromSheet, setApplyFromSheet] = useStateS(false);
   const [applyFromDate, setApplyFromDate] = useStateS('');
@@ -532,6 +665,9 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
         // Already versioned — prepend new version, keep rest
         versions = [newVersionEntry, ...existingVersions];
       }
+      // One version per date — the new entry is first, so it wins for its date
+      // (replaces any existing version with the same validFrom instead of duplicating).
+      versions = LB.dedupeVersionsByDate(versions);
       // Sort newest first
       versions.sort((a, b) => b.validFrom.localeCompare(a.validFrom));
       savedDraft = { ...draft, versions };
@@ -540,6 +676,12 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
       // getCyclePosForDate derive the correct position for any given date.
       setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
     } else {
+      // Non-structural save (e.g. exercise swap) on the newest/unversioned plan.
+      // Keep the newest version's days in sync with sch.days so the
+      // version-aware viewer reflects the change.
+      if (draft.versions?.length) {
+        savedDraft = { ...draft, versions: draft.versions.map((v, i) => i === 0 ? { ...v, days: draft.days } : v) };
+      }
       setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
     }
 
@@ -557,7 +699,32 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
     go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
   };
 
+  // In-place edit of an older (non-newest) version: replace just that version's
+  // days; sch.days stays the newest version (untouched). No "from date" flow.
+  const doSaveVersion = async () => {
+    const versions = (original.versions || []).map((v, i) =>
+      i === editVerIdx ? { ...v, days: draft.days } : v
+    );
+    const savedDraft = { ...draft, versions, days: versions[0].days };
+    setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
+
+    const asClient = store.coaching?.asClient;
+    if (store.activeScheduleId === draft.id && asClient?.status === 'active') {
+      try {
+        const before = { ...original, days: (original.versions[editVerIdx] || {}).days || [] };
+        const diff = LB.diffSchedule(before, { ...draft }, store.exercises);
+        if (diff) {
+          const threadId = await LB.getOrCreateCoachingThread(asClient.id, `Changes on ${draft.name}`, userId);
+          const body = `Modified plan: ${draft.name}\n\n${diff.split('\n').map(l => `• ${l}`).join('\n')}`;
+          await LB.addCoachingNote(asClient.id, 'plan', draft.id, draft.name, body, userId, threadId);
+        }
+      } catch (e) { console.error('Failed to send plan change note', e); }
+    }
+    go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
+  };
+
   const save = () => {
+    if (editVerIdx > 0) { doSaveVersion(); return; } // older version → update in place, no date prompt
     if (!dirty || store.activeScheduleId !== draft.id) { doSave(null); return; }
     const isWdPlan = LB.isWeekdayPlan(original);
     const structurallyChanged = isWdPlan
@@ -626,6 +793,9 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
     <Screen>
       <TopBar
         title="Edit plan"
+        sub={editVerIdx > 0
+          ? `V${original.versions.length - editVerIdx} · from ${new Date(versionFrom + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+          : null}
         onBack={async () => {
           if (dirty && !await confirm('Unsaved changes will be lost.', { title: 'Discard changes?', ok: 'Discard', danger: true })) return;
           go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
