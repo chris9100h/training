@@ -477,6 +477,11 @@ function App() {
             const curExMap = new Map((cur.exercises || []).map(e => [e.id, e]));
             const serverSchIds = new Set(fresh.schedules.map(s => s.id));
             const localOnlySchedules = (cur.schedules || []).filter(x => !serverSchIds.has(x.id));
+            // Skips offline gesetzt aber noch nicht gesynct: erhalten, damit der
+            // Reload-Merge sie nicht mit den Server-Skips überschreibt (sie werden
+            // über syncStore's skips-Diff nachgeschoben).
+            const serverSkipIds = new Set((fresh.skips || []).map(s => s.id));
+            const localOnlySkips = (cur.skips || []).filter(x => !serverSkipIds.has(x.id));
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
@@ -492,6 +497,7 @@ function App() {
               sessions: [...localOnly, ...sessions],
               exercises: [...localOnlyExercises, ...fresh.exercises],
               schedules: [...localOnlySchedules, ...fresh.schedules],
+              skips: [...localOnlySkips, ...(fresh.skips || [])],
             };
           }
           if (!fresh.user.approved) { setPhase('pending'); return; }

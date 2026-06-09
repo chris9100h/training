@@ -108,22 +108,9 @@ async function deleteAllData(userId) {
   ]);
 }
 
-async function createSkip(userId, { id, date, dayId, dayName, skipReason }) {
-  const { error } = await _supabase.from('zane_skips').insert({
-    id, user_id: userId, date, day_id: dayId, day_name: dayName, skip_reason: skipReason,
-  });
-  if (error) throw error;
-}
-
-async function updateSkipReason(id, skipReason) {
-  const { error } = await _supabase.from('zane_skips').update({ skip_reason: skipReason }).eq('id', id);
-  if (error) throw error;
-}
-
-async function deleteSkip(id) {
-  const { error } = await _supabase.from('zane_skips').delete().eq('id', id);
-  if (error) throw error;
-}
+// Skips are persisted through syncStore's diff model (see the skips block there),
+// so they inherit the same offline-resilient retry/cache path as sessions. UI
+// mutates store.skips via setStore; no imperative per-skip writes.
 
 async function importFromBackup(backup, userId) {
   await deleteAllData(userId);
@@ -537,6 +524,19 @@ async function syncStore(prev, next, userId) {
       sessionUpserts = upsert.filter(s => prev.sessions?.find(x => x.id === s.id));
     }
     if (removed.length) ops.push(_supabase.from('zane_sessions').delete().in('id', removed.map(s => s.id)));
+  }
+
+  if (prev.skips !== next.skips) {
+    const upsert = (next.skips || []).filter(s => {
+      const p = (prev.skips || []).find(x => x.id === s.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(s);
+    });
+    const removed = (prev.skips || []).filter(s => !(next.skips || []).find(x => x.id === s.id));
+    if (upsert.length)  ops.push(_supabase.from('zane_skips').upsert(upsert.map(s => ({
+      id: s.id, user_id: userId, date: s.date, day_id: s.dayId, day_name: s.dayName,
+      skip_reason: s.skipReason, skipped_at: s.skippedAt ?? null,
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_skips').delete().in('id', removed.map(s => s.id)));
   }
 
   if (prev.user?.name !== next.user?.name && next.user?.name) {
@@ -1450,7 +1450,7 @@ window.LB = {
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
   computeNextTrainingDate, computeNextReminderAt,
-  cancelPushover, createSkip, updateSkipReason, deleteSkip,
+  cancelPushover,
   subscribeToChanges,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,

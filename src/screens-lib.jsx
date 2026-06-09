@@ -392,6 +392,7 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
   const [unilateral, setUnilateral] = useStateL(false);
   const [equipment, setEquipment] = useStateL('barbell_dual');
   const [progressionReps, setProgressionReps] = useStateL(null);
+  const [showSizeInfo, setShowSizeInfo] = useStateL(false);
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const save = () => {
     if (!name.trim()) return;
@@ -416,7 +417,25 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
           </div>
         </div>
         <div>
-          <span className="label">Exercise size</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span className="label">Exercise size</span>
+            <button onClick={() => setShowSizeInfo(v => !v)} style={{
+              background: 'none', border: `1px solid ${UI.hairStrong}`, borderRadius: '50%',
+              width: 14, height: 14, padding: 0, cursor: 'pointer', color: UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 8, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              WebkitTapHighlightColor: 'transparent', flexShrink: 0,
+            }}>?</button>
+          </div>
+          {showSizeInfo && (
+            <div style={{ marginTop: 6, padding: '8px 10px', background: UI.bgRaised, borderRadius: 6, border: `1px solid ${UI.hairStrong}`, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {[['BIG','Heavy compounds — squat, deadlift, overhead press'],['MEDIUM','Moderate compounds — bench press, pull-up, lunge'],['SMALL','Isolation — bicep curl, lateral raise, tricep extension']].map(([k,v]) => (
+                <div key={k} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                  <span className="micro" style={{ color: UI.gold, flexShrink: 0, minWidth: 46 }}>{k}</span>
+                  <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.04em', textTransform: 'none', fontWeight: 400 }}>{v}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
             {EXERCISE_SIZES.map(([val, label]) => (
               <Pill key={val} gold={category === val} onClick={() => setCategory(c => c === val ? null : val)} style={{ cursor: 'pointer' }}>{label}</Pill>
@@ -477,6 +496,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editProgressionReps, setEditProgressionReps] = useStateL(autoEdit ? (ex.progression_reps ?? null) : null);
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
+  const [showSizeInfoEdit, setShowSizeInfoEdit] = useStateL(false);
 
   const advanceQueue = () => {
     if (editQueue.length > 0) {
@@ -598,7 +618,25 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
               </div>
             </div>
             <div>
-              <span className="label">Exercise size</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span className="label">Exercise size</span>
+                <button onClick={() => setShowSizeInfoEdit(v => !v)} style={{
+                  background: 'none', border: `1px solid ${UI.hairStrong}`, borderRadius: '50%',
+                  width: 14, height: 14, padding: 0, cursor: 'pointer', color: UI.inkFaint,
+                  fontFamily: UI.fontUi, fontSize: 8, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  WebkitTapHighlightColor: 'transparent', flexShrink: 0,
+                }}>?</button>
+              </div>
+              {showSizeInfoEdit && (
+                <div style={{ marginTop: 6, padding: '8px 10px', background: UI.bgRaised, borderRadius: 6, border: `1px solid ${UI.hairStrong}`, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {[['BIG','Heavy compounds — squat, deadlift, overhead press'],['MEDIUM','Moderate compounds — bench press, pull-up, lunge'],['SMALL','Isolation — bicep curl, lateral raise, tricep extension']].map(([k,v]) => (
+                    <div key={k} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                      <span className="micro" style={{ color: UI.gold, flexShrink: 0, minWidth: 46 }}>{k}</span>
+                      <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.04em', textTransform: 'none', fontWeight: 400 }}>{v}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                 {EXERCISE_SIZES.map(([val, label]) => (
                   <Pill key={val} gold={editCategory === val} onClick={() => setEditCategory(c => c === val ? null : val)} style={{ cursor: 'pointer' }}>{label}</Pill>
