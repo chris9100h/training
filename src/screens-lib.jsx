@@ -2024,6 +2024,10 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
 function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
   const [session, setSession] = useStateL(null);
   const [exIdx, setExIdx] = useStateL(0);
+  // Auto-follow the trainee's current exercise. Turned off the moment the
+  // spectator taps a different exercise, so the 2s poll stops yanking the view
+  // back; tapping the live exercise (or the LIVE badge) re-engages it.
+  const [followLive, setFollowLive] = useStateL(true);
   const [loading, setLoading] = useStateL(true);
   const [ended, setEnded] = useStateL(false);
   const [now, setNow] = useStateL(Date.now());
@@ -2046,7 +2050,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
           const d = data[0];
           setSession(d);
           setEnded(false);
-          if (!sessionId) setExIdx(LB.inferCurrentExIdx(d.entries || []));
+          // Position is synced separately (see the follow-live effect below) so
+          // a poll never overrides the spectator's manual navigation.
         }
         setLoading(false);
       })
@@ -2059,6 +2064,14 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
     const iv = setInterval(load, 2000);
     return () => clearInterval(iv);
   }, [targetUserId, sessionId]);
+
+  // Keep the view on the trainee's current exercise while following live. Runs
+  // on each poll (session changes) and when following is re-engaged. Once the
+  // spectator navigates away (followLive = false) the position is left alone.
+  useEffectL(() => {
+    if (sessionId || !session || !followLive) return;
+    setExIdx(LB.inferCurrentExIdx(session.entries || []));
+  }, [session, followLive, sessionId]);
 
   useEffectL(() => {
     const row = chipRowRef.current;
@@ -2105,7 +2118,9 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
   );
 
   const entries = session.entries || [];
+  const liveIdx = LB.inferCurrentExIdx(entries);
   const entry = entries[exIdx];
+  const goLive = () => { setFollowLive(true); setExIdx(liveIdx); };
 
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
@@ -2136,10 +2151,17 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
             <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{elapsedStr}</span>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-          <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, animation: 'pulseDot 1.4s ease-in-out infinite' }} />
-          <span className="micro" style={{ color: UI.gold }}>LIVE</span>
-        </div>
+        <button onClick={goLive} style={{
+          display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+          border: `1px solid ${followLive ? 'transparent' : UI.gold}`,
+          background: followLive ? 'transparent' : UI.goldFaint,
+          borderRadius: 4, padding: '4px 8px',
+          cursor: followLive ? 'default' : 'pointer',
+          WebkitTapHighlightColor: 'transparent',
+        }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, animation: followLive ? 'pulseDot 1.4s ease-in-out infinite' : 'none' }} />
+          <span className="micro" style={{ color: UI.gold }}>{followLive ? 'LIVE' : 'GO LIVE'}</span>
+        </button>
       </div>
 
       {/* Exercise chips */}
@@ -2151,8 +2173,10 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
         {entries.map((e, i) => {
           const allDone = e.sets?.length > 0 && e.sets.every(s => s.done || s.skipped);
           const isCurrent = i === exIdx;
+          const isLive = i === liveIdx;
+          // Tapping the live exercise re-engages following; any other stops it.
           return (
-            <button key={i} onClick={() => setExIdx(i)} style={{
+            <button key={i} onClick={() => { setExIdx(i); setFollowLive(i === liveIdx); }} style={{
               flexShrink: 0, padding: '6px 12px', borderRadius: 4,
               border: `${isCurrent ? '1.5px' : '1px'} solid ${isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.hair}`,
               background: isCurrent ? UI.goldFaint : allDone ? 'rgba(201,169,97,0.06)' : 'transparent',
@@ -2161,6 +2185,9 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
               letterSpacing: '0.06em', cursor: 'pointer',
               WebkitTapHighlightColor: 'transparent',
             }}>
+              {isLive && !isCurrent && (
+                <span style={{ display: 'inline-block', width: 5, height: 5, borderRadius: '50%', background: UI.gold, marginRight: 5, verticalAlign: 'middle', animation: 'pulseDot 1.4s ease-in-out infinite' }} />
+              )}
               {e.name?.split(' ').slice(0, 2).join(' ')}
               {allDone && !isCurrent && (
                 <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ marginLeft: 4, verticalAlign: 'middle' }}>
