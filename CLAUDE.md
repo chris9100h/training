@@ -65,6 +65,18 @@
   - `logbook-accent-color`
   - `logbook-push-enabled`
   - `logbook-cycle-week-view`
+  - `logbook-whatsnew-seen` — zuletzt gesehene `WHATS_NEW.id` (siehe „What's New / Changelog")
+
+## What's New / Changelog
+
+- **`WHATS_NEW`-Konstante in `src/app.jsx`** (Default `null`). Steuert eine einmalige „What's New"-Karte (`WhatsNewModal`), die dem Nutzer nach einem Update neue Features vorstellt. Form: `{ id, title, items: [...] }`.
+- **Anzeige-Logik:** Sobald die App nach einem Update den Zustand `ready` erreicht (eingeloggt + Daten geladen) und `WHATS_NEW.id` noch nicht in `localStorage` (`logbook-whatsnew-seen`) steht, erscheint die Karte **genau einmal**. Beim Schließen wird die `id` gespeichert → erscheint nie wieder. Tracking ist **pro Gerät** (localStorage, keine DB).
+- **Default `null` = es wird nichts angezeigt.** Die Karte erscheint nur für Releases, die wir bewusst annotieren.
+- **Workflow — nur auf ausdrückliche Nutzeranfrage** eine neue Nachricht einspielen. Niemals ungefragt eine Ankündigung setzen. Wenn der Nutzer eine wünscht:
+  1. `WHATS_NEW` in `app.jsx` auf `{ id, title, items }` setzen — mit **neuer, eindeutiger `id`** (im Gleichschritt mit der SW-Cache-Version, z.B. `'v2.065'`), damit die Karte genau einmal pro Nutzer erscheint.
+  2. SW-Cache-Version in `sw.js` wie üblich bumpen.
+  3. **Texte gut schreiben — das ist der Punkt der Funktion:** Das neue Feature klar und nutzerorientiert erklären — *was* ist neu, *welchen Nutzen* es bringt, *wie* man es benutzt. Knackige Stichpunkte (`items`), kein Tech-Jargon, keine internen Begriffe (Tabellen, Funktionsnamen). Der `title` benennt das Feature, die Punkte vermitteln den Mehrwert. Lieber 2–4 starke Punkte als eine lange Liste.
+- Wird ein Release ohne Ankündigungs-Wunsch gemacht, bleibt `WHATS_NEW = null` (keine Karte).
 
 ## Datenbank (Supabase)
 
