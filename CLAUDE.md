@@ -25,6 +25,7 @@
   - `src/screens-home.jsx`, `src/screens-schedule.jsx`, `src/screens-train.jsx`, `src/screens-lib.jsx` — einzelne Screens
   - `src/store.js` — Supabase-Lesen/Schreiben, Auth-Funktionen
   - `src/supabase.js` — Supabase JS Client (vendored)
+  - `src/whatsnew.js` — Changelog-Historie (`window.WHATS_NEW`-Array, siehe „What's New / Changelog")
   - `supabase/` — Migrationen, Edge Functions, Schema
 
 ## Screens & Navigation
@@ -69,14 +70,16 @@
 
 ## What's New / Changelog
 
-- **`WHATS_NEW`-Konstante in `src/app.jsx`** (Default `null`). Steuert eine einmalige „What's New"-Karte (`WhatsNewModal`), die dem Nutzer nach einem Update neue Features vorstellt. Form: `{ id, title, items: [...] }`.
-- **Anzeige-Logik:** Sobald die App nach einem Update den Zustand `ready` erreicht (eingeloggt + Daten geladen) und `WHATS_NEW.id` noch nicht in `localStorage` (`logbook-whatsnew-seen`) steht, erscheint die Karte **genau einmal**. Beim Schließen wird die `id` gespeichert → erscheint nie wieder. Tracking ist **pro Gerät** (localStorage, keine DB).
-- **Default `null` = es wird nichts angezeigt.** Die Karte erscheint nur für Releases, die wir bewusst annotieren.
-- **Workflow — nur auf ausdrückliche Nutzeranfrage** eine neue Nachricht einspielen. Niemals ungefragt eine Ankündigung setzen. Wenn der Nutzer eine wünscht:
-  1. `WHATS_NEW` in `app.jsx` auf `{ id, title, items }` setzen — mit **neuer, eindeutiger `id`** (im Gleichschritt mit der SW-Cache-Version, z.B. `'v2.065'`), damit die Karte genau einmal pro Nutzer erscheint.
-  2. SW-Cache-Version in `sw.js` wie üblich bumpen.
-  3. **Texte gut schreiben — das ist der Punkt der Funktion:** Das neue Feature klar und nutzerorientiert erklären — *was* ist neu, *welchen Nutzen* es bringt, *wie* man es benutzt. Knackige Stichpunkte (`items`), kein Tech-Jargon, keine internen Begriffe (Tabellen, Funktionsnamen). Der `title` benennt das Feature, die Punkte vermitteln den Mehrwert. Lieber 2–4 starke Punkte als eine lange Liste.
-- Wird ein Release ohne Ankündigungs-Wunsch gemacht, bleibt `WHATS_NEW = null` (keine Karte).
+- **Changelog-Historie in `src/whatsnew.js`** — `window.WHATS_NEW`, ein **Array** von Einträgen, **neueste zuerst**. Jeder Eintrag: `{ id, title, items: [...] }`. `app.jsx` referenziert nur dieses Array; `WhatsNewModal` rendert es. Die Datei ist die vollständige History auf einen Blick.
+- **Anzeige-Logik:** Sobald die App nach einem Update `ready` ist (eingeloggt + Daten geladen), zeigt sie **alle noch nicht gesehenen Einträge** — gebündelt in **einer** Karte (jeder Eintrag ein eigener Abschnitt mit Titel + Punkten). So holt ein Rückkehrer, der mehrere Releases übersprungen hat, alles auf einmal nach. Beim Schließen wird die `id` des **neuesten** Eintrags in `localStorage` (`logbook-whatsnew-seen`) gespeichert; alles bis dahin gilt als gesehen. Tracking **pro Gerät** (keine DB). Neue Nutzer / erster Lauf nach Einführung (keine gespeicherte id) sehen nur den **neuesten** Eintrag, nicht die ganze Historie.
+- **Leeres Array (`[]`) = es wird nichts angezeigt.** Die Karte erscheint nur für Einträge, die wir bewusst hinzufügen.
+- **Workflow — nur auf ausdrückliche Nutzeranfrage** eine Ankündigung einspielen. Niemals ungefragt. Wenn der Nutzer eine wünscht:
+  1. Neuen Eintrag **oben** ins Array in `src/whatsnew.js` einfügen — mit **neuer, eindeutiger `id`** (typischerweise im Gleichschritt mit der kommenden SW-Cache-Version, z.B. `'v2.066'`).
+  2. **Alte Einträge nie entfernen** — sie sind die Historie, die Rückkehrer nachholen.
+  3. SW-Cache-Version in `sw.js` wie üblich bumpen (deployt das Update).
+  4. **Texte gut schreiben — das ist der Punkt der Funktion:** Das neue Feature klar und nutzerorientiert erklären — *was* ist neu, *welchen Nutzen* es bringt, *wie* man es benutzt. Knackige Stichpunkte (`items`), kein Tech-Jargon, keine internen Begriffe (Tabellen, Funktionsnamen). Der `title` benennt das Feature, die Punkte vermitteln den Mehrwert. Lieber 2–4 starke Punkte als eine lange Liste.
+- Wird ein Release ohne Ankündigungs-Wunsch gemacht, bleibt das Array unverändert (kein neuer Eintrag → keine Karte).
+- **`whatsnew.js` ist plain JS** (kein JSX): wird wie `store.js` als normales `<script>` in `index.html` geladen (nicht über den Precompile-Loader) und ist in `ASSETS` in `sw.js` für Offline gelistet — beides bereits eingerichtet.
 
 ## Datenbank (Supabase)
 

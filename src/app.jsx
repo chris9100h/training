@@ -2,33 +2,22 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useCallback: useCallbackA } = React;
 
-/* ─── What's New ────────────────────────────────────────────────────────────
-   A changelog card shown once per `id`, the first time the app reaches 'ready'
-   after an update. Leave it null to show nothing. To announce new features
-   (only on request): set it to { id, title, items:[…] } and give it a fresh
-   `id` so anyone who saw the previous entry gets the new card exactly once.
-   Keep `id` in step with the sw.js cache version you ship it with.
-
-   Example:
-   const WHATS_NEW = {
-     id: 'v2.064',
-     title: 'Plan versioning',
-     items: [
-       'Plans now keep a dated version history — browse and reactivate past versions from the plan view.',
-       'Faster cold starts, fully offline-capable.',
-     ],
-   };
-*/
-const WHATS_NEW = {
-  id: 'v2.065',
-  title: 'Faster, offline & flexible plans',
-  items: [
-    'The app now starts much faster and works fully offline — open it anytime, even without a connection, and your training is right there.',
-    'Plans keep a dated version history. Change your split starting from any date you choose, then browse or bring back earlier versions anytime in the plan view.',
-    "Coaching: while following a client's live session you can now scroll through their whole workout freely — tap LIVE to jump back to the exercise they're on right now.",
-  ],
-};
+// What's New — changelog entries live in src/whatsnew.js (window.WHATS_NEW, an
+// array, newest first). On 'ready' after an update we show every entry the user
+// hasn't seen yet, bundled into one card. Tracked per device by the newest id.
 const WHATS_NEW_KEY = 'logbook-whatsnew-seen';
+
+// Entries newer than the last-seen id. New users / first run after the feature
+// shipped (no stored id) get just the latest, not the whole back catalogue.
+function unseenWhatsNew() {
+  const all = window.WHATS_NEW || [];
+  if (!all.length) return [];
+  let seen = null;
+  try { seen = localStorage.getItem(WHATS_NEW_KEY); } catch (_) {}
+  if (!seen) return [all[0]];
+  const idx = all.findIndex(e => e.id === seen);
+  return idx === -1 ? [all[0]] : all.slice(0, idx); // newest-first: before the seen entry = unseen
+}
 
 function useIsPad() {
   const [isPad, setIsPad] = useStateA(() => window.innerWidth >= 768);
@@ -176,7 +165,7 @@ function UpdateBanner({ onUpdate }) {
   );
 }
 
-function WhatsNewModal({ data, onDismiss }) {
+function WhatsNewModal({ entries, onDismiss }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9997,
@@ -186,31 +175,37 @@ function WhatsNewModal({ data, onDismiss }) {
       padding: 32,
     }}>
       <div style={{
-        width: '100%', maxWidth: 340,
+        width: '100%', maxWidth: 340, maxHeight: '82vh',
         background: UI.bgRaised,
         border: `1px solid ${UI.goldSoft}`,
         borderRadius: 6,
         padding: '28px 26px',
-        display: 'flex', flexDirection: 'column', gap: 16,
+        display: 'flex', flexDirection: 'column', gap: 18,
+        overflowY: 'auto',
         boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(201,169,97,0.2)',
         animation: 'fadeUp 0.3s ease',
       }}>
-        <div>
-          <div className="micro-gold" style={{ marginBottom: 6 }}>WHAT'S NEW</div>
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 24, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
-            {data.title}
-          </div>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-          {(data.items || []).map((it, i) => (
-            <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-              <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.gold, marginTop: 7, flexShrink: 0 }} />
-              <div style={{ fontSize: 13.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{it}</div>
+        <div className="micro-gold">WHAT'S NEW</div>
+        {entries.map((entry, ei) => (
+          <div key={entry.id} style={{
+            display: 'flex', flexDirection: 'column', gap: 12,
+            ...(ei > 0 ? { paddingTop: 18, borderTop: `1px solid ${UI.hair}` } : null),
+          }}>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 23, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
+              {entry.title}
             </div>
-          ))}
-        </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+              {(entry.items || []).map((it, i) => (
+                <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                  <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.gold, marginTop: 7, flexShrink: 0 }} />
+                  <div style={{ fontSize: 13.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{it}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
         <button onClick={onDismiss} style={{
-          marginTop: 4, width: '100%', padding: '14px 0',
+          marginTop: 4, width: '100%', padding: '14px 0', flexShrink: 0,
           borderRadius: 6, border: 'none', cursor: 'pointer',
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
@@ -278,7 +273,7 @@ function App() {
   const [route, setRoute]         = useStateA({ name: 'home' });
   const [updateAvailable, setUpdateAvailable] = useStateA(false);
   const [autoCloseNotify, setAutoCloseNotify] = useStateA(null);
-  const [showWhatsNew, setShowWhatsNew] = useStateA(false);
+  const [whatsNew, setWhatsNew] = useStateA(null); // array of unseen changelog entries, or null
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
   const swReg                     = useRefA(null);
@@ -580,21 +575,20 @@ function App() {
     return () => { cancelled = true; };
   }, [phase, userId]);
 
-  // What's New — show the changelog card once per id, the first time the app is
-  // 'ready' after an update that ships one (WHATS_NEW set). Tracked by id in
-  // localStorage, so it appears exactly once per announcement.
+  // What's New — the first time the app is 'ready' after an update, show every
+  // changelog entry the user hasn't seen yet (bundled into one card), so anyone
+  // returning after several releases catches up on all of them at once.
   useEffectA(() => {
     if (phase !== 'ready') return;
-    try {
-      if (WHATS_NEW?.id && localStorage.getItem(WHATS_NEW_KEY) !== WHATS_NEW.id) {
-        setShowWhatsNew(true);
-      }
-    } catch (_) {}
+    const unseen = unseenWhatsNew();
+    if (unseen.length) setWhatsNew(unseen);
   }, [phase]);
 
   const dismissWhatsNew = useCallbackA(() => {
-    try { if (WHATS_NEW?.id) localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW.id); } catch (_) {}
-    setShowWhatsNew(false);
+    // Mark everything up to the newest entry as seen.
+    const newest = (window.WHATS_NEW || [])[0];
+    try { if (newest?.id) localStorage.setItem(WHATS_NEW_KEY, newest.id); } catch (_) {}
+    setWhatsNew(null);
   }, []);
 
   // Realtime: coaching invites + messages only. (Cross-device live workout sync
@@ -807,7 +801,7 @@ function App() {
         </div>
         {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
         {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
-        {showWhatsNew && WHATS_NEW && <WhatsNewModal data={WHATS_NEW} onDismiss={dismissWhatsNew} />}
+        {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
         {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
       </div>
     );
@@ -824,7 +818,7 @@ function App() {
       </ErrorBoundary>
       {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
-      {showWhatsNew && WHATS_NEW && <WhatsNewModal data={WHATS_NEW} onDismiss={dismissWhatsNew} />}
+      {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
     </>
