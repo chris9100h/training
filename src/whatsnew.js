@@ -15,11 +15,11 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
-    id: 'v2.065',
+    id: 'v2.068',
     title: 'Faster, offline & flexible plans',
     items: [
       'The app now starts much faster and works fully offline — open it anytime, even without a connection, and your training is right there.',
-      'Plans keep a dated version history. Change your split starting from any date you choose, then browse or bring back earlier versions anytime in the plan view.',
+      'Plans keep a dated version history. Change your split from any date you choose, and browse, edit, or restore each version separately — right from the plan view.',
       "Coaching: while following a client's live session you can now scroll through their whole workout freely — tap LIVE to jump back to the exercise they're on right now.",
     ],
   },
