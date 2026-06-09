@@ -330,7 +330,7 @@ function RecentBannerDay({ banner, store, setStore, go, sch, onOpenSkipSheet }) 
       <button onClick={() => {
         const entries = (dayData?.items || []).map(it => {
           const ex = LB.findExercise(store, it.exId);
-          const last = LB.lastSessionForExercise(store, it.exId, dayId);
+          const last = LB.bestRecentEntry(store, it.exId, dayId);
           const isUni = ex?.unilateral || false;
           const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet);
           const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
@@ -732,7 +732,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (!activeDay || isActiveRest) return;
     const entries = activeDay.items.map(it => {
       const ex = LB.findExercise(store, it.exId);
-      const last = LB.lastSessionForExercise(store, it.exId, activeDay.id);
+      const last = LB.bestRecentEntry(store, it.exId, activeDay.id);
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps);
       const seedSets = LB.buildSeedSets(it, last, suggestion, isUnilateral, !!store.settings?.smartProgression);
@@ -1215,7 +1215,7 @@ function HomeScreen({ store, setStore, go, userId }) {
               const { dayData, dayId, dayName, date } = recentBannerDay;
               const entries = (dayData?.items || []).map(it => {
                 const ex = LB.findExercise(store, it.exId);
-                const last = LB.lastSessionForExercise(store, it.exId, dayId);
+                const last = LB.bestRecentEntry(store, it.exId, dayId);
                 const isUni = ex?.unilateral || false;
                 const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet);
                 const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);

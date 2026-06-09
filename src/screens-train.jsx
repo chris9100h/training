@@ -473,13 +473,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       return nextKg > refKg ? { exName: entry.name, currentKg: refKg, nextKg } : null;
     })();
 
+    // Overlay precedence (one per completed set): PROGRESSION UNLOCKED (handled
+    // below) > NEW BEST > IMPROVEMENT > REGRESSION. NEW BEST fires when the set
+    // beats the all-time e1RM record for this exercise — independent of smart
+    // progression, max once per exercise. A first-ever set (no record yet) and
+    // bodyweight sets (no kg) never count as a new best.
     if (!entry.sets[setIdx]?.warmup && !progressionResult) {
-      if (isImprovement(entry.sets[setIdx], prevSet)) {
+      const completed = entry.sets[setIdx];
+      const cReps = LB.effReps(completed);
+      const cE1rm = (completed?.kg != null && cReps != null && cReps > 0) ? LB.e1rm(completed.kg, cReps) : 0;
+      const priorBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
+      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[exIdx];
+      if (isNewBest) {
+        newBestShownRef.current[exIdx] = true;
+        setNewBestSet(true);
+        setTimeout(() => setNewBestSet(false), 2500);
+      } else if (isImprovement(completed, prevSet)) {
         setImprovedSet(true);
         setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, prevWorkingSetFor(k)));
-        if (!anyImprovementBefore && isDecline(entry.sets[setIdx], prevSet)) {
+        if (!anyImprovementBefore && isDecline(completed, prevSet)) {
           setRegressionSet(true);
           setTimeout(() => setRegressionSet(false), 2500);
         }
@@ -804,6 +818,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
   const [flashSet, setFlashSet] = useStateT(null);
   const [improvedSet, setImprovedSet] = useStateT(false);
   const [regressionSet, setRegressionSet] = useStateT(false);
+  const [newBestSet, setNewBestSet] = useStateT(false);
+  const newBestShownRef = useRefT({}); // exIdx → true once a NEW BEST flashed (max once per exercise)
   const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
   const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(false);
@@ -1190,8 +1206,33 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       )}
       {/* Improvement overlay */}
       {/* Block keyboard and content interaction while any overlay is visible */}
-      {(improvedSet || regressionSet || !!progressionUnlocked) && (
+      {(improvedSet || regressionSet || newBestSet || !!progressionUnlocked) && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} />
+      )}
+
+      {/* New best (personal record) overlay */}
+      {newBestSet && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 155, pointerEvents: 'none',
+          background: 'rgb(8,6,3)',
+          animation: 'improvedFade 2.5s ease forwards',
+          animationFillMode: 'forwards',
+        }}>
+          <div style={{
+            position: 'absolute', inset: 0,
+            animation: 'improvedBorderPulse 0.5s ease-in-out infinite',
+            borderRadius: 0,
+          }} />
+          <div style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            gap: 8,
+          }}>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 80, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 35px rgba(201,169,97,1), 0 0 80px rgba(201,169,97,0.6)' }}>★</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 30, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 18px rgba(201,169,97,1), 0 0 45px rgba(201,169,97,0.8), 0 0 90px rgba(201,169,97,0.4)' }}>NEW BEST</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, fontWeight: 700, letterSpacing: '0.28em' }}>PERSONAL RECORD</span>
+          </div>
+        </div>
       )}
 
       {improvedSet && (

@@ -365,7 +365,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
       {day.items.map((it, k) => {
         const ex = LB.findExercise(store, it.exId);
         const isUni = !!ex?.unilateral;
-        const last = LB.lastSessionForExercise(store, it.exId, day.id);
+        const last = LB.bestRecentEntry(store, it.exId, day.id);
         const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps);
         const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
         return (
