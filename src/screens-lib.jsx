@@ -881,15 +881,20 @@ function StatsTab({ store, sessions, go }) {
       const day = sch.days.find(d => d.weekday === wd);
       return day ? day.items.length > 0 : false;
     }
+    const dateStr = date.toISOString().slice(0, 10);
+    const days = LB.getPlanDaysForDate(sch, dateStr);
+    const idx = LB.getCyclePosForDate(sch, dateStr);
+    if (idx !== null) return (days[idx]?.items || []).length > 0;
     if (!store.cycleStartDate) return true;
     const start = LB.parseDate(store.cycleStartDate);
     const n = Math.round((date.getTime() - start.getTime()) / 86400000);
-    if (n < 0) return false; // before plan start → streak-neutral
+    if (n < 0) return false;
     const day = sch.days[((n % sch.days.length) + sch.days.length) % sch.days.length];
     return day ? day.items.length > 0 : false;
   };
 
-  const planStart = store.cycleStartDate ? LB.parseDate(store.cycleStartDate) : null;
+  const oldestVersion = sch?.versions?.length ? sch.versions[sch.versions.length - 1] : null;
+  const planStart = oldestVersion ? LB.parseDate(oldestVersion.validFrom) : (store.cycleStartDate ? LB.parseDate(store.cycleStartDate) : null);
 
   let currentStreak = 0;
   for (let i = 0; i <= 730; i++) {

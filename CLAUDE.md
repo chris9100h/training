@@ -87,7 +87,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_pushover_active`:** `id` (text), `nonce` (text)
 
-**`zane_schedules`:** `id` (text), `user_id` (uuid), `name` (text), `days` (jsonb), `archived` (boolean, default false)
+**`zane_schedules`:** `id` (text), `user_id` (uuid), `name` (text), `days` (jsonb), `archived` (boolean, default false), `versions` (jsonb, default []) — array of `{ validFrom: 'YYYY-MM-DD', days: [...] }` sorted newest first; used for plan-change-from-date versioning
 
 **`zane_sessions`:** `id` (text), `user_id` (uuid), `schedule_id`, `day_id`, `day_name` (text), `date`, `started_at`, `ended` (timestamptz), `entries` (jsonb), `duration_minutes` (int), `feel` (text: easy|good|hard|very_hard|max)
 
@@ -107,7 +107,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_skips`:** `id` (text), `user_id` (uuid), `date` (text), `day_id` (text), `day_name` (text), `skip_reason` (text), `skipped_at` (timestamptz)
 
-**`zane_user_settings`:** `user_id` (uuid), `active_schedule_id` (text), `cycle_index` (int), `cycle_start_date` (text), `last_advanced_date` (date), `week_plan_start_date` (date), `in_progress_session_id` (text), `unit` (text), `rest_default`, `rest_big`, `rest_medium`, `rest_small` (int), `push_enabled` (boolean), `pushover_user_key` (text), `cycle_week_view` (boolean), `accent_color` (text), `dark_mode` (text), `tempo_enabled` (boolean), `tempo_eccentric` (numeric), `tempo_concentric` (numeric), `smart_progression` (boolean), `progression_range_top` (int), `equipment_config` (jsonb), `custom_day_types` (text[]), `reminder_enabled` (boolean), `reminder_time` (text, HH:MM), `next_reminder_at` (timestamptz), `show_warmup_in_summary` (boolean), `show_coaching_tab` (boolean), `be_your_own_coach` (boolean)
+**`zane_user_settings`:** `user_id` (uuid), `active_schedule_id` (text), `cycle_index` (int), `cycle_start_date` (text), `last_advanced_date` (date), `week_plan_start_date` (date), `in_progress_session_id` (text), `unit` (text), `rest_default`, `rest_big`, `rest_medium`, `rest_small` (int), `push_enabled` (boolean), `pushover_user_key` (text), `cycle_week_view` (boolean), `accent_color` (text), `dark_mode` (text), `tempo_enabled` (boolean), `tempo_eccentric` (numeric), `tempo_concentric` (numeric), `smart_progression` (boolean), `progression_range_top` (int), `equipment_config` (jsonb), `custom_day_types` (text[]), `reminder_enabled` (boolean), `reminder_time` (text, HH:MM), `next_reminder_at` (timestamptz), `show_warmup_in_summary` (boolean), `show_coaching_tab` (boolean), `be_your_own_coach` (boolean), `session_timeout_minutes` (int, default 90), `auto_close_notify` (jsonb, nullable — `{ dayName, date, durationMinutes }`, written by edge function, cleared by app on first read)
 
 ### Aktuelle RPCs & Realtime
 
@@ -122,6 +122,8 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 **`get_active_session_detail(p_user_id uuid, p_session_id text)`** → `TABLE(...)` — Volldetail einer Session inkl. Historienvergleich (avg. Dauer, Sets, letzte Session; gated by feature grant)
 
 **`sync_sets_batch(p_sets jsonb)`** → `void` — batch-upsert sets with updated_at guard; only updates a row if the incoming updated_at is newer than what's stored (prevents stale kbApply writes from overwriting completed sets)
+
+**`auto-close-sessions`** (Edge Function) — schließt abgelaufene offene Sessions: kein Sets → Session + Entries löschen (butt start); mit Sets → `ended` = letztes `updated_at` der Sets, `duration_minutes` berechnen, `in_progress_session_id` clearen; optional Pushover-Notification. Wird per Cron alle 15 Minuten aufgerufen (Supabase Dashboard → Edge Functions → Schedule). Timeout pro User in `session_timeout_minutes` (default 90 min).
 
 **`get_coaching_clients()`** → `TABLE(coaching_id text, client_id uuid, client_email text, client_name text, status text, checkin_enabled boolean)` — listet alle Clients des aufrufenden Coaches inkl. `checkin_enabled`-Flag; Self-Coaching-Zeilen ausgeschlossen
 

@@ -793,7 +793,7 @@ function Field({ label, children, style = {} }) {
   );
 }
 
-function TextInput({ value, onChange, placeholder, type = 'text', autoFocus }) {
+function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...rest }) {
   const [focus, setFocus] = React.useState(false);
   return (
     <div style={{
@@ -805,6 +805,7 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus }) {
         value={value} onChange={e => onChange(e.target.value)}
         type={type} placeholder={placeholder} autoFocus={autoFocus}
         onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
+        {...rest}
         style={{
           width: '100%', background: 'transparent', border: 'none', outline: 'none',
           color: UI.ink, fontFamily: UI.fontUi, fontSize: 16, padding: 0,

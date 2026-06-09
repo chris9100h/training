@@ -156,6 +156,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
   // Training sub-sheets
   const [restSheet, setRestSheet] = useStateSet(false);
+  const [timeoutSheet, setTimeoutSheet] = useStateSet(false);
   const [paceguardSheet, setPaceguardSheet] = useStateSet(false);
   const [progressionSheet, setProgressionSheet] = useStateSet(false);
   const [progConfigOpen, setProgConfigOpen] = useStateSet(false);
@@ -539,6 +540,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           {trainingOpen && (
             <div style={{ marginTop: 4 }}>
               <NavRow label="Rest timers" hint={restHint} onTap={() => setRestSheet(true)} first />
+              <NavRow label="Auto-end session" hint={`${store.settings?.sessionTimeoutMinutes ?? 90} min`} onTap={() => setTimeoutSheet(true)} />
               <NavRow label="Paceguard" hint={paceguardHint} onTap={() => setPaceguardSheet(true)} />
               <NavRow label="Smart progression" hint={progressionHint} onTap={() => setProgressionSheet(true)} />
               <Row label="Warmup sets in summary">
@@ -647,6 +649,21 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
       {confirmEl}
       {debugPanelOpen && <DebugPanel onClose={() => setDebugPanelOpen(false)} />}
+
+      {/* ══ Auto-end session sheet ══ */}
+      <Sheet open={timeoutSheet} onClose={() => setTimeoutSheet(false)} title="Auto-end session">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginBottom: 8 }}>
+          <div>
+            <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>INACTIVITY TIMEOUT</div>
+            <Stepper value={store.settings?.sessionTimeoutMinutes ?? 90} step={15} min={15} max={480} suffix=" min"
+              onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, sessionTimeoutMinutes: v } }))} />
+          </div>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
+            Open sessions with no new sets for this long are automatically ended. Sessions with no sets at all are silently deleted.
+          </div>
+          <Btn onClick={() => setTimeoutSheet(false)}>Done</Btn>
+        </div>
+      </Sheet>
 
       {/* ══ Rest timers sheet ══ */}
       <Sheet open={restSheet} onClose={() => setRestSheet(false)} title="Rest timers">

@@ -17,6 +17,7 @@ function LoginScreen() {
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
   const [swVersion, setSwVersion] = useState('');
+  const formRef = useRef(null);
 
   useEffect(() => {
     if (!('caches' in window)) return;
@@ -26,17 +27,32 @@ function LoginScreen() {
     });
   }, []);
 
+  // Safari autofill fires native DOM input events but not React synthetic ones.
+  // Sync autofilled values to React state so canLogin is correct when tapping the button.
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    const handler = (e) => {
+      if (e.target.name === 'email') setEmail(e.target.value);
+      if (e.target.name === 'password') setPassword(e.target.value);
+    };
+    form.addEventListener('input', handler);
+    return () => form.removeEventListener('input', handler);
+  }, []);
+
   const switchMode = (m) => { setMode(m); setError(''); setPassword(''); setConfirm(''); };
 
   const pwMatch = password === confirm;
   const canLogin    = email.trim() && password.length >= 6;
   const canRegister = name.trim() && email.trim() && password.length >= 6 && pwMatch;
 
-  const submitLogin = async () => {
-    if (!canLogin || loading) return;
+  const submitLogin = async (emailVal, passwordVal) => {
+    const e2 = (emailVal || email).trim();
+    const p2 = passwordVal || password;
+    if (!e2 || p2.length < 6 || loading) return;
     setLoading(true); setError('');
     try {
-      await LB.signIn(email.trim(), password);
+      await LB.signIn(e2, p2);
     } catch (e) {
       setError(e.message || 'Sign in failed');
     } finally {
@@ -88,23 +104,32 @@ function LoginScreen() {
           ))}
         </div>
 
-        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
+        <form ref={formRef} onSubmit={e => {
+            e.preventDefault();
+            if (isLogin) {
+              const els = e.target.elements;
+              submitLogin(els.namedItem('email')?.value, els.namedItem('password')?.value);
+            } else {
+              submitRegister();
+            }
+          }}
+          style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
           {!isLogin && (
             <Field label="Name">
-              <TextInput value={name} onChange={setName} placeholder="Your name" autoFocus={!isLogin} />
+              <TextInput value={name} onChange={setName} placeholder="Your name" autoFocus={!isLogin} autoComplete="name" name="name" />
             </Field>
           )}
           <Field label="Email">
-            <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus={isLogin} />
+            <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus={isLogin} autoComplete="email" name="email" type="email" />
           </Field>
           <Field label="Password">
             <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters"
-              onKeyDown={e => e.key === 'Enter' && isLogin && submitLogin()} />
+              autoComplete={isLogin ? 'current-password' : 'new-password'} name="password" />
           </Field>
           {!isLogin && (
             <Field label="Repeat password">
               <TextInput value={confirm} onChange={setConfirm} type="password" placeholder="repeat password"
-                onKeyDown={e => e.key === 'Enter' && submitRegister()} />
+                autoComplete="new-password" />
             </Field>
           )}
 
@@ -121,15 +146,15 @@ function LoginScreen() {
           )}
 
           {isLogin ? (
-            <Btn onClick={submitLogin} disabled={!canLogin || loading} style={{ marginTop: 4, opacity: canLogin && !loading ? 1 : 0.4 }}>
+            <Btn style={{ marginTop: 4, opacity: canLogin && !loading ? 1 : 0.4 }}>
               {loading ? 'Signing in…' : 'Log in'}
             </Btn>
           ) : (
-            <Btn onClick={submitRegister} disabled={!canRegister || loading} style={{ marginTop: 4, opacity: canRegister && !loading ? 1 : 0.4 }}>
+            <Btn disabled={!canRegister || loading} style={{ marginTop: 4, opacity: canRegister && !loading ? 1 : 0.4 }}>
               {loading ? 'Creating account…' : 'Create account'}
             </Btn>
           )}
-        </div>
+        </form>
       </div>
 
       <div style={{ flexShrink: 0, padding: '0 22px calc(env(safe-area-inset-bottom, 8px) + 18px)', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
@@ -339,6 +364,10 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const jsDay = new Date().getDay();
   const todayWd = jsDay === 0 ? 6 : jsDay - 1;
+  // Oldest version = original plan start; null when no versioning
+  const oldestVersionStart = sch?.versions?.length
+    ? sch.versions[sch.versions.length - 1].validFrom
+    : null;
 
   // Auto-migrate from cycleIndex to cycleStartDate on first load
   useEffect(() => {
@@ -368,10 +397,11 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const minOffset = (() => {
     if (weekdayMode) {
-      if (store.weekPlanStartDate) {
+      const startDateStr = oldestVersionStart || store.weekPlanStartDate;
+      if (startDateStr) {
         const now = new Date(); now.setHours(12, 0, 0, 0);
         const currentMondayMs = now.getTime() - todayWd * 86400000;
-        const start = LB.parseDate(store.weekPlanStartDate);
+        const start = LB.parseDate(startDateStr);
         const planMondayMs = start.getTime() - ((start.getDay() + 6) % 7) * 86400000;
         const week0MondayMs = planMondayMs - 7 * 86400000;
         return Math.round((week0MondayMs - currentMondayMs) / (7 * 86400000));
@@ -381,10 +411,15 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (cycleWeekView && store.cycleStartDate && dayCount > 0) {
       const now = new Date(); now.setHours(12, 0, 0, 0);
       const currentMondayMs = now.getTime() - todayWd * 86400000;
-      const cycle0StartMs = LB.parseDate(store.cycleStartDate).getTime() - dayCount * 86400000;
-      const cycle0Wd = (new Date(cycle0StartMs).getDay() + 6) % 7;
-      const cycle0MondayMs = cycle0StartMs - cycle0Wd * 86400000;
-      return Math.round((cycle0MondayMs - currentMondayMs) / (7 * 86400000));
+      const trueStart = oldestVersionStart
+        ? LB.parseDate(oldestVersionStart)
+        : new Date(LB.parseDate(store.cycleStartDate).getTime() - dayCount * 86400000);
+      const oldestDayCount = oldestVersionStart
+        ? (sch.versions[sch.versions.length - 1]?.days?.length || dayCount)
+        : dayCount;
+      const startWd = (trueStart.getDay() + 6) % 7;
+      const startMondayMs = trueStart.getTime() - startWd * 86400000 - oldestDayCount * 86400000;
+      return Math.round((startMondayMs - currentMondayMs) / (7 * 86400000));
     }
     return -(currentCycleNum + 1);
   })();
@@ -409,15 +444,17 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (!sch) return [];
     if (weekdayMode) {
       return Array.from({ length: 7 }).map((_, i) => {
-        const trainingDay = sch.days.find(d => d.weekday === i);
         const diff = i - todayWd + weekOffset * 7;
         const date = new Date(); date.setDate(date.getDate() + diff);
+        const dateStr = date.toISOString().slice(0, 10);
+        const vDays = LB.getPlanDaysForDate(sch, dateStr);
+        const trainingDay = vDays.find(d => d.weekday === i) || null;
         return {
           id: `wd-${i}`, weekday: i,
           isToday: i === todayWd && weekOffset === 0,
           name: trainingDay?.name ?? 'REST',
           items: trainingDay?.items ?? [],
-          date,
+          date, _dayData: trainingDay,
         };
       });
     }
@@ -427,15 +464,20 @@ function HomeScreen({ store, setStore, go, userId }) {
       monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
       return Array.from({ length: 7 }).map((_, i) => {
         const date = new Date(monday); date.setDate(monday.getDate() + i);
+        const dateStr = date.toISOString().slice(0, 10);
         const daysFromStart = Math.round((date - start) / 86400000);
-        const slotIdx = ((daysFromStart % dayCount) + dayCount) % dayCount;
-        const dayData = sch.days[slotIdx];
+        const vDays = LB.getPlanDaysForDate(sch, dateStr);
+        const cyclePosForDate = LB.getCyclePosForDate(sch, dateStr);
+        const slotIdx = cyclePosForDate !== null
+          ? cyclePosForDate
+          : ((daysFromStart % dayCount) + dayCount) % dayCount;
+        const dayData = vDays[slotIdx] || null;
         return {
           id: `cwv-${i}`, weekday: i,
           isToday: i === todayWd && weekOffset === 0,
           name: dayData?.name ?? 'REST',
           items: dayData?.items ?? [],
-          date, slotIdx, daysFromStart,
+          date, slotIdx, daysFromStart, _dayData: dayData,
         };
       });
     }
@@ -449,13 +491,12 @@ function HomeScreen({ store, setStore, go, userId }) {
   const activeDay = useMemo(() => {
     if (!sch) return day;
     if (weekdayMode) {
-      const found = sch.days.find(d => d.weekday === selectedWd);
-      return found ?? { id: 'rest-virtual', name: 'REST', items: [], weekday: selectedWd };
+      const sel = week.find(d => d.weekday === selectedWd);
+      return sel?._dayData ?? { id: 'rest-virtual', name: 'REST', items: [], weekday: selectedWd };
     }
     if (cycleWeekView) {
       const sel = week.find(d => d.weekday === selectedWd);
-      if (sel?.slotIdx != null) return sch.days[sel.slotIdx];
-      return { id: 'rest-virtual', name: 'REST', items: [] };
+      return sel?._dayData ?? { id: 'rest-virtual', name: 'REST', items: [] };
     }
     return sch.days[selectedSlot] ?? sch.days[0];
   }, [weekdayMode, cycleWeekView, sch, selectedWd, selectedSlot, day, week]);
@@ -494,13 +535,20 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (cycleWeekView && store.cycleStartDate && dayCount > 0) {
       const monday = new Date(); monday.setHours(12, 0, 0, 0);
       monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
+      if (sch?.versions?.length) {
+        return `CYCLE ${LB.getCycleNumForDate(sch, monday.toISOString().slice(0, 10))}`;
+      }
       const start = LB.parseDate(store.cycleStartDate);
       const dfs = Math.round((monday - start) / 86400000);
       return `CYCLE ${Math.floor(dfs / dayCount) + 1}`;
     }
+    if (sch?.versions?.length) {
+      const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + weekOffset * dayCount);
+      return `CYCLE ${LB.getCycleNumForDate(sch, d.toISOString().slice(0, 10))}`;
+    }
     const cycleNum = currentCycleNum + weekOffset + 1;
     return `CYCLE ${cycleNum}`;
-  }, [weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount]);
+  }, [weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch]);
 
   const cardLabel = useMemo(() => {
     if (isViewingToday) {
@@ -604,6 +652,9 @@ function HomeScreen({ store, setStore, go, userId }) {
     monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
     const cycleNums = Array.from({ length: 7 }).map((_, i) => {
       const date = new Date(monday); date.setDate(monday.getDate() + i);
+      if (sch?.versions?.length) {
+        return LB.getCycleNumForDate(sch, date.toISOString().slice(0, 10));
+      }
       const dfs = Math.round((date - start) / 86400000);
       return Math.floor(dfs / dayCount) + 1;
     });
@@ -658,11 +709,19 @@ function HomeScreen({ store, setStore, go, userId }) {
         const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
         trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
       } else if (store.cycleStartDate) {
-        const start = LB.parseDate(store.cycleStartDate);
-        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-        if (n < 0) continue;
-        const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
-        const dayData = sch.days[idx];
+        const vDays = LB.getPlanDaysForDate(sch, dateKey);
+        if (!vDays.length) continue;
+        const cyclePosForDate = LB.getCyclePosForDate(sch, dateKey);
+        let idx;
+        if (cyclePosForDate !== null) {
+          idx = cyclePosForDate;
+        } else {
+          const start = LB.parseDate(store.cycleStartDate);
+          const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+          if (n < 0) continue;
+          idx = ((n % vDays.length) + vDays.length) % vDays.length;
+        }
+        const dayData = vDays[idx];
         if (dayData?.items?.length > 0) trainingDay = dayData;
       }
       if (!trainingDay) continue;
@@ -888,9 +947,9 @@ function HomeScreen({ store, setStore, go, userId }) {
             }
             const dateKey = d.date.toISOString().slice(0, 10);
             const isPast = !d.isToday && d.date < new Date();
-            const isBeforePlanStart = weekdayMode
-              ? (store.weekPlanStartDate ? d.date < LB.parseDate(store.weekPlanStartDate) : false)
-              : (store.cycleStartDate ? d.date < LB.parseDate(store.cycleStartDate) : false);
+            const planStartStr = oldestVersionStart
+              || (weekdayMode ? store.weekPlanStartDate : store.cycleStartDate);
+            const isBeforePlanStart = planStartStr ? d.date < LB.parseDate(planStartStr) : false;
             const isMissed = !r && isPast && !isCompleted && !skipsMap.has(dateKey) && !isBeforePlanStart;
             const isSkipped = !r && isPast && !isCompleted && skipsMap.has(dateKey);
             return (
@@ -936,7 +995,11 @@ function HomeScreen({ store, setStore, go, userId }) {
           <div style={{ flexShrink: 0, display: 'flex', gap: 4, marginTop: -4 }}>
             {cycleBarSegments.map((seg, i) => {
               const selDay = week.find(d => d.weekday === selectedWd);
-              const selCycleNum = selDay ? Math.floor(selDay.daysFromStart / dayCount) + 1 : null;
+              const selCycleNum = selDay
+                ? (sch?.versions?.length
+                    ? LB.getCycleNumForDate(sch, selDay.date.toISOString().slice(0, 10))
+                    : Math.floor(selDay.daysFromStart / dayCount) + 1)
+                : null;
               const isActive = seg.cycleNum === selCycleNum;
               return (
                 <div key={i} style={{

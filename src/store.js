@@ -182,7 +182,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps').eq('user_id', userId),
-    _supabase.from('zane_schedules').select('id, name, days, archived').eq('user_id', userId),
+    _supabase.from('zane_schedules').select('id, name, days, archived, versions').eq('user_id', userId),
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries, duration_minutes, feel')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
@@ -324,6 +324,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         showWarmupInSummary: sett.show_warmup_in_summary ?? true,
         showCoachingTab: sett.show_coaching_tab ?? false,
         beYourOwnCoach: sett.be_your_own_coach ?? false,
+        sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -384,11 +385,18 @@ async function autoArchiveMissedDays(userId, state) {
       const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
       trainingDay = activeSch.days.find(day => day.weekday === wd && (day.items || []).length > 0) || null;
     } else {
-      const start = parseDate(state.cycleStartDate);
-      const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-      if (n < 0) continue;
-      const idx = ((n % activeSch.days.length) + activeSch.days.length) % activeSch.days.length;
-      const dayData = activeSch.days[idx];
+      const days = getPlanDaysForDate(activeSch, dateKey);
+      const pos = getCyclePosForDate(activeSch, dateKey);
+      let dayData;
+      if (pos !== null) {
+        dayData = days[pos];
+      } else {
+        if (!state.cycleStartDate) continue;
+        const start = parseDate(state.cycleStartDate);
+        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+        if (n < 0) continue;
+        dayData = activeSch.days[((n % activeSch.days.length) + activeSch.days.length) % activeSch.days.length];
+      }
       if ((dayData?.items || []).length > 0) trainingDay = dayData;
     }
     if (!trainingDay) continue;
@@ -563,8 +571,9 @@ async function syncStore(prev, next, userId) {
     prev.settings?.reminderTime         !== next.settings?.reminderTime         ||
     prev.settings?.showWarmupInSummary  !== next.settings?.showWarmupInSummary  ||
     prev.settings?.showCoachingTab      !== next.settings?.showCoachingTab      ||
-    prev.settings?.beYourOwnCoach       !== next.settings?.beYourOwnCoach       ||
-    prev.nextReminderAt                 !== next.nextReminderAt;
+    prev.settings?.beYourOwnCoach         !== next.settings?.beYourOwnCoach         ||
+    prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
+    prev.nextReminderAt                   !== next.nextReminderAt;
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
@@ -596,6 +605,7 @@ async function syncStore(prev, next, userId) {
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
       show_coaching_tab: next.settings?.showCoachingTab ?? false,
       be_your_own_coach: next.settings?.beYourOwnCoach ?? false,
+      session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
     }));
@@ -628,12 +638,17 @@ function computeNextTrainingDate(state) {
       const day = sch.days.find(x => x.weekday === wd);
       training = !!(day && (day.items || []).length > 0);
     } else {
-      if (!state.cycleStartDate) return null;
-      const start = parseDate(state.cycleStartDate);
-      const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-      if (n < 0) continue;
-      const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
-      training = (sch.days[idx]?.items || []).length > 0;
+      const days = getPlanDaysForDate(sch, dateStr);
+      const idx = getCyclePosForDate(sch, dateStr);
+      if (idx !== null) {
+        training = (days[idx]?.items || []).length > 0;
+      } else {
+        if (!state.cycleStartDate) return null;
+        const start = parseDate(state.cycleStartDate);
+        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+        if (n < 0) continue;
+        training = (sch.days[((n % sch.days.length) + sch.days.length) % sch.days.length]?.items || []).length > 0;
+      }
     }
     if (training) return dateStr;
   }
@@ -665,12 +680,17 @@ function computeNextReminderAt(state) {
       const day = sch.days.find(x => x.weekday === wd);
       training = !!(day && (day.items || []).length > 0);
     } else {
-      if (!state.cycleStartDate) return null;
-      const start = parseDate(state.cycleStartDate);
-      const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-      if (n < 0) continue;
-      const idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
-      training = (sch.days[idx]?.items || []).length > 0;
+      const days = getPlanDaysForDate(sch, dateStr);
+      const idx = getCyclePosForDate(sch, dateStr);
+      if (idx !== null) {
+        training = (days[idx]?.items || []).length > 0;
+      } else {
+        if (!state.cycleStartDate) return null;
+        const start = parseDate(state.cycleStartDate);
+        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+        if (n < 0) continue;
+        training = (sch.days[((n % sch.days.length) + sch.days.length) % sch.days.length]?.items || []).length > 0;
+      }
     }
     if (training) return new Date(dateStr + 'T' + time + ':00').toISOString();
   }
@@ -821,16 +841,86 @@ function isWeekdayPlan(sch) {
   return sch.mode === 'weekday' || (sch.days.length > 0 && sch.days.some(d => d.weekday != null));
 }
 
+function getPlanDaysForDate(schedule, dateStr) {
+  const versions = schedule.versions;
+  if (!versions?.length) return schedule.days || [];
+  for (const v of versions) {
+    if (v.validFrom <= dateStr) return v.days || [];
+  }
+  // Before plan started: extend oldest version backwards so Cycle 0 can be used for migration
+  return versions[versions.length - 1]?.days || [];
+}
+
+// Returns cumulative 1-indexed cycle number for dateStr across all plan versions.
+// When a new version starts it continues the count from where the previous left off
+// (cycle number on the last day of the previous version + 1), so cycle numbering
+// never resets. Returns 0 for dates before the plan started (pre-plan scroll buffer).
+function getCycleNumForDate(schedule, dateStr) {
+  const versions = schedule.versions;
+  if (!versions?.length) return null;
+
+  const sorted = [...versions].sort((a, b) => a.validFrom.localeCompare(b.validFrom));
+  if (dateStr < sorted[0].validFrom) return 0;
+
+  let totalPriorCycles = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const v = sorted[i];
+    const nextV = sorted[i + 1];
+    const daysLen = (v.days || []).length;
+    if (!daysLen) continue;
+
+    if (!nextV || dateStr < nextV.validFrom) {
+      // dateStr is within this version's period
+      const daysDiff = Math.round((new Date(dateStr + 'T12:00:00') - new Date(v.validFrom + 'T12:00:00')) / 86400000);
+      return totalPriorCycles + Math.floor(Math.max(0, daysDiff) / daysLen) + 1;
+    }
+    // Add the cycle number of this version's last day (= the highest cycle it reached)
+    const vStart = new Date(v.validFrom + 'T12:00:00');
+    const vEnd = new Date(nextV.validFrom + 'T12:00:00');
+    const daysInVersion = Math.round((vEnd - vStart) / 86400000);
+    totalPriorCycles += Math.floor((daysInVersion - 1) / daysLen) + 1;
+  }
+  return totalPriorCycles + 1;
+}
+
+function getCyclePosForDate(schedule, dateStr) {
+  const versions = schedule.versions;
+  if (!versions?.length) return null;
+  for (const v of versions) {
+    if (v.validFrom <= dateStr) {
+      const daysLen = (v.days || []).length;
+      if (!daysLen) return 0;
+      const daysDiff = Math.round((new Date(dateStr + 'T12:00:00') - new Date(v.validFrom + 'T12:00:00')) / 86400000);
+      return ((daysDiff % daysLen) + daysLen) % daysLen;
+    }
+  }
+  // Before plan started: extend oldest version backwards (negative daysDiff wraps correctly)
+  const oldest = versions[versions.length - 1];
+  const daysLen = (oldest.days || []).length;
+  if (!daysLen) return 0;
+  const daysDiff = Math.round((new Date(dateStr + 'T12:00:00') - new Date(oldest.validFrom + 'T12:00:00')) / 86400000);
+  return ((daysDiff % daysLen) + daysLen) % daysLen;
+}
+
 function todaysDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
+  const todayStr = todayISO();
   if (isWeekdayPlan(sch)) {
     const js = new Date().getDay();
     const todayWd = js === 0 ? 6 : js - 1; // 0=Mo … 6=So
-    const day = sch.days.find(d => d.weekday === todayWd);
+    const vDays = getPlanDaysForDate(sch, todayStr);
+    const day = vDays.find(d => d.weekday === todayWd);
     if (day) return { schedule: sch, day, idx: todayWd };
     return { schedule: sch, day: { id: 'rest-virtual', name: 'REST', items: [], weekday: todayWd }, idx: todayWd };
   }
+  // When versions exist, derive today's position from the version active today
+  const cyclePosToday = getCyclePosForDate(sch, todayStr);
+  if (cyclePosToday !== null) {
+    const vDays = getPlanDaysForDate(sch, todayStr);
+    return { schedule: sch, day: vDays[cyclePosToday] || sch.days[0], idx: cyclePosToday };
+  }
+  // Fall back: no versions → use cycleStartDate or cycleIndex
   let idx;
   if (state.cycleStartDate) {
     const today = new Date(); today.setHours(12, 0, 0, 0);
@@ -846,6 +936,15 @@ function todaysDay(state) {
 function nextDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
+  if (sch.versions?.length) {
+    const tomorrow = new Date(); tomorrow.setHours(12, 0, 0, 0); tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+    const pos = getCyclePosForDate(sch, tomorrowStr);
+    if (pos !== null) {
+      const vDays = getPlanDaysForDate(sch, tomorrowStr);
+      return { schedule: sch, day: vDays[pos] || sch.days[0], idx: pos };
+    }
+  }
   let curIdx;
   if (state.cycleStartDate) {
     const today = new Date(); today.setHours(12, 0, 0, 0);
@@ -1324,7 +1423,7 @@ window.LB = {
   signIn, signUp, signOut, deleteAllData, importFromBackup,
   loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan,
+  uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate,
   effReps, e1rm, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,

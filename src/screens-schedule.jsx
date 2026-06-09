@@ -174,9 +174,26 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
   const isActivePlan = !!sch && sch.id === store.activeScheduleId;
 
   const activeCycleDayIdx = isActivePlan && !isWeekday
-    ? (store.cycleStartDate
-        ? (() => { const t = new Date(); t.setHours(12, 0, 0, 0); const st = LB.parseDate(store.cycleStartDate); return ((Math.round((t - st) / 86400000) % sch.days.length) + sch.days.length) % sch.days.length; })()
-        : (store.cycleIndex || 0) % sch.days.length)
+    ? (() => {
+        const t = new Date(); t.setHours(12, 0, 0, 0);
+        const today = t.toISOString().slice(0, 10);
+        const pos = LB.getCyclePosForDate(sch, today);
+        if (pos !== null) {
+          // Get the day that is actually active today (may be from an older version)
+          const todayDays = LB.getPlanDaysForDate(sch, today);
+          const todayDay = todayDays[pos];
+          if (!todayDay) return -1;
+          // Find that day by ID in displayDays (the current/future version shown in the chip row)
+          const idx = displayDays.findIndex(d => d.id === todayDay.id);
+          return idx;
+        }
+        // Fallback: no versions
+        if (store.cycleStartDate) {
+          const st = LB.parseDate(store.cycleStartDate);
+          return ((Math.round((t - st) / 86400000) % sch.days.length) + sch.days.length) % sch.days.length;
+        }
+        return (store.cycleIndex || 0) % sch.days.length;
+      })()
     : -1;
 
   const todayDayId = isActivePlan
@@ -349,9 +366,13 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
       {confirmEl}
       <TopBar
         title={sch.name}
-        sub={isWeekday
-          ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ')
-          : `${sch.days.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`}
+        sub={(() => {
+          const vn = (sch.versions?.length || 0) + 1;
+          const vLabel = vn > 1 ? ` · V${vn}` : '';
+          return isWeekday
+            ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ') + vLabel
+            : `${sch.days.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}${vLabel}`;
+        })()}
         onBack={() => go({ name: fromPlan ? 'plan' : 'home' })}
         right={fromPlan ? (
           <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })} style={{
@@ -457,6 +478,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
   const original = store.schedules.find(s => s.id === scheduleId);
   const [draft, setDraft] = useStateS(original ? JSON.parse(JSON.stringify(original)) : null);
   const [pickingType, setPickingType] = useStateS(false);
+  const [applyFromSheet, setApplyFromSheet] = useStateS(false);
+  const [applyFromDate, setApplyFromDate] = useStateS('');
   const [editingDay, setEditingDay] = useStateS(null);
   if (!draft) return null;
 
@@ -488,11 +511,40 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
     setPickingType(false);
   };
 
-  const save = async () => {
-    setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === draft.id ? draft : x) }));
-    const isActivePlan = store.activeScheduleId === draft.id;
+  const doSave = async (effectiveFrom) => {
+    let savedDraft = draft;
+    if (effectiveFrom) {
+      // Snapshot the original plan as a version entry
+      const originalDays = original.days;
+      // Find the original plan's start date for the snapshot's validFrom
+      const isWd = LB.isWeekdayPlan(original);
+      const originalStart = isWd
+        ? (store.weekPlanStartDate || null)
+        : (store.cycleStartDate || null);
+      const existingVersions = original.versions || [];
+      const newVersionEntry = { validFrom: effectiveFrom, days: draft.days };
+      let versions;
+      if (existingVersions.length === 0) {
+        // First versioned change — anchor the original plan
+        const anchorDate = originalStart || LB.todayISO();
+        versions = [newVersionEntry, { validFrom: anchorDate, days: originalDays }];
+      } else {
+        // Already versioned — prepend new version, keep rest
+        versions = [newVersionEntry, ...existingVersions];
+      }
+      // Sort newest first
+      versions.sort((a, b) => b.validFrom.localeCompare(a.validFrom));
+      savedDraft = { ...draft, versions };
+      // Don't touch cycleStartDate / weekPlanStartDate: versions[] encodes
+      // when each plan version takes effect; getPlanDaysForDate /
+      // getCyclePosForDate derive the correct position for any given date.
+      setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
+    } else {
+      setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
+    }
+
     const asClient = store.coaching?.asClient;
-    if (isActivePlan && asClient?.status === 'active') {
+    if (store.activeScheduleId === draft.id && asClient?.status === 'active') {
       try {
         const diff = LB.diffSchedule(original, draft, store.exercises);
         if (diff) {
@@ -503,6 +555,19 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
       } catch (e) { console.error('Failed to send plan change note', e); }
     }
     go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
+  };
+
+  const save = () => {
+    if (!dirty || store.activeScheduleId !== draft.id) { doSave(null); return; }
+    const isWdPlan = LB.isWeekdayPlan(original);
+    const structurallyChanged = isWdPlan
+      ? JSON.stringify([...(original.days || [])].map(d => d.weekday).sort()) !==
+        JSON.stringify([...(draft.days || [])].map(d => d.weekday).sort())
+      : draft.days.length !== original.days.length ||
+        draft.days.some((d, i) => d.id !== (original.days[i] || {}).id);
+    if (!structurallyChanged) { doSave(null); return; }
+    setApplyFromDate('');
+    setApplyFromSheet(true);
   };
   const deleteSch = async () => {
     if (!await confirm(`This cannot be undone.`, { title: `Delete "${draft.name}"?`, ok: 'Delete', danger: true })) return;
@@ -735,6 +800,38 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
         />
       )}
       {confirmEl}
+
+      {applyFromSheet && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
+          onClick={() => setApplyFromSheet(false)}>
+          <div style={{ background: UI.bg, borderRadius: '14px 14px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="label" style={{ color: UI.inkFaint, marginBottom: 18 }}>WHEN SHOULD THIS TAKE EFFECT?</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <Btn onClick={() => { setApplyFromSheet(false); doSave(null); }}>
+                From the beginning
+              </Btn>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${applyFromDate ? UI.goldSoft : UI.hairStrong}` }}>
+                  <input
+                    type="date"
+                    value={applyFromDate}
+                    onChange={e => setApplyFromDate(e.target.value)}
+                    style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: applyFromDate ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
+                  />
+                </div>
+                <Btn
+                  disabled={!applyFromDate}
+                  onClick={() => { if (!applyFromDate) return; setApplyFromSheet(false); doSave(applyFromDate); }}
+                  style={{ flexShrink: 0 }}
+                >
+                  Apply from date
+                </Btn>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </Screen>
   );
 }
