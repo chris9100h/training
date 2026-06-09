@@ -19,7 +19,15 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useCallback
      ],
    };
 */
-const WHATS_NEW = null;
+const WHATS_NEW = {
+  id: 'v2.065',
+  title: 'Faster, offline & flexible plans',
+  items: [
+    'The app now starts much faster and works fully offline — open it anytime, even without a connection, and your training is right there.',
+    'Plans keep a dated version history. Change your split starting from any date you choose, then browse or bring back earlier versions anytime in the plan view.',
+    "Coaching: while following a client's live session you can now scroll through their whole workout freely — tap LIVE to jump back to the exercise they're on right now.",
+  ],
+};
 const WHATS_NEW_KEY = 'logbook-whatsnew-seen';
 
 function useIsPad() {
