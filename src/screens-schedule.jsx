@@ -308,7 +308,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
   const doReactivate = (date) => {
     if (!selectedVersion || !date) return;
     const newVer = { validFrom: date, days: JSON.parse(JSON.stringify(selectedVersion.days || [])) };
-    const newVersions = [newVer, ...(sch.versions || [])].sort((a, b) => b.validFrom.localeCompare(a.validFrom));
+    // One version per date — newVer is first, so it replaces any same-date entry.
+    const newVersions = LB.dedupeVersionsByDate([newVer, ...(sch.versions || [])])
+      .sort((a, b) => b.validFrom.localeCompare(a.validFrom));
     const newIdx = newVersions.indexOf(newVer);
     setStore(s => ({
       ...s,
@@ -645,6 +647,9 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId }) {
         // Already versioned — prepend new version, keep rest
         versions = [newVersionEntry, ...existingVersions];
       }
+      // One version per date — the new entry is first, so it wins for its date
+      // (replaces any existing version with the same validFrom instead of duplicating).
+      versions = LB.dedupeVersionsByDate(versions);
       // Sort newest first
       versions.sort((a, b) => b.validFrom.localeCompare(a.validFrom));
       savedDraft = { ...draft, versions };

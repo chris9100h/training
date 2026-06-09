@@ -914,6 +914,18 @@ function getActiveVersionIdx(schedule, dateStr) {
   return versions.length - 1;
 }
 
+// One version per date: keep only the first entry for each validFrom. Callers
+// put the authoritative/newest entry first, so a same-date save replaces the
+// previous version for that date instead of stacking a duplicate.
+function dedupeVersionsByDate(versions) {
+  const seen = new Set();
+  return (versions || []).filter(v => {
+    if (seen.has(v.validFrom)) return false;
+    seen.add(v.validFrom);
+    return true;
+  });
+}
+
 function todaysDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
@@ -1435,7 +1447,7 @@ window.LB = {
   signIn, signUp, signOut, deleteAllData, importFromBackup,
   loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx,
+  uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover, createSkip, updateSkipReason, deleteSkip,
