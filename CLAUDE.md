@@ -14,6 +14,8 @@
   - `window.UI` — UI-Primitives und Farb-Tokens (aus `ui.jsx`)
   - `window.ACCENT_PALETTE`, `window.applyAccentColor` — Akzentfarben-System (aus `index.html`)
 - **Babel Standalone** — JSX funktioniert, TypeScript nicht. Syntaxfehler crashen die gesamte App ohne hilfreiche Fehlermeldung.
+- **Boot über Precompile-Cache (Performance).** Die `screens-*.jsx`/`ui.jsx`/`app.jsx` werden **nicht** mehr als `<script type="text/babel">` geladen. Stattdessen transpiliert ein Loader in `index.html` jede Datei **einmal** (Presets `react` + `env`, sourceType `script` — identisch zum alten Babel-Default), cacht das fertige JS in IndexedDB (`zane-precompile`, Key = Pfad + Content-Hash) und führt bei Folgestarts das gecachte JS direkt aus. **Babel Standalone wird nur noch bei Cache-Miss (neue/geänderte Datei) lazy geladen**, `html2canvas` erst beim ersten Screenshot. React läuft als **Production-Build**. Schlägt der Loader fehl, fällt er automatisch auf den alten „Babel transpiliert alles"-Pfad zurück.
+  - **Neue `.jsx`-Datei hinzufügen:** an **drei** Stellen eintragen — `SOURCES` im Loader (`index.html`, in Ausführungsreihenfolge), `ASSETS` in `sw.js`, und das `<script>` entfällt (der Loader lädt sie). Content-Hash invalidiert den Cache bei jeder Änderung automatisch.
 - **Dateistruktur:**
   - `index.html` — CSS-Variablen, globale Styles, Animationen, Skripte
   - `sw.js` — Service Worker

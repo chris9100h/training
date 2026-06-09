@@ -222,21 +222,200 @@ window.applyDarkMode = function(key) {
 };
 window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 </script>
-<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<!-- React 18 — production builds: ~10x smaller and faster to parse than the
+     development builds, with no dev-mode runtime overhead. -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>
+<!-- Plain JS (no JSX) — run directly, no transpile needed. -->
 <script src="src/supabase.js"></script>
 <script src="src/store.js"></script>
-<script type="text/babel" src="src/ui.jsx"></script>
-<script type="text/babel" src="src/screens-home.jsx"></script>
-<script type="text/babel" src="src/screens-schedule.jsx"></script>
-<script type="text/babel" src="src/screens-train.jsx"></script>
-<script type="text/babel" src="src/screens-lib.jsx"></script>
-<script type="text/babel" src="src/screens-settings.jsx"></script>
-<script type="text/babel" src="src/screens-coaching.jsx"></script>
-<script type="text/babel" src="src/app.jsx"></script>
+
+<!-- ────────────────────────────────────────────────────────────────────────
+     Precompile loader — boots the app without re-running Babel every start.
+
+     The screens are authored in JSX. Previously every cold start downloaded
+     Babel Standalone (~3 MB) and re-transpiled ~700 KB of JSX on the main
+     thread — several blocking seconds on a phone. Instead we transpile each
+     file once, cache the resulting JS in IndexedDB keyed by a content hash,
+     and on later starts execute the cached JS directly. Babel is fetched
+     lazily and only when a file is new or changed (cache miss). On any
+     failure we fall back to transpiling everything through Babel, so boot can
+     never end up worse than before.
+
+     html2canvas (only needed for the share-screenshot button) is likewise
+     loaded on demand instead of blocking boot.
+──────────────────────────────────────────────────────────────────────── -->
+<script>
+(function () {
+  // Executed in this exact order: ui.jsx defines shared primitives the screens
+  // reference, app.jsx mounts React last. Order must be preserved.
+  var SOURCES = [
+    'src/ui.jsx',
+    'src/screens-home.jsx',
+    'src/screens-schedule.jsx',
+    'src/screens-train.jsx',
+    'src/screens-lib.jsx',
+    'src/screens-settings.jsx',
+    'src/screens-coaching.jsx',
+    'src/app.jsx',
+  ];
+  var BABEL_URL = 'https://unpkg.com/@babel/standalone@7.29.0/babel.min.js';
+  // Reproduces the legacy <script type="text/babel"> defaults exactly (presets
+  // react + env, classic-script scope). Bump the suffix if these options change
+  // so previously cached output is invalidated.
+  var PRESETS = ['react', 'env'];
+  var PRESET_TAG = 'react+env.script.v1';
+  var DB_NAME = 'zane-precompile';
+  var STORE = 'modules';
+
+  // cyrb53 — fast non-crypto content hash. Invalidates cached output whenever a
+  // source file changes; no secure context or async crypto required.
+  function hash(str) {
+    var h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (var i = 0; i < str.length; i++) {
+      var ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  }
+
+  function idbOpen() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = function () { req.result.createObjectStore(STORE); };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+  function idbGet(db, key) {
+    return new Promise(function (resolve) {
+      try {
+        var r = db.transaction(STORE, 'readonly').objectStore(STORE).get(key);
+        r.onsuccess = function () { resolve(r.result || null); };
+        r.onerror = function () { resolve(null); };
+      } catch (e) { resolve(null); }
+    });
+  }
+  function idbPut(db, key, val) {
+    try { db.transaction(STORE, 'readwrite').objectStore(STORE).put(val, key); } catch (e) {}
+  }
+
+  var babelPromise = null;
+  function ensureBabel() {
+    if (window.Babel) return Promise.resolve(window.Babel);
+    if (!babelPromise) {
+      babelPromise = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = BABEL_URL;
+        s.integrity = 'sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y';
+        s.crossOrigin = 'anonymous';
+        s.onload = function () { resolve(window.Babel); };
+        s.onerror = function () { reject(new Error('Babel failed to load')); };
+        document.head.appendChild(s);
+      });
+    }
+    return babelPromise;
+  }
+
+  function transpile(src, filename) {
+    return ensureBabel().then(function (Babel) {
+      return Babel.transform(src, {
+        presets: PRESETS,
+        sourceType: 'script',
+        filename: filename,
+      }).code;
+    });
+  }
+
+  // Append as a classic inline script so it runs synchronously and in order,
+  // sharing the global scope exactly like the original text/babel scripts.
+  function execute(code, filename) {
+    var s = document.createElement('script');
+    s.textContent = code + '\n//# sourceURL=' + filename;
+    document.head.appendChild(s);
+  }
+
+  function showError(e) {
+    var d = document.getElementById('err');
+    if (d) { d.style.display = 'block'; d.textContent += '[BOOT] ' + (e && e.message || e) + '\n'; }
+  }
+
+  // Last resort: transpile + run everything through Babel (no caching).
+  // Behaviourally identical to the app before this optimisation.
+  function fallback() {
+    var chain = Promise.resolve();
+    SOURCES.forEach(function (src) {
+      chain = chain.then(function () {
+        return fetch(src).then(function (r) { return r.text(); })
+          .then(function (code) { return transpile(code, src); })
+          .then(function (out) { execute(out, src); });
+      });
+    });
+    return chain.catch(showError);
+  }
+
+  function boot() {
+    // Guard against rare environments where IndexedDB.open() hangs (some iOS
+    // PWA states) — after the timeout we just proceed cache-less via Babel.
+    var dbPromise = Promise.race([
+      idbOpen().catch(function () { return null; }),
+      new Promise(function (resolve) { setTimeout(function () { resolve(null); }, 3000); }),
+    ]);
+    var fetchAll = Promise.all(SOURCES.map(function (src) {
+      return fetch(src).then(function (r) {
+        if (!r.ok) throw new Error('fetch ' + src + ' → ' + r.status);
+        return r.text();
+      });
+    }));
+
+    Promise.all([dbPromise, fetchAll]).then(function (res) {
+      var db = res[0], sources = res[1];
+      // Resolve each file to runnable JS: from cache when the content hash
+      // matches, otherwise transpile (lazy-loading Babel) and write it back.
+      return Promise.all(sources.map(function (code, i) {
+        var key = SOURCES[i] + '|' + PRESET_TAG;
+        var h = hash(code);
+        var lookup = db ? idbGet(db, key) : Promise.resolve(null);
+        return lookup.then(function (rec) {
+          if (rec && rec.h === h && typeof rec.code === 'string') return rec.code;
+          return transpile(code, SOURCES[i]).then(function (out) {
+            if (db) idbPut(db, key, { h: h, code: out });
+            return out;
+          });
+        });
+      }));
+    }).then(function (compiled) {
+      // Promise.all preserves order, so compiled[i] === SOURCES[i].
+      compiled.forEach(function (code, i) { execute(code, SOURCES[i]); });
+    }).catch(function (e) {
+      showError(e);
+      return fallback();
+    });
+  }
+
+  // Lazily load html2canvas the first time a screenshot is actually taken.
+  window.__ensureHtml2Canvas = function () {
+    if (window.html2canvas) return Promise.resolve(window.html2canvas);
+    if (!window.__h2cPromise) {
+      window.__h2cPromise = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+        s.crossOrigin = 'anonymous';
+        s.onload = function () { resolve(window.html2canvas); };
+        s.onerror = function () { reject(new Error('html2canvas failed to load')); };
+        document.head.appendChild(s);
+      });
+    }
+    return window.__h2cPromise;
+  };
+
+  boot();
+})();
+</script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

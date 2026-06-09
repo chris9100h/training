@@ -1,4 +1,4 @@
-const CACHE = 'zane-v2.058';
+const CACHE = 'zane-v2.059';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 // Works at any base path (e.g. /training/ on GitHub Pages, / on custom domain)
 const BASE = self.registration.scope.replace(/\/$/, '');
@@ -19,9 +19,25 @@ const ASSETS = [
   BASE + '/icons/icon-512.png',
 ];
 
+// CDN libraries the app boots with. Precached best-effort so the app is fully
+// offline-capable right after the first load — but kept out of the atomic
+// addAll() above so a CDN hiccup can never abort the install. Babel is
+// deliberately omitted (~3 MB): it's only needed on a cache miss and gets
+// cached organically on first boot via the cache-first CDN path below.
+const CDN_ASSETS = [
+  'https://unpkg.com/react@18.3.1/umd/react.production.min.js',
+  'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js',
+];
+
 self.addEventListener('install', e => {
   e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(ASSETS))
+    caches.open(CACHE).then(c =>
+      c.addAll(ASSETS).then(() =>
+        Promise.allSettled(CDN_ASSETS.map(u =>
+          c.add(new Request(u, { mode: 'cors' })).catch(() => {})
+        ))
+      )
+    )
   );
 });
 

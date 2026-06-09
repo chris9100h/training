@@ -1504,7 +1504,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   )];
 
   const takeScreenshot = async () => {
-    if (!captureRef.current || !window.html2canvas) return;
+    if (!captureRef.current) return;
+    // html2canvas is loaded on demand (not at boot) — fetch it on first use.
+    const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
+    if (!html2canvas) return;
     setCapturing(true);
     // Temporarily expand scroll parent so html2canvas captures full content
     const scrollParent = captureRef.current.parentElement;
@@ -1515,7 +1518,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
       const el = captureRef.current;
-      const canvas = await window.html2canvas(el, {
+      const canvas = await html2canvas(el, {
         backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
         scale: 2, useCORS: true, logging: false,
         height: el.scrollHeight, windowHeight: el.scrollHeight,
