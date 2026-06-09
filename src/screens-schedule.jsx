@@ -264,6 +264,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
   const isTodaySel = day.id === todayDayId;
   const dayLabel = isWeekday ? WEEKDAYS_FULL[day.weekday] : `Day ${dayIdx + 1}`;
   const trainingDayCount = displayDays.filter(d => d.items.length).length;
+  // In a non-active version no day is live, so the selected (viewed) day gets a
+  // neutral highlight rather than the gold "today/active" accent.
+  const selBorder = viewingActiveVersion ? UI.gold : UI.inkFaint;
+  const selBg     = viewingActiveVersion ? UI.goldFaint : UI.bgInset;
+  const selText   = viewingActiveVersion ? UI.gold : UI.ink;
 
   const isPad = useIsPadS();
   const [confirmEl, confirm] = useConfirm();
@@ -438,7 +443,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
             {banner}
           </div>
         )}
-        {!viewingActiveVersion && (
+        {status === 'PAST' && (
           <button onClick={() => setReactivateSheet(true)} style={{
             alignSelf: 'center', background: 'transparent', border: `1px solid ${UI.goldSoft}`,
             borderRadius: 4, padding: '6px 14px', cursor: 'pointer', color: UI.gold,
@@ -490,18 +495,18 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
                 return (
                   <button key={d.id} onClick={() => setSelectedDayId(d.id)} style={{
                     flexShrink: 0, padding: '8px 12px 6px', borderRadius: 4,
-                    border: `1px solid ${active ? UI.gold : isToday ? UI.goldSoft : UI.hairStrong}`,
-                    background: active ? UI.goldFaint : 'transparent',
+                    border: `1px solid ${active ? selBorder : isToday ? UI.goldSoft : UI.hairStrong}`,
+                    background: active ? selBg : 'transparent',
                     cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
                     display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
                   }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
                         fontSize: 11, fontFamily: UI.fontUi, letterSpacing: '0.07em', fontWeight: 600,
-                        color: active ? UI.gold : rest ? UI.inkFaint : UI.inkSoft,
+                        color: active ? selText : rest ? UI.inkFaint : UI.inkSoft,
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}>{d.name}</div>
-                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: active ? UI.gold : UI.inkFaint, marginTop: 1 }}>{sub}</div>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: active ? selText : UI.inkFaint, marginTop: 1 }}>{sub}</div>
                     </div>
                     {isToday && <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.gold, flexShrink: 0 }} />}
                   </button>
@@ -533,16 +538,16 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
               return (
                 <button key={d.id} onClick={() => setSelectedDayId(d.id)} style={{
                   flexShrink: 0, maxWidth: 120, padding: '6px 12px 4px', borderRadius: 4,
-                  border: `1px solid ${active ? UI.gold : isToday ? UI.goldSoft : UI.hairStrong}`,
-                  background: active ? UI.goldFaint : 'transparent',
+                  border: `1px solid ${active ? selBorder : isToday ? UI.goldSoft : UI.hairStrong}`,
+                  background: active ? selBg : 'transparent',
                   cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
                 }}>
                   <div style={{
                     fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em', fontWeight: 600,
-                    color: active ? UI.gold : rest ? UI.inkFaint : UI.inkSoft,
+                    color: active ? selText : rest ? UI.inkFaint : UI.inkSoft,
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}>{d.name}</div>
-                  <div style={{ fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: active ? UI.gold : UI.inkFaint, marginTop: 1 }}>{sub}</div>
+                  <div style={{ fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: active ? selText : UI.inkFaint, marginTop: 1 }}>{sub}</div>
                   <div style={{ height: 3, marginTop: 3, display: 'flex', justifyContent: 'center' }}>
                     {isToday && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold, marginTop: -1 }} />}
                   </div>
