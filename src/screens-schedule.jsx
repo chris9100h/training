@@ -426,7 +426,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
       WebkitTapHighlightColor: 'transparent',
     });
     return (
-      <div style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ flexShrink: 0, padding: '12px 22px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: 6, background: UI.bgRaised }}>
           <button onClick={() => setVerIdx(safeVerIdx + 1)} disabled={safeVerIdx >= versions.length - 1} style={stepBtn(safeVerIdx >= versions.length - 1)}>‹</button>
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, minWidth: 0 }}>
