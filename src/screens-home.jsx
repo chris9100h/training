@@ -512,6 +512,15 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const isViewingToday = weekOffset === 0 && ((weekdayMode || cycleWeekView) ? selectedWd === todayWd : selectedSlot === dayIdx);
   const isActiveRest = !activeDay?.items?.length;
+
+  // "DAY X OF Y" denominator: with plan versioning the top-level sch.days holds
+  // the newest version (which may only become active in the future), so the
+  // day count must come from the version active on the date being viewed.
+  const viewedDayCount = useMemo(() => {
+    if (!sch?.versions?.length) return dayCount;
+    const dStr = sessionDate.toISOString().slice(0, 10);
+    return LB.getPlanDaysForDate(sch, dStr)?.length || dayCount;
+  }, [sch, sessionDate, dayCount]);
   const isFutureSlot = sessionDate > (() => { const d = new Date(); d.setHours(12,0,0,0); return d; })();
 
   const periodLabel = useMemo(() => {
@@ -553,18 +562,18 @@ function HomeScreen({ store, setStore, go, userId }) {
       if (weekdayMode) return `TODAY · ${WEEKDAYS_FULL[selectedWd].toUpperCase()}`;
       if (cycleWeekView) {
         const sel = week.find(d => d.weekday === selectedWd);
-        return `TODAY · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${dayCount}`;
+        return `TODAY · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
       }
-      return `TODAY · DAY ${selectedSlot + 1} OF ${dayCount}`;
+      return `TODAY · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
     }
     const dateStr = sessionDate.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
     if (weekdayMode) return dateStr;
     if (cycleWeekView) {
       const sel = week.find(d => d.weekday === selectedWd);
-      return `${dateStr} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${dayCount}`;
+      return `${dateStr} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
     }
-    return `${dateStr} · DAY ${selectedSlot + 1} OF ${dayCount}`;
-  }, [isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, dayCount, sessionDate, week]);
+    return `${dateStr} · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
+  }, [isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week]);
 
   const avgDayDuration = useMemo(() => {
     if (!activeDay?.id) return null;
