@@ -795,6 +795,25 @@ function e1rm(kg, reps) {
   return kg * (1 + reps / 30);
 }
 
+// Did `curr` beat `prev` (set-vs-same-position-last-time)? Used by the library,
+// session detail and coaching views. The live training screen keeps its own
+// variant because it evaluates a set mid-completion, before `done` is set.
+// More weight at no worse than -2 reps, or same/more weight at more reps.
+function isImprovement(curr, prev) {
+  if (!prev || !curr || !curr.done || curr.skipped || curr.kg == null || prev.kg == null) return false;
+  const rA = effReps(curr); const rB = effReps(prev);
+  if (rA == null || rB == null) return false;
+  return (curr.kg > prev.kg && rA >= rB - 2) || (curr.kg >= prev.kg && rA > rB);
+}
+function isDecline(curr, prev) {
+  if (!prev || !curr || curr.skipped) return false;
+  if (prev.skipped) return false; // prev was already skipped, no baseline to decline from
+  if (!curr.done || curr.kg == null || prev.kg == null) return false;
+  const rA = effReps(curr); const rB = effReps(prev);
+  if (rA == null || rB == null) return false;
+  return (curr.kg < prev.kg && rA <= rB) || (curr.kg === prev.kg && rA < rB);
+}
+
 // Best estimated 1RM ever recorded for an exercise across all ended sessions
 // (any day), optionally excluding a session (e.g. the live one). Returns 0 when
 // there's no history — callers treat 0 as "no record to beat yet".
@@ -1585,7 +1604,7 @@ window.LB = {
   loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
-  effReps, e1rm, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
+  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover,
   subscribeToChanges,

@@ -46,20 +46,9 @@ function fmtRelative(iso) {
 
 
 
-function isImprovement(curr, prev) {
-  if (!prev || !curr || !curr.done || curr.skipped || curr.kg == null || prev.kg == null) return false;
-  const rA = LB.effReps(curr); const rB = LB.effReps(prev);
-  if (rA == null || rB == null) return false;
-  return (curr.kg > prev.kg && rA >= rB - 2) || (curr.kg >= prev.kg && rA > rB);
-}
-function isDecline(curr, prev) {
-  if (!prev || !curr || curr.skipped) return false;
-  if (prev.skipped) return false;
-  if (!curr.done || curr.kg == null || prev.kg == null) return false;
-  const rA = LB.effReps(curr); const rB = LB.effReps(prev);
-  if (rA == null || rB == null) return false;
-  return (curr.kg < prev.kg && rA <= rB) || (curr.kg === prev.kg && rA < rB);
-}
+// Canonical set-comparison logic lives in store.js (window.LB) — no drift.
+const isImprovement = LB.isImprovement;
+const isDecline = LB.isDecline;
 
 // ─── CoachingPendingBanner ────────────────────────────────────────────────────
 // Shown on app boot when the user has a pending coaching invite.

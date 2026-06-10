@@ -55,11 +55,29 @@
   - `.micro-gold` — wie micro, aber in Akzentfarbe
   - `.label` — 10px uppercase Label
   - `.num` — JetBrains Mono, für Zahlen
-  - `.display` — Cormorant Garamond, für Titel
-  - `.display-it` — Cormorant Garamond italic
+  - `.display` — Big Shoulders Display (700), für Titel
+  - `.display-it` — Big Shoulders Display (900)
+  - **Hinweis:** Das JS-Token `UI.fontDisplay` (in `ui.jsx`) muss auf dieselbe
+    Schrift zeigen wie die `.display`-CSS-Klassen und der Google-Fonts-`<link>`
+    in `index.html` (aktuell „Big Shoulders Display"). Wird die Display-Schrift
+    gewechselt, alle drei Stellen gemeinsam anpassen, sonst rendern JSX-Titel
+    im Fallback.
 
 ## Konventionen
 
+- **Supabase-Schreibzugriffe müssen Fehler propagieren.** Der JS-Client wirft bei
+  fehlgeschlagenen Writes **nicht**, sondern löst mit `{ error }` auf (auch bei
+  Netzwerkfehlern). Jeder Write, der in den Sync-/Diff-Pfad einfließt, läuft
+  deshalb über `unwrap(...)` in `store.js` (wirft bei `{ error }`). Nur so greift
+  der Retry in `flushSync` (`app.jsx`) und nur so kann eine fehlgeschlagene
+  Speicherung nicht als Erfolg durchgehen. In Screens bei direkten Supabase-Calls
+  immer `{ error }` prüfen, bevor optimistisch UI/State aktualisiert wird.
+- **CI-Gate (kein Build-Step!):** `tools/check-syntax.cjs` transpiliert alle
+  Quellen exakt wie der In-App-Loader und `tools/test/store.test.cjs` testet die
+  Store-Kernlogik; beide laufen via `.github/workflows/check.yml` bei jedem Push.
+  Die JSX-Dateiliste im Check wird aus dem `SOURCES`-Array in `index.html`
+  geparst — neue `.jsx` also wie gehabt dort eintragen, dann ist sie automatisch
+  mit abgedeckt.
 - **DB-Spalten:** `snake_case` (z.B. `accent_color`, `rest_default`)
 - **Store-Felder:** `camelCase` (z.B. `accentColor`, `restDefault`)
 - **localStorage-Keys:** Einige Settings liegen parallel im localStorage für schnellen Zugriff vor dem Store-Load. Bestehende Keys konsistent halten:
@@ -154,6 +172,6 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 PWA, erreichbar unter `/training/`. Service Worker in `sw.js`.
 
-**Bei jedem Commit die SW-Cache-Version in `sw.js` um 1 erhöhen** (erste Zeile: `const CACHE = 'zane-vX.XXX'`). Das stellt sicher, dass Nutzer nach einem Deploy automatisch frische Assets bekommen. Aktuelles Format: `zane-v1.501`, nächster Commit `zane-v1.502`, dann `zane-v1.503`, usw.
+**Bei jedem Commit die SW-Cache-Version in `sw.js` um 1 erhöhen** (erste Zeile: `const CACHE = 'zane-vX.XXX'`). Das stellt sicher, dass Nutzer nach einem Deploy automatisch frische Assets bekommen. Format `zane-vMAJOR.MINOR`, fortlaufend hochgezählt (z.B. `zane-v2.077` → `zane-v2.078` → `zane-v2.079`).
 
 **Nach jedem Cache-Bump die neue Versionsnummer im Chat melden** — z.B. „SW-Cache → zane-v1.922".

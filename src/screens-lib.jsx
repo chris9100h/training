@@ -934,29 +934,34 @@ function StatsTab({ store, sessions, go }) {
   const oldestVersion = sch?.versions?.length ? sch.versions[sch.versions.length - 1] : null;
   const planStart = oldestVersion ? LB.parseDate(oldestVersion.validFrom) : (store.cycleStartDate ? LB.parseDate(store.cycleStartDate) : null);
 
-  let currentStreak = 0;
-  for (let i = 0; i <= 730; i++) {
-    const d = new Date(today); d.setDate(today.getDate() - i); d.setHours(12, 0, 0, 0);
-    if (planStart && d < planStart) break; // don't count before plan start
-    const key = d.toISOString().slice(0, 10);
-    if (sessionDateSet.has(key)) { currentStreak++; }
-    else if (i === 0) { /* today not done yet — don't break */ }
-    else if (isTrainingDay(d)) { break; }
-    // rest day → continue without breaking or counting
-  }
-
-  let longestStreak = 0, ls = 0;
-  if (sessions.length > 0) {
-    const earliest = planStart ?? LB.parseDate(sessions[sessions.length - 1].date);
-    const dayCount = Math.round((today.getTime() - earliest.getTime()) / 86400000) + 1;
-    for (let i = 0; i < dayCount; i++) {
-      const d = new Date(earliest); d.setDate(earliest.getDate() + i); d.setHours(12, 0, 0, 0);
+  // Streaks scan up to ~730 days (+ the full history for the longest streak).
+  // Memoize so this only re-runs when the day rolls over, the sessions change,
+  // or the active plan changes — not on every unrelated re-render.
+  const { currentStreak, longestStreak } = useMemoL(() => {
+    let cur = 0;
+    for (let i = 0; i <= 730; i++) {
+      const d = new Date(today); d.setDate(today.getDate() - i); d.setHours(12, 0, 0, 0);
+      if (planStart && d < planStart) break; // don't count before plan start
       const key = d.toISOString().slice(0, 10);
-      if (sessionDateSet.has(key)) { ls++; longestStreak = Math.max(longestStreak, ls); }
-      else if (isTrainingDay(d)) { ls = 0; }
-      // rest day → ls unchanged
+      if (sessionDateSet.has(key)) { cur++; }
+      else if (i === 0) { /* today not done yet — don't break */ }
+      else if (isTrainingDay(d)) { break; }
+      // rest day → continue without breaking or counting
     }
-  }
+    let longest = 0, ls = 0;
+    if (sessions.length > 0) {
+      const earliest = planStart ?? LB.parseDate(sessions[sessions.length - 1].date);
+      const dayCount = Math.round((today.getTime() - earliest.getTime()) / 86400000) + 1;
+      for (let i = 0; i < dayCount; i++) {
+        const d = new Date(earliest); d.setDate(earliest.getDate() + i); d.setHours(12, 0, 0, 0);
+        const key = d.toISOString().slice(0, 10);
+        if (sessionDateSet.has(key)) { ls++; longest = Math.max(longest, ls); }
+        else if (isTrainingDay(d)) { ls = 0; }
+        // rest day → ls unchanged
+      }
+    }
+    return { currentStreak: cur, longestStreak: longest };
+  }, [todayKey, sessions, store.activeScheduleId, store.cycleStartDate]);
 
   const totalTrainingMins = durations.reduce((a, b) => a + b, 0);
   const totalTrainingStr = totalTrainingMins >= 60
@@ -1452,20 +1457,9 @@ function FeelSelector({ value, onChange }) {
 
 // ─── SET COMPARISON HELPERS ──────────────────────────────────────────
 // Shared by SessionDetailScreen, ComparisonScreen, and the LAST TIME card.
-function isImprovement(curr, prev) {
-  if (!prev || !curr || !curr.done || curr.skipped || curr.kg == null || prev.kg == null) return false;
-  const rA = LB.effReps(curr); const rB = LB.effReps(prev);
-  if (rA == null || rB == null) return false;
-  return (curr.kg > prev.kg && rA >= rB - 2) || (curr.kg >= prev.kg && rA > rB);
-}
-function isDecline(curr, prev) {
-  if (!prev || !curr || curr.skipped) return false;
-  if (prev.skipped) return false; // prev was already skipped, no baseline to decline from
-  if (!curr.done || curr.kg == null || prev.kg == null) return false;
-  const rA = LB.effReps(curr); const rB = LB.effReps(prev);
-  if (rA == null || rB == null) return false;
-  return (curr.kg < prev.kg && rA <= rB) || (curr.kg === prev.kg && rA < rB);
-}
+// Canonical logic lives in store.js (window.LB) — one definition, no drift.
+const isImprovement = LB.isImprovement;
+const isDecline = LB.isDecline;
 
 // ─── SESSION DETAIL ──────────────────────────────────────────────────
 function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, back }) {

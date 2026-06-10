@@ -3,7 +3,7 @@
    swap-exercise sheet, rest timer, abandon flow).
 */
 
-const { useState: useStateT, useEffect: useEffectT, useRef: useRefT } = React;
+const { useState: useStateT, useEffect: useEffectT, useRef: useRefT, useMemo: useMemoT } = React;
 
 // ── Debug log ────────────────────────────────────────────────────────────────
 window._dbg = window._dbg || [];
@@ -1153,7 +1153,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
 
   const workingSetsArr = entry.sets.filter(s => !s.warmup);
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
-  const anyMissingData = workingSetsArr.some(st => !st.done && !st.skipped && (st.kg == null || (isUnilateral ? (!st.repsL || !st.repsR) : !st.reps)));
+  const anyMissingData = workingSetsArr.some(st => !st.done && !st.skipped && (st.kg == null || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
 
   const checkAllSets = async () => {
     if (allWorkingDone || anyMissingData) return;
@@ -1184,6 +1184,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
     updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
     persistRestStart(null);
   };
+
+  // Pace-bar base: the parts that DON'T depend on `now`. The 250 ms `now` tick
+  // re-renders this component 4×/s; memoizing the set scans here keeps only the
+  // elapsed-time math in the per-tick path. Returns null when the bar is hidden.
+  const paceBase = useMemoT(() => {
+    const timeline = avgStats?.timeline;
+    if (!timeline || !session.startedAt) return null;
+    const totalSetsDone = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done && !x.warmup).length || 0), 0);
+    if (totalSetsDone < 2) return null;
+    const remainingSets = session.entries.reduce((s, e) => s + (e.sets?.filter(x => !x.done && !x.skipped && !x.warmup).length || 0), 0);
+    if (remainingSets === 0) return null;
+    const expectedSec = timeline[totalSetsDone - 1];
+    if (expectedSec == null) return null; // beyond historical set count
+    return { totalSetsDone, expectedSec };
+  }, [avgStats, session.entries, session.startedAt]);
 
   // Derive warmup overlay vars here so they're available inside the main return
   const warmupOverlayGlobalIdx = warmupSetsRemaining ? entry.sets.findIndex(s => s.warmup && !s.done) : -1;
@@ -1349,15 +1364,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
       </div>
 
       {/* Pace bar — positional comparison vs same point in last session */}
-      {avgStats && (() => {
-        const { timeline } = avgStats;
-        if (!timeline || !session.startedAt) return null;
-        const totalSetsDone = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done && !x.warmup).length || 0), 0);
-        if (totalSetsDone < 2) return null;
-        const remainingSets = session.entries.reduce((s, e) => s + (e.sets?.filter(x => !x.done && !x.skipped && !x.warmup).length || 0), 0);
-        if (remainingSets === 0) return null;
-        const expectedSec = timeline[totalSetsDone - 1];
-        if (expectedSec == null) return null; // beyond historical set count
+      {paceBase && (() => {
+        const { totalSetsDone, expectedSec } = paceBase;
         const elapsedSec = (now - new Date(session.startedAt).getTime()) / 1000;
         const diffMin = Math.round((elapsedSec - expectedSec) / 60);
         if (Math.abs(diffMin) < 2) return null;
@@ -1723,14 +1731,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
                         _log(`row${i} → completeSet`);
                         completeSet(i);
                       }}
-                      disabled={!s.done && !s.skipped && (s.kg == null || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)))}
+                      disabled={!s.done && !s.skipped && (s.kg == null || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)))}
                       style={{
-                        width: 26, height: 26, borderRadius: 3, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
+                        width: 26, height: 26, borderRadius: 3, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (s.kg == null || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
                         background: s.done ? UI.gold : 'transparent',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontSize: s.skipped ? 12 : 14, fontWeight: 700,
                         color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
-                        opacity: !s.done && !s.skipped && (s.kg == null || (isUnilateral ? (!s.repsL || !s.repsR) : !s.reps)) ? 0.35 : 1,
+                        opacity: !s.done && !s.skipped && (s.kg == null || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
                         flexShrink: 0,
                         WebkitTapHighlightColor: 'transparent',
                       }}>{s.skipped ? '×' : '✓'}</button>
