@@ -16,6 +16,7 @@ function FitText({ text, max, min, style }) {
     const el = ref.current;
     if (!el || !el.parentElement) return;
     const fit = () => {
+      if (!el.parentElement) return;
       el.style.fontSize = max + 'px';
       const avail = el.parentElement.clientWidth;
       const natural = el.scrollWidth;
@@ -26,6 +27,9 @@ function FitText({ text, max, min, style }) {
       }
     };
     fit();
+    // Re-fit once web fonts finish loading — the first measurement can happen
+    // against the fallback font (wider), which would yield too small a size.
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
   }, [text, max, min]);
