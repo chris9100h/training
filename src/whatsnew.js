@@ -15,6 +15,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.087',
+    title: 'Fast start, no matter how long you\'ve trained',
+    items: [
+      'The app now starts equally fast whether you logged in last week or have years of training behind you — opening time and memory use no longer grow with your history.',
+      'Your full history is still all there: stats, personal records and charts stay exact, and older sessions load their details the moment you open them.',
+      'Everything still works fully offline — your recent training is ready instantly, even without a connection.',
+    ],
+  },
+  {
     id: 'v2.083',
     title: 'A big reliability tune-up',
     items: [
