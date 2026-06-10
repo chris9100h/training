@@ -8,6 +8,7 @@ const vm = require('vm');
 const assert = require('assert');
 
 let testFrom; // swapped per test to control what supabase calls "return"
+const rpcLog = []; // records every rpc(name, args) call
 
 function loadStore() {
   const code = fs.readFileSync(path.join(__dirname, '../../src/store.js'), 'utf8');
@@ -17,7 +18,7 @@ function loadStore() {
       getSession: async () => ({ data: { session: null } }),
     },
     from: (...args) => testFrom(...args),
-    rpc: async () => ({ data: null, error: null }),
+    rpc: async (name, args) => { rpcLog.push({ name, args }); return { data: null, error: null }; },
     channel: () => ({ on() { return this; }, subscribe() { return this; } }),
     removeChannel: () => {},
   };
@@ -98,6 +99,46 @@ async function testAsync(name, fn) {
     const prev = baseStore();
     const next = { ...baseStore(), exercises: [{ id: 'e1', name: 'X', tags: [] }] };
     await LB.syncStore(prev, next, 'u1'); // must not throw
+  });
+
+  // ── relational session sync (spectator regression) ───────────────────────
+  // Since the JSONB dual-write was dropped, the relational rows are the only
+  // copy the spectator/overview RPCs can read. A brand-new session must write
+  // ALL its seeded sets (incl. pending ones), or the live view shows wrong
+  // set totals ("4/4", "finishing soon").
+  const mkSession = (secondDone) => ({
+    id: 'sess1', scheduleId: 'sch', dayId: 'd', dayName: 'PULL', date: '2026-06-10',
+    startedAt: '2026-06-10T10:00:00Z', ended: null,
+    entries: [{
+      exId: 'e1', name: 'Row', plannedSets: 3, plannedReps: 10,
+      sets: [
+        { kg: 50, reps: 10, done: true },
+        { kg: 50, reps: 10, done: secondDone },
+        { kg: 50, reps: 10, done: false },
+      ],
+    }],
+  });
+
+  await testAsync('syncStore writes ALL seeded sets for a brand-new session', async () => {
+    rpcLog.length = 0;
+    testFrom = () => builder({ data: null, error: null });
+    const prev = baseStore(); // session not in prev = creation event
+    const next = { ...baseStore(), sessions: [mkSession(false)] };
+    await LB.syncStore(prev, next, 'u1');
+    const call = rpcLog.find(c => c.name === 'sync_sets_batch');
+    assert.ok(call, 'sync_sets_batch must be called for a brand-new session');
+    assert.strictEqual(call.args.p_sets.length, 3, 'all seeded sets (incl. pending) must be written');
+  });
+
+  await testAsync('syncStore writes only CHANGED sets for an existing session', async () => {
+    rpcLog.length = 0;
+    testFrom = () => builder({ data: null, error: null });
+    const prev = { ...baseStore(), sessions: [mkSession(false)] };
+    const next = { ...baseStore(), sessions: [mkSession(true)] };
+    await LB.syncStore(prev, next, 'u1');
+    const call = rpcLog.find(c => c.name === 'sync_sets_batch');
+    assert.ok(call, 'sync_sets_batch must be called when a set changed');
+    assert.strictEqual(call.args.p_sets.length, 1, 'only the changed set is re-written');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

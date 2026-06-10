@@ -587,10 +587,15 @@ async function syncStore(prev, next, userId) {
     const removed = prev.sessions.filter(s => !next.sessions.find(x => x.id === s.id));
     if (upsert.length) {
       ops.push(_supabase.from('zane_sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
-      // Only sync relational tables for sessions that already existed in prev —
-      // filters out initial load (prev.sessions empty) and session creation events.
-      // On the first real set change, the session will be in prev and gets written.
-      sessionUpserts = upsert.filter(s => prev.sessions?.find(x => x.id === s.id));
+      // Sync the relational tables for EVERY changed session — including brand-new
+      // ones. Since the JSONB dual-write was dropped (migration 0058), the
+      // relational rows are the only copy the spectator/overview RPCs can read;
+      // skipping creation here left a live session with only its completed sets
+      // (planned-but-untouched seeds missing → wrong set totals, "finishing soon").
+      // _syncEntryRelational still diffs per set: sessions already in prev write
+      // only changed sets; sessions NOT in prev (just created, or offline-created
+      // and re-synced after a reload merge) write all their seeded sets once.
+      sessionUpserts = upsert;
     }
     if (removed.length) ops.push(_supabase.from('zane_sessions').delete().in('id', removed.map(s => s.id)));
   }
