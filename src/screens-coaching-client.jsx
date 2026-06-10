@@ -1079,6 +1079,20 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
 
   const sessions = (clientStore.sessions || []).filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
 
+  // Client sessions outside the boot window carry no entries — lazy-load the
+  // selected one (clientStore is a read-only copy, so plain local state).
+  useEffectC(() => {
+    if (!selected || (selected.entries || []).length || !(selected.aggExercises > 0)) return;
+    let on = true;
+    LB.fetchSessionEntries([selected.id])
+      .then(bySession => {
+        const entries = bySession[selected.id];
+        if (on && entries?.length) setSelected(sel => sel && sel.id === selected.id ? { ...sel, entries } : sel);
+      })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [selected?.id]);
+
   const dayNames = useMemoC(() => {
     const counts = {};
     sessions.forEach(s => { if (s.dayName && s.dayName !== 'REST') counts[s.dayName] = (counts[s.dayName] || 0) + 1; });

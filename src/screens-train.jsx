@@ -337,6 +337,22 @@ function TrainingScreen(props) {
 }
 
 function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, syncPill }) {
+  // Refresh the all-time best-e1RM aggregate once per training mount so the
+  // "NEW BEST" overlay compares against an up-to-date baseline (covers
+  // sessions finished on other devices since boot). Offline keeps the cached
+  // map — bestE1rmForExercise also folds in locally windowed sessions.
+  useEffectT(() => {
+    let on = true;
+    LB.refreshExerciseBests(userId).then(bests => {
+      if (!on || !bests) return;
+      setStore(s => {
+        if (!s || JSON.stringify(s.exerciseBests || {}) === JSON.stringify(bests)) return s;
+        return { ...s, exerciseBests: bests };
+      });
+    });
+    return () => { on = false; };
+  }, []);
+
   useEffectT(() => {
     if (!('wakeLock' in navigator)) return;
     let lock = null;
@@ -358,7 +374,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const exIdx = session.currentExIdx || 0;
   const entry = session.entries[exIdx];
   const exercise = entry ? LB.findExercise(store, entry.exId) : null;
-  const last = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayId) : null;
+
+  // "Last time" reference. The local window covers recently trained exercises;
+  // when an exercise has no local history (last logged before the boot
+  // window), fetch its most recent session from the server once and keep it in
+  // local state (exId → { entry } | null while resolved, undefined = not asked).
+  const [remoteLast, setRemoteLast] = useStateT({});
+  const localLast = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayId) : null;
+  useEffectT(() => {
+    const exId = entry?.exId;
+    if (!exId || localLast || remoteLast[exId] !== undefined) return;
+    let on = true;
+    LB.fetchExerciseHistory(exId, session.dayId, 1, userId)
+      .then(rows => {
+        if (!on) return;
+        const row = (rows || []).find(r => r.sessionId !== session.id);
+        setRemoteLast(m => ({ ...m, [exId]: row ? { entry: { sets: row.sets } } : null }));
+      })
+      .catch(() => { if (on) setRemoteLast(m => ({ ...m, [exId]: null })); });
+    return () => { on = false; };
+  }, [entry?.exId]);
+  const last = localLast ?? (entry ? remoteLast[entry.exId] : null) ?? null;
   const isUnilateral = !!exercise?.unilateral;
   const progressionTargetForSet = (workingSetIdx) => {
     if (!store.settings?.smartProgression) return null;

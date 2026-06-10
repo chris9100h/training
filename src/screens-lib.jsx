@@ -485,7 +485,7 @@ function ExerciseDetailScreen(props) {
   return <ExerciseDetailScreenInner {...props} ex={ex} />;
 }
 
-function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue = [], editQueueTotal = 0, autoEdit = false, ex }) {
+function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue = [], editQueueTotal = 0, autoEdit = false, ex, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [editMode, setEditMode] = useStateL(autoEdit);
   const [editName, setEditName] = useStateL(autoEdit ? ex.name : '');
@@ -538,12 +538,35 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     go({ name: 'lib' });
   };
 
+  // Local window renders instantly (and is all we have offline); the server
+  // history (get_exercise_history) extends the chart/PRs to the full account
+  // age once it arrives. Rows are merged by session id, newest first.
+  const [serverRows, setServerRows] = useStateL(null);
+  useEffectL(() => {
+    let on = true;
+    LB.fetchExerciseHistory(exId, null, 500, userId)
+      .then(rows => { if (on) setServerRows(rows); })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [exId]);
+
   const history = useMemoL(() => {
-    return store.sessions
+    const local = store.sessions
       .filter(s => s.ended && s.entries.some(e => e.exId === exId))
-      .sort((a,b) => (b.ended||'').localeCompare(a.ended||''))
       .map(s => ({ session: s, entry: s.entries.find(e => e.exId === exId) }));
-  }, [store.sessions, exId]);
+    const seen = new Set(local.map(h => h.session.id));
+    // Session metadata (dayName, date, …) is fully loaded at boot — attach it
+    // to the server rows so the list renders like the local ones.
+    const metaById = new Map(store.sessions.map(s => [s.id, s]));
+    const remote = (serverRows || [])
+      .filter(r => !seen.has(r.sessionId))
+      .map(r => ({
+        session: metaById.get(r.sessionId) || { id: r.sessionId, dayId: r.dayId, date: r.date, ended: r.ended },
+        entry: { exId, sets: r.sets },
+      }));
+    return [...local, ...remote]
+      .sort((a, b) => (Date.parse(b.session.ended) || 0) - (Date.parse(a.session.ended) || 0));
+  }, [store.sessions, exId, serverRows]);
 
   const e1rmForSet = (s) => {
     if (s.kg == null) return 0;
@@ -1107,7 +1130,7 @@ function StatsTab({ store, sessions, go }) {
                   {LB.parseDate(bestSession.date).toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()}
                 </div>
                 <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>
-                  {bestSession.entries.length} exercises · {LB.doneSetCount(bestSession)} sets
+                  {bestSession.entries.length || bestSession.aggExercises || 0} exercises · {LB.doneSetCount(bestSession)} sets
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
@@ -1318,7 +1341,7 @@ function HistoryScreen({ store, go, initialTab }) {
                     </div>
                     <div className="display" style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>{s.dayName}</div>
                     <div className="micro" style={{ color: UI.inkFaint }}>
-                      {s.entries.length} Exercises · {setsLogged} Sets
+                      {s.entries.length || s.aggExercises || 0} Exercises · {setsLogged} Sets
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
@@ -1470,6 +1493,25 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const captureRef = useRefL(null);
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
+  // Sessions outside the boot window carry no entries — lazy-load them into
+  // the store on first open (also makes editing work; aggExercises > 0 tells
+  // a windowed-out session apart from a genuinely empty one).
+  const needsEntries = !!(s && s.ended && !(s.entries || []).length && (s.aggExercises || 0) > 0);
+  useEffectL(() => {
+    if (!needsEntries) return;
+    let on = true;
+    LB.fetchSessionEntries([sessionId])
+      .then(bySession => {
+        const entries = bySession[sessionId];
+        if (!on || !entries?.length) return;
+        setStore(st => ({
+          ...st,
+          sessions: st.sessions.map(x => x.id === sessionId && !(x.entries || []).length ? { ...x, entries } : x),
+        }));
+      })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [needsEntries, sessionId]);
   if (!s) return null;
   const vol = LB.totalVolume(s);
   const duration = s.durationMinutes != null
@@ -2446,7 +2488,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
 }
 
 
-function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back }) {
+function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId }) {
   const [metric, setMetric] = useStateL('kg');
   const [showCount, setShowCount] = useStateL(20);
 
@@ -2454,20 +2496,40 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back }) {
   const isUni = !!ex?.unilateral;
   const displayName = exName || ex?.name || '?';
 
-  const allSessions = useMemoL(() =>
-    store.sessions
+  // Local window renders instantly; the server history extends the chart to
+  // the full account age once it arrives (merged by session id).
+  const [serverRows, setServerRows] = useStateL(null);
+  useEffectL(() => {
+    let on = true;
+    LB.fetchExerciseHistory(exId, dayId, 500, userId)
+      .then(rows => { if (on) setServerRows(rows); })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [exId, dayId]);
+
+  const allSessions = useMemoL(() => {
+    const local = store.sessions
       .filter(s => s.ended && s.dayId === dayId)
       .map(s => {
         const entry = s.entries.find(e => e.exId === exId);
         if (!entry) return null;
         const working = entry.sets.filter(st => !st.warmup && !st.skipped);
         if (!working.some(st => st.kg != null || st.reps != null)) return null;
-        return { ended: s.ended, sets: working };
+        return { id: s.id, ended: s.ended, sets: working };
       })
-      .filter(Boolean)
-      .sort((a, b) => a.ended.localeCompare(b.ended)),
-    [store.sessions, exId, dayId]
-  );
+      .filter(Boolean);
+    const seen = new Set(local.map(s => s.id));
+    const remote = (serverRows || [])
+      .filter(r => !seen.has(r.sessionId))
+      .map(r => {
+        const working = (r.sets || []).filter(st => !st.warmup && !st.skipped);
+        if (!working.some(st => st.kg != null || st.reps != null)) return null;
+        return { id: r.sessionId, ended: r.ended, sets: working };
+      })
+      .filter(Boolean);
+    return [...local, ...remote]
+      .sort((a, b) => (Date.parse(a.ended) || 0) - (Date.parse(b.ended) || 0));
+  }, [store.sessions, exId, dayId, serverRows]);
 
   const maxSets = Math.max(...allSessions.map(s => s.sets.length), 1);
 

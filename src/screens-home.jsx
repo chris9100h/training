@@ -302,8 +302,11 @@ function LastSessionStrip({ session, onClick }) {
   );
 }
 
-function RecentBannerDay({ banner, store, setStore, go, sch, onOpenSkipSheet }) {
+function RecentBannerDay({ banner, store, setStore, go, sch, userId, onOpenSkipSheet }) {
   const { dateKey, dayName, daysAgo, skip, dayData, date, dayId } = banner;
+  // The Log handler awaits a seed fetch — guard against a double tap creating
+  // two sessions inside that window.
+  const startingRef = useRef(false);
   const dateLabel = daysAgo === 1 ? 'YESTERDAY' : `${daysAgo}D AGO`;
   if (skip) {
     return (
@@ -327,12 +330,17 @@ function RecentBannerDay({ banner, store, setStore, go, sch, onOpenSkipSheet }) 
         <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>{dayName} · {dateLabel}</div>
         <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Not logged</div>
       </div>
-      <button onClick={() => {
+      <button onClick={async () => {
+        if (startingRef.current) return;
+        startingRef.current = true;
+        // Seeds may live outside the boot window — fetch them before creating
+        // the session (resolves instantly when the local window has them).
+        const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
         const entries = (dayData?.items || []).map(it => {
           const ex = LB.findExercise(store, it.exId);
-          const last = LB.bestRecentEntry(store, it.exId, dayId);
+          const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
           const isUni = ex?.unilateral || false;
-          const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet);
+          const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
           const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
           return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
         });
@@ -392,6 +400,9 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [selectedSlot, setSelectedSlot] = useState(dayIdx);
   const [warmupPromptData, setWarmupPromptData] = useState(null);
   const [notLoggedModalOpen, setNotLoggedModalOpen] = useState(false);
+  // The not-logged Log handler awaits a seed fetch — guard against a double
+  // tap creating two sessions inside that window.
+  const loggingRef = useRef(false);
 
   const minOffset = (() => {
     if (weekdayMode) {
@@ -737,13 +748,18 @@ function HomeScreen({ store, setStore, go, userId }) {
     return null;
   }, [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
 
-  const startSession = () => {
+  const startSession = async () => {
     if (!activeDay || isActiveRest) return;
+    // Seeds/progression consume the recent history synchronously — when an
+    // exercise's last sessions are outside the boot window, fetch them from
+    // the server first (fetchSeedEntries resolves instantly when the local
+    // window suffices, and never rejects — offline falls back to local data).
+    const seedRefs = await LB.fetchSeedEntries(store, activeDay.items, activeDay.id, userId);
     const entries = activeDay.items.map(it => {
       const ex = LB.findExercise(store, it.exId);
-      const last = LB.bestRecentEntry(store, it.exId, activeDay.id);
+      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, activeDay.id);
       const isUnilateral = ex?.unilateral || false;
-      const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps);
+      const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps, undefined, seedRefs[it.exId]);
       const seedSets = LB.buildSeedSets(it, last, suggestion, isUnilateral, !!store.settings?.smartProgression);
       return {
         exId: it.exId, name: ex?.name || '?',
@@ -1198,7 +1214,7 @@ function HomeScreen({ store, setStore, go, userId }) {
           ) : lastSession ? (
             <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id, back: { name: 'home' } })} />
           ) : (
-            <RecentBannerDay banner={recentBannerDay} store={store} setStore={setStore} go={go} sch={sch} onOpenSkipSheet={setSkipReasonModal} />
+            <RecentBannerDay banner={recentBannerDay} store={store} setStore={setStore} go={go} sch={sch} userId={userId} onOpenSkipSheet={setSkipReasonModal} />
           )}
         </div>
       )}
@@ -1219,14 +1235,17 @@ function HomeScreen({ store, setStore, go, userId }) {
           </div>
           <div style={{ fontSize: 18, fontFamily: UI.fontDisplay, fontWeight: 700, textTransform: 'uppercase', textAlign: 'center', color: UI.ink, marginBottom: 20 }}>Not logged</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <Btn onClick={() => {
+            <Btn onClick={async () => {
+              if (loggingRef.current) return;
+              loggingRef.current = true;
               setNotLoggedModalOpen(false);
               const { dayData, dayId, dayName, date } = recentBannerDay;
+              const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
               const entries = (dayData?.items || []).map(it => {
                 const ex = LB.findExercise(store, it.exId);
-                const last = LB.bestRecentEntry(store, it.exId, dayId);
+                const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
                 const isUni = ex?.unilateral || false;
-                const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet);
+                const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
                 const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
                 return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
               });

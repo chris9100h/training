@@ -275,6 +275,7 @@ CREATE INDEX zane_coaching_notes_thread_id_idx ON public.zane_coaching_notes USI
 CREATE INDEX zane_coaching_threads_coaching_id_created_at_idx ON public.zane_coaching_threads USING btree (coaching_id, created_at);
 CREATE INDEX zane_session_entries_session_id_idx ON public.zane_session_entries USING btree (session_id);
 CREATE INDEX zane_sets_entry_id_idx ON public.zane_sets USING btree (entry_id);
+CREATE INDEX zane_sets_session_id_idx ON public.zane_sets USING btree (session_id);
 
 -- ── Row Level Security ─────────────────────────────────────────────────────────
 
@@ -972,6 +973,35 @@ AS $function$
              THEN EXTRACT(EPOCH FROM (en.ended - en.started_at))/60 ELSE 0 END))::bigint FROM ended en), 0)::bigint AS total_minutes,
     COALESCE((SELECT COUNT(*) FROM zane_sets st JOIN ended en ON en.id = st.session_id
               WHERE st.done AND NOT st.warmup AND NOT st.skipped), 0)::bigint AS total_done_sets;
+$function$;
+
+-- Per-session aggregates for the windowed boot (migration 0060): the history
+-- list / "best session" card / coach session lists need volume + set/exercise
+-- counts for sessions whose sets weren't loaded. Semantics match the client's
+-- totalVolume()/doneSetCount() for ended sessions (done flag not required).
+CREATE OR REPLACE FUNCTION public.get_session_stats(p_user_id uuid DEFAULT NULL)
+ RETURNS TABLE(session_id text, exercise_count integer, done_sets integer, volume double precision)
+ LANGUAGE sql STABLE SECURITY INVOKER SET search_path TO 'public'
+AS $function$
+  WITH uid AS (SELECT COALESCE(p_user_id, auth.uid()) AS id)
+  SELECT s.id AS session_id,
+    (SELECT COUNT(*) FROM zane_session_entries e WHERE e.session_id = s.id)::int AS exercise_count,
+    (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id
+       AND NOT st.warmup AND NOT st.skipped
+       AND st.kg IS NOT NULL
+       AND (st.reps IS NOT NULL OR st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL))::int AS done_sets,
+    COALESCE((SELECT SUM(st.kg * COALESCE(
+        CASE WHEN st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL
+             THEN LEAST(COALESCE(st.reps_l, st.reps_r), COALESCE(st.reps_r, st.reps_l))
+             ELSE st.reps END, 0))
+      FROM zane_sets st WHERE st.session_id = s.id
+        AND NOT st.warmup AND NOT st.skipped
+        AND st.kg IS NOT NULL
+        AND (st.reps IS NOT NULL OR st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL)
+    ), 0)::float AS volume
+  FROM zane_sessions s
+  WHERE s.user_id = (SELECT id FROM uid)
+    AND s.ended IS NOT NULL;
 $function$;
 
 -- ── Trigger: create user_settings row on signup ────────────────────────────────
