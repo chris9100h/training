@@ -222,12 +222,38 @@ function WhatsNewModal({ entries, onDismiss }) {
 // Small, unobtrusive sync/storage status. Hidden when everything is synced.
 // 'pending' is faint (normal operation); an error or a full local cache shows
 // a tappable amber pill so a silent sync failure can't go unnoticed.
-function SyncIndicator({ status, storageFull, onRetry }) {
+// Default: fixed top-center overlay. `inline` renders just the compact pill
+// for embedding into a screen's own header (the training screen puts it in
+// the day-name row, where the overlay would cover the session/rest timers).
+function SyncIndicator({ status, storageFull, onRetry, inline = false }) {
   if (status === 'synced' && !storageFull) return null;
   const isProblem = storageFull || status === 'error';
   const label = storageFull
     ? 'Device storage full'
     : status === 'error' ? 'Not synced — tap to retry' : 'Saving…';
+  const pill = (
+    <button
+      onClick={isProblem ? onRetry : undefined}
+      style={{
+        pointerEvents: isProblem ? 'auto' : 'none',
+        display: 'flex', alignItems: 'center', gap: inline ? 6 : 7,
+        padding: inline ? '3px 9px' : '6px 12px', borderRadius: 999,
+        background: isProblem ? 'rgba(var(--danger-rgb),0.16)' : 'rgba(var(--bg-rgb),0.85)',
+        border: `1px solid ${isProblem ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`,
+        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+        color: isProblem ? UI.danger : UI.inkFaint,
+        fontFamily: UI.fontUi, fontSize: inline ? 10 : 11, fontWeight: 600, letterSpacing: '0.04em',
+        cursor: isProblem ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent',
+      }}>
+      <span style={{
+        width: inline ? 6 : 7, height: inline ? 6 : 7, borderRadius: '50%', flexShrink: 0,
+        background: isProblem ? UI.danger : UI.inkFaint,
+        ...(status === 'pending' && !storageFull ? { animation: 'pulseDot 1.4s ease-in-out infinite' } : {}),
+      }} />
+      {label}
+    </button>
+  );
+  if (inline) return pill;
   return (
     <div style={{
       position: 'fixed', left: 0, right: 0,
@@ -235,26 +261,7 @@ function SyncIndicator({ status, storageFull, onRetry }) {
       display: 'flex', justifyContent: 'center',
       zIndex: 90, pointerEvents: 'none',
     }}>
-      <button
-        onClick={isProblem ? onRetry : undefined}
-        style={{
-          pointerEvents: isProblem ? 'auto' : 'none',
-          display: 'flex', alignItems: 'center', gap: 7,
-          padding: '6px 12px', borderRadius: 999,
-          background: isProblem ? 'rgba(var(--danger-rgb),0.16)' : 'rgba(var(--bg-rgb),0.85)',
-          border: `1px solid ${isProblem ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`,
-          backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-          color: isProblem ? UI.danger : UI.inkFaint,
-          fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
-          cursor: isProblem ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent',
-        }}>
-        <span style={{
-          width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-          background: isProblem ? UI.danger : UI.inkFaint,
-          ...(status === 'pending' && !storageFull ? { animation: 'pulseDot 1.4s ease-in-out infinite' } : {}),
-        }} />
-        {label}
-      </button>
+      {pill}
     </div>
   );
 }
@@ -816,7 +823,12 @@ function App() {
   if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 
   const go    = (r) => setRoute(r);
-  const props = { store, setStore, go, userId };
+  const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
+  // The training screen embeds the status in its own header (the overlay would
+  // sit on top of the session/rest timers), so hand it a ready-made inline pill
+  // and suppress the global overlay there.
+  const syncPillInline = <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} inline />;
+  const props = { store, setStore, go, userId, syncPill: syncPillInline };
   const tabRoutes = ['home', 'plan', 'lib', 'hist', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
 
@@ -865,7 +877,7 @@ function App() {
         {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
         {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
         {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
-        <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={() => { setStorageFull(false); flushSync(userId); }} />
+        {route.name !== 'train' && <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} />}
         {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
       </div>
     );
@@ -883,7 +895,7 @@ function App() {
       {updateAvailable && <UpdateBanner onUpdate={applyUpdate} />}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
-      <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={() => { setStorageFull(false); flushSync(userId); }} />
+      {route.name !== 'train' && <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} />}
       {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
     </>

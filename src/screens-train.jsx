@@ -336,7 +336,7 @@ function TrainingScreen(props) {
   return <TrainingScreenInner {...props} session={session} />;
 }
 
-function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }) {
+function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, syncPill }) {
   useEffectT(() => {
     if (!('wakeLock' in navigator)) return;
     let lock = null;
@@ -1395,9 +1395,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
         );
       })()}
 
-      {/* Day name + exercise position */}
-      <div style={{ flexShrink: 0, padding: '6px 22px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+      {/* Day name + exercise position — sync status floats centered between them
+          (the global top-center overlay would cover the timers above). */}
+      <div style={{ flexShrink: 0, padding: '6px 22px 10px', position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span className="micro-gold">{session.dayName}</span>
+        <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)', display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
+          <div style={{ pointerEvents: 'auto' }}>{syncPill}</div>
+        </div>
         <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
           {String(exIdx + 1).padStart(2, '0')} <span style={{ color: UI.hair }}>/</span> {String(session.entries.length).padStart(2, '0')}
         </span>
