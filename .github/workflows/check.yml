@@ -1,0 +1,20 @@
+name: Syntax check
+
+# The app has no build step: GitHub Pages serves every push as-is, and one
+# syntax error in any source file blanks the whole app at runtime. This job
+# transpiles all sources exactly like the in-app loader before they go live.
+on:
+  push:
+  pull_request:
+
+jobs:
+  transpile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Same Babel build and version the app itself loads from unpkg.
+      - run: npm install --no-save --no-package-lock @babel/standalone@7.29.0
+      - run: node tools/check-syntax.cjs

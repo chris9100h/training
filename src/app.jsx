@@ -661,7 +661,10 @@ function App() {
   // version string. iOS Safari ignores reg.update() when the app is in the
   // foreground, so this is the only reliable detection path.
   const checkSwUpdate = useCallbackA(() => {
-    fetch(`/training/sw.js?_v=${Date.now()}`)
+    // Resolve sw.js relative to the SW scope (or page URL before registration
+    // settles) — works on both github.io/training/ and the zane-wo.com root.
+    const swUrl = new URL('sw.js', swReg.current?.scope || window.location.href);
+    fetch(`${swUrl}?_v=${Date.now()}`)
       .then(r => r.text())
       .then(text => {
         const m = text.match(/const CACHE = '([^']+)'/);

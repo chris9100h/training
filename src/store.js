@@ -9,7 +9,13 @@ const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+// Local calendar date as YYYY-MM-DD. Never use toISOString() here — that
+// returns the UTC date, which is yesterday between midnight and UTC-offset
+// o'clock (and tomorrow in negative-offset timezones from the evening on).
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 // ─── QUICK SWITCH ────────────────────────────────────────────────────────
 
