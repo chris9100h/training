@@ -22,7 +22,8 @@
   - `manifest.json` — PWA-Manifest
   - `src/ui.jsx` — gemeinsame UI-Komponenten (UI-Objekt, Screen, TopBar, TabBar, Btn, Card, …)
   - `src/app.jsx` — Root-Komponente, Auth, Routing, Store-Sync
-  - `src/screens-home.jsx`, `src/screens-schedule.jsx`, `src/screens-train.jsx`, `src/screens-lib.jsx` — einzelne Screens
+  - `src/screens-home.jsx`, `src/screens-schedule.jsx`, `src/screens-train.jsx`, `src/screens-lib.jsx`, `src/screens-settings.jsx` — einzelne Screens
+  - `src/screens-coaching-core.jsx`, `src/screens-coaching-client.jsx`, `src/screens-coaching-detail.jsx`, `src/screens-coaching-tabs.jsx` — Coaching-UI, aufgeteilt. **`-core` zuerst laden** (definiert die geteilten Top-Level-`const`: React-Aliase `useStateC`/… und `isImprovement`/`isDecline`). Klassische Scripts teilen sich einen globalen Scope, daher: diese `const` **nur in `-core`** deklarieren, nie in den anderen Dateien; alle übrigen Coaching-Symbole sind `function`-Deklarationen (global). Die `window.Screens`-Registrierung steht in `-tabs`.
   - `src/store.js` — Supabase-Lesen/Schreiben, Auth-Funktionen
   - `src/supabase.js` — Supabase JS Client (vendored)
   - `src/whatsnew.js` — Changelog-Historie (`window.WHATS_NEW`-Array, siehe „What's New / Changelog")
