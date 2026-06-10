@@ -14,24 +14,30 @@ function FitText({ text, max, min, style }) {
   const [fs, setFs] = useState(max);
   React.useLayoutEffect(() => {
     const el = ref.current;
-    if (!el || !el.parentElement) return;
+    if (!el) return;
     const fit = () => {
-      if (!el.parentElement) return;
+      const parent = el.parentElement;
+      if (!parent) return;
+      const avail = parent.clientWidth;
+      if (avail <= 0) return; // not laid out yet — ResizeObserver re-fires when it is
       el.style.fontSize = max + 'px';
-      const avail = el.parentElement.clientWidth;
       const natural = el.scrollWidth;
-      if (avail > 0 && natural > avail) {
-        setFs(Math.max(min, Math.floor(max * avail / natural)));
-      } else {
-        setFs(max);
-      }
+      setFs(natural > avail ? Math.max(min, Math.floor(max * avail / natural)) : max);
     };
     fit();
-    // Re-fit once web fonts finish loading — the first measurement can happen
-    // against the fallback font (wider), which would yield too small a size.
+    // Re-fit once web fonts load — a measurement against the fallback font
+    // (wider) would otherwise yield too small a size.
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
-    window.addEventListener('resize', fit);
-    return () => window.removeEventListener('resize', fit);
+    // Observe the parent so we re-fit whenever its width becomes known/changes
+    // (covers remounts where layout isn't ready during useLayoutEffect).
+    let ro;
+    if (window.ResizeObserver && el.parentElement) {
+      ro = new ResizeObserver(fit);
+      ro.observe(el.parentElement);
+    } else {
+      window.addEventListener('resize', fit);
+    }
+    return () => { if (ro) ro.disconnect(); else window.removeEventListener('resize', fit); };
   }, [text, max, min]);
   return (
     <div ref={ref} style={{ ...style, fontSize: fs, whiteSpace: 'nowrap' }}>{text}</div>
