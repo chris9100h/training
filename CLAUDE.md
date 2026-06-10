@@ -22,7 +22,8 @@
   - `manifest.json` — PWA-Manifest
   - `src/ui.jsx` — gemeinsame UI-Komponenten (UI-Objekt, Screen, TopBar, TabBar, Btn, Card, …)
   - `src/app.jsx` — Root-Komponente, Auth, Routing, Store-Sync
-  - `src/screens-home.jsx`, `src/screens-schedule.jsx`, `src/screens-train.jsx`, `src/screens-lib.jsx` — einzelne Screens
+  - `src/screens-home.jsx`, `src/screens-schedule.jsx`, `src/screens-train.jsx`, `src/screens-lib.jsx`, `src/screens-settings.jsx` — einzelne Screens
+  - `src/screens-coaching-core.jsx`, `src/screens-coaching-client.jsx`, `src/screens-coaching-detail.jsx`, `src/screens-coaching-tabs.jsx` — Coaching-UI, aufgeteilt. **`-core` zuerst laden** (definiert die geteilten Top-Level-`const`: React-Aliase `useStateC`/… und `isImprovement`/`isDecline`). Klassische Scripts teilen sich einen globalen Scope, daher: diese `const` **nur in `-core`** deklarieren, nie in den anderen Dateien; alle übrigen Coaching-Symbole sind `function`-Deklarationen (global). Die `window.Screens`-Registrierung steht in `-tabs`.
   - `src/store.js` — Supabase-Lesen/Schreiben, Auth-Funktionen
   - `src/supabase.js` — Supabase JS Client (vendored)
   - `src/whatsnew.js` — Changelog-Historie (`window.WHATS_NEW`-Array, siehe „What's New / Changelog")
@@ -55,11 +56,29 @@
   - `.micro-gold` — wie micro, aber in Akzentfarbe
   - `.label` — 10px uppercase Label
   - `.num` — JetBrains Mono, für Zahlen
-  - `.display` — Cormorant Garamond, für Titel
-  - `.display-it` — Cormorant Garamond italic
+  - `.display` — Big Shoulders Display (700), für Titel
+  - `.display-it` — Big Shoulders Display (900)
+  - **Hinweis:** Das JS-Token `UI.fontDisplay` (in `ui.jsx`) muss auf dieselbe
+    Schrift zeigen wie die `.display`-CSS-Klassen und der Google-Fonts-`<link>`
+    in `index.html` (aktuell „Big Shoulders Display"). Wird die Display-Schrift
+    gewechselt, alle drei Stellen gemeinsam anpassen, sonst rendern JSX-Titel
+    im Fallback.
 
 ## Konventionen
 
+- **Supabase-Schreibzugriffe müssen Fehler propagieren.** Der JS-Client wirft bei
+  fehlgeschlagenen Writes **nicht**, sondern löst mit `{ error }` auf (auch bei
+  Netzwerkfehlern). Jeder Write, der in den Sync-/Diff-Pfad einfließt, läuft
+  deshalb über `unwrap(...)` in `store.js` (wirft bei `{ error }`). Nur so greift
+  der Retry in `flushSync` (`app.jsx`) und nur so kann eine fehlgeschlagene
+  Speicherung nicht als Erfolg durchgehen. In Screens bei direkten Supabase-Calls
+  immer `{ error }` prüfen, bevor optimistisch UI/State aktualisiert wird.
+- **CI-Gate (kein Build-Step!):** `tools/check-syntax.cjs` transpiliert alle
+  Quellen exakt wie der In-App-Loader und `tools/test/store.test.cjs` testet die
+  Store-Kernlogik; beide laufen via `.github/workflows/check.yml` bei jedem Push.
+  Die JSX-Dateiliste im Check wird aus dem `SOURCES`-Array in `index.html`
+  geparst — neue `.jsx` also wie gehabt dort eintragen, dann ist sie automatisch
+  mit abgedeckt.
 - **DB-Spalten:** `snake_case` (z.B. `accent_color`, `rest_default`)
 - **Store-Felder:** `camelCase` (z.B. `accentColor`, `restDefault`)
 - **localStorage-Keys:** Einige Settings liegen parallel im localStorage für schnellen Zugriff vor dem Store-Load. Bestehende Keys konsistent halten:
@@ -106,7 +125,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_schedules`:** `id` (text), `user_id` (uuid), `name` (text), `days` (jsonb), `archived` (boolean, default false), `versions` (jsonb, default []) — array of `{ validFrom: 'YYYY-MM-DD', days: [...] }` sorted newest first; used for plan-change-from-date versioning
 
-**`zane_sessions`:** `id` (text), `user_id` (uuid), `schedule_id`, `day_id`, `day_name` (text), `date`, `started_at`, `ended` (timestamptz), `entries` (jsonb), `duration_minutes` (int), `feel` (text: easy|good|hard|very_hard|max)
+**`zane_sessions`:** `id` (text), `user_id` (uuid), `schedule_id`, `day_id`, `day_name` (text), `date`, `started_at`, `ended` (timestamptz), `entries` (jsonb — **legacy, not written anymore**; seit Migration 0058 sind `zane_session_entries`/`zane_sets` die alleinige Quelle, alte Zeilen behalten ihren JSONB-Stand), `duration_minutes` (int), `feel` (text: easy|good|hard|very_hard|max)
 
 **`zane_session_entries`:** `id` (text), `session_id` (text), `user_id` (uuid), `entry_idx` (int), `ex_id` (text), `name` (text), `planned_sets` (int), `planned_reps` (int), `planned_reps_per_set` (integer[]), `note` (text), `superset_group` (text)
 
@@ -140,6 +159,13 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`sync_sets_batch(p_sets jsonb)`** → `void` — batch-upsert sets with updated_at guard; only updates a row if the incoming updated_at is newer than what's stored (prevents stale kbApply writes from overwriting completed sets)
 
+**`zane_entries_json(p_session_id text)`** → `jsonb` — baut die store-förmige (camelCase) `entries`-Array einer Session aus den relationalen Tabellen (`zane_session_entries`/`zane_sets`). Quelle der Wahrheit seit Migration 0058; von `get_active_session_detail`/`get_active_sessions_overview` genutzt, damit die Coach-/Spectator-Ansicht nicht mehr vom Legacy-JSONB abhängt. Der Client schreibt das JSONB nicht mehr (`sessionToRow` in `store.js` lässt `entries` aus).
+
+**Serverseitige History-Aggregate (Migration 0059, SECURITY INVOKER, optional `p_user_id` für Coach-Zugriff):**
+- **`get_exercise_best_e1rm(p_user_id?)`** → `TABLE(ex_id, best_e1rm)` — bestes All-Time-e1RM (Epley) je Übung über beendete Sessions. Für PR-Erkennung ohne volle Historie im Client.
+- **`get_exercise_history(p_ex_id, p_day_id?, p_limit?, p_user_id?)`** → `TABLE(session_id, day_id, date, ended, sets jsonb)` — jüngste beendete Sessions mit dieser Übung (für Seeds/Progression, „Last time"-Karte, Exercise-History).
+- **`get_user_volume_stats(p_user_id?)`** → `TABLE(session_count, total_volume, total_minutes, total_done_sets)` — All-Time-Summen für die Stats. Streaks bleiben clientseitig (plan-abhängig, brauchen nur Session-Daten).
+
 **`auto-close-sessions`** (Edge Function) — schließt abgelaufene offene Sessions: kein Sets → Session + Entries löschen (butt start); mit Sets → `ended` = letztes `updated_at` der Sets, `duration_minutes` berechnen, `in_progress_session_id` clearen; optional Pushover-Notification. Wird per Cron alle 15 Minuten aufgerufen (Supabase Dashboard → Edge Functions → Schedule). Timeout pro User in `session_timeout_minutes` (default 90 min).
 
 **`get_coaching_clients()`** → `TABLE(coaching_id text, client_id uuid, client_email text, client_name text, status text, checkin_enabled boolean)` — listet alle Clients des aufrufenden Coaches inkl. `checkin_enabled`-Flag; Self-Coaching-Zeilen ausgeschlossen
@@ -150,10 +176,64 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **Realtime:** `zane_coaching` und `zane_coaching_notes` sind in der `supabase_realtime`-Publikation — ermöglicht Live-Coaching-Einladungen und -Nachrichten. **Cross-Device Live-Sync laufender Sessions wurde entfernt** (der lokale Store ist die alleinige Quelle für eine laufende Session; ein Coach sieht die Live-Session eines Clients per Polling via `get_active_session_detail`, nicht über Realtime). `subscribeToChanges(userId, onCoachingNote, onCoachingInvite)` abonniert nur noch die Coaching-Tabellen.
 
+## Offene Aufgabe: Server-seitige PR/History — Client lädt nicht mehr die ganze Historie (Phase 2 / Stage 2 von Migration 0059)
+
+**Ziel:** Der Client soll beim Boot **nicht mehr die komplette Session-Historie**
+(alle `zane_session_entries` + `zane_sets`) laden. PR-Erkennung, Progression-Seeds
+und All-Time-Stats laufen stattdessen über die bereits existierenden 0059-RPCs.
+Wichtig, weil die App wachsen soll — heute wächst Boot-Zeit und Speicher linear mit
+der Trainingshistorie.
+
+**Was schon erledigt ist (NICHT nochmal machen):**
+- Client schreibt das `entries`-JSONB nicht mehr (`sessionToRow` lässt es aus).
+- Spectator/Coach-RPCs lesen relational via `zane_entries_json` (Migration 0058).
+- Die Server-Aggregate existieren und sind deployt (Migration 0059):
+  `get_exercise_best_e1rm`, `get_exercise_history`, `get_user_volume_stats`.
+- **Offen ist nur die Client-Umstellung** — diese RPCs werden derzeit von
+  `src/` aus **nirgends** aufgerufen (per grep prüfbar).
+
+**Konkrete Schritte (alle im Client):**
+1. **Boot-Fenster** in `loadFromSupabase` (`store.js`): Session-*Metadaten* (id,
+   date, dayId, dayName, ended, duration, feel) weiter **vollständig** laden (leicht;
+   Streaks/Kalender brauchen die Datumsliste). Aber `zane_session_entries`/`zane_sets`
+   nur noch für ein **Fenster** (z.B. letzte ~30–60 Tage) **plus** die laufende
+   In-Progress-Session. Den `entries`-JSONB-Select + den JSONB-Fallback im Mapping
+   dabei entfernen.
+2. **PR-Erkennung:** `bestE1rmForExercise` (store.js, scannt heute alle Sessions) →
+   `get_exercise_best_e1rm` einmal pro Session-Start laden + im Store cachen. Auch das
+   „★ NEW BEST"-Overlay im Training (`screens-train.jsx`) hängt daran.
+3. **Progression-Seeds / „Last time":** `lastSessionForExercise`,
+   `recentSessionsForExercise`, `bestRecentEntry` (store.js) → `get_exercise_history(exId, dayId)`
+   beim Session-Start. Achtung: `buildSeedSets`/`progressionSuggestion` konsumieren
+   `bestRecentEntry` **synchron** beim Vorbefüllen der Sätze — die Seeds müssen künftig
+   **vor** dem Anlegen der Session asynchron geladen werden (in `startSession` in
+   `screens-home.jsx`).
+4. **All-Time-Stats** (`screens-lib.jsx`): Volumen/Session-Count/Minuten →
+   `get_user_volume_stats`. **Streaks bleiben clientseitig** (plan-abhängig, brauchen
+   nur die Session-Datumsliste, die ja weiter geladen wird).
+5. **Exercise-History-Screen:** → `get_exercise_history` mit höherem `p_limit`.
+
+**Gotchas (vorher lesen, sonst Regressionen):**
+- **Offline:** Heute funktioniert die volle Historie offline aus dem localStorage-Cache.
+  Windowing + RPCs brauchen Netz → das geladene Fenster und die Aggregate (best_e1rm,
+  volume_stats) **mit-cachen** und offline darauf zurückfallen; PR-Erkennung mid-session
+  muss den gecachten Wert nutzen, nicht leer ausgehen.
+- **Merge in `app.jsx` (`loadData`):** Der Cache-first-Merge nimmt an, `fresh.sessions`
+  sei die **volle** Historie, und entfernt lokale Sessions, die der Server „nicht mehr hat".
+  Beim Windowing darf diese „nicht da → löschen"-Logik **nur aufs Fenster** wirken, sonst
+  werden ältere Sessions fälschlich aus dem Cache gelöscht.
+- **Spalte zuletzt droppen:** `zane_sessions.entries` erst per separater Migration
+  entfernen, wenn Boot sie nicht mehr selektiert UND der JSONB-Fallback raus ist.
+- Neue Store-Tests in `tools/test/store.test.cjs` für Fenster- und Merge-Logik.
+
+**Done, wenn:** Boot-Query lädt unabhängig vom Account-Alter konstant viele Sets;
+PR-Overlay/Progression/Stats sind gegen einen Account mit langer Historie identisch zu
+vorher; offline startet die App weiter ohne Crash (Fenster/Stats aus Cache).
+
 ## Deployment
 
 PWA, erreichbar unter `/training/`. Service Worker in `sw.js`.
 
-**Bei jedem Commit die SW-Cache-Version in `sw.js` um 1 erhöhen** (erste Zeile: `const CACHE = 'zane-vX.XXX'`). Das stellt sicher, dass Nutzer nach einem Deploy automatisch frische Assets bekommen. Aktuelles Format: `zane-v1.501`, nächster Commit `zane-v1.502`, dann `zane-v1.503`, usw.
+**Bei jedem Commit die SW-Cache-Version in `sw.js` um 1 erhöhen** (erste Zeile: `const CACHE = 'zane-vX.XXX'`). Das stellt sicher, dass Nutzer nach einem Deploy automatisch frische Assets bekommen. Format `zane-vMAJOR.MINOR`, fortlaufend hochgezählt (z.B. `zane-v2.077` → `zane-v2.078` → `zane-v2.079`).
 
 **Nach jedem Cache-Bump die neue Versionsnummer im Chat melden** — z.B. „SW-Cache → zane-v1.922".

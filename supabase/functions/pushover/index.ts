@@ -1,3 +1,9 @@
+// DEPLOY WITH verify_jwt = false. This function does its OWN auth in
+// resolveCaller() below (signed-in user OR the service-role key), which is the
+// real security boundary. It MUST stay false because the long-rest relay chain
+// calls this function back with the service-role key and no apikey header — the
+// gateway's verify_jwt=true rejects that self-call (HTTP 401, ~40 ms) and the
+// chain dies, so rest-timer pushes silently never fire for delays > 10 s.
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -6,7 +12,8 @@ const corsHeaders = {
 
 const SELF_URL  = 'https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover';
 const ANON_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
-const MAX_CHUNK = 10; // seconds per hop
+const MAX_CHUNK = 10;   // seconds per relay hop
+const MAX_DELAY = 3600; // cap user-supplied delays at 1 h — rest timers are minutes
 
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
@@ -28,14 +35,42 @@ async function isNonceCurrent(nonce: string, userId: string): Promise<boolean> {
   return rows[0]?.nonce === nonce;
 }
 
+// Resolve the caller: a real signed-in user (normal app calls) or the
+// service-role key (internal relay hops + other edge functions). The bare
+// anon key is NOT enough — without this check the function was an open
+// relay anyone could use to push arbitrary messages via our Pushover token,
+// cancel other users' notification chains, or start unbounded relay chains.
+async function resolveCaller(req: Request): Promise<{ internal: boolean; userId: string | null }> {
+  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+  if (!token) return { internal: false, userId: null };
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  if (serviceKey && token === serviceKey) return { internal: true, userId: null };
+  const base = Deno.env.get('SUPABASE_URL') ?? '';
+  const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? ANON_KEY;
+  const r = await fetch(`${base}/auth/v1/user`, {
+    headers: { 'Authorization': `Bearer ${token}`, 'apikey': anon },
+  }).catch(() => null);
+  if (!r?.ok) return { internal: false, userId: null };
+  const user = await r.json().catch(() => null);
+  return { internal: false, userId: user?.id ?? null };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  const caller = await resolveCaller(req);
+  if (!caller.internal && !caller.userId) {
+    return new Response(JSON.stringify({ error: 'unauthorized' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   const token = Deno.env.get('PUSHOVER_TOKEN') ?? 'a2vfbj4vu92hwzp5t9b6cbzkc18vw9';
 
-  const {
+  let {
     message = 'Rest over — keep going! 💪',
     title = 'Zane',
     delaySeconds = 0,
@@ -47,6 +82,26 @@ Deno.serve(async (req) => {
     priority = 0,
     ttl = 180,    // expire after 3 minutes by default; pass 0 to disable
   } = await req.json().catch(() => ({}));
+
+  if (!caller.internal) {
+    // App callers may only act on themselves: identity and target key come
+    // from the database, never from the request body.
+    userId = caller.userId!;
+    _relay = false;
+    delaySeconds = Math.min(Math.max(0, Number(delaySeconds) || 0), MAX_DELAY);
+    const r = await dbFetch(
+      `zane_user_settings?user_id=eq.${encodeURIComponent(userId)}&select=push_enabled,pushover_user_key`
+    );
+    const [sett] = await r.json().catch(() => [null]);
+    userKey = sett?.push_enabled ? (sett?.pushover_user_key ?? '') : '';
+    if (!cancel && !userKey) {
+      // Nothing to deliver to — e.g. the key was just typed and hasn't synced yet
+      return new Response(JSON.stringify({ skipped: true, reason: 'no_user_key' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+  }
 
   const user = userKey || (Deno.env.get('PUSHOVER_USER') ?? 'uxrg8gh43b1tpw31pq4r4i4ebqrhjt');
 
@@ -79,11 +134,16 @@ Deno.serve(async (req) => {
         console.log('[pushover] cancelled — newer rest timer active');
         return;
       }
+      // Relay hops authenticate with the service-role key (caller JWTs could
+      // expire mid-chain and must never be forwarded anywhere).
       EdgeRuntime.waitUntil(
         fetch(SELF_URL, {
           method: 'POST',
-          headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message, title, delaySeconds: delaySeconds - MAX_CHUNK, nonce, _relay: true, userKey, userId, priority, ttl }),
+          headers: {
+            'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ message, title, delaySeconds: delaySeconds - MAX_CHUNK, nonce, _relay: true, userKey: user, userId, priority, ttl }),
         }).catch(e => console.error('[pushover] relay error:', e))
       );
     } else {

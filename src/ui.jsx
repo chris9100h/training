@@ -25,7 +25,7 @@ const UI = {
   ok:        'var(--ok)',
   fontUi:      '"Inter", system-ui, sans-serif',
   fontNum:     '"JetBrains Mono", ui-monospace, monospace',
-  fontDisplay: '"Barlow Condensed", "Arial Narrow", sans-serif',
+  fontDisplay: '"Big Shoulders Display", "Arial Narrow", sans-serif',
 };
 
 // ─── Screen ─────────────────────────────────────────────────────────

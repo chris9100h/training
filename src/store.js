@@ -8,8 +8,44 @@ const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify
 
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Await a PostgREST builder and throw if it resolved with an { error }. The
+// supabase-js client does NOT throw on failed writes (network errors, RLS
+// denials, constraint violations all come back as a resolved { error }), so
+// without this a failed write looks identical to success. Wrapping every
+// write that feeds the sync diff is what makes flushSync's retry path real.
+async function unwrap(builder) {
+  const res = await builder;
+  if (res && res.error) {
+    throw Object.assign(new Error(res.error.message || 'Supabase request failed'), { cause: res.error });
+  }
+  return res;
+}
+
+// POST to an edge function authenticated as the signed-in user. The functions
+// reject the bare anon key (security hardening) — identity and push target are
+// derived server-side from the caller's JWT. Never rejects; resolves with the
+// Response, or null when there is no session / the request failed.
+async function fnFetch(url, body) {
+  try {
+    const { data } = await _supabase.auth.getSession();
+    const token = data?.session?.access_token;
+    if (!token) return null;
+    return await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (_) { return null; }
+}
+
 function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+// Local calendar date as YYYY-MM-DD. Never use toISOString() here — that
+// returns the UTC date, which is yesterday between midnight and UTC-offset
+// o'clock (and tomorrow in negative-offset timezones from the evening on).
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 // ─── QUICK SWITCH ────────────────────────────────────────────────────────
 
@@ -99,13 +135,39 @@ async function signOut() {
 
 async function deleteAllData(userId) {
   await Promise.all([
-    _supabase.from('zane_sessions').delete().eq('user_id', userId),
-    _supabase.from('zane_exercises').delete().eq('user_id', userId),
-    _supabase.from('zane_schedules').delete().eq('user_id', userId),
-    _supabase.from('zane_user_settings').delete().eq('user_id', userId),
-    _supabase.from('zane_profiles').delete().eq('id', userId),
-    _supabase.from('zane_skips').delete().eq('user_id', userId),
+    unwrap(_supabase.from('zane_sessions').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_exercises').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_schedules').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_user_settings').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_profiles').delete().eq('id', userId)),
+    unwrap(_supabase.from('zane_skips').delete().eq('user_id', userId)),
   ]);
+}
+
+// Validate a parsed backup object BEFORE importFromBackup deletes anything.
+// Returns an error string, or null when the structure looks safe to import.
+// The import is destructive (delete-then-write) and not transactional, so a
+// malformed file must be rejected up front rather than half-applied.
+function validateBackup(b) {
+  if (!b || typeof b !== 'object') return 'File is not a Zane backup.';
+  for (const key of ['sessions', 'exercises', 'schedules']) {
+    if (!Array.isArray(b[key])) return `Backup is missing or has an invalid "${key}" list.`;
+  }
+  if (b.settings != null && typeof b.settings !== 'object') return 'Backup "settings" is malformed.';
+  for (const e of b.exercises) {
+    if (!e || typeof e !== 'object' || typeof e.id !== 'string' || !e.id) return 'Backup contains an invalid exercise entry.';
+    if (e.tags != null && !Array.isArray(e.tags)) return 'Backup contains an exercise with invalid tags.';
+  }
+  for (const s of b.schedules) {
+    if (!s || typeof s !== 'object' || typeof s.id !== 'string' || !s.id) return 'Backup contains an invalid schedule entry.';
+    if (s.days != null && !Array.isArray(s.days)) return 'Backup contains a schedule with invalid days.';
+  }
+  for (const s of b.sessions) {
+    if (!s || typeof s !== 'object') return 'Backup contains an invalid session entry.';
+    if (s.id != null && typeof s.id !== 'string') return 'Backup contains a session with an invalid id.';
+    if (s.entries != null && !Array.isArray(s.entries)) return 'Backup contains a session with invalid entries.';
+  }
+  return null;
 }
 
 // Skips are persisted through syncStore's diff model (see the skips block there),
@@ -113,21 +175,24 @@ async function deleteAllData(userId) {
 // mutates store.skips via setStore; no imperative per-skip writes.
 
 async function importFromBackup(backup, userId) {
+  // Validate before the destructive delete — never half-apply a bad file.
+  const invalid = validateBackup(backup);
+  if (invalid) throw new Error(invalid);
   await deleteAllData(userId);
   const sett = backup.settings ?? {};
   const importSessions = backup.sessions?.filter(s => s.id) ?? [];
   await Promise.all([
-    backup.user?.name && _supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name }),
-    backup.exercises?.length && _supabase.from('zane_exercises').upsert(
+    backup.user?.name && unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name })),
+    backup.exercises?.length && unwrap(_supabase.from('zane_exercises').upsert(
       backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, user_id: userId }))
-    ),
-    backup.schedules?.length && _supabase.from('zane_schedules').upsert(
+    )),
+    backup.schedules?.length && unwrap(_supabase.from('zane_schedules').upsert(
       backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
-    ),
-    importSessions.length && _supabase.from('zane_sessions').upsert(
+    )),
+    importSessions.length && unwrap(_supabase.from('zane_sessions').upsert(
       importSessions.map(s => sessionToRow(s, userId))
-    ),
-    _supabase.from('zane_user_settings').upsert({
+    )),
+    unwrap(_supabase.from('zane_user_settings').upsert({
       user_id: userId,
       active_schedule_id: backup.activeScheduleId ?? null,
       cycle_index: backup.cycleIndex ?? 0,
@@ -147,7 +212,7 @@ async function importFromBackup(backup, userId) {
       custom_day_types: backup.customDayTypes ?? [],
       reminder_enabled: sett.reminderEnabled ?? false,
       reminder_time: sett.reminderTime ?? '07:00',
-    }),
+    })),
   ].filter(Boolean));
   // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
   if (importSessions.length) await _syncEntryRelational(importSessions, userId, null);
@@ -468,16 +533,20 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
   }
 
   if (allEntries.length) {
-    await _supabase.from('zane_session_entries').upsert(allEntries, { onConflict: 'id' });
+    await unwrap(_supabase.from('zane_session_entries').upsert(allEntries, { onConflict: 'id' }));
   }
   if (allSets.length) {
-    await _supabase.rpc('sync_sets_batch', { p_sets: allSets });
+    await unwrap(_supabase.rpc('sync_sets_batch', { p_sets: allSets }));
   }
 }
 
 function sessionToRow(s, userId) {
+  // `entries` is intentionally pulled out and NOT written: the relational
+  // zane_session_entries / zane_sets tables are the single source of truth, and
+  // the reporting RPCs read from them (migration 0058). The legacy JSONB column
+  // keeps its default '[]' on insert and is left untouched on update.
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
@@ -518,10 +587,15 @@ async function syncStore(prev, next, userId) {
     const removed = prev.sessions.filter(s => !next.sessions.find(x => x.id === s.id));
     if (upsert.length) {
       ops.push(_supabase.from('zane_sessions').upsert(upsert.map(s => sessionToRow(s, userId))));
-      // Only sync relational tables for sessions that already existed in prev —
-      // filters out initial load (prev.sessions empty) and session creation events.
-      // On the first real set change, the session will be in prev and gets written.
-      sessionUpserts = upsert.filter(s => prev.sessions?.find(x => x.id === s.id));
+      // Sync the relational tables for EVERY changed session — including brand-new
+      // ones. Since the JSONB dual-write was dropped (migration 0058), the
+      // relational rows are the only copy the spectator/overview RPCs can read;
+      // skipping creation here left a live session with only its completed sets
+      // (planned-but-untouched seeds missing → wrong set totals, "finishing soon").
+      // _syncEntryRelational still diffs per set: sessions already in prev write
+      // only changed sets; sessions NOT in prev (just created, or offline-created
+      // and re-synced after a reload merge) write all their seeded sets once.
+      sessionUpserts = upsert;
     }
     if (removed.length) ops.push(_supabase.from('zane_sessions').delete().in('id', removed.map(s => s.id)));
   }
@@ -611,7 +685,10 @@ async function syncStore(prev, next, userId) {
     }));
   }
 
-  await Promise.all(ops);
+  // unwrap() turns a failed write (network/RLS/constraint) into a thrown
+  // error so the caller (flushSync) keeps syncBase unchanged and retries,
+  // instead of silently advancing past data that never reached the server.
+  await Promise.all(ops.map(unwrap));
   // Dual-write entries then sets after sessions are committed (FK order: sessions → entries → sets)
   if (sessionUpserts.length) await _syncEntryRelational(sessionUpserts, userId, prev.sessions);
 }
@@ -699,11 +776,8 @@ function computeNextReminderAt(state) {
 
 function cancelPushover(settings, userId) {
   if (!settings?.pushEnabled) return;
-  fetch(PUSHOVER_URL, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nonce: `cancel-${Date.now()}`, cancel: true, userKey: settings?.pushoverUserKey ?? '', userId }),
-  }).catch(() => {});
+  // Identity + target key are derived server-side from the JWT now.
+  fnFetch(PUSHOVER_URL, { nonce: `cancel-${Date.now()}`, cancel: true });
 }
 
 function findExercise(state, exId) {
@@ -728,6 +802,25 @@ function effReps(st) {
 // Epley-style estimated 1RM.
 function e1rm(kg, reps) {
   return kg * (1 + reps / 30);
+}
+
+// Did `curr` beat `prev` (set-vs-same-position-last-time)? Used by the library,
+// session detail and coaching views. The live training screen keeps its own
+// variant because it evaluates a set mid-completion, before `done` is set.
+// More weight at no worse than -2 reps, or same/more weight at more reps.
+function isImprovement(curr, prev) {
+  if (!prev || !curr || !curr.done || curr.skipped || curr.kg == null || prev.kg == null) return false;
+  const rA = effReps(curr); const rB = effReps(prev);
+  if (rA == null || rB == null) return false;
+  return (curr.kg > prev.kg && rA >= rB - 2) || (curr.kg >= prev.kg && rA > rB);
+}
+function isDecline(curr, prev) {
+  if (!prev || !curr || curr.skipped) return false;
+  if (prev.skipped) return false; // prev was already skipped, no baseline to decline from
+  if (!curr.done || curr.kg == null || prev.kg == null) return false;
+  const rA = effReps(curr); const rB = effReps(prev);
+  if (rA == null || rB == null) return false;
+  return (curr.kg < prev.kg && rA <= rB) || (curr.kg === prev.kg && rA < rB);
 }
 
 // Best estimated 1RM ever recorded for an exercise across all ended sessions
@@ -1052,10 +1145,14 @@ function nextDay(state) {
 
 // ─── LOCAL CACHE ─────────────────────────────────────────────────────
 
+// Returns true on success, false if the write failed (most importantly a
+// QuotaExceededError once the ~5 MB localStorage budget fills up). Callers
+// surface a warning instead of letting the local cache silently stop updating.
 function saveToLocal(store, userId) {
   try {
     localStorage.setItem(`logbook-${userId}`, JSON.stringify(store));
-  } catch (_) {}
+    return true;
+  } catch (_) { return false; }
 }
 
 function loadFromLocal(userId) {
@@ -1070,7 +1167,8 @@ function loadFromLocal(userId) {
 function saveBase(store, userId) {
   try {
     localStorage.setItem(`logbook-base-${userId}`, JSON.stringify(store));
-  } catch (_) {}
+    return true;
+  } catch (_) { return false; }
 }
 
 function loadBase(userId) {
@@ -1264,13 +1362,10 @@ async function addCoachingNote(coachingId, type, entityId, entityName, body, aut
   });
   if (error) throw error;
   // Fire-and-forget push to the other party (fails silently if push not enabled).
-  // Skip for self-coaching — there's no "other party" to notify.
+  // Skip for self-coaching — there's no "other party" to notify. The author is
+  // derived server-side from the JWT, so it can't be spoofed.
   if (!coachingId.startsWith('self_')) {
-    fetch(COACHING_NOTIFY_URL, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ coachingId, authorId, threadId, preview: body }),
-    }).catch(() => {});
+    fnFetch(COACHING_NOTIFY_URL, { coachingId, threadId, preview: body });
   }
   return id;
 }
@@ -1512,13 +1607,13 @@ async function deleteCheckin(checkinId, userId) {
 
 window.LB = {
   supabase: _supabase,
-  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
+  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, fnFetch,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
-  signIn, signUp, signOut, deleteAllData, importFromBackup,
+  signIn, signUp, signOut, deleteAllData, importFromBackup, validateBackup,
   loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
-  effReps, e1rm, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
+  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover,
   subscribeToChanges,

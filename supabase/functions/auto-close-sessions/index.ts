@@ -4,8 +4,6 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
-
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const key  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -22,9 +20,11 @@ function dbFetch(path: string, options: RequestInit = {}) {
 
 async function sendPushover(userKey: string, userId: string, message: string) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
+  // Internal call: the pushover function only accepts user JWTs or the
+  // service-role key since the security hardening — the anon key is rejected.
   return fetch(`${base}/functions/v1/pushover`, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+    headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, title: 'Zane', userKey, userId }),
   }).catch(e => console.error('[auto-close] pushover error:', e));
 }
