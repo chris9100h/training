@@ -176,6 +176,60 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **Realtime:** `zane_coaching` und `zane_coaching_notes` sind in der `supabase_realtime`-Publikation — ermöglicht Live-Coaching-Einladungen und -Nachrichten. **Cross-Device Live-Sync laufender Sessions wurde entfernt** (der lokale Store ist die alleinige Quelle für eine laufende Session; ein Coach sieht die Live-Session eines Clients per Polling via `get_active_session_detail`, nicht über Realtime). `subscribeToChanges(userId, onCoachingNote, onCoachingInvite)` abonniert nur noch die Coaching-Tabellen.
 
+## Offene Aufgabe: Server-seitige PR/History — Client lädt nicht mehr die ganze Historie (Phase 2 / Stage 2 von Migration 0059)
+
+**Ziel:** Der Client soll beim Boot **nicht mehr die komplette Session-Historie**
+(alle `zane_session_entries` + `zane_sets`) laden. PR-Erkennung, Progression-Seeds
+und All-Time-Stats laufen stattdessen über die bereits existierenden 0059-RPCs.
+Wichtig, weil die App wachsen soll — heute wächst Boot-Zeit und Speicher linear mit
+der Trainingshistorie.
+
+**Was schon erledigt ist (NICHT nochmal machen):**
+- Client schreibt das `entries`-JSONB nicht mehr (`sessionToRow` lässt es aus).
+- Spectator/Coach-RPCs lesen relational via `zane_entries_json` (Migration 0058).
+- Die Server-Aggregate existieren und sind deployt (Migration 0059):
+  `get_exercise_best_e1rm`, `get_exercise_history`, `get_user_volume_stats`.
+- **Offen ist nur die Client-Umstellung** — diese RPCs werden derzeit von
+  `src/` aus **nirgends** aufgerufen (per grep prüfbar).
+
+**Konkrete Schritte (alle im Client):**
+1. **Boot-Fenster** in `loadFromSupabase` (`store.js`): Session-*Metadaten* (id,
+   date, dayId, dayName, ended, duration, feel) weiter **vollständig** laden (leicht;
+   Streaks/Kalender brauchen die Datumsliste). Aber `zane_session_entries`/`zane_sets`
+   nur noch für ein **Fenster** (z.B. letzte ~30–60 Tage) **plus** die laufende
+   In-Progress-Session. Den `entries`-JSONB-Select + den JSONB-Fallback im Mapping
+   dabei entfernen.
+2. **PR-Erkennung:** `bestE1rmForExercise` (store.js, scannt heute alle Sessions) →
+   `get_exercise_best_e1rm` einmal pro Session-Start laden + im Store cachen. Auch das
+   „★ NEW BEST"-Overlay im Training (`screens-train.jsx`) hängt daran.
+3. **Progression-Seeds / „Last time":** `lastSessionForExercise`,
+   `recentSessionsForExercise`, `bestRecentEntry` (store.js) → `get_exercise_history(exId, dayId)`
+   beim Session-Start. Achtung: `buildSeedSets`/`progressionSuggestion` konsumieren
+   `bestRecentEntry` **synchron** beim Vorbefüllen der Sätze — die Seeds müssen künftig
+   **vor** dem Anlegen der Session asynchron geladen werden (in `startSession` in
+   `screens-home.jsx`).
+4. **All-Time-Stats** (`screens-lib.jsx`): Volumen/Session-Count/Minuten →
+   `get_user_volume_stats`. **Streaks bleiben clientseitig** (plan-abhängig, brauchen
+   nur die Session-Datumsliste, die ja weiter geladen wird).
+5. **Exercise-History-Screen:** → `get_exercise_history` mit höherem `p_limit`.
+
+**Gotchas (vorher lesen, sonst Regressionen):**
+- **Offline:** Heute funktioniert die volle Historie offline aus dem localStorage-Cache.
+  Windowing + RPCs brauchen Netz → das geladene Fenster und die Aggregate (best_e1rm,
+  volume_stats) **mit-cachen** und offline darauf zurückfallen; PR-Erkennung mid-session
+  muss den gecachten Wert nutzen, nicht leer ausgehen.
+- **Merge in `app.jsx` (`loadData`):** Der Cache-first-Merge nimmt an, `fresh.sessions`
+  sei die **volle** Historie, und entfernt lokale Sessions, die der Server „nicht mehr hat".
+  Beim Windowing darf diese „nicht da → löschen"-Logik **nur aufs Fenster** wirken, sonst
+  werden ältere Sessions fälschlich aus dem Cache gelöscht.
+- **Spalte zuletzt droppen:** `zane_sessions.entries` erst per separater Migration
+  entfernen, wenn Boot sie nicht mehr selektiert UND der JSONB-Fallback raus ist.
+- Neue Store-Tests in `tools/test/store.test.cjs` für Fenster- und Merge-Logik.
+
+**Done, wenn:** Boot-Query lädt unabhängig vom Account-Alter konstant viele Sets;
+PR-Overlay/Progression/Stats sind gegen einen Account mit langer Historie identisch zu
+vorher; offline startet die App weiter ohne Crash (Fenster/Stats aus Cache).
+
 ## Deployment
 
 PWA, erreichbar unter `/training/`. Service Worker in `sw.js`.
