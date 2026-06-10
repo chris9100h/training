@@ -15,6 +15,18 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.083',
+    title: 'A big reliability tune-up',
+    items: [
+      'Rest-timer notifications are dependable again: the "rest\'s over" alert now arrives even for longer rests with your phone locked — not just short ones.',
+      'You can now see when your data is still saving. Make changes offline and a small "not synced" marker appears, then clears itself the moment you\'re back online — so nothing slips through unsaved.',
+      'App updates install reliably now — when a new version is ready you\'ll be prompted to refresh, no matter how you opened the app.',
+      'Coaches: a client\'s live workout shows the right set count and a realistic time-to-finish from the very start, instead of jumping straight to "finishing soon".',
+      'Your training day now rolls over at your local midnight, so the day shown late at night or early in the morning is always the correct one.',
+      'Under the hood: tighter security around notifications and coaching messages, and new safeguards that catch saving glitches before they ever reach you.',
+    ],
+  },
+  {
     id: 'v2.072',
     title: 'Smarter progression — always aim higher',
     items: [
