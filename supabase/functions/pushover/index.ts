@@ -1,3 +1,9 @@
+// DEPLOY WITH verify_jwt = false. This function does its OWN auth in
+// resolveCaller() below (signed-in user OR the service-role key), which is the
+// real security boundary. It MUST stay false because the long-rest relay chain
+// calls this function back with the service-role key and no apikey header — the
+// gateway's verify_jwt=true rejects that self-call (HTTP 401, ~40 ms) and the
+// chain dies, so rest-timer pushes silently never fire for delays > 10 s.
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
