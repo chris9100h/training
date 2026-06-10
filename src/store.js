@@ -8,6 +8,23 @@ const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify
 
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// POST to an edge function authenticated as the signed-in user. The functions
+// reject the bare anon key (security hardening) — identity and push target are
+// derived server-side from the caller's JWT. Never rejects; resolves with the
+// Response, or null when there is no session / the request failed.
+async function fnFetch(url, body) {
+  try {
+    const { data } = await _supabase.auth.getSession();
+    const token = data?.session?.access_token;
+    if (!token) return null;
+    return await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (_) { return null; }
+}
+
 function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
 // Local calendar date as YYYY-MM-DD. Never use toISOString() here — that
 // returns the UTC date, which is yesterday between midnight and UTC-offset
@@ -705,11 +722,8 @@ function computeNextReminderAt(state) {
 
 function cancelPushover(settings, userId) {
   if (!settings?.pushEnabled) return;
-  fetch(PUSHOVER_URL, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nonce: `cancel-${Date.now()}`, cancel: true, userKey: settings?.pushoverUserKey ?? '', userId }),
-  }).catch(() => {});
+  // Identity + target key are derived server-side from the JWT now.
+  fnFetch(PUSHOVER_URL, { nonce: `cancel-${Date.now()}`, cancel: true });
 }
 
 function findExercise(state, exId) {
@@ -1270,13 +1284,10 @@ async function addCoachingNote(coachingId, type, entityId, entityName, body, aut
   });
   if (error) throw error;
   // Fire-and-forget push to the other party (fails silently if push not enabled).
-  // Skip for self-coaching — there's no "other party" to notify.
+  // Skip for self-coaching — there's no "other party" to notify. The author is
+  // derived server-side from the JWT, so it can't be spoofed.
   if (!coachingId.startsWith('self_')) {
-    fetch(COACHING_NOTIFY_URL, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ coachingId, authorId, threadId, preview: body }),
-    }).catch(() => {});
+    fnFetch(COACHING_NOTIFY_URL, { coachingId, threadId, preview: body });
   }
   return id;
 }
@@ -1518,7 +1529,7 @@ async function deleteCheckin(checkinId, userId) {
 
 window.LB = {
   supabase: _supabase,
-  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL,
+  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, fnFetch,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
   signIn, signUp, signOut, deleteAllData, importFromBackup,
   loadFromSupabase, syncStore,

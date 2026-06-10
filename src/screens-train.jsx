@@ -759,14 +759,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session }
     if (!restStart) return;
     if (!store.settings?.pushEnabled) return;
     const delaySeconds = Math.round(Math.max(0, restStart + activeRestDef * 1000 - Date.now()) / 1000);
-    fetch(LB.PUSHOVER_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LB.SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ delaySeconds, nonce: String(restStart) + '-' + Math.random().toString(36).slice(2, 8), userKey: store.settings?.pushoverUserKey ?? '', userId, priority: 1 }),
-    }).catch(() => {});
+    // Authenticated as the user; the server derives the target key from the DB.
+    LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds, nonce: String(restStart) + '-' + Math.random().toString(36).slice(2, 8), priority: 1 });
   }, [restStart]);
 
   // beep + auto-open modal when rest timer hits zero
