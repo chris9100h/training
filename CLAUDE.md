@@ -160,6 +160,11 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_entries_json(p_session_id text)`** → `jsonb` — baut die store-förmige (camelCase) `entries`-Array einer Session aus den relationalen Tabellen (`zane_session_entries`/`zane_sets`). Quelle der Wahrheit seit Migration 0058; von `get_active_session_detail`/`get_active_sessions_overview` genutzt, damit die Coach-/Spectator-Ansicht nicht mehr vom Legacy-JSONB abhängt. Der Client schreibt das JSONB nicht mehr (`sessionToRow` in `store.js` lässt `entries` aus).
 
+**Serverseitige History-Aggregate (Migration 0059, SECURITY INVOKER, optional `p_user_id` für Coach-Zugriff):**
+- **`get_exercise_best_e1rm(p_user_id?)`** → `TABLE(ex_id, best_e1rm)` — bestes All-Time-e1RM (Epley) je Übung über beendete Sessions. Für PR-Erkennung ohne volle Historie im Client.
+- **`get_exercise_history(p_ex_id, p_day_id?, p_limit?, p_user_id?)`** → `TABLE(session_id, day_id, date, ended, sets jsonb)` — jüngste beendete Sessions mit dieser Übung (für Seeds/Progression, „Last time"-Karte, Exercise-History).
+- **`get_user_volume_stats(p_user_id?)`** → `TABLE(session_count, total_volume, total_minutes, total_done_sets)` — All-Time-Summen für die Stats. Streaks bleiben clientseitig (plan-abhängig, brauchen nur Session-Daten).
+
 **`auto-close-sessions`** (Edge Function) — schließt abgelaufene offene Sessions: kein Sets → Session + Entries löschen (butt start); mit Sets → `ended` = letztes `updated_at` der Sets, `duration_minutes` berechnen, `in_progress_session_id` clearen; optional Pushover-Notification. Wird per Cron alle 15 Minuten aufgerufen (Supabase Dashboard → Edge Functions → Schedule). Timeout pro User in `session_timeout_minutes` (default 90 min).
 
 **`get_coaching_clients()`** → `TABLE(coaching_id text, client_id uuid, client_email text, client_name text, status text, checkin_enabled boolean)` — listet alle Clients des aufrufenden Coaches inkl. `checkin_enabled`-Flag; Self-Coaching-Zeilen ausgeschlossen
