@@ -24,8 +24,14 @@ function FitText({ text, max, min, style }) {
       const avail = parent.clientWidth;
       if (avail <= 0) return;            // not laid out yet — re-fires once it is
       lastW = avail;
+      // Measure the true text width at max size. The width cap is lifted during
+      // the read because iOS Safari otherwise clamps scrollWidth to the box,
+      // hiding the real overflow and leaving the title oversized.
+      const prevMaxW = el.style.maxWidth;
+      el.style.maxWidth = 'none';
       el.style.fontSize = max + 'px';
       const natural = el.scrollWidth;
+      el.style.maxWidth = prevMaxW;
       setFs(natural > avail ? Math.max(min, Math.floor(max * avail / natural)) : max);
       setMeasured(true);
     };
