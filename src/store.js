@@ -1312,15 +1312,17 @@ function nextDay(state) {
 
 // Cache-first reload merge for sessions (extracted from app.jsx's loadData so
 // the windowing rules stay testable). fresh = server sessions (FULL metadata
-// list, but entries only inside the boot window); cur = cached/local sessions.
+// list, but entries only inside the boot window); cur = cached/local sessions;
+// baseSessions = sessions of the last state confirmed written to Supabase.
 // - Sessions the server no longer has are dropped (deleted on another device),
-//   except very recent local-only ones and the in-progress session (offline-
-//   created, not yet synced). This works on the session level only — the
-//   metadata list is still complete, so "missing on the server" is meaningful.
+//   except local-only ones that never reached the server (recent + not in the
+//   synced base) and the in-progress session. This works on the session level
+//   only — the metadata list is still complete, so "missing on the server" is
+//   meaningful.
 // - The in-progress session keeps its LOCAL entries/restStart (authoritative).
 // - A fresh session without entries (outside the boot window) keeps the cached
 //   entries — windowing must never wipe history already on the device.
-function mergeSessions(freshSessions, curSessions, inProgressId, now = new Date()) {
+function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
   const serverIds = new Set(freshSessions.map(s => s.id));
   const sessions = freshSessions.map(s => {
     const mem = (curSessions || []).find(x => x.id === s.id);
@@ -1336,15 +1338,21 @@ function mergeSessions(freshSessions, curSessions, inProgressId, now = new Date(
       ...(keepCachedEntries ? { entries: mem.entries } : {}),
     };
   });
-  // Keep sessions the server hasn't stored yet, but only recent ones — so a
-  // session deleted on another device isn't resurrected from a stale cache.
-  // The in-progress session is always kept regardless of its date; other
-  // ended=null sessions are orphans and only ended ones qualify via the window.
+  // Keep sessions the server hasn't stored yet — i.e. created on this device
+  // and never confirmed synced. A session that IS in the synced base but gone
+  // from fresh was deleted on another device: keeping it would make this
+  // device push it right back (resurrection). Without a base (legacy cache)
+  // fall back to the recency rule alone — the safe direction, since dropping
+  // a never-synced session would lose data. Only recent ended sessions
+  // qualify; the in-progress session is always kept regardless of its date
+  // (other ended=null sessions are orphans).
+  const baseIds = baseSessions ? new Set(baseSessions.map(s => s.id)) : null;
   const cutoff = new Date(now); cutoff.setDate(cutoff.getDate() - 2);
   const cutoffISO = cutoff.toISOString().slice(0, 10);
   const localOnly = (curSessions || []).filter(x =>
     !serverIds.has(x.id) &&
-    (x.id === inProgressId || ((x.date || '') >= cutoffISO && x.ended != null))
+    (x.id === inProgressId ||
+      ((x.date || '') >= cutoffISO && x.ended != null && !baseIds?.has(x.id)))
   );
   const activeExists = !!(inProgressId && (
     serverIds.has(inProgressId) ||

@@ -504,17 +504,26 @@ function App() {
             // windowing rules are unit-tested: the "missing on the server →
             // drop" logic works on the (complete) metadata list, while cached
             // entries of sessions outside the boot window are preserved.
-            const { sessions, activeExists } = LB.mergeSessions(fresh.sessions, cur.sessions, inProgressId);
+            // The persisted base tells apart "never reached the server" (keep
+            // + re-sync) from "deleted on another device" (drop — keeping it
+            // would push it right back).
+            const { sessions, activeExists } = LB.mergeSessions(fresh.sessions, cur.sessions, inProgressId, base?.sessions);
+            // Same resurrection guard for the other ID-merged collections:
+            // local-only items are kept only if they were never confirmed
+            // synced (not in the base). No base (legacy cache) → keep.
             const serverExIds = new Set(fresh.exercises.map(e => e.id));
-            const localOnlyExercises = (cur.exercises || []).filter(x => !serverExIds.has(x.id));
+            const baseExIds = base ? new Set((base.exercises || []).map(e => e.id)) : null;
+            const localOnlyExercises = (cur.exercises || []).filter(x => !serverExIds.has(x.id) && !baseExIds?.has(x.id));
             const curExMap = new Map((cur.exercises || []).map(e => [e.id, e]));
             const serverSchIds = new Set(fresh.schedules.map(s => s.id));
-            const localOnlySchedules = (cur.schedules || []).filter(x => !serverSchIds.has(x.id));
+            const baseSchIds = base ? new Set((base.schedules || []).map(s => s.id)) : null;
+            const localOnlySchedules = (cur.schedules || []).filter(x => !serverSchIds.has(x.id) && !baseSchIds?.has(x.id));
             // Skips offline gesetzt aber noch nicht gesynct: erhalten, damit der
             // Reload-Merge sie nicht mit den Server-Skips überschreibt (sie werden
             // über syncStore's skips-Diff nachgeschoben).
             const serverSkipIds = new Set((fresh.skips || []).map(s => s.id));
-            const localOnlySkips = (cur.skips || []).filter(x => !serverSkipIds.has(x.id));
+            const baseSkipIds = base ? new Set((base.skips || []).map(s => s.id)) : null;
+            const localOnlySkips = (cur.skips || []).filter(x => !serverSkipIds.has(x.id) && !baseSkipIds?.has(x.id));
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.

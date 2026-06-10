@@ -207,6 +207,11 @@ Seit v2.085 lädt der Boot **konstant viele Sets**, unabhängig vom Account-Alte
   sie nicht mehr → löschen"-Logik arbeitet auf der weiterhin vollständigen
   Metadaten-Liste; **gecachte Entries** von Sessions außerhalb des Fensters
   bleiben erhalten (Bestandsgeräte behalten ihre volle Offline-Historie).
+  Lokale Einträge, die der Server nicht hat, werden nur behalten, wenn sie
+  **nie bestätigt gesynct** waren (nicht in der persistierten Sync-Base aus
+  `loadBase`) — sonst würde ein Gerät auf einem anderen Gerät Gelöschtes
+  wieder hochsyncen (Resurrection). Gilt für Sessions, Exercises, Schedules
+  und Skips; ohne Base (Alt-Cache) wird konservativ behalten.
 - **Offline:** Aggregate + Fenster liegen im localStorage-Store-Cache; ohne
   Netz laufen PR-Erkennung/Stats/Listen aus dem Cache. Die RPC-Helfer
   (`fetchSeedEntries` etc.) fallen bei Fehlern still auf lokale Daten zurück.

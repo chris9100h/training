@@ -188,31 +188,31 @@ async function testAsync(name, fn) {
       { id: 'a', date: '2026-06-01', ended: 'x', entries: [] },
       { id: 'gone', date: '2026-01-01', ended: 'x', entries: [] },
     ];
-    const { sessions } = LB.mergeSessions(fresh, cur, null, now);
+    const { sessions } = LB.mergeSessions(fresh, cur, null, null, now);
     assert.strictEqual(sessions.map(s => s.id).join(','), 'a');
   });
   test('mergeSessions keeps recent local-only ended sessions (not yet synced)', () => {
     const fresh = [];
     const cur = [{ id: 'loc', date: '2026-06-09', ended: 'x', entries: [] }];
-    const { sessions } = LB.mergeSessions(fresh, cur, null, now);
+    const { sessions } = LB.mergeSessions(fresh, cur, null, null, now);
     assert.strictEqual(sessions.map(s => s.id).join(','), 'loc');
   });
   test('mergeSessions always keeps the local-only in-progress session', () => {
     const fresh = [];
     const cur = [{ id: 'ip', date: '2026-01-01', ended: null, entries: [] }];
-    const { sessions, activeExists } = LB.mergeSessions(fresh, cur, 'ip', now);
+    const { sessions, activeExists } = LB.mergeSessions(fresh, cur, 'ip', null, now);
     assert.strictEqual(sessions.map(s => s.id).join(','), 'ip');
     assert.strictEqual(activeExists, true);
   });
   test('mergeSessions reports a vanished in-progress session as inactive', () => {
-    const { activeExists } = LB.mergeSessions([], [], 'ghost', now);
+    const { activeExists } = LB.mergeSessions([], [], 'ghost', null, now);
     assert.strictEqual(activeExists, false);
   });
   test('mergeSessions preserves cached entries for sessions outside the boot window', () => {
     const cachedEntries = [{ exId: 'e1', sets: [{ kg: 80, reps: 8 }] }];
     const fresh = [{ id: 'old', date: '2025-01-01', ended: 'x', entries: [], aggVolume: 640 }];
     const cur = [{ id: 'old', date: '2025-01-01', ended: 'x', entries: cachedEntries }];
-    const { sessions } = LB.mergeSessions(fresh, cur, null, now);
+    const { sessions } = LB.mergeSessions(fresh, cur, null, null, now);
     assert.strictEqual(sessions[0].entries, cachedEntries, 'windowing must not wipe history already on the device');
     assert.strictEqual(sessions[0].aggVolume, 640, 'fresh aggregates still attached');
   });
@@ -220,9 +220,22 @@ async function testAsync(name, fn) {
     const localEntries = [{ exId: 'e1', sets: [{ kg: 100, reps: 5, done: true }] }];
     const fresh = [{ id: 'act', date: '2026-06-10', ended: null, entries: [{ exId: 'e1', sets: [] }] }];
     const cur = [{ id: 'act', date: '2026-06-10', ended: null, entries: localEntries, restStart: 123 }];
-    const { sessions } = LB.mergeSessions(fresh, cur, 'act', now);
+    const { sessions } = LB.mergeSessions(fresh, cur, 'act', null, now);
     assert.strictEqual(sessions[0].entries, localEntries);
     assert.strictEqual(sessions[0].restStart, 123);
+  });
+  // A recent session that was already confirmed synced (present in the base)
+  // but is gone from fresh was deleted on another device. Keeping it would
+  // make this device push it right back (resurrection bug).
+  test('mergeSessions does NOT resurrect a synced session deleted on another device', () => {
+    const sess = { id: 'del', date: '2026-06-09', ended: 'x', entries: [] };
+    const { sessions } = LB.mergeSessions([], [sess], null, [sess], now);
+    assert.strictEqual(sessions.length, 0, 'was in the synced base + gone from the server → deleted remotely');
+  });
+  test('mergeSessions still keeps never-synced recent sessions when a base exists', () => {
+    const sess = { id: 'new', date: '2026-06-09', ended: 'x', entries: [] };
+    const { sessions } = LB.mergeSessions([], [sess], null, [{ id: 'other' }], now);
+    assert.strictEqual(sessions.map(s => s.id).join(','), 'new');
   });
 
   // ── sessionToRow keeps client-only fields out of the DB row ──────────────
