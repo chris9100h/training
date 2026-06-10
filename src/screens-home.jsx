@@ -18,36 +18,42 @@ function FitText({ text, max, min, style }) {
     if (!el) return;
     let raf, lastW = -1;
     // Measure the text at max size and scale down to fit the parent's width.
-    // `force` bypasses the width-equality guard (used when only the font, not
-    // the width, changed — e.g. after web fonts load).
-    const measure = (force) => {
+    const measure = () => {
       const parent = el.parentElement;
       if (!parent) return;
       const avail = parent.clientWidth;
-      if (avail <= 0) return;            // not laid out yet — observer re-fires later
-      if (!force && avail === lastW) return; // width unchanged — nothing to do
+      if (avail <= 0) return;            // not laid out yet — re-fires once it is
       lastW = avail;
       el.style.fontSize = max + 'px';
       const natural = el.scrollWidth;
       setFs(natural > avail ? Math.max(min, Math.floor(max * avail / natural)) : max);
       setMeasured(true);
     };
-    // Defer measuring to a frame so a ResizeObserver callback never mutates
-    // layout synchronously (which would trigger the "ResizeObserver loop"
-    // notification). Coalesce bursts into one measure.
-    const schedule = (force) => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => measure(force)); };
-    schedule(true);
-    // Re-fit when web fonts load — the first measurement may run against the
-    // fallback font (different metrics), yielding a wrong size.
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => schedule(true));
-    // Observe the parent so we re-fit when its width becomes known (covers
-    // remounts where layout isn't ready yet) or changes (orientation/resize).
+    // Measure synchronously: on a text change the layout is already settled, so
+    // this fits the new text immediately (no race with the observer below).
+    measure();
+    // Re-measure after layout for the cases where it wasn't ready yet (remount /
+    // a screen being revealed) — the synchronous pass above bailed on width 0.
+    raf = requestAnimationFrame(measure);
+    // Re-fit when web fonts load — a measurement against the fallback font
+    // (different metrics) would yield a wrong size.
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
+    // Re-fit only on real width changes (orientation/resize/late reveal). Width
+    // is compared so the parent's height change from our own font resize can't
+    // trigger a ResizeObserver feedback loop.
     let ro, onResize;
+    const onWidthChange = () => {
+      const p = el.parentElement;
+      if (p && p.clientWidth > 0 && p.clientWidth !== lastW) {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(measure);
+      }
+    };
     if (window.ResizeObserver) {
-      ro = new ResizeObserver(() => schedule(false));
+      ro = new ResizeObserver(onWidthChange);
       ro.observe(el.parentElement);
     } else {
-      onResize = () => schedule(false);
+      onResize = onWidthChange;
       window.addEventListener('resize', onResize);
     }
     return () => {
