@@ -7,6 +7,33 @@ const { useState, useEffect, useMemo, useRef } = React;
 
 const SKIP_REASONS = ['Tired', 'Sick', 'Stress', 'Forgot', 'Rest day', 'No particular reason'];
 
+// Renders text on a single line, scaling the font size down so it always fits
+// the parent's width (used for the hero day name, which varies in length).
+function FitText({ text, max, min, style }) {
+  const ref = useRef(null);
+  const [fs, setFs] = useState(max);
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !el.parentElement) return;
+    const fit = () => {
+      el.style.fontSize = max + 'px';
+      const avail = el.parentElement.clientWidth;
+      const natural = el.scrollWidth;
+      if (avail > 0 && natural > avail) {
+        setFs(Math.max(min, Math.floor(max * avail / natural)));
+      } else {
+        setFs(max);
+      }
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [text, max, min]);
+  return (
+    <div ref={ref} style={{ ...style, fontSize: fs, whiteSpace: 'nowrap' }}>{text}</div>
+  );
+}
+
 // ─── LOGIN / REGISTER ─────────────────────────────────────────────────────────
 function LoginScreen() {
   const [mode, setMode]           = useState('login'); // 'login' | 'register'
@@ -1061,13 +1088,16 @@ function HomeScreen({ store, setStore, go, userId }) {
             {/* Fixed: label, name, stats, CTAs */}
             <div style={{ flexShrink: 0, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 4 }}>
             <div className="micro-gold" style={{ marginBottom: 6 }}>{cardLabel}</div>
-            <div style={{
-              fontFamily: UI.fontDisplay, fontSize: 72, fontWeight: 900,
-              textTransform: 'uppercase', letterSpacing: '0.04em',
-              color: UI.gold, lineHeight: 0.9, marginBottom: 20,
-            }}>
-              {activeDay.name}
-            </div>
+            <FitText
+              text={(activeDay.name || '').toUpperCase()}
+              max={72} min={28}
+              style={{
+                fontFamily: UI.fontDisplay, fontWeight: 900,
+                letterSpacing: '0.04em',
+                color: UI.gold, lineHeight: 0.9, marginBottom: 20,
+                maxWidth: '100%',
+              }}
+            />
 
             {/* Stats */}
             <div style={{ display: 'flex', alignItems: 'stretch', gap: 20, marginBottom: 18, width: '100%', justifyContent: 'center' }}>
