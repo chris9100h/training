@@ -12,54 +12,40 @@ const SKIP_REASONS = ['Tired', 'Sick', 'Stress', 'Forgot', 'Rest day', 'No parti
 function FitText({ text, max, min, style }) {
   const ref = useRef(null);
   const [fs, setFs] = useState(max);
-  const [measured, setMeasured] = useState(false);
   React.useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     let raf, lastW = -1;
     // Measure the text at max size and scale down to fit the parent's width.
-    const measure = () => {
+    // `force` bypasses the width-equality guard (used when only the font, not
+    // the width, changed — e.g. after web fonts load).
+    const measure = (force) => {
       const parent = el.parentElement;
       if (!parent) return;
       const avail = parent.clientWidth;
-      if (avail <= 0) return;            // not laid out yet — re-fires once it is
+      if (avail <= 0) return;            // not laid out yet — observer re-fires later
+      if (!force && avail === lastW) return; // width unchanged — nothing to do
       lastW = avail;
-      // Measure the true text width at max size. The width cap is lifted during
-      // the read because iOS Safari otherwise clamps scrollWidth to the box,
-      // hiding the real overflow and leaving the title oversized.
-      const prevMaxW = el.style.maxWidth;
-      el.style.maxWidth = 'none';
       el.style.fontSize = max + 'px';
       const natural = el.scrollWidth;
-      el.style.maxWidth = prevMaxW;
       setFs(natural > avail ? Math.max(min, Math.floor(max * avail / natural)) : max);
-      setMeasured(true);
     };
-    // Measure synchronously: on a text change the layout is already settled, so
-    // this fits the new text immediately (no race with the observer below).
-    measure();
-    // Re-measure after layout for the cases where it wasn't ready yet (remount /
-    // a screen being revealed) — the synchronous pass above bailed on width 0.
-    raf = requestAnimationFrame(measure);
-    // Re-fit when web fonts load — a measurement against the fallback font
-    // (different metrics) would yield a wrong size.
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
-    // Re-fit only on real width changes (orientation/resize/late reveal). Width
-    // is compared so the parent's height change from our own font resize can't
-    // trigger a ResizeObserver feedback loop.
+    // Defer measuring to a frame so a ResizeObserver callback never mutates
+    // layout synchronously (which would trigger the "ResizeObserver loop"
+    // notification). Coalesce bursts into one measure.
+    const schedule = (force) => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => measure(force)); };
+    schedule(true);
+    // Re-fit when web fonts load — the first measurement may run against the
+    // fallback font (different metrics), yielding a wrong size.
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => schedule(true));
+    // Observe the parent so we re-fit when its width becomes known (covers
+    // remounts where layout isn't ready yet) or changes (orientation/resize).
     let ro, onResize;
-    const onWidthChange = () => {
-      const p = el.parentElement;
-      if (p && p.clientWidth > 0 && p.clientWidth !== lastW) {
-        cancelAnimationFrame(raf);
-        raf = requestAnimationFrame(measure);
-      }
-    };
     if (window.ResizeObserver) {
-      ro = new ResizeObserver(onWidthChange);
+      ro = new ResizeObserver(() => schedule(false));
       ro.observe(el.parentElement);
     } else {
-      onResize = onWidthChange;
+      onResize = () => schedule(false);
       window.addEventListener('resize', onResize);
     }
     return () => {
@@ -69,13 +55,7 @@ function FitText({ text, max, min, style }) {
     };
   }, [text, max, min]);
   return (
-    <div ref={ref} style={{
-      ...style, fontSize: fs, whiteSpace: 'nowrap',
-      // Stay invisible (but keep layout space) until the first fit lands, so
-      // the user only sees the final size fade in — not the resize jump.
-      opacity: measured ? 1 : 0,
-      transition: 'opacity 0.15s ease-out',
-    }}>{text}</div>
+    <div ref={ref} style={{ ...style, fontSize: fs, whiteSpace: 'nowrap' }}>{text}</div>
   );
 }
 
