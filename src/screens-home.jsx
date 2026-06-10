@@ -25,19 +25,14 @@ function FitText({ text, max, min, style }) {
       setFs(natural > avail ? Math.max(min, Math.floor(max * avail / natural)) : max);
     };
     fit();
+    // Re-measure after the browser has laid out — on remount the parent width
+    // can still be 0 during useLayoutEffect; rAF runs once layout is settled.
+    const raf = requestAnimationFrame(fit);
     // Re-fit once web fonts load — a measurement against the fallback font
     // (wider) would otherwise yield too small a size.
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
-    // Observe the parent so we re-fit whenever its width becomes known/changes
-    // (covers remounts where layout isn't ready during useLayoutEffect).
-    let ro;
-    if (window.ResizeObserver && el.parentElement) {
-      ro = new ResizeObserver(fit);
-      ro.observe(el.parentElement);
-    } else {
-      window.addEventListener('resize', fit);
-    }
-    return () => { if (ro) ro.disconnect(); else window.removeEventListener('resize', fit); };
+    window.addEventListener('resize', fit);
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', fit); };
   }, [text, max, min]);
   return (
     <div ref={ref} style={{ ...style, fontSize: fs, whiteSpace: 'nowrap' }}>{text}</div>
