@@ -12,6 +12,7 @@ const SKIP_REASONS = ['Tired', 'Sick', 'Stress', 'Forgot', 'Rest day', 'No parti
 function FitText({ text, max, min, style }) {
   const ref = useRef(null);
   const [fs, setFs] = useState(max);
+  const [measured, setMeasured] = useState(false);
   React.useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -29,6 +30,7 @@ function FitText({ text, max, min, style }) {
       el.style.fontSize = max + 'px';
       const natural = el.scrollWidth;
       setFs(natural > avail ? Math.max(min, Math.floor(max * avail / natural)) : max);
+      setMeasured(true);
     };
     // Defer measuring to a frame so a ResizeObserver callback never mutates
     // layout synchronously (which would trigger the "ResizeObserver loop"
@@ -55,7 +57,13 @@ function FitText({ text, max, min, style }) {
     };
   }, [text, max, min]);
   return (
-    <div ref={ref} style={{ ...style, fontSize: fs, whiteSpace: 'nowrap' }}>{text}</div>
+    <div ref={ref} style={{
+      ...style, fontSize: fs, whiteSpace: 'nowrap',
+      // Stay invisible (but keep layout space) until the first fit lands, so
+      // the user only sees the final size fade in — not the resize jump.
+      opacity: measured ? 1 : 0,
+      transition: 'opacity 0.15s ease-out',
+    }}>{text}</div>
   );
 }
 
