@@ -115,8 +115,8 @@ function LoginScreen() {
           }}
           style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
           {!isLogin && (
-            <Field label="Name">
-              <TextInput value={name} onChange={setName} placeholder="Your name" autoFocus={!isLogin} autoComplete="name" name="name" />
+            <Field label="Nickname">
+              <TextInput value={name} onChange={setName} placeholder="Your nickname" autoFocus={!isLogin} autoComplete="nickname" name="name" />
             </Field>
           )}
           <Field label="Email">
