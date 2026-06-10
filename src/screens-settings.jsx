@@ -214,7 +214,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const approveUser = async (userId) => {
     setApprovingId(userId);
     try {
-      await LB.supabase.rpc('approve_user', { p_user_id: userId });
+      // The RPC resolves with { error } rather than throwing — check it, or a
+      // failed approval would still drop the user from the list (false success).
+      const { error } = await LB.supabase.rpc('approve_user', { p_user_id: userId });
+      if (error) { await confirm(error.message || 'Could not approve this user.', { title: 'Approve failed', ok: 'OK' }); return; }
       setPendingUsers(u => u.filter(x => x.user_id !== userId));
     } finally {
       setApprovingId(null);
@@ -224,7 +227,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const declineUser = async (userId) => {
     setDecliningId(userId);
     try {
-      await LB.supabase.rpc('decline_user', { p_user_id: userId });
+      const { error } = await LB.supabase.rpc('decline_user', { p_user_id: userId });
+      if (error) { await confirm(error.message || 'Could not decline this user.', { title: 'Decline failed', ok: 'OK' }); return; }
       setPendingUsers(u => u.filter(x => x.user_id !== userId));
     } finally {
       setDecliningId(null);
@@ -234,11 +238,13 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const addGrant = async () => {
     const email = newGrantEmail.trim().toLowerCase();
     if (!email.includes('@') || activeGrants.includes(email)) return;
-    await LB.supabase.rpc('set_active_users_grant', { p_email: email, p_granted: true });
+    const { error } = await LB.supabase.rpc('set_active_users_grant', { p_email: email, p_granted: true });
+    if (error) { await confirm(error.message || 'Could not add this grant.', { title: 'Grant failed', ok: 'OK' }); return; }
     setActiveGrants(g => [...g, email]); setNewGrantEmail('');
   };
   const removeGrant = async (email) => {
-    await LB.supabase.rpc('set_active_users_grant', { p_email: email, p_granted: false });
+    const { error } = await LB.supabase.rpc('set_active_users_grant', { p_email: email, p_granted: false });
+    if (error) { await confirm(error.message || 'Could not remove this grant.', { title: 'Grant failed', ok: 'OK' }); return; }
     setActiveGrants(g => g.filter(x => x !== email));
   };
 
@@ -282,7 +288,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
     input.onchange = async (e) => {
       const file = e.target.files?.[0]; if (!file) return;
       let backup; try { backup = JSON.parse(await file.text()); } catch (_) { await confirm('The selected file is not valid JSON.', { title: 'Invalid file', ok: 'OK' }); return; }
-      if (!backup.sessions || !backup.exercises || !backup.schedules) { await confirm('This file does not look like a Zane backup.', { title: 'Invalid backup', ok: 'OK' }); return; }
+      const invalid = LB.validateBackup(backup);
+      if (invalid) { await confirm(invalid, { title: 'Invalid backup', ok: 'OK' }); return; }
       const latestSession = [...(backup.sessions || [])].filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
       const backupDate = latestSession ? new Date(latestSession.ended).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }) : 'unknown date';
       const ok = await confirm(`This backup contains data up to ${backupDate}. Your current data will be downloaded first, then replaced.`, { title: 'Restore backup?', ok: 'Restore', danger: true });

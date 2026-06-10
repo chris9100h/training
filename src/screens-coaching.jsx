@@ -2,6 +2,29 @@
 
 const { useState: useStateC, useEffect: useEffectC, useRef: useRefC, useMemo: useMemoC } = React;
 
+// Fixed amber pill shown while a coach's edit to a client's plan failed to
+// sync. syncStore now throws on a real write failure, so this surfaces it
+// instead of the edit silently not persisting. The next edit retries the diff.
+function CoachSyncErrorPill({ show }) {
+  if (!show) return null;
+  return (
+    <div style={{
+      position: 'fixed', left: 0, right: 0,
+      top: 'calc(env(safe-area-inset-top, 0px) + 8px)',
+      display: 'flex', justifyContent: 'center', zIndex: 90, pointerEvents: 'none',
+    }}>
+      <div style={{
+        padding: '6px 12px', borderRadius: 999,
+        background: 'rgba(var(--danger-rgb),0.16)', border: `1px solid rgba(var(--danger-rgb),0.5)`,
+        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+        color: UI.danger, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
+      }}>
+        Change not saved — keep editing to retry
+      </div>
+    </div>
+  );
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmtDate(iso) {
@@ -1381,9 +1404,12 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
   const activate = async (scheduleId) => {
     try {
       const oldPlanName = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId)?.name;
-      await LB.supabase.from('zane_user_settings')
+      // The update resolves with { error } instead of throwing — check it, or a
+      // failed activation would still flip the UI and send a misleading note.
+      const { error } = await LB.supabase.from('zane_user_settings')
         .update({ active_schedule_id: scheduleId })
         .eq('user_id', clientId);
+      if (error) throw error;
       setClientStore(s => ({ ...s, activeScheduleId: scheduleId }));
       const planName = clientStore.schedules?.find(s => s.id === scheduleId)?.name || scheduleId;
       const threadName = oldPlanName ? `Plan changed from ${oldPlanName} to ${planName}` : `Plan changed to ${planName}`;
@@ -1441,9 +1467,13 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
           })),
         };
         if (newExercises.length) {
-          await LB.supabase.from('zane_exercises').insert(newExercises.map(ex => ({ ...ex, user_id: clientId })));
+          const { error: exErr } = await LB.supabase.from('zane_exercises').insert(newExercises.map(ex => ({ ...ex, user_id: clientId })));
+          if (exErr) { alert(`Import failed: ${exErr.message}`); return; }
         }
-        await LB.supabase.from('zane_schedules').insert({ id: sch.id, user_id: clientId, name: sch.name, days: sch.days, archived: false });
+        // If this insert fails the new exercises above are left orphaned, but
+        // surfacing the error beats silently showing a plan that wasn't saved.
+        const { error: schErr } = await LB.supabase.from('zane_schedules').insert({ id: sch.id, user_id: clientId, name: sch.name, days: sch.days, archived: false });
+        if (schErr) { alert(`Import failed: ${schErr.message}`); return; }
         setClientStore(s => ({
           ...s,
           exercises: [...(s.exercises || []), ...newExercises],
@@ -2400,6 +2430,7 @@ function ClientNutritionTab({ coachingId, userId }) {
 
 function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, clientId, clientName, scheduleId }) {
   const [clientStore, setClientStoreRaw] = useStateC(null);
+  const [syncErr, setSyncErr] = useStateC(false);
   const prevClientStore = useRefC(null);
   const latestClientStore = useRefC(null);  // updated synchronously for diff; prevClientStore only after confirmed sync
   const initialSchedule = useRefC(null);
@@ -2423,8 +2454,8 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
         isDirty.current = true;
         latestClientStore.current = next;
         LB.syncStore(prevClientStore.current, next, clientId)
-          .then(() => { prevClientStore.current = next; })
-          .catch(e => console.error('Coach sync failed', e));
+          .then(() => { prevClientStore.current = next; setSyncErr(false); })
+          .catch(e => { console.error('Coach sync failed', e); setSyncErr(true); });
         return next;
       });
     };
@@ -2466,13 +2497,16 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
   }
 
   return (
-    <window.Screens.ScheduleEditScreen
-      store={clientStore}
-      setStore={setClientStore.current}
-      go={coachGo}
-      userId={clientId}
-      scheduleId={scheduleId}
-    />
+    <>
+      <window.Screens.ScheduleEditScreen
+        store={clientStore}
+        setStore={setClientStore.current}
+        go={coachGo}
+        userId={clientId}
+        scheduleId={scheduleId}
+      />
+      <CoachSyncErrorPill show={syncErr} />
+    </>
   );
 }
 
@@ -2482,6 +2516,7 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
 
 function CoachNewPlanScreen({ store, setStore, go, userId, coachingId, clientId, clientName }) {
   const [clientStore, setClientStoreRaw] = useStateC(null);
+  const [syncErr, setSyncErr] = useStateC(false);
   const prevClientStore = useRefC(null);
 
   useEffectC(() => {
@@ -2497,8 +2532,8 @@ function CoachNewPlanScreen({ store, setStore, go, userId, coachingId, clientId,
       setClientStoreRaw(prev => {
         const next = typeof updater === 'function' ? updater(prev) : updater;
         LB.syncStore(prevClientStore.current, next, clientId)
-          .then(() => { prevClientStore.current = next; })
-          .catch(e => console.error('Coach sync failed', e));
+          .then(() => { prevClientStore.current = next; setSyncErr(false); })
+          .catch(e => { console.error('Coach sync failed', e); setSyncErr(true); });
         return next;
       });
     };
@@ -2524,11 +2559,14 @@ function CoachNewPlanScreen({ store, setStore, go, userId, coachingId, clientId,
   }
 
   return (
-    <window.Screens.ScheduleNewScreen
-      store={clientStore}
-      setStore={setClientStore.current}
-      go={coachGo}
-    />
+    <>
+      <window.Screens.ScheduleNewScreen
+        store={clientStore}
+        setStore={setClientStore.current}
+        go={coachGo}
+      />
+      <CoachSyncErrorPill show={syncErr} />
+    </>
   );
 }
 

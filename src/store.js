@@ -8,6 +8,19 @@ const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify
 
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Await a PostgREST builder and throw if it resolved with an { error }. The
+// supabase-js client does NOT throw on failed writes (network errors, RLS
+// denials, constraint violations all come back as a resolved { error }), so
+// without this a failed write looks identical to success. Wrapping every
+// write that feeds the sync diff is what makes flushSync's retry path real.
+async function unwrap(builder) {
+  const res = await builder;
+  if (res && res.error) {
+    throw Object.assign(new Error(res.error.message || 'Supabase request failed'), { cause: res.error });
+  }
+  return res;
+}
+
 // POST to an edge function authenticated as the signed-in user. The functions
 // reject the bare anon key (security hardening) — identity and push target are
 // derived server-side from the caller's JWT. Never rejects; resolves with the
@@ -122,13 +135,39 @@ async function signOut() {
 
 async function deleteAllData(userId) {
   await Promise.all([
-    _supabase.from('zane_sessions').delete().eq('user_id', userId),
-    _supabase.from('zane_exercises').delete().eq('user_id', userId),
-    _supabase.from('zane_schedules').delete().eq('user_id', userId),
-    _supabase.from('zane_user_settings').delete().eq('user_id', userId),
-    _supabase.from('zane_profiles').delete().eq('id', userId),
-    _supabase.from('zane_skips').delete().eq('user_id', userId),
+    unwrap(_supabase.from('zane_sessions').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_exercises').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_schedules').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_user_settings').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_profiles').delete().eq('id', userId)),
+    unwrap(_supabase.from('zane_skips').delete().eq('user_id', userId)),
   ]);
+}
+
+// Validate a parsed backup object BEFORE importFromBackup deletes anything.
+// Returns an error string, or null when the structure looks safe to import.
+// The import is destructive (delete-then-write) and not transactional, so a
+// malformed file must be rejected up front rather than half-applied.
+function validateBackup(b) {
+  if (!b || typeof b !== 'object') return 'File is not a Zane backup.';
+  for (const key of ['sessions', 'exercises', 'schedules']) {
+    if (!Array.isArray(b[key])) return `Backup is missing or has an invalid "${key}" list.`;
+  }
+  if (b.settings != null && typeof b.settings !== 'object') return 'Backup "settings" is malformed.';
+  for (const e of b.exercises) {
+    if (!e || typeof e !== 'object' || typeof e.id !== 'string' || !e.id) return 'Backup contains an invalid exercise entry.';
+    if (e.tags != null && !Array.isArray(e.tags)) return 'Backup contains an exercise with invalid tags.';
+  }
+  for (const s of b.schedules) {
+    if (!s || typeof s !== 'object' || typeof s.id !== 'string' || !s.id) return 'Backup contains an invalid schedule entry.';
+    if (s.days != null && !Array.isArray(s.days)) return 'Backup contains a schedule with invalid days.';
+  }
+  for (const s of b.sessions) {
+    if (!s || typeof s !== 'object') return 'Backup contains an invalid session entry.';
+    if (s.id != null && typeof s.id !== 'string') return 'Backup contains a session with an invalid id.';
+    if (s.entries != null && !Array.isArray(s.entries)) return 'Backup contains a session with invalid entries.';
+  }
+  return null;
 }
 
 // Skips are persisted through syncStore's diff model (see the skips block there),
@@ -136,21 +175,24 @@ async function deleteAllData(userId) {
 // mutates store.skips via setStore; no imperative per-skip writes.
 
 async function importFromBackup(backup, userId) {
+  // Validate before the destructive delete — never half-apply a bad file.
+  const invalid = validateBackup(backup);
+  if (invalid) throw new Error(invalid);
   await deleteAllData(userId);
   const sett = backup.settings ?? {};
   const importSessions = backup.sessions?.filter(s => s.id) ?? [];
   await Promise.all([
-    backup.user?.name && _supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name }),
-    backup.exercises?.length && _supabase.from('zane_exercises').upsert(
+    backup.user?.name && unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name })),
+    backup.exercises?.length && unwrap(_supabase.from('zane_exercises').upsert(
       backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, user_id: userId }))
-    ),
-    backup.schedules?.length && _supabase.from('zane_schedules').upsert(
+    )),
+    backup.schedules?.length && unwrap(_supabase.from('zane_schedules').upsert(
       backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
-    ),
-    importSessions.length && _supabase.from('zane_sessions').upsert(
+    )),
+    importSessions.length && unwrap(_supabase.from('zane_sessions').upsert(
       importSessions.map(s => sessionToRow(s, userId))
-    ),
-    _supabase.from('zane_user_settings').upsert({
+    )),
+    unwrap(_supabase.from('zane_user_settings').upsert({
       user_id: userId,
       active_schedule_id: backup.activeScheduleId ?? null,
       cycle_index: backup.cycleIndex ?? 0,
@@ -170,7 +212,7 @@ async function importFromBackup(backup, userId) {
       custom_day_types: backup.customDayTypes ?? [],
       reminder_enabled: sett.reminderEnabled ?? false,
       reminder_time: sett.reminderTime ?? '07:00',
-    }),
+    })),
   ].filter(Boolean));
   // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
   if (importSessions.length) await _syncEntryRelational(importSessions, userId, null);
@@ -491,10 +533,10 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
   }
 
   if (allEntries.length) {
-    await _supabase.from('zane_session_entries').upsert(allEntries, { onConflict: 'id' });
+    await unwrap(_supabase.from('zane_session_entries').upsert(allEntries, { onConflict: 'id' }));
   }
   if (allSets.length) {
-    await _supabase.rpc('sync_sets_batch', { p_sets: allSets });
+    await unwrap(_supabase.rpc('sync_sets_batch', { p_sets: allSets }));
   }
 }
 
@@ -634,7 +676,10 @@ async function syncStore(prev, next, userId) {
     }));
   }
 
-  await Promise.all(ops);
+  // unwrap() turns a failed write (network/RLS/constraint) into a thrown
+  // error so the caller (flushSync) keeps syncBase unchanged and retries,
+  // instead of silently advancing past data that never reached the server.
+  await Promise.all(ops.map(unwrap));
   // Dual-write entries then sets after sessions are committed (FK order: sessions → entries → sets)
   if (sessionUpserts.length) await _syncEntryRelational(sessionUpserts, userId, prev.sessions);
 }
@@ -1072,10 +1117,14 @@ function nextDay(state) {
 
 // ─── LOCAL CACHE ─────────────────────────────────────────────────────
 
+// Returns true on success, false if the write failed (most importantly a
+// QuotaExceededError once the ~5 MB localStorage budget fills up). Callers
+// surface a warning instead of letting the local cache silently stop updating.
 function saveToLocal(store, userId) {
   try {
     localStorage.setItem(`logbook-${userId}`, JSON.stringify(store));
-  } catch (_) {}
+    return true;
+  } catch (_) { return false; }
 }
 
 function loadFromLocal(userId) {
@@ -1090,7 +1139,8 @@ function loadFromLocal(userId) {
 function saveBase(store, userId) {
   try {
     localStorage.setItem(`logbook-base-${userId}`, JSON.stringify(store));
-  } catch (_) {}
+    return true;
+  } catch (_) { return false; }
 }
 
 function loadBase(userId) {
@@ -1531,7 +1581,7 @@ window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, fnFetch,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
-  signIn, signUp, signOut, deleteAllData, importFromBackup,
+  signIn, signUp, signOut, deleteAllData, importFromBackup, validateBackup,
   loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,

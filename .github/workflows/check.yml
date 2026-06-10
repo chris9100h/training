@@ -18,3 +18,4 @@ jobs:
       # Same Babel build and version the app itself loads from unpkg.
       - run: npm install --no-save --no-package-lock @babel/standalone@7.29.0
       - run: node tools/check-syntax.cjs
+      - run: node tools/test/store.test.cjs
