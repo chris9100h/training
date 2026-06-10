@@ -161,10 +161,11 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_entries_json(p_session_id text)`** → `jsonb` — baut die store-förmige (camelCase) `entries`-Array einer Session aus den relationalen Tabellen (`zane_session_entries`/`zane_sets`). Quelle der Wahrheit seit Migration 0058; von `get_active_session_detail`/`get_active_sessions_overview` genutzt, damit die Coach-/Spectator-Ansicht nicht mehr vom Legacy-JSONB abhängt. Der Client schreibt das JSONB nicht mehr (`sessionToRow` in `store.js` lässt `entries` aus).
 
-**Serverseitige History-Aggregate (Migration 0059, SECURITY INVOKER, optional `p_user_id` für Coach-Zugriff):**
-- **`get_exercise_best_e1rm(p_user_id?)`** → `TABLE(ex_id, best_e1rm)` — bestes All-Time-e1RM (Epley) je Übung über beendete Sessions. Für PR-Erkennung ohne volle Historie im Client.
-- **`get_exercise_history(p_ex_id, p_day_id?, p_limit?, p_user_id?)`** → `TABLE(session_id, day_id, date, ended, sets jsonb)` — jüngste beendete Sessions mit dieser Übung (für Seeds/Progression, „Last time"-Karte, Exercise-History).
-- **`get_user_volume_stats(p_user_id?)`** → `TABLE(session_count, total_volume, total_minutes, total_done_sets)` — All-Time-Summen für die Stats. Streaks bleiben clientseitig (plan-abhängig, brauchen nur Session-Daten).
+**Serverseitige History-Aggregate (Migrationen 0059/0060, SECURITY INVOKER, optional `p_user_id` für Coach-Zugriff):**
+- **`get_exercise_best_e1rm(p_user_id?)`** → `TABLE(ex_id, best_e1rm)` — bestes All-Time-e1RM (Epley) je Übung über beendete Sessions. Beim Boot geladen und als `store.exerciseBests` gecacht; `bestE1rmForExercise` = max(Aggregat, lokal geladenes Fenster). Beim Training-Mount refresht (`refreshExerciseBests`).
+- **`get_exercise_history(p_ex_id, p_day_id?, p_limit?, p_user_id?)`** → `TABLE(session_id, day_id, date, ended, sets jsonb)` — jüngste beendete Sessions mit dieser Übung. Genutzt von `fetchSeedEntries` (Seeds/Progression beim Session-Start, nur wenn das lokale Fenster < 3 Treffer hat), der „Last time"-Karte im Training (Fallback) und beiden Exercise-History-Ansichten (lokal sofort, Server erweitert auf volle Historie).
+- **`get_user_volume_stats(p_user_id?)`** → `TABLE(session_count, total_volume, total_minutes, total_done_sets)` — All-Time-Summen. Vom Client derzeit **nicht** aufgerufen: Die Stats summieren lokal über `totalVolume()`/`doneSetCount()`, die für gefensterte Sessions auf die `get_session_stats`-Aggregate zurückfallen (exakt, offline-fähig, schließt frisch beendete Sessions sofort ein).
+- **`get_session_stats(p_user_id?)`** → `TABLE(session_id, exercise_count, done_sets, volume)` — per-Session-Aggregate aller beendeten Sessions (Migration 0060). Beim Boot geladen und als `aggVolume`/`aggDoneSets`/`aggExercises` an die Sessions gehängt; `totalVolume`/`doneSetCount` nutzen sie als Fallback für Sessions ohne geladene Sets (History-Liste, Best Session, Coach-Listen). Semantik = Client-Logik für beendete Sessions (done-Flag nicht erforderlich). `sessionToRow` filtert die `agg*`-Felder beim Sync wieder heraus.
 
 **`auto-close-sessions`** (Edge Function) — schließt abgelaufene offene Sessions: kein Sets → Session + Entries löschen (butt start); mit Sets → `ended` = letztes `updated_at` der Sets, `duration_minutes` berechnen, `in_progress_session_id` clearen; optional Pushover-Notification. Wird per Cron alle 15 Minuten aufgerufen (Supabase Dashboard → Edge Functions → Schedule). Timeout pro User in `session_timeout_minutes` (default 90 min).
 
@@ -176,59 +177,53 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **Realtime:** `zane_coaching` und `zane_coaching_notes` sind in der `supabase_realtime`-Publikation — ermöglicht Live-Coaching-Einladungen und -Nachrichten. **Cross-Device Live-Sync laufender Sessions wurde entfernt** (der lokale Store ist die alleinige Quelle für eine laufende Session; ein Coach sieht die Live-Session eines Clients per Polling via `get_active_session_detail`, nicht über Realtime). `subscribeToChanges(userId, onCoachingNote, onCoachingInvite)` abonniert nur noch die Coaching-Tabellen.
 
-## Offene Aufgabe: Server-seitige PR/History — Client lädt nicht mehr die ganze Historie (Phase 2 / Stage 2 von Migration 0059)
+## History-Windowing (Boot lädt nicht mehr die ganze Historie)
 
-**Ziel:** Der Client soll beim Boot **nicht mehr die komplette Session-Historie**
-(alle `zane_session_entries` + `zane_sets`) laden. PR-Erkennung, Progression-Seeds
-und All-Time-Stats laufen stattdessen über die bereits existierenden 0059-RPCs.
-Wichtig, weil die App wachsen soll — heute wächst Boot-Zeit und Speicher linear mit
-der Trainingshistorie.
+Seit v2.085 lädt der Boot **konstant viele Sets**, unabhängig vom Account-Alter
+(Phase 2 von Migration 0059; per-Session-Aggregate aus Migration 0060):
 
-**Was schon erledigt ist (NICHT nochmal machen):**
-- Client schreibt das `entries`-JSONB nicht mehr (`sessionToRow` lässt es aus).
-- Spectator/Coach-RPCs lesen relational via `zane_entries_json` (Migration 0058).
-- Die Server-Aggregate existieren und sind deployt (Migration 0059):
-  `get_exercise_best_e1rm`, `get_exercise_history`, `get_user_volume_stats`.
-- **Offen ist nur die Client-Umstellung** — diese RPCs werden derzeit von
-  `src/` aus **nirgends** aufgerufen (per grep prüfbar).
-
-**Konkrete Schritte (alle im Client):**
-1. **Boot-Fenster** in `loadFromSupabase` (`store.js`): Session-*Metadaten* (id,
-   date, dayId, dayName, ended, duration, feel) weiter **vollständig** laden (leicht;
-   Streaks/Kalender brauchen die Datumsliste). Aber `zane_session_entries`/`zane_sets`
-   nur noch für ein **Fenster** (z.B. letzte ~30–60 Tage) **plus** die laufende
-   In-Progress-Session. Den `entries`-JSONB-Select + den JSONB-Fallback im Mapping
-   dabei entfernen.
-2. **PR-Erkennung:** `bestE1rmForExercise` (store.js, scannt heute alle Sessions) →
-   `get_exercise_best_e1rm` einmal pro Session-Start laden + im Store cachen. Auch das
-   „★ NEW BEST"-Overlay im Training (`screens-train.jsx`) hängt daran.
-3. **Progression-Seeds / „Last time":** `lastSessionForExercise`,
-   `recentSessionsForExercise`, `bestRecentEntry` (store.js) → `get_exercise_history(exId, dayId)`
-   beim Session-Start. Achtung: `buildSeedSets`/`progressionSuggestion` konsumieren
-   `bestRecentEntry` **synchron** beim Vorbefüllen der Sätze — die Seeds müssen künftig
-   **vor** dem Anlegen der Session asynchron geladen werden (in `startSession` in
-   `screens-home.jsx`).
-4. **All-Time-Stats** (`screens-lib.jsx`): Volumen/Session-Count/Minuten →
-   `get_user_volume_stats`. **Streaks bleiben clientseitig** (plan-abhängig, brauchen
-   nur die Session-Datumsliste, die ja weiter geladen wird).
-5. **Exercise-History-Screen:** → `get_exercise_history` mit höherem `p_limit`.
-
-**Gotchas (vorher lesen, sonst Regressionen):**
-- **Offline:** Heute funktioniert die volle Historie offline aus dem localStorage-Cache.
-  Windowing + RPCs brauchen Netz → das geladene Fenster und die Aggregate (best_e1rm,
-  volume_stats) **mit-cachen** und offline darauf zurückfallen; PR-Erkennung mid-session
-  muss den gecachten Wert nutzen, nicht leer ausgehen.
-- **Merge in `app.jsx` (`loadData`):** Der Cache-first-Merge nimmt an, `fresh.sessions`
-  sei die **volle** Historie, und entfernt lokale Sessions, die der Server „nicht mehr hat".
-  Beim Windowing darf diese „nicht da → löschen"-Logik **nur aufs Fenster** wirken, sonst
-  werden ältere Sessions fälschlich aus dem Cache gelöscht.
-- **Spalte zuletzt droppen:** `zane_sessions.entries` erst per separater Migration
-  entfernen, wenn Boot sie nicht mehr selektiert UND der JSONB-Fallback raus ist.
-- Neue Store-Tests in `tools/test/store.test.cjs` für Fenster- und Merge-Logik.
-
-**Done, wenn:** Boot-Query lädt unabhängig vom Account-Alter konstant viele Sets;
-PR-Overlay/Progression/Stats sind gegen einen Account mit langer Historie identisch zu
-vorher; offline startet die App weiter ohne Crash (Fenster/Stats aus Cache).
+- **Boot-Fenster:** `loadFromSupabase` lädt Session-*Metadaten* weiterhin
+  **vollständig** (Streaks/Kalender brauchen die Datumsliste), aber
+  `zane_session_entries`/`zane_sets` nur für die letzten `HISTORY_WINDOW_DAYS`
+  (70 Tage, deckt den 8-Wochen-Chart) **plus** die In-Progress-Session.
+  Der `entries`-JSONB-Select und der JSONB-Fallback sind entfernt (alle
+  Alt-Sessions wurden in Migration 0031 relational backgefüllt).
+- **Sessions außerhalb des Fensters** haben `entries: []` und tragen die
+  Aggregate `aggVolume`/`aggDoneSets`/`aggExercises` (aus `get_session_stats`).
+  `totalVolume()`/`doneSetCount()` fallen automatisch darauf zurück;
+  `aggExercises > 0` unterscheidet eine gefensterte von einer echt leeren
+  Session. Die Session-Detail-Ansichten (eigene + Coach) laden die Sets bei
+  Bedarf nach (`fetchSessionEntries`, RLS: own + coach-of).
+- **PR-Erkennung:** `bestE1rmForExercise` = max(`store.exerciseBests`-Aggregat,
+  lokal geladenes Fenster) — deckt auch Sessions ab, die seit dem Boot lokal
+  beendet wurden. Das Aggregat wird beim Training-Mount refresht.
+- **Seeds/Progression:** `fetchSeedEntries` fragt `get_exercise_history` nur für
+  Übungen, deren lokales Fenster < 3 Sessions hat (Normalfall: 0 RPCs, komplett
+  offline-fähig); Server- und Lokal-Treffer werden per Session-Id dedupliziert
+  gemerged. Die Session-Start-Flows (`startSession`, „Log"-Banner,
+  Not-logged-Modal) awaiten das **vor** dem Anlegen der Session.
+- **Merge in `app.jsx`:** Der Sessions-Teil des Cache-first-Merges ist als
+  `LB.mergeSessions` in `store.js` extrahiert (unit-getestet). Die „Server hat
+  sie nicht mehr → löschen"-Logik arbeitet auf der weiterhin vollständigen
+  Metadaten-Liste; **gecachte Entries** von Sessions außerhalb des Fensters
+  bleiben erhalten (Bestandsgeräte behalten ihre volle Offline-Historie).
+  Lokale Einträge, die der Server nicht hat, werden nur behalten, wenn sie
+  **nie bestätigt gesynct** waren (nicht in der persistierten Sync-Base aus
+  `loadBase`) — sonst würde ein Gerät auf einem anderen Gerät Gelöschtes
+  wieder hochsyncen (Resurrection). Gilt für Sessions, Exercises, Schedules
+  und Skips; ohne Base (Alt-Cache) wird konservativ behalten.
+- **Offline:** Aggregate + Fenster liegen im localStorage-Store-Cache; ohne
+  Netz laufen PR-Erkennung/Stats/Listen aus dem Cache. Die RPC-Helfer
+  (`fetchSeedEntries` etc.) fallen bei Fehlern still auf lokale Daten zurück.
+- **Bekannte, akzeptierte Degradationen** (nur frische Geräte, Sessions älter
+  als das Fenster): Set-für-Set-Vergleiche/PR-Sterne in **alten**
+  Session-Details vergleichen nur gegen Fenster+Cache; `setsPerMuscle` beim
+  Zurückblättern in alte Cycles ist leer; die „Recent"-Liste der Library
+  umfasst nur das Fenster.
+- **Spalte zuletzt droppen:** `zane_sessions.entries` erst per separater
+  Migration entfernen — Boot selektiert sie nicht mehr, aber erst droppen, wenn
+  alle Clients auf ≥ v2.085 sind (alte SW-Caches laden sonst noch den alten
+  Boot-Code, dessen Select dann 400 würfe).
 
 ## Deployment
 

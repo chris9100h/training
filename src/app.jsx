@@ -500,48 +500,30 @@ function App() {
           let merged = fresh;
           if (cur) {
             const inProgressId = cur.inProgress ?? fresh.inProgress;
-            const serverIds = new Set(fresh.sessions.map(s => s.id));
-            const sessions = fresh.sessions.map(s => {
-              const mem = cur.sessions?.find(x => x.id === s.id);
-              if (!mem) return s;
-              const isActive = s.id === inProgressId;
-              return {
-                ...s,
-                currentExIdx: mem.currentExIdx ?? 0,
-                cyclePos: mem.cyclePos ?? null,
-                // for the active session, local entries/restStart are authoritative
-                ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null } : {}),
-              };
-            });
-            // keep sessions the server hasn't stored yet, but only recent ones —
-            // so a session deleted on another device isn't resurrected from a stale
-            // cache. The in-progress session is always kept regardless of its date.
-            const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 2);
-            const cutoffISO = cutoff.toISOString().slice(0, 10);
-            // Keep the in-progress session even if it's unended and not yet
-            // synced to the server (e.g. app killed right after starting a
-            // warmup, before the first sync). Other ended=null sessions are
-            // orphans and only ended sessions qualify via the recency window.
-            const localOnly = (cur.sessions || []).filter(x =>
-              !serverIds.has(x.id) &&
-              (x.id === inProgressId || ((x.date || '') >= cutoffISO && x.ended != null))
-            );
-            // Drop inProgress if the session is gone from the server and not in
-            // localOnly (would only survive if it somehow has an ended timestamp).
-            const activeExists = inProgressId && (
-              serverIds.has(inProgressId) ||
-              localOnly.some(s => s.id === inProgressId)
-            );
+            // Session merge lives in store.js (LB.mergeSessions) so the
+            // windowing rules are unit-tested: the "missing on the server →
+            // drop" logic works on the (complete) metadata list, while cached
+            // entries of sessions outside the boot window are preserved.
+            // The persisted base tells apart "never reached the server" (keep
+            // + re-sync) from "deleted on another device" (drop — keeping it
+            // would push it right back).
+            const { sessions, activeExists } = LB.mergeSessions(fresh.sessions, cur.sessions, inProgressId, base?.sessions);
+            // Same resurrection guard for the other ID-merged collections:
+            // local-only items are kept only if they were never confirmed
+            // synced (not in the base). No base (legacy cache) → keep.
             const serverExIds = new Set(fresh.exercises.map(e => e.id));
-            const localOnlyExercises = (cur.exercises || []).filter(x => !serverExIds.has(x.id));
+            const baseExIds = base ? new Set((base.exercises || []).map(e => e.id)) : null;
+            const localOnlyExercises = (cur.exercises || []).filter(x => !serverExIds.has(x.id) && !baseExIds?.has(x.id));
             const curExMap = new Map((cur.exercises || []).map(e => [e.id, e]));
             const serverSchIds = new Set(fresh.schedules.map(s => s.id));
-            const localOnlySchedules = (cur.schedules || []).filter(x => !serverSchIds.has(x.id));
+            const baseSchIds = base ? new Set((base.schedules || []).map(s => s.id)) : null;
+            const localOnlySchedules = (cur.schedules || []).filter(x => !serverSchIds.has(x.id) && !baseSchIds?.has(x.id));
             // Skips offline gesetzt aber noch nicht gesynct: erhalten, damit der
             // Reload-Merge sie nicht mit den Server-Skips überschreibt (sie werden
             // über syncStore's skips-Diff nachgeschoben).
             const serverSkipIds = new Set((fresh.skips || []).map(s => s.id));
-            const localOnlySkips = (cur.skips || []).filter(x => !serverSkipIds.has(x.id));
+            const baseSkipIds = base ? new Set((base.skips || []).map(s => s.id)) : null;
+            const localOnlySkips = (cur.skips || []).filter(x => !serverSkipIds.has(x.id) && !baseSkipIds?.has(x.id));
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
@@ -554,7 +536,7 @@ function App() {
               lastAdvancedDate: cur.lastAdvancedDate,
               user: cur.user?.name ? { ...fresh.user, name: cur.user.name } : fresh.user,
               inProgress: activeExists ? inProgressId : null,
-              sessions: [...localOnly, ...sessions],
+              sessions,
               exercises: [...localOnlyExercises, ...fresh.exercises],
               schedules: [...localOnlySchedules, ...fresh.schedules],
               skips: [...localOnlySkips, ...(fresh.skips || [])],

@@ -229,20 +229,70 @@ async function setupNewUser(userId, name) {
 
 // ─── LOAD ────────────────────────────────────────────────────────────────
 
+// How far back boot loads the relational set data. Sessions newer than this
+// (plus the in-progress session) get full entries; older sessions carry only
+// the server aggregates (aggVolume/aggDoneSets/aggExercises from
+// get_session_stats) and lazy-load their sets on demand. 70 days covers the
+// 8-week volume chart with margin, so boot stays O(sessions), never O(sets).
+const HISTORY_WINDOW_DAYS = 70;
+
+function historyWindowCutoffISO(now = new Date()) {
+  const d = new Date(now);
+  d.setDate(d.getDate() - HISTORY_WINDOW_DAYS);
+  return d.toISOString().slice(0, 10);
+}
+
+// snake_case zane_session_entries rows (with nested zane_sets) → store-shaped
+// entries array. Shared by boot and the lazy per-session loader.
+function mapEntryRows(entryRows) {
+  return (entryRows || []).map(e => ({
+    exId: e.ex_id,
+    name: e.name,
+    plannedSets: e.planned_sets,
+    plannedReps: e.planned_reps,
+    plannedRepsPerSet: e.planned_reps_per_set || null,
+    note: e.note || '',
+    supersetGroup: e.superset_group || null,
+    sets: (e.sets || [])
+      .sort((a, b) => a.set_idx - b.set_idx)
+      .map(st => ({
+        kg: st.kg,
+        reps: st.reps,
+        repsL: st.reps_l,
+        repsR: st.reps_r,
+        done: st.done,
+        skipped: st.skipped,
+        warmup: st.warmup,
+      })),
+  }));
+}
+
 async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const isCoachLoad = !!_opts.coachLoad;
+  const histCutoff = historyWindowCutoffISO();
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions').eq('user_id', userId),
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, entries, duration_minutes, feel')
+    // Session METADATA stays complete (cheap; streaks/calendar need the full
+    // date list) — the legacy entries JSONB is no longer selected.
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
+    // Boot window: relational set data only for recent sessions (the inner
+    // join filters on the parent session's date). An in-progress session
+    // older than the window is fetched separately below.
     _supabase.from('zane_session_entries')
-      .select('*, sets:zane_sets(*)')
+      .select('*, sets:zane_sets(*), session:zane_sessions!inner(date)')
       .eq('user_id', userId)
+      .gte('session.date', histCutoff)
       .order('entry_idx'),
+    // Server-side history aggregates (migrations 0059/0060): all-time PR
+    // baselines per exercise + per-session volume/set counts for everything
+    // outside the boot window. Passing p_user_id covers coach loads too.
+    _supabase.rpc('get_exercise_best_e1rm', { p_user_id: userId }),
+    _supabase.rpc('get_session_stats', { p_user_id: userId }),
     // Coaching data — only for own store load, not when a coach loads a client
     isCoachLoad ? null : _supabase.rpc('get_coach_info'),
     isCoachLoad ? null : _supabase.rpc('get_coaching_clients'),
@@ -257,12 +307,19 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
+         bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
   // new user and re-seeding starter data over an existing account.
   if (profileRes.error) throw profileRes.error;
+  // Same for sessions/entries: a silent partial failure would look like an
+  // empty history and make the reload merge delete cached sessions (or boot a
+  // windowed session list without its sets). Fail loudly instead — the
+  // background refresh keeps the cache, the first load shows the retry screen.
+  if (sessRes.error) throw sessRes.error;
+  if (entriesRes.error) throw entriesRes.error;
 
   // First login after email confirmation — profile not yet created (skip for coach loads)
   if (!profileRes.data && !isCoachLoad) {
@@ -301,6 +358,25 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     entriesBySession[e.session_id].push(e);
   }
 
+  // An in-progress session that predates the boot window (rare — auto-close
+  // ends stale sessions) still needs its sets so training can resume.
+  const inProgId = sett.in_progress_session_id;
+  const inProgRow = inProgId ? (sessRes.data || []).find(s => s.id === inProgId) : null;
+  if (inProgRow && !entriesBySession[inProgId] && (inProgRow.date || '').slice(0, 10) < histCutoff) {
+    const { data } = await _supabase.from('zane_session_entries')
+      .select('*, sets:zane_sets(*)').eq('session_id', inProgId).order('entry_idx');
+    if (data?.length) entriesBySession[inProgId] = data;
+  }
+
+  // Server aggregates. Tolerate RPC errors (e.g. migration not applied yet) —
+  // the maps just stay empty and the client falls back to windowed data.
+  const statsBySession = {};
+  for (const r of (sessionStatsRes?.data || [])) statsBySession[r.session_id] = r;
+  const exerciseBests = {};
+  for (const r of (bestsRes?.data || [])) {
+    if (r.ex_id != null && r.best_e1rm != null) exerciseBests[r.ex_id] = r.best_e1rm;
+  }
+
   const result = {
     user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || ''), approved: profileRes.data?.approved ?? false },
     exercises: exRes.data || [],
@@ -308,28 +384,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // map snake_case DB columns → camelCase store fields
     sessions: (sessRes.data || []).map(s => {
       const entryRows = entriesBySession[s.id];
-      const entries = entryRows && entryRows.length > 0
-        ? entryRows.map(e => ({
-            exId: e.ex_id,
-            name: e.name,
-            plannedSets: e.planned_sets,
-            plannedReps: e.planned_reps,
-            plannedRepsPerSet: e.planned_reps_per_set || null,
-            note: e.note || '',
-            supersetGroup: e.superset_group || null,
-            sets: (e.sets || [])
-              .sort((a, b) => a.set_idx - b.set_idx)
-              .map(st => ({
-                kg: st.kg,
-                reps: st.reps,
-                repsL: st.reps_l,
-                repsR: st.reps_r,
-                done: st.done,
-                skipped: st.skipped,
-                warmup: st.warmup,
-              })),
-          }))
-        : s.entries; // JSONB fallback for sessions that predate the migration
+      const stats = statsBySession[s.id];
       return {
         id: s.id,
         scheduleId: s.schedule_id,
@@ -338,7 +393,15 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         date: s.date,
         startedAt: s.started_at ?? null,
         ended: s.ended,
-        entries,
+        // Sessions outside the boot window keep entries empty;
+        // totalVolume/doneSetCount fall back to the agg* fields below and the
+        // session-detail screens lazy-load the sets when opened.
+        entries: entryRows && entryRows.length > 0 ? mapEntryRows(entryRows) : [],
+        ...(stats ? {
+          aggVolume: stats.volume,
+          aggDoneSets: stats.done_sets,
+          aggExercises: stats.exercise_count,
+        } : {}),
         durationMinutes: s.duration_minutes ?? null,
         feel: s.feel ?? null,
       };
@@ -347,6 +410,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       id: s.id, date: s.date, dayId: s.day_id, dayName: s.day_name,
       skipReason: s.skip_reason, skippedAt: s.skipped_at,
     })),
+    // All-time best e1RM per exercise (server aggregate, cached in the store —
+    // and via the local cache also offline). bestE1rmForExercise combines this
+    // with the windowed sessions, so PR detection stays exact mid-session.
+    exerciseBests,
     activeScheduleId: sett.active_schedule_id ?? null,
     cycleIndex: sett.cycle_index ?? 0,
     cycleStartDate: sett.cycle_start_date ?? null,
@@ -545,8 +612,9 @@ function sessionToRow(s, userId) {
   // zane_session_entries / zane_sets tables are the single source of truth, and
   // the reporting RPCs read from them (migration 0058). The legacy JSONB column
   // keeps its default '[]' on insert and is left untouched on update.
+  // agg* are read-only server aggregates attached at load time — never synced.
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
@@ -826,8 +894,13 @@ function isDecline(curr, prev) {
 // Best estimated 1RM ever recorded for an exercise across all ended sessions
 // (any day), optionally excluding a session (e.g. the live one). Returns 0 when
 // there's no history — callers treat 0 as "no record to beat yet".
+// Since boot only loads a recent window of sets, the local scan is combined
+// with the cached get_exercise_best_e1rm aggregate (state.exerciseBests). The
+// aggregate covers everything ended server-side; the scan covers sessions
+// ended on this device since the aggregate was fetched. The excluded (live)
+// session is never part of the aggregate because it isn't ended yet.
 function bestE1rmForExercise(state, exId, excludeSessionId = null) {
-  let best = 0;
+  let best = (state.exerciseBests || {})[exId] || 0;
   for (const s of state.sessions || []) {
     if (!s.ended || (excludeSessionId && s.id === excludeSessionId)) continue;
     for (const e of (s.entries || [])) {
@@ -844,11 +917,29 @@ function bestE1rmForExercise(state, exId, excludeSessionId = null) {
   return best;
 }
 
+// Re-fetch the all-time best-e1RM aggregate (once per session start / training
+// mount). Resolves with the fresh map, or null when offline / on error — the
+// caller keeps the cached map in that case.
+async function refreshExerciseBests(userId) {
+  try {
+    const { data, error } = await _supabase.rpc('get_exercise_best_e1rm', { p_user_id: userId });
+    if (error || !data) return null;
+    const bests = {};
+    for (const r of data) {
+      if (r.ex_id != null && r.best_e1rm != null) bests[r.ex_id] = r.best_e1rm;
+    }
+    return bests;
+  } catch (_) { return null; }
+}
+
 // Total volume (kg) of all completed working sets in a session (warm-ups excluded).
 // For ended sessions we don't require done:true — a kbApply race can leave sets as
 // done:false in Supabase even though the user actually performed them.
+// Ended sessions outside the boot window carry no entries — fall back to the
+// server aggregate (get_session_stats) attached at load time.
 function totalVolume(session) {
   const ended = !!session.ended;
+  if (ended && !(session.entries || []).length && session.aggVolume != null) return session.aggVolume;
   return (session.entries || []).reduce((sum, ex) =>
     sum + (ex.sets || []).filter(st => {
       if (st.warmup || st.skipped) return false;
@@ -862,8 +953,10 @@ function totalVolume(session) {
 }
 
 // Count of completed working sets in a session (warm-ups excluded).
+// Same aggregate fallback as totalVolume for windowed-out sessions.
 function doneSetCount(session) {
   const ended = !!session.ended;
+  if (ended && !(session.entries || []).length && session.aggDoneSets != null) return session.aggDoneSets;
   return (session.entries || []).reduce((c, e) =>
     c + (e.sets || []).filter(st => {
       if (st.warmup || st.skipped) return false;
@@ -967,17 +1060,11 @@ function recentSessionsForExercise(state, exId, dayId = null, limit = 3) {
   return out;
 }
 
-// Seed/progression reference: per working-set position, the BEST set performed at
-// the CURRENT working weight within the recent window. A single weak session can
-// no longer drag a suggestion below proven capability — the reference is the best
-// recent performance, not merely the last one. Returns the same { entry: { sets } }
-// shape as lastSessionForExercise so buildSeedSets and progressionSuggestion
-// consume it unchanged. Compares reps only at the same weight (a heavier session
-// with fewer reps is real progression, not weakness).
-function bestRecentEntry(state, exId, dayId = null, window = 3) {
-  const recent = recentSessionsForExercise(state, exId, dayId, window);
-  if (!recent.length) return null;
-  const perSession = recent.map(r => (r.entry.sets || []).filter(s => !s.warmup && !s.skipped));
+// Core of bestRecentEntry, factored out so the same logic can run on server
+// rows from get_exercise_history (fetchSeedEntries). perSession: newest-first
+// list of working-set arrays (warm-ups/skipped already filtered out).
+function bestEntryFromSetLists(perSession) {
+  if (!perSession.length) return null;
   const mostRecent = perSession[0];
   if (!mostRecent.length) return null;
   const sets = mostRecent.map((curSet, i) => {
@@ -996,6 +1083,86 @@ function bestRecentEntry(state, exId, dayId = null, window = 3) {
       : { kg: curKg, reps: best.reps ?? null, done: false, skipped: false, warmup: false };
   });
   return { entry: { sets } };
+}
+
+// Seed/progression reference: per working-set position, the BEST set performed at
+// the CURRENT working weight within the recent window. A single weak session can
+// no longer drag a suggestion below proven capability — the reference is the best
+// recent performance, not merely the last one. Returns the same { entry: { sets } }
+// shape as lastSessionForExercise so buildSeedSets and progressionSuggestion
+// consume it unchanged. Compares reps only at the same weight (a heavier session
+// with fewer reps is real progression, not weakness).
+function bestRecentEntry(state, exId, dayId = null, window = 3) {
+  const recent = recentSessionsForExercise(state, exId, dayId, window);
+  if (!recent.length) return null;
+  return bestEntryFromSetLists(recent.map(r => (r.entry.sets || []).filter(s => !s.warmup && !s.skipped)));
+}
+
+// Recent ended sessions for an exercise from the server (get_exercise_history),
+// mapped to camelCase rows: [{ sessionId, dayId, date, ended, sets }].
+async function fetchExerciseHistory(exId, dayId, limit, userId) {
+  const { data, error } = await _supabase.rpc('get_exercise_history', {
+    p_ex_id: exId, p_day_id: dayId ?? null, p_limit: limit, p_user_id: userId ?? null,
+  });
+  if (error) throw error;
+  return (data || []).map(r => ({
+    sessionId: r.session_id, dayId: r.day_id, date: r.date, ended: r.ended,
+    sets: r.sets || [],
+  }));
+}
+
+// Seed references for starting/logging a session. The local window already
+// covers exercises trained recently — only exercises with fewer than `window`
+// local sessions ask the server (get_exercise_history), so the common case
+// stays synchronous-fast and fully offline-capable. Server rows are merged
+// with local ones (a just-ended session may not be synced yet) and reduced via
+// bestEntryFromSetLists. Returns { exId: { entry: { sets } } } — only for
+// exercises where the server added anything; callers fall back to
+// bestRecentEntry for the rest. Never rejects.
+async function fetchSeedEntries(state, items, dayId, userId, window = 3) {
+  const out = {};
+  const exIds = [...new Set((items || []).map(it => it.exId).filter(Boolean))]
+    .filter(exId => recentSessionsForExercise(state, exId, dayId, window).length < window);
+  if (!exIds.length) return out;
+  await Promise.all(exIds.map(async exId => {
+    try {
+      const rows = await fetchExerciseHistory(exId, dayId, window, userId);
+      if (!rows.length) return;
+      const local = recentSessionsForExercise(state, exId, dayId, window)
+        .map(r => ({ sessionId: r.session.id, ended: r.session.ended, sets: r.entry.sets || [] }));
+      const merged = [...local];
+      for (const row of rows) {
+        if (!merged.some(m => m.sessionId === row.sessionId)) merged.push(row);
+      }
+      merged.sort((a, b) => (Date.parse(b.ended) || 0) - (Date.parse(a.ended) || 0));
+      const ref = bestEntryFromSetLists(
+        merged.slice(0, window).map(r => (r.sets || []).filter(s => !s.warmup && !s.skipped))
+      );
+      if (ref) out[exId] = ref;
+    } catch (_) { /* offline / RPC failure → caller uses the local window */ }
+  }));
+  return out;
+}
+
+// Lazy-load the full entries of specific sessions (session-detail views for
+// sessions outside the boot window). RLS covers own rows and coach-of reads.
+// Returns { sessionId: entries[] } in store shape.
+async function fetchSessionEntries(sessionIds) {
+  const ids = (sessionIds || []).filter(Boolean);
+  if (!ids.length) return {};
+  const { data, error } = await _supabase.from('zane_session_entries')
+    .select('*, sets:zane_sets(*)')
+    .in('session_id', ids)
+    .order('entry_idx');
+  if (error) throw error;
+  const bySession = {};
+  for (const e of (data || [])) {
+    if (!bySession[e.session_id]) bySession[e.session_id] = [];
+    bySession[e.session_id].push(e);
+  }
+  const out = {};
+  for (const id of Object.keys(bySession)) out[id] = mapEntryRows(bySession[id]);
+  return out;
 }
 
 function isWeekdayPlan(sch) {
@@ -1143,6 +1310,57 @@ function nextDay(state) {
   return { schedule: sch, day: sch.days[idx], idx };
 }
 
+// Cache-first reload merge for sessions (extracted from app.jsx's loadData so
+// the windowing rules stay testable). fresh = server sessions (FULL metadata
+// list, but entries only inside the boot window); cur = cached/local sessions;
+// baseSessions = sessions of the last state confirmed written to Supabase.
+// - Sessions the server no longer has are dropped (deleted on another device),
+//   except local-only ones that never reached the server (recent + not in the
+//   synced base) and the in-progress session. This works on the session level
+//   only — the metadata list is still complete, so "missing on the server" is
+//   meaningful.
+// - The in-progress session keeps its LOCAL entries/restStart (authoritative).
+// - A fresh session without entries (outside the boot window) keeps the cached
+//   entries — windowing must never wipe history already on the device.
+function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
+  const serverIds = new Set(freshSessions.map(s => s.id));
+  const sessions = freshSessions.map(s => {
+    const mem = (curSessions || []).find(x => x.id === s.id);
+    if (!mem) return s;
+    const isActive = s.id === inProgressId;
+    const keepCachedEntries = !isActive && !(s.entries || []).length && (mem.entries || []).length > 0;
+    return {
+      ...s,
+      currentExIdx: mem.currentExIdx ?? 0,
+      cyclePos: mem.cyclePos ?? null,
+      // for the active session, local entries/restStart are authoritative
+      ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null } : {}),
+      ...(keepCachedEntries ? { entries: mem.entries } : {}),
+    };
+  });
+  // Keep sessions the server hasn't stored yet — i.e. created on this device
+  // and never confirmed synced. A session that IS in the synced base but gone
+  // from fresh was deleted on another device: keeping it would make this
+  // device push it right back (resurrection). Without a base (legacy cache)
+  // fall back to the recency rule alone — the safe direction, since dropping
+  // a never-synced session would lose data. Only recent ended sessions
+  // qualify; the in-progress session is always kept regardless of its date
+  // (other ended=null sessions are orphans).
+  const baseIds = baseSessions ? new Set(baseSessions.map(s => s.id)) : null;
+  const cutoff = new Date(now); cutoff.setDate(cutoff.getDate() - 2);
+  const cutoffISO = cutoff.toISOString().slice(0, 10);
+  const localOnly = (curSessions || []).filter(x =>
+    !serverIds.has(x.id) &&
+    (x.id === inProgressId ||
+      ((x.date || '') >= cutoffISO && x.ended != null && !baseIds?.has(x.id)))
+  );
+  const activeExists = !!(inProgressId && (
+    serverIds.has(inProgressId) ||
+    localOnly.some(s => s.id === inProgressId)
+  ));
+  return { sessions: [...localOnly, ...sessions], activeExists };
+}
+
 // ─── LOCAL CACHE ─────────────────────────────────────────────────────
 
 // Returns true on success, false if the write failed (most importantly a
@@ -1218,7 +1436,9 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite) {
 }
 
 // Returns { kg, reps } suggestion when all last sets hit top of rep range, null otherwise.
-function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSet) {
+// refOverride: a pre-fetched { entry: { sets } } reference (fetchSeedEntries) —
+// used when the exercise's recent history lives outside the boot window.
+function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSet, refOverride) {
   if (!store.settings?.smartProgression) return null;
   const ex = findExercise(store, exId);
   const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
@@ -1227,7 +1447,7 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
 
   // Anchor on the best recent performance at the current weight, not just the
   // last session — so a weak week doesn't block an earned weight jump.
-  const ref = bestRecentEntry(store, exId, dayId);
+  const ref = refOverride ?? bestRecentEntry(store, exId, dayId);
   if (!ref) return null;
 
   const range = store.settings?.progressionRangeTop ?? 4;
@@ -1610,10 +1830,11 @@ window.LB = {
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, fnFetch,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
   signIn, signUp, signOut, deleteAllData, importFromBackup, validateBackup,
-  loadFromSupabase, syncStore,
+  loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
+  refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover,
   subscribeToChanges,
