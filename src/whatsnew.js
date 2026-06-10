@@ -15,6 +15,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.072',
+    title: 'Smarter progression — always aim higher',
+    items: [
+      'The app now anchors your next session on your best recent performance, not just the last one — so a tough day never drags your progression backwards.',
+      'Smart Progression and the pre-filled values both use the same anchor: the best set you\'ve done at the current weight over your last 3 sessions, position by position.',
+      'Hit a new personal record mid-session? You\'ll know — a brief flash of ★ NEW BEST marks the moment your all-time e1RM is broken.',
+    ],
+  },
+  {
     id: 'v2.068',
     title: 'Faster, offline & flexible plans',
     items: [

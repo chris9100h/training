@@ -677,6 +677,19 @@ function SettingsScreen({ store, setStore, go, userId }) {
               </div>
             ))}
           </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 10px', background: UI.bgRaised, borderRadius: 6, border: `1px solid ${UI.hairStrong}` }}>
+            {[['BIG', 'Heavy compounds — squat, deadlift, overhead press'], ['MEDIUM', 'Moderate compounds — bench, pull-up, lunge'], ['SMALL', 'Isolation — bicep curl, lateral raise, tricep extension']].map(([k, v]) => (
+              <div key={k} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <span className="micro" style={{ color: UI.gold, flexShrink: 0, minWidth: 46 }}>{k}</span>
+                <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.04em', textTransform: 'none', fontWeight: 400 }}>{v}</span>
+              </div>
+            ))}
+            <div style={{ marginTop: 4, borderTop: `1px solid ${UI.hair}`, paddingTop: 6 }}>
+              <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.04em', textTransform: 'none', fontWeight: 400, lineHeight: 1.5 }}>
+                BIG / MEDIUM / SMALL only apply when the exercise has its size set. Default is used otherwise.
+              </span>
+            </div>
+          </div>
           <Btn onClick={() => setRestSheet(false)}>Done</Btn>
         </div>
       </Sheet>

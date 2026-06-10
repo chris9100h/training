@@ -115,8 +115,8 @@ function LoginScreen() {
           }}
           style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
           {!isLogin && (
-            <Field label="Name">
-              <TextInput value={name} onChange={setName} placeholder="Your name" autoFocus={!isLogin} autoComplete="name" name="name" />
+            <Field label="Nickname">
+              <TextInput value={name} onChange={setName} placeholder="Your nickname" autoFocus={!isLogin} autoComplete="nickname" name="name" />
             </Field>
           )}
           <Field label="Email">
@@ -330,7 +330,7 @@ function RecentBannerDay({ banner, store, setStore, go, sch, onOpenSkipSheet }) 
       <button onClick={() => {
         const entries = (dayData?.items || []).map(it => {
           const ex = LB.findExercise(store, it.exId);
-          const last = LB.lastSessionForExercise(store, it.exId, dayId);
+          const last = LB.bestRecentEntry(store, it.exId, dayId);
           const isUni = ex?.unilateral || false;
           const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet);
           const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
@@ -512,6 +512,15 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const isViewingToday = weekOffset === 0 && ((weekdayMode || cycleWeekView) ? selectedWd === todayWd : selectedSlot === dayIdx);
   const isActiveRest = !activeDay?.items?.length;
+
+  // "DAY X OF Y" denominator: with plan versioning the top-level sch.days holds
+  // the newest version (which may only become active in the future), so the
+  // day count must come from the version active on the date being viewed.
+  const viewedDayCount = useMemo(() => {
+    if (!sch?.versions?.length) return dayCount;
+    const dStr = sessionDate.toISOString().slice(0, 10);
+    return LB.getPlanDaysForDate(sch, dStr)?.length || dayCount;
+  }, [sch, sessionDate, dayCount]);
   const isFutureSlot = sessionDate > (() => { const d = new Date(); d.setHours(12,0,0,0); return d; })();
 
   const periodLabel = useMemo(() => {
@@ -553,18 +562,18 @@ function HomeScreen({ store, setStore, go, userId }) {
       if (weekdayMode) return `TODAY · ${WEEKDAYS_FULL[selectedWd].toUpperCase()}`;
       if (cycleWeekView) {
         const sel = week.find(d => d.weekday === selectedWd);
-        return `TODAY · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${dayCount}`;
+        return `TODAY · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
       }
-      return `TODAY · DAY ${selectedSlot + 1} OF ${dayCount}`;
+      return `TODAY · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
     }
     const dateStr = sessionDate.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
     if (weekdayMode) return dateStr;
     if (cycleWeekView) {
       const sel = week.find(d => d.weekday === selectedWd);
-      return `${dateStr} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${dayCount}`;
+      return `${dateStr} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
     }
-    return `${dateStr} · DAY ${selectedSlot + 1} OF ${dayCount}`;
-  }, [isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, dayCount, sessionDate, week]);
+    return `${dateStr} · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
+  }, [isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week]);
 
   const avgDayDuration = useMemo(() => {
     if (!activeDay?.id) return null;
@@ -732,7 +741,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (!activeDay || isActiveRest) return;
     const entries = activeDay.items.map(it => {
       const ex = LB.findExercise(store, it.exId);
-      const last = LB.lastSessionForExercise(store, it.exId, activeDay.id);
+      const last = LB.bestRecentEntry(store, it.exId, activeDay.id);
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps);
       const seedSets = LB.buildSeedSets(it, last, suggestion, isUnilateral, !!store.settings?.smartProgression);
@@ -1215,7 +1224,7 @@ function HomeScreen({ store, setStore, go, userId }) {
               const { dayData, dayId, dayName, date } = recentBannerDay;
               const entries = (dayData?.items || []).map(it => {
                 const ex = LB.findExercise(store, it.exId);
-                const last = LB.lastSessionForExercise(store, it.exId, dayId);
+                const last = LB.bestRecentEntry(store, it.exId, dayId);
                 const isUni = ex?.unilateral || false;
                 const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet);
                 const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);

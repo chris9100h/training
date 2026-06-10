@@ -730,6 +730,27 @@ function e1rm(kg, reps) {
   return kg * (1 + reps / 30);
 }
 
+// Best estimated 1RM ever recorded for an exercise across all ended sessions
+// (any day), optionally excluding a session (e.g. the live one). Returns 0 when
+// there's no history — callers treat 0 as "no record to beat yet".
+function bestE1rmForExercise(state, exId, excludeSessionId = null) {
+  let best = 0;
+  for (const s of state.sessions || []) {
+    if (!s.ended || (excludeSessionId && s.id === excludeSessionId)) continue;
+    for (const e of (s.entries || [])) {
+      if (e.exId !== exId) continue;
+      for (const st of (e.sets || [])) {
+        if (st.warmup || st.skipped || st.kg == null) continue;
+        const reps = effReps(st);
+        if (reps == null || reps <= 0) continue;
+        const v = e1rm(st.kg, reps);
+        if (v > best) best = v;
+      }
+    }
+  }
+  return best;
+}
+
 // Total volume (kg) of all completed working sets in a session (warm-ups excluded).
 // For ended sessions we don't require done:true — a kbApply race can leave sets as
 // done:false in Supabase even though the user actually performed them.
@@ -835,6 +856,53 @@ function lastSessionForExercise(state, exId, dayId = null) {
     if (entry) return { session: s, entry };
   }
   return null;
+}
+
+// Up to `limit` most-recent ended sessions that logged this exercise, newest first.
+function recentSessionsForExercise(state, exId, dayId = null, limit = 3) {
+  const sessions = state.sessions
+    .filter(s => s.ended && (dayId == null || s.dayId === dayId))
+    .slice()
+    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+  const out = [];
+  for (const s of sessions) {
+    const entry = (s.entries || []).find(e => e.exId === exId &&
+      (e.sets || []).some(x => x.kg != null || x.reps != null || x.repsL != null || x.repsR != null));
+    if (entry) out.push({ session: s, entry });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+// Seed/progression reference: per working-set position, the BEST set performed at
+// the CURRENT working weight within the recent window. A single weak session can
+// no longer drag a suggestion below proven capability — the reference is the best
+// recent performance, not merely the last one. Returns the same { entry: { sets } }
+// shape as lastSessionForExercise so buildSeedSets and progressionSuggestion
+// consume it unchanged. Compares reps only at the same weight (a heavier session
+// with fewer reps is real progression, not weakness).
+function bestRecentEntry(state, exId, dayId = null, window = 3) {
+  const recent = recentSessionsForExercise(state, exId, dayId, window);
+  if (!recent.length) return null;
+  const perSession = recent.map(r => (r.entry.sets || []).filter(s => !s.warmup && !s.skipped));
+  const mostRecent = perSession[0];
+  if (!mostRecent.length) return null;
+  const sets = mostRecent.map((curSet, i) => {
+    const curKg = curSet.kg ?? null;          // current working weight at this position
+    let best = curSet;
+    let bestReps = effReps(curSet);
+    for (const ws of perSession) {
+      const cand = ws[i];
+      if (!cand || (cand.kg ?? null) !== curKg) continue; // same weight only
+      const r = effReps(cand);
+      if (r == null) continue;
+      if (bestReps == null || r > bestReps) { bestReps = r; best = cand; }
+    }
+    return (best.repsL != null || best.repsR != null)
+      ? { kg: curKg, repsL: best.repsL ?? null, repsR: best.repsR ?? null, done: false, skipped: false, warmup: false }
+      : { kg: curKg, reps: best.reps ?? null, done: false, skipped: false, warmup: false };
+  });
+  return { entry: { sets } };
 }
 
 function isWeekdayPlan(sch) {
@@ -1059,11 +1127,13 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
   const increment = catCfg.increment ?? 2.5;
   const maxKg = catCfg.maxKg ?? null;
 
-  const last = lastSessionForExercise(store, exId, dayId);
-  if (!last) return null;
+  // Anchor on the best recent performance at the current weight, not just the
+  // last session — so a weak week doesn't block an earned weight jump.
+  const ref = bestRecentEntry(store, exId, dayId);
+  if (!ref) return null;
 
   const range = store.settings?.progressionRangeTop ?? 4;
-  const doneSets = (last.entry.sets || []).filter(s => !s.skipped && !s.warmup && s.kg != null);
+  const doneSets = (ref.entry.sets || []).filter(s => !s.skipped && !s.warmup && s.kg != null);
   if (!doneSets.length) return null;
 
   const allHitTop = doneSets.every((s, i) => {
@@ -1447,8 +1517,8 @@ window.LB = {
   signIn, signUp, signOut, deleteAllData, importFromBackup,
   loadFromSupabase, syncStore,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, parseDate, findExercise, lastSessionForExercise, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
-  effReps, e1rm, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
+  uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
+  effReps, e1rm, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover,
   subscribeToChanges,
