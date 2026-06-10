@@ -541,8 +541,12 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
 }
 
 function sessionToRow(s, userId) {
+  // `entries` is intentionally pulled out and NOT written: the relational
+  // zane_session_entries / zane_sets tables are the single source of truth, and
+  // the reporting RPCs read from them (migration 0058). The legacy JSONB column
+  // keeps its default '[]' on insert and is left untouched on update.
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
