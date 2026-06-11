@@ -501,7 +501,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog }
 
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', background: UI.bgInset,
-    border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8,
+    border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
     padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14,
     color: UI.ink, outline: 'none',
   };
@@ -509,7 +509,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog }
   return (
     <Sheet open={open} onClose={onClose} title={editLog ? 'EDIT CARDIO' : 'LOG CARDIO'}>
       {/* Date */}
-      <div style={{ marginBottom: 14, overflow: 'hidden' }}>
+      <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Date</div>
         <input type="date" value={form.date} max={todayStr} onChange={e => set('date', e.target.value)} style={{ ...inputStyle, colorScheme: 'dark', maxWidth: '100%' }} />
       </div>
@@ -539,7 +539,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog }
       </div>
 
       {/* Duration + Distance */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'flex-end' }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Duration (min)</div>
           <input type="number" inputMode="numeric" placeholder="—" value={form.duration} onChange={e => set('duration', e.target.value)} style={inputStyle} />
