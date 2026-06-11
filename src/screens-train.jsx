@@ -7,7 +7,6 @@ const { useState: useStateT, useEffect: useEffectT, useRef: useRefT, useMemo: us
 
 const CARDIO_DIST_KEY_T = 'logbook-cardio-dist-unit';
 const MI_TO_M_T = 1609.344;
-const CARDIO_TYPES_T = ['Running', 'Cycling', 'Rowing', 'Swimming', 'Walking', 'Hiking'];
 function mToDisplayT(m, unit) { return m == null ? '' : unit === 'mi' ? (m / MI_TO_M_T).toFixed(2) : (m / 1000).toFixed(2); }
 function distToMT(val, unit) { const n = parseFloat(val); return isNaN(n) ? null : unit === 'mi' ? Math.round(n * MI_TO_M_T) : Math.round(n * 1000); }
 
@@ -926,6 +925,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
   const [cardioForm, setCardioForm] = useStateT({ type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: localStorage.getItem(CARDIO_DIST_KEY_T) || 'km' });
+  const cardioTypeChips = useMemoT(() => {
+    const seen = new Set(); const result = [];
+    for (const l of (store.cardioLogs || [])) {
+      if (l.type && !seen.has(l.type)) { seen.add(l.type); result.push(l.type); }
+      if (result.length >= 6) break;
+    }
+    return result;
+  }, [store.cardioLogs]);
   const pendingNavRef = useRefT(false);
   // Records when a set was last completed via the checkbox; used to ignore
   // iOS ghost-clicks that fire 200-400ms after completion and would otherwise
@@ -1586,22 +1593,29 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <div style={{ padding: '18px 20px 20px' }}>
                 <div className="micro-gold" style={{ marginBottom: 14 }}>LOG CARDIO</div>
 
-                {/* Type chips */}
+                {/* Activity type */}
                 <div style={{ marginBottom: 14 }}>
                   <div className="label" style={{ marginBottom: 8 }}>Activity</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-                    {CARDIO_TYPES_T.map(t => (
-                      <Pill key={t} gold={cardioForm.type === t}
-                        onClick={() => setCardioForm(f => ({ ...f, type: f.type === t ? '' : t }))}
-                        style={{ cursor: 'pointer' }}>{t}</Pill>
-                    ))}
-                  </div>
                   <input
                     type="text" value={cardioForm.type}
                     onChange={e => setCardioForm(f => ({ ...f, type: e.target.value }))}
-                    placeholder="or type custom…"
+                    placeholder="e.g. Running, Cycling…"
                     style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }}
                   />
+                  {cardioTypeChips.length > 0 && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                      {cardioTypeChips.map(t => (
+                        <button key={t} onClick={() => setCardioForm(f => ({ ...f, type: t }))} style={{
+                          padding: '4px 10px', borderRadius: 4, cursor: 'pointer',
+                          border: `1px solid ${cardioForm.type === t ? 'var(--accent)' : UI.hairStrong}`,
+                          background: cardioForm.type === t ? `rgba(var(--accent-rgb),0.12)` : 'transparent',
+                          color: cardioForm.type === t ? 'var(--accent)' : UI.inkFaint,
+                          fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.04em',
+                          WebkitTapHighlightColor: 'transparent',
+                        }}>{t}</button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Duration */}

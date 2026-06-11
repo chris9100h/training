@@ -18,10 +18,10 @@ window.WHATS_NEW = [
     id: 'v2.118',
     title: 'Cardio in your training plan',
     items: [
-      'Add the CARDIO block to any training day in your plan — ideal if cardio is already part of your routine.',
-      'When you reach it during a session, pick your activity (Running, Cycling, Rowing and more), then log duration, distance and effort.',
+      'Add the CARDIO exercise to any training day in your plan — ideal if cardio is already part of your routine.',
+      'When you reach it during a session, pick your activity, then log duration, distance and effort.',
       'Done — the data lands straight in your cardio history. No double-logging.',
-      'Cardio blocks never count toward your training volume or workout streaks.',
+      'Cardio exercises never count toward your training volume or workout streaks.',
     ],
   },
   {
