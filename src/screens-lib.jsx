@@ -2012,7 +2012,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               const showWarmup = store.settings?.showWarmupInSummary ?? true;
               const renderEntry = (e, i) => {
                 const prev = prevEntryMap[e.exId];
-                const exName = store.exercises.find(ex => ex.id === e.exId)?.name ?? e.name;
+                const exObj = store.exercises.find(ex => ex.id === e.exId);
+                const exName = exObj?.name ?? e.name;
+                const isCheckboxOnly = !!exObj?.no_weight_reps;
                 const filteredSets = e.sets.filter(st => !st.skipped && (showWarmup || !st.warmup));
                 // Compare working sets by position, warm-ups excluded on both sides.
                 const prevWorking = (prev?.sets || []).filter(st => !st.warmup);
@@ -2050,8 +2052,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           fontFamily: UI.fontNum, fontSize: 12,
                           color: isWarm ? UI.inkFaint : highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,
                         }}>
-                          {isWarm && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkFaint, marginRight: 4 }}>W</span>}
-                          {st.kg ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
+                          {isCheckboxOnly ? (st.done ? '✓' : '○') : (<>
+                            {isWarm && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkFaint, marginRight: 4 }}>W</span>}
+                            {st.kg ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
+                          </>)}
                         </span>
                       );
                     })}
