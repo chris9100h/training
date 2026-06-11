@@ -443,6 +443,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const completeSet = (setIdx) => {
+    // Unlock AudioContext on this user gesture so the rest-timer beep works on iOS
+    // even when the tempo feature is disabled (only other init path).
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
+    } catch (_) {}
     const isLastWarmupSet = !!entry.sets[setIdx]?.warmup &&
       !entry.sets.slice(setIdx + 1).some(s => s.warmup);
     const kb = kbFieldRef.current;
