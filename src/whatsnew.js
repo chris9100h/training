@@ -15,6 +15,24 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.115a',
+    title: 'Cardio Logging',
+    items: [
+      'Log cardio directly in the app — running, cycling, whatever you do.',
+      'Track duration, distance (km or mi), pace feeling and effort per session.',
+      'Quick-log via the CARDIO button on the home screen; full history under History → Cardio.',
+      'Check-in forms auto-fill with your cardio data from the week.',
+    ],
+  },
+  {
+    id: 'v2.115b',
+    title: 'Mobility & Fixes',
+    items: [
+      'New "Mobility" exercise type for stretching and mobility work — excluded from training volume.',
+      'Rest timer audio and Pushover notifications working reliably again.',
+    ],
+  },
+  {
     id: 'v2.087',
     title: 'Fast start, no matter how long you\'ve trained',
     items: [
