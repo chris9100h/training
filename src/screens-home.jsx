@@ -613,7 +613,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog }
         <textarea rows={2} placeholder="…" value={form.note} onChange={e => set('note', e.target.value)} style={{ ...inputStyle, resize: 'none' }} />
       </div>
 
-      <Btn onClick={save} disabled={!canSave}>SAVE</Btn>
+      <Btn onClick={save} disabled={!canSave} style={{ width: '100%' }}>SAVE</Btn>
     </Sheet>
   );
 }
@@ -664,6 +664,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [cardioLogOpen, setCardioLogOpen] = useState(false);
   const [cardioPopoverOpen, setCardioPopoverOpen] = useState(false);
   const [editingCardioLog, setEditingCardioLog] = useState(null);
+  const isPad = useIsPad();
   // The not-logged Log handler awaits a seed fetch — guard against a double
   // tap creating two sessions inside that window.
   const loggingRef = useRef(false);
@@ -975,6 +976,11 @@ function HomeScreen({ store, setStore, go, userId }) {
     return skipsMap.get(sessionDate.toISOString().slice(0, 10)) ?? null;
   }, [isViewingToday, isFutureSlot, skipsMap, sessionDate]);
 
+  const selectedDayCardioLogs = useMemo(() => {
+    const dateKey = sessionDate.toISOString().slice(0, 10);
+    return (store.cardioLogs || []).filter(l => l.date === dateKey);
+  }, [store.cardioLogs, sessionDate]);
+
   const recentBannerDay = useMemo(() => {
     if (!sch) return null;
     const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
@@ -1099,6 +1105,38 @@ function HomeScreen({ store, setStore, go, userId }) {
       </Screen>
     );
   }
+
+  const cardioBanner = selectedDayCardioLogs.length > 0 ? (() => {
+    const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch(_) { return 'km'; } })();
+    const totalMins = selectedDayCardioLogs.reduce((s, l) => s + (l.durationMinutes || 0), 0);
+    const single = selectedDayCardioLogs.length === 1 ? selectedDayCardioLogs[0] : null;
+    const typeLabel = (() => {
+      const unique = [...new Set(selectedDayCardioLogs.map(l => l.type || 'Activity'))];
+      if (unique.length <= 2) return unique.join(', ');
+      return `${unique[0]}, ${unique[1]} +${unique.length - 2}`;
+    })();
+    return (
+      <Frame onClick={() => setCardioPopoverOpen(true)} style={{ marginTop: 8, padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, width: '100%', boxSizing: 'border-box', textAlign: 'left' }}>
+        <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0, width: 12 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>CARDIO</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{typeLabel}</span>
+            <span className="num" style={{ fontSize: 12, color: UI.gold, flexShrink: 0 }}>
+              {totalMins}<span style={{ fontSize: 9, color: UI.inkFaint }}>{selectedDayCardioLogs.length > 1 ? 'min total' : 'min'}</span>
+            </span>
+            {single?.distanceM != null && (
+              <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{mToDisplay(single.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>
+            )}
+            {single?.effort != null && (
+              <span className="num" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{single.effort}/10</span>
+            )}
+          </div>
+        </div>
+        <ChevronRight />
+      </Frame>
+    );
+  })() : null;
 
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
@@ -1333,6 +1371,7 @@ function HomeScreen({ store, setStore, go, userId }) {
               <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: 'rgba(10,8,5,0.6)' }} />
               <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
             </button>
+            {cardioBanner}
           </BracketFrame>
         ) : (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
@@ -1467,6 +1506,8 @@ function HomeScreen({ store, setStore, go, userId }) {
               </div>
             )}
 
+            {cardioBanner}
+
             </div>{/* end fixed header */}
 
           </div>
@@ -1474,7 +1515,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       </div>
 
       {!isActiveRest && (
-        <div style={{ flexShrink: 0, padding: '6px 22px', paddingBottom: useIsPad() ? 'calc(env(safe-area-inset-bottom, 0px) + 16px)' : 0 }}>
+        <div style={{ flexShrink: 0, padding: '6px 22px', paddingBottom: isPad ? 'calc(env(safe-area-inset-bottom, 0px) + 16px)' : 0 }}>
           <button onClick={() => setCardioPopoverOpen(true)} style={{
             width: '100%', padding: '9px 16px',
             background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',

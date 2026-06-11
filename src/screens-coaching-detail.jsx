@@ -355,6 +355,7 @@ function CheckInTrendCards({ recent }) {
         <CardioTrendCard />
         <TrendCard label="Pace feeling" icon="fa-gauge" values={recent.map(c => c.cardioPaceFeeling)} format={v => `${v}/6`} invertColor={false} />
         <TrendCard label="Effort" icon="fa-fire" values={recent.map(c => c.cardioEffort)} format={v => `${v}/10`} invertColor={true} />
+        <TrendCard label="Distance" icon="fa-road" values={recent.map(c => c.cardioDistanceM)} format={v => { const du = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch(_) { return 'km'; } })(); return du === 'mi' ? `${(v/1609.344).toFixed(1)} mi` : `${(v/1000).toFixed(1)} km`; }} invertColor={false} />
       </TrendSection>
     </>
   );
@@ -412,9 +413,10 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
   return (
     <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       {toggleRow}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
         <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
           <CheckInTrendCards recent={recent} />
+          <div className="knurl" style={{ margin: '4px 0' }} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
             {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
