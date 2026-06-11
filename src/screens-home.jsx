@@ -390,6 +390,9 @@ function RecentBannerDay({ banner, store, setStore, go, sch, userId, onOpenSkipS
         const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
         const entries = (dayData?.items || []).map(it => {
           const ex = LB.findExercise(store, it.exId);
+          if (ex?.movement_type === 'cardio') {
+            return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
+          }
           const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
           const isUni = ex?.unilateral || false;
           const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
@@ -1016,6 +1019,9 @@ function HomeScreen({ store, setStore, go, userId }) {
     const seedRefs = await LB.fetchSeedEntries(store, activeDay.items, activeDay.id, userId);
     const entries = activeDay.items.map(it => {
       const ex = LB.findExercise(store, it.exId);
+      if (ex?.movement_type === 'cardio') {
+        return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
+      }
       const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, activeDay.id);
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps, undefined, seedRefs[it.exId]);
@@ -1571,6 +1577,9 @@ function HomeScreen({ store, setStore, go, userId }) {
               const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
               const entries = (dayData?.items || []).map(it => {
                 const ex = LB.findExercise(store, it.exId);
+                if (ex?.movement_type === 'cardio') {
+                  return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
+                }
                 const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
                 const isUni = ex?.unilateral || false;
                 const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);

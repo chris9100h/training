@@ -231,10 +231,11 @@ function LibraryScreen({ store, setStore, go }) {
 
         {tab === 'all' && filtered.map((e, fi) => {
           const isSelected = selected.has(e.id);
+          const isSystemCardio = e.movement_type === 'cardio';
           return (
             <React.Fragment key={e.id}>
             <div
-              onClick={() => selecting ? toggleSelect(e.id) : go({ name: 'exercise', exId: e.id })}
+              onClick={() => (selecting && !isSystemCardio) ? toggleSelect(e.id) : go({ name: 'exercise', exId: e.id })}
               style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
                 padding: '13px 0',
@@ -617,6 +618,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>×</button>
               )
+            ) : ex.movement_type === 'cardio' ? (
+              <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.1em' }}>SYSTEM</span>
             ) : (
               <>
                 <button onClick={startEdit} style={{
@@ -728,9 +731,10 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             {ex.category && <Pill gold>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
             {ex.movement_type === 'unilateral' || (ex.unilateral && !ex.movement_type) ? <Pill gold>Unilateral</Pill> : null}
             {ex.movement_type === 'mobility' && <Pill gold>Mobility</Pill>}
+            {ex.movement_type === 'cardio' && <Pill gold>Cardio</Pill>}
             {(ex.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
             {ex.equipment && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill>}
-            {!ex.category && !ex.unilateral && ex.movement_type !== 'mobility' && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
+            {!ex.category && !ex.unilateral && ex.movement_type !== 'mobility' && ex.movement_type !== 'cardio' && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
           </div>
         )}
       </div>

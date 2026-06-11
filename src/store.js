@@ -963,11 +963,12 @@ async function refreshExerciseBests(userId) {
 function totalVolume(session, exercises) {
   const ended = !!session.ended;
   if (ended && !(session.entries || []).length && session.aggVolume != null) return session.aggVolume;
-  const mobilityIds = exercises
-    ? new Set(exercises.filter(e => e.movement_type === 'mobility').map(e => e.id))
+  const excludedIds = exercises
+    ? new Set(exercises.filter(e => e.movement_type === 'mobility' || e.movement_type === 'cardio').map(e => e.id))
     : null;
   return (session.entries || []).reduce((sum, entry) => {
-    if (mobilityIds && mobilityIds.has(entry.exId)) return sum;
+    if (entry.isCardio) return sum;
+    if (excludedIds && excludedIds.has(entry.exId)) return sum;
     return sum + (entry.sets || []).filter(st => {
       if (st.warmup || st.skipped) return false;
       if (ended) return st.kg != null && (st.reps != null || st.repsL != null || st.repsR != null);

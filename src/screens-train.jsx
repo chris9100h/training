@@ -5,6 +5,12 @@
 
 const { useState: useStateT, useEffect: useEffectT, useRef: useRefT, useMemo: useMemoT } = React;
 
+const CARDIO_DIST_KEY_T = 'logbook-cardio-dist-unit';
+const MI_TO_M_T = 1609.344;
+const CARDIO_TYPES_T = ['Running', 'Cycling', 'Rowing', 'Swimming', 'Walking', 'Hiking'];
+function mToDisplayT(m, unit) { return m == null ? '' : unit === 'mi' ? (m / MI_TO_M_T).toFixed(2) : (m / 1000).toFixed(2); }
+function distToMT(val, unit) { const n = parseFloat(val); return isNaN(n) ? null : unit === 'mi' ? Math.round(n * MI_TO_M_T) : Math.round(n * 1000); }
+
 // ── Debug log ────────────────────────────────────────────────────────────────
 window._dbg = window._dbg || [];
 window._log = window._log || ((msg) => {
@@ -395,8 +401,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return () => { on = false; };
   }, [entry?.exId]);
   const last = localLast ?? (entry ? remoteLast[entry.exId] : null) ?? null;
-  const isUnilateral = (exercise?.movement_type ?? (exercise?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
-  const isNoWeightReps = !!exercise?.no_weight_reps;
+  const isCardio = !!entry.isCardio;
+  const isUnilateral = !isCardio && (exercise?.movement_type ?? (exercise?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
+  const isNoWeightReps = !isCardio && !!exercise?.no_weight_reps;
   const progressionTargetForSet = (workingSetIdx) => {
     if (!store.settings?.smartProgression) return null;
     const perSet = entry?.plannedRepsPerSet;
@@ -645,7 +652,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     completeSet(idx);
   };
 
+  const logCardio = () => {
+    const dur = parseInt(cardioForm.duration, 10);
+    if (!dur || dur <= 0) return;
+    const distM = cardioForm.distance ? distToMT(cardioForm.distance, cardioForm.distUnit) : null;
+    const data = { type: cardioForm.type.trim() || null, durationMinutes: dur, distanceM: distM, paceFeeling: cardioForm.paceFeeling, effort: cardioForm.effort };
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((e, i) => i === exIdx ? { ...e, cardioDone: true, cardioData: data } : e),
+    }));
+    setTimeout(() => navigate(1), 300);
+  };
+
+  const skipCardio = () => {
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((e, i) => i === exIdx ? { ...e, cardioDone: true, cardioData: null } : e),
+    }));
+    navigate(1);
+  };
+
   const skipExercise = () => {
+    if (isCardio) { skipCardio(); return; }
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
@@ -711,6 +739,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const finish = (feel = null) => {
     cancelPushover();
+    const sessionDate = session.date.slice(0, 10);
+    const newCardioLogs = session.entries
+      .filter(e => e.isCardio && e.cardioDone && e.cardioData)
+      .map(e => ({ id: LB.uid(), date: sessionDate, type: e.cardioData.type || e.name, durationMinutes: e.cardioData.durationMinutes, distanceM: e.cardioData.distanceM ?? null, paceFeeling: e.cardioData.paceFeeling ?? null, effort: e.cardioData.effort ?? null, note: null }));
     updateSession(sess => {
       const now = new Date();
       const mins = sess.startedAt ? Math.round((now - new Date(sess.startedAt)) / 60000) : null;
@@ -737,6 +769,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       inProgress: null,
       ...(!isWeekdayMode && { cycleIndex: s.cycleIndex + 1 }),
       lastAdvancedDate: LB.todayISO(),
+      ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
     }));
     go({ name: 'session', sessionId: session.id, justFinished: true });
   };
@@ -892,6 +925,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbShieldTimerRef.current = setTimeout(() => setKbShield(false), 400);
   };
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
+  const [cardioForm, setCardioForm] = useStateT({ type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: localStorage.getItem(CARDIO_DIST_KEY_T) || 'km' });
   const pendingNavRef = useRefT(false);
   // Records when a set was last completed via the checkbox; used to ignore
   // iOS ghost-clicks that fire 200-400ms after completion and would otherwise
@@ -903,6 +937,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const lastCompleteRef = useRefT(0);
 
   useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); }, [exIdx, sessionId]);
+  useEffectT(() => {
+    if (!entry?.isCardio) return;
+    const du = localStorage.getItem(CARDIO_DIST_KEY_T) || 'km';
+    const cd = entry.cardioData;
+    setCardioForm(cd ? { type: cd.type || '', duration: cd.durationMinutes ? String(cd.durationMinutes) : '', distance: cd.distanceM != null ? mToDisplayT(cd.distanceM, du) : '', paceFeeling: cd.paceFeeling ?? null, effort: cd.effort ?? null, distUnit: du } : { type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: du });
+  }, [exIdx, sessionId]);
   useEffectT(() => () => stopTempo(), []);
 
   // Log ALL document pointer/click events — captures ghost-clicks and shows where they land.
@@ -1187,8 +1227,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
   }
 
-  const completed = entry.sets.filter(s => s.done).length;
-  const allDone = completed === entry.sets.length;
+  const completed = isCardio ? (entry.cardioDone ? 1 : 0) : entry.sets.filter(s => s.done).length;
+  const allDone = isCardio ? !!entry.cardioDone : (completed === entry.sets.length);
   const currentSetIdx = entry.sets.findIndex(s => !s.done);
   const warmupCount = entry.sets.filter(s => s.warmup).length;
   const isCurrentWarmup = warmupCount > 0 && currentSetIdx >= 0 && !!entry.sets[currentSetIdx]?.warmup;
@@ -1465,7 +1505,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* Exercise chips */}
       <div ref={chipRowRef} style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
         {session.entries.flatMap((e, i) => {
-          const done = e.sets.every(s => s.done || s.skipped);
+          const done = e.isCardio ? !!e.cardioDone : e.sets.every(s => s.done || s.skipped);
           const active = i === exIdx;
           const nextE = session.entries[i + 1];
           const linkedToNext = e.supersetGroup && e.supersetGroup === nextE?.supersetGroup;
@@ -1519,8 +1559,109 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           )}
         </div>
 
-        {/* HERO CURRENT SET */}
-        {allDone ? (
+        {/* HERO CURRENT SET — or CARDIO FORM */}
+        {isCardio ? (
+          entry.cardioDone ? (
+            <Frame accent style={{ padding: 24, textAlign: 'center' }}>
+              <i className="fa-solid fa-person-running" style={{ fontSize: 18, color: UI.gold, marginBottom: 8, display: 'block' }} />
+              <div className="display" style={{ fontSize: 26, color: UI.gold, fontWeight: 900, marginBottom: 4 }}>
+                {entry.cardioData?.type || 'Cardio'} logged.
+              </div>
+              {entry.cardioData && (
+                <div className="num" style={{ fontSize: 12, color: UI.inkSoft, marginBottom: 16 }}>
+                  {entry.cardioData.durationMinutes}min
+                  {entry.cardioData.distanceM != null && ` · ${mToDisplayT(entry.cardioData.distanceM, cardioForm.distUnit)} ${cardioForm.distUnit}`}
+                  {entry.cardioData.effort != null && ` · effort ${entry.cardioData.effort}/10`}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn kind="ghost" onClick={() => updateSession(sess => ({ ...sess, entries: sess.entries.map((e, i) => i === exIdx ? { ...e, cardioDone: false } : e) }))} style={{ flex: 1 }}>Edit</Btn>
+                <Btn onClick={() => navigate(1)} style={{ flex: 2 }}>
+                  {exIdx === session.entries.length - 1 ? 'Finish session →' : 'Next →'}
+                </Btn>
+              </div>
+            </Frame>
+          ) : (
+            <BracketFrame gold padding={0}>
+              <div style={{ padding: '18px 20px 20px' }}>
+                <div className="micro-gold" style={{ marginBottom: 14 }}>LOG CARDIO</div>
+
+                {/* Type chips */}
+                <div style={{ marginBottom: 14 }}>
+                  <div className="label" style={{ marginBottom: 8 }}>Activity</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                    {CARDIO_TYPES_T.map(t => (
+                      <Pill key={t} gold={cardioForm.type === t}
+                        onClick={() => setCardioForm(f => ({ ...f, type: f.type === t ? '' : t }))}
+                        style={{ cursor: 'pointer' }}>{t}</Pill>
+                    ))}
+                  </div>
+                  <input
+                    type="text" value={cardioForm.type}
+                    onChange={e => setCardioForm(f => ({ ...f, type: e.target.value }))}
+                    placeholder="or type custom…"
+                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }}
+                  />
+                </div>
+
+                {/* Duration */}
+                <div style={{ marginBottom: 14 }}>
+                  <div className="label" style={{ marginBottom: 6 }}>Duration (min)</div>
+                  <input
+                    type="number" inputMode="numeric" value={cardioForm.duration}
+                    onChange={e => setCardioForm(f => ({ ...f, duration: e.target.value }))}
+                    placeholder="e.g. 30"
+                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontNum, fontSize: 22, outline: 'none' }}
+                  />
+                </div>
+
+                {/* Distance */}
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span className="label">Distance (optional)</span>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {['km','mi'].map(u => (
+                        <button key={u} onClick={() => { localStorage.setItem(CARDIO_DIST_KEY_T, u); setCardioForm(f => ({ ...f, distUnit: u })); }} style={{ padding: '2px 8px', borderRadius: 4, border: `1px solid ${cardioForm.distUnit === u ? UI.gold : UI.hairStrong}`, background: cardioForm.distUnit === u ? UI.goldFaint : 'transparent', color: cardioForm.distUnit === u ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', cursor: 'pointer' }}>{u}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <input
+                    type="number" inputMode="decimal" value={cardioForm.distance}
+                    onChange={e => setCardioForm(f => ({ ...f, distance: e.target.value }))}
+                    placeholder={`0.00 ${cardioForm.distUnit}`}
+                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontNum, fontSize: 22, outline: 'none' }}
+                  />
+                </div>
+
+                {/* Pace feeling */}
+                <div style={{ marginBottom: 14 }}>
+                  <div className="label" style={{ marginBottom: 8 }}>Pace feeling (optional)</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {[['1','Easy'],['2','Light'],['3','Steady'],['4','Power'],['5','Hard'],['6','Max']].map(([v, l]) => (
+                      <Pill key={v} gold={cardioForm.paceFeeling === Number(v)}
+                        onClick={() => setCardioForm(f => ({ ...f, paceFeeling: f.paceFeeling === Number(v) ? null : Number(v) }))}
+                        style={{ cursor: 'pointer' }}>{l}</Pill>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Effort */}
+                <div style={{ marginBottom: 18 }}>
+                  <div className="label" style={{ marginBottom: 8 }}>Effort 1–10 (optional)</div>
+                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                    {[1,2,3,4,5,6,7,8,9,10].map(v => (
+                      <button key={v} onClick={() => setCardioForm(f => ({ ...f, effort: f.effort === v ? null : v }))} style={{ width: 30, height: 30, borderRadius: 4, border: `1px solid ${cardioForm.effort === v ? UI.gold : UI.hairStrong}`, background: cardioForm.effort === v ? UI.goldFaint : 'transparent', color: cardioForm.effort === v ? UI.gold : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>{v}</button>
+                    ))}
+                  </div>
+                </div>
+
+                <Btn onClick={logCardio} disabled={!cardioForm.duration || parseInt(cardioForm.duration) <= 0} style={{ width: '100%', opacity: (!cardioForm.duration || parseInt(cardioForm.duration) <= 0) ? 0.4 : 1 }}>
+                  <i className="fa-solid fa-person-running" style={{ marginRight: 8 }} />Log cardio
+                </Btn>
+              </div>
+            </BracketFrame>
+          )
+        ) : allDone ? (
           <Frame accent style={{ padding: 28, textAlign: 'center' }}>
             <div className="micro-gold" style={{ marginBottom: 10 }}>ALL SETS</div>
             <div className="display" style={{ fontSize: 28, color: UI.gold, fontWeight: 900, marginBottom: 6 }}>Done.</div>
@@ -1654,8 +1795,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </BracketFrame>
         )}
 
-        {/* All sets list */}
-        <div>
+        {/* All sets list — hidden for cardio */}
+        {!isCardio && <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
             <span className="micro">{warmupCount > 0 && warmupActive ? 'WARMUP' : 'ALL SETS'}</span>
             <button onClick={checkAllSets} disabled={anyMissingData && !allWorkingDone} style={{
@@ -1815,21 +1956,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             })}
           </div>
 
-          {/* Add set / swap / note */}
+        </div>}
+
+          {/* Add set / swap / note — shown for all exercises, + and tempo hidden for cardio */}
           <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button onClick={addSet} style={{
+            {!isCardio && <button onClick={addSet} style={{
               width: 32, height: 32, borderRadius: 4,
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               color: UI.inkSoft, fontSize: 18, lineHeight: 1, cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>+</button>
-            <button onClick={swapExercise} style={{
+            }}>+</button>}
+            {!isCardio && <button onClick={swapExercise} style={{
               width: 32, height: 32, borderRadius: 4,
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>⇄</button>
-            {store.settings?.tempoEnabled && (
+            }}>⇄</button>}
+            {!isCardio && store.settings?.tempoEnabled && (
               <button onClick={() => tempoActive ? stopTempo() : startTempo()} style={{
                 borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
                 background: tempoActive ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
@@ -1865,7 +2008,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {entry.note}
             </button>
           ) : null}
-        </div>
 
         {/* Exercise note (permanent, from exercise definition) */}
         {exercise?.note && (
@@ -1899,7 +2041,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>
             {exIdx === session.entries.length - 1 ? 'Finish →' : 'Next exercise →'}
           </Btn>
-        ) : (<>
+        ) : isCardio ? (<>
+          <Btn kind="ghost" onClick={skipCardio} style={{ flex: 1, minHeight: 44 }}>Skip</Btn>
+          {exIdx === session.entries.length - 1 && (
+            <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44 }}>Finish →</Btn>
+          )}
+        </>) : (<>
           {(() => {
             const pending = entry.sets.find(s => !s.done && !s.skipped);
             const hasVal = pending && (pending.kg != null || pending.reps != null || pending.repsL != null || pending.repsR != null);
@@ -1921,7 +2068,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 18, lineHeight: 1.6 }}>
             {(() => {
               const incomplete = session.entries
-                .map(e => ({ name: e.name, remaining: e.sets.filter(s => !s.done && !s.skipped).length }))
+                .map(e => e.isCardio
+                  ? { name: e.name, remaining: e.cardioDone ? 0 : 1, isCardio: true }
+                  : { name: e.name, remaining: e.sets.filter(s => !s.done && !s.skipped).length })
                 .filter(e => e.remaining > 0);
               if (!incomplete.length) return null;
               return (
@@ -1930,7 +2079,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {incomplete.map(e => (
                     <div key={e.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 4 }}>
                       <span style={{ color: UI.inkSoft }}>{e.name}</span>
-                      <span className="num" style={{ color: 'var(--accent)' }}>{e.remaining} left</span>
+                      <span className="num" style={{ color: 'var(--accent)' }}>{e.isCardio ? 'not logged' : `${e.remaining} left`}</span>
                     </div>
                   ))}
                 </div>

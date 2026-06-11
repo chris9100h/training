@@ -340,6 +340,16 @@ function App() {
     }
   }, [store?.user?.email, store?.user?.name]);
 
+  // Auto-seed the system CARDIO exercise once per user (if missing or deleted).
+  useEffectA(() => {
+    if (phase !== 'ready' || !userId) return;
+    setStore(s => {
+      if (!s || (s.exercises || []).some(e => e.movement_type === 'cardio')) return s;
+      const cardioEx = { id: LB.uid(), name: 'CARDIO', movement_type: 'cardio', tags: [], category: null, unilateral: false, no_weight_reps: false, equipment: null, note: '', progression_reps: null };
+      return { ...s, exercises: [...(s.exercises || []), cardioEx] };
+    });
+  }, [phase, userId]);
+
   useEffectA(() => {
     const color = store?.settings?.accentColor;
     if (color) {
