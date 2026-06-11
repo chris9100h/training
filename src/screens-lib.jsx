@@ -812,24 +812,32 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
 }
 
 function ProgressChart({ points }) {
-  const w = 280, h = 90, pad = 8;
+  const w = 280, h = 108, padT = 8, padB = 20, padL = 36, padR = 8;
   const max = Math.max(...points.map(p => p.est));
   const min = Math.min(...points.map(p => p.est));
   const range = max - min || 1;
   const xy = points.map((p, i) => {
-    const x = pad + (i / Math.max(1, points.length - 1)) * (w - pad * 2);
-    const y = h - pad - ((p.est - min) / range) * (h - pad * 2);
+    const x = padL + (i / Math.max(1, points.length - 1)) * (w - padL - padR);
+    const y = padT + (1 - (p.est - min) / range) * (h - padT - padB);
     return [x, y];
   });
   const path = xy.map(([x,y], i) => `${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const fmtDate = d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' });
+  const unit = UI.unit();
   return (
     <div style={{ padding: '10px 0', maxWidth: 380 }}>
       <div className="micro" style={{ marginBottom: 8, color: UI.inkFaint }}>EST. 1RM · HISTORY</div>
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
+        <text x={padL - 5} y={padT + 4} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{Math.round(max)} {unit}</text>
+        {max > min && <text x={padL - 5} y={h - padB} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{Math.round(min)} {unit}</text>}
         <path d={path} fill="none" stroke={UI.gold} strokeWidth="1" opacity="0.6" />
         {xy.map(([x,y], i) => (
           <circle key={i} cx={x} cy={y} r="2" fill={UI.gold} />
         ))}
+        {points.length > 1 && <>
+          <text x={padL} y={h - 6} textAnchor="start" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
+          <text x={w - padR} y={h - 6} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[points.length - 1].date)}</text>
+        </>}
       </svg>
     </div>
   );
