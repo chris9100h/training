@@ -803,7 +803,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!store.settings?.pushEnabled) return;
     const delaySeconds = Math.round(Math.max(0, restStart + activeRestDef * 1000 - Date.now()) / 1000);
     // Authenticated as the user; the server derives the target key from the DB.
-    LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds, nonce: String(restStart) + '-' + Math.random().toString(36).slice(2, 8), priority: 1 });
+    LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds, nonce: String(restStart), priority: 1 });
   }, [restStart]);
 
   // beep + auto-open modal when rest timer hits zero
