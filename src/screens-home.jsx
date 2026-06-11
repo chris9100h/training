@@ -1116,7 +1116,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       return `${unique[0]}, ${unique[1]} +${unique.length - 2}`;
     })();
     return (
-      <Frame onClick={() => setCardioPopoverOpen(true)} style={{ marginTop: 8, padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, width: '100%', boxSizing: 'border-box' }}>
+      <Frame onClick={() => setCardioPopoverOpen(true)} style={{ marginTop: 8, padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, width: '100%', boxSizing: 'border-box', textAlign: 'left' }}>
         <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0, width: 12 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>CARDIO</div>
