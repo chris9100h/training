@@ -856,6 +856,8 @@ function ProgressChart({ points }) {
     <div style={{ padding: '10px 0', maxWidth: 380 }}>
       <div className="micro" style={{ marginBottom: 8, color: UI.inkFaint }}>EST. 1RM · HISTORY</div>
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
+        <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
+        <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
         <text x={padL - 5} y={padT + 4} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{Math.round(max)} {unit}</text>
         {max > min && <text x={padL - 5} y={h - padB} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{Math.round(min)} {unit}</text>}
         <path d={path} fill="none" stroke={UI.gold} strokeWidth="1" opacity="0.6" />
@@ -894,6 +896,8 @@ function CardioLineChart({ points, label, formatVal }) {
         <span className="micro" style={{ color: UI.inkFaint }}>AVG</span>
       </div>
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
+        <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
+        <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
         <text x={padL - 4} y={padT + 5} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
         {max > min && <text x={padL - 4} y={h - padB} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
         <path d={pathD} fill="none" stroke={UI.gold} strokeWidth="1.2" opacity="0.7" />
@@ -2835,6 +2839,8 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
 
           {/* SVG Chart — maxWidth keeps it from ballooning on iPad */}
           <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" style={{ display: 'block', overflow: 'visible', marginBottom: 12, maxWidth: 480 }}>
+            <line x1={PAD_L} y1={PAD_T} x2={PAD_L} y2={VH - PAD_B} stroke={UI.hair} strokeWidth="0.5" />
+            <line x1={PAD_L} y1={VH - PAD_B} x2={VW - PAD_R} y2={VH - PAD_B} stroke={UI.hair} strokeWidth="0.5" />
             {/* Horizontal grid lines + Y labels */}
             {gridVals.map((v, i) => {
               const y = yPos(v);
