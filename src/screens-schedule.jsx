@@ -1313,7 +1313,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 }
 
 // ─── Day editor (exercises within a day) ─────────────────────────────
-function ExerciseItemEditor({ item, exName, onClose, onSave }) {
+function ExerciseItemEditor({ item, exName, isCheckboxOnly, onClose, onSave }) {
   const hasVariable = item.repsPerSet && item.repsPerSet.length > 1;
   const [mode, setMode] = useStateS(hasVariable ? 'variable' : 'uniform');
   const [sets, setSetsRaw] = useStateS(item.sets);
@@ -1346,6 +1346,10 @@ function ExerciseItemEditor({ item, exName, onClose, onSave }) {
   };
 
   const handleSave = () => {
+    if (isCheckboxOnly) {
+      onSave({ sets, reps: 0, repsPerSet: undefined, note });
+      return;
+    }
     if (mode === 'variable') {
       onSave({ sets, reps: repsPerSet[0] ?? uniformReps, repsPerSet, note });
     } else {
@@ -1365,13 +1369,13 @@ function ExerciseItemEditor({ item, exName, onClose, onSave }) {
 
   return (
     <Sheet open={true} onClose={onClose} title={exName}>
-      {/* Mode toggle */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+      {/* Mode toggle — hidden for checkbox-only exercises */}
+      {!isCheckboxOnly && <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
         <button style={toggleStyle(mode === 'uniform')} onClick={() => switchMode('uniform')}>Uniform</button>
         <button style={toggleStyle(mode === 'variable')} onClick={() => switchMode('variable')}>Per Set</button>
-      </div>
+      </div>}
 
-      {/* Sets stepper — always visible, same layout as per-set rows */}
+      {/* Sets stepper — always visible */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Sets</span>
@@ -1380,7 +1384,7 @@ function ExerciseItemEditor({ item, exName, onClose, onSave }) {
           </div>
         </div>
 
-        <div className="knurl" />
+        {!isCheckboxOnly && <><div className="knurl" />
 
         {mode === 'uniform' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1404,7 +1408,7 @@ function ExerciseItemEditor({ item, exName, onClose, onSave }) {
               </div>
             </div>
           ))
-        )}
+        )}</>}
       </div>
 
       <Field label="Note (optional)">
@@ -1444,8 +1448,9 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const removeItem = (idx) => setDraft(d => ({ ...d, items: normalizeSupersets(d.items.filter((_, i) => i !== idx)) }));
   const addExercise = (exId) => {
     const ex = LB.findExercise(store, exId);
+    const isCardioEx = ex?.movement_type === 'cardio';
     const defaultReps = ex?.progression_reps ?? 8;
-    setDraft(d => ({ ...d, items: [...d.items, { exId, sets: 3, reps: defaultReps }] }));
+    setDraft(d => ({ ...d, items: [...d.items, { exId, sets: isCardioEx ? 0 : 3, reps: isCardioEx ? 0 : defaultReps }] }));
     setAddingEx(false);
   };
   const moveItem = (idx, dir) => {
@@ -1555,7 +1560,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                     fontSize: 12, color: UI.gold, background: UI.goldFaint,
                     border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
                     padding: '3px 8px', whiteSpace: 'nowrap',
-                  }}>{it.repsPerSet && it.repsPerSet.length > 1 ? it.repsPerSet.join('/') : `${it.sets}×${it.reps}`}</div>
+                  }}>{it.repsPerSet && it.repsPerSet.length > 1 ? it.repsPerSet.join('/') : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`}</div>
                   <button onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...dayEditIconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
                 </div>
               );
@@ -1589,6 +1594,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
         <ExerciseItemEditor
           item={draft.items[editingItem]}
           exName={LB.findExercise(store, draft.items[editingItem]?.exId)?.name || '—'}
+          isCheckboxOnly={!!LB.findExercise(store, draft.items[editingItem]?.exId)?.no_weight_reps}
           onClose={() => setEditingItem(null)}
           onSave={(patch) => { updateItem(editingItem, patch); setEditingItem(null); }}
         />

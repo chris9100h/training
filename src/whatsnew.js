@@ -15,6 +15,17 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.134',
+    title: 'Cardio & Mobility',
+    items: [
+      'Log cardio two ways: tap CARDIO on the home screen for a quick standalone log, or add the CARDIO exercise to any training day — it saves to your cardio history automatically when the session ends. Cardio never counts toward volume or workout streaks.',
+      'Track activity type, duration, distance (km or mi), pace feeling and effort. Your most-used activity types appear as quick-select chips. Full history under History → Cardio, with your weekly totals auto-filling the check-in form.',
+      'Tap any activity type in your cardio history to open a progression chart — Duration, Speed, Effort, Pace Feeling and Distance plotted over time, so you can see trends at a glance.',
+      'New Mobility exercise type for stretching and flexibility work: excluded from training volume. Choose whether to log weight & reps or just tick a checkbox — no set-by-set tracking. Creating a Mobility exercise automatically sets equipment to No equipment.',
+      'Charts across the app now show axis lines for cleaner reading. Various fixes: rest timer audio and Pushover notifications restored, plan editor handles cardio correctly.',
+    ],
+  },
+  {
     id: 'v2.087',
     title: 'Fast start, no matter how long you\'ve trained',
     items: [

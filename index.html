@@ -158,6 +158,8 @@
 <script>
 
 window.onerror = function(msg, src, line, col, err) {
+  // Benign, well-known browser warning — not a real error; don't surface it.
+  if (typeof msg === 'string' && msg.indexOf('ResizeObserver loop') !== -1) return;
   var d = document.getElementById('err');
   d.style.display = 'block';
   d.textContent += '[JS ERROR] ' + msg + '\n  ' + src + ':' + line + '\n\n';

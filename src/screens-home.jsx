@@ -7,6 +7,58 @@ const { useState, useEffect, useMemo, useRef } = React;
 
 const SKIP_REASONS = ['Tired', 'Sick', 'Stress', 'Forgot', 'Rest day', 'No particular reason'];
 
+// Renders text on a single line, scaling the font size down so it always fits
+// the parent's width (used for the hero day name, which varies in length).
+function FitText({ text, max, min, style }) {
+  const ref = useRef(null);
+  const [fs, setFs] = useState(max);
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let raf, lastW = -1;
+    // Measure the text at max size and scale down to fit the parent's width.
+    // `force` bypasses the width-equality guard (used when only the font, not
+    // the width, changed — e.g. after web fonts load).
+    const measure = (force) => {
+      const parent = el.parentElement;
+      if (!parent) return;
+      const avail = parent.clientWidth;
+      if (avail <= 0) return;            // not laid out yet — observer re-fires later
+      if (!force && avail === lastW) return; // width unchanged — nothing to do
+      lastW = avail;
+      el.style.fontSize = max + 'px';
+      const natural = el.scrollWidth;
+      setFs(natural > avail ? Math.max(min, Math.floor(max * avail / natural)) : max);
+    };
+    // Defer measuring to a frame so a ResizeObserver callback never mutates
+    // layout synchronously (which would trigger the "ResizeObserver loop"
+    // notification). Coalesce bursts into one measure.
+    const schedule = (force) => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => measure(force)); };
+    schedule(true);
+    // Re-fit when web fonts load — the first measurement may run against the
+    // fallback font (different metrics), yielding a wrong size.
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => schedule(true));
+    // Observe the parent so we re-fit when its width becomes known (covers
+    // remounts where layout isn't ready yet) or changes (orientation/resize).
+    let ro, onResize;
+    if (window.ResizeObserver) {
+      ro = new ResizeObserver(() => schedule(false));
+      ro.observe(el.parentElement);
+    } else {
+      onResize = () => schedule(false);
+      window.addEventListener('resize', onResize);
+    }
+    return () => {
+      cancelAnimationFrame(raf);
+      if (ro) ro.disconnect();
+      if (onResize) window.removeEventListener('resize', onResize);
+    };
+  }, [text, max, min]);
+  return (
+    <div ref={ref} style={{ ...style, fontSize: fs, whiteSpace: 'nowrap' }}>{text}</div>
+  );
+}
+
 // ─── LOGIN / REGISTER ─────────────────────────────────────────────────────────
 function LoginScreen() {
   const [mode, setMode]           = useState('login'); // 'login' | 'register'
@@ -280,7 +332,7 @@ function SkipReasonSheet({ modal, onClose, setStore, userId }) {
   );
 }
 
-function LastSessionStrip({ session, onClick }) {
+function LastSessionStrip({ session, onClick, exercises }) {
   return (
     <Frame onClick={onClick} style={{ flexShrink: 0, padding: '12px 16px', cursor: 'pointer' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
@@ -292,7 +344,7 @@ function LastSessionStrip({ session, onClick }) {
               {LB.parseDate(session.date).toLocaleDateString('en-US', { day:'2-digit', month:'short' }).toUpperCase()}
             </span>
             <span className="num" style={{ color: UI.gold, fontSize: 11 }}>
-              {Math.round(LB.totalVolume(session)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>{UI.unit()}</span>
+              {Math.round(LB.totalVolume(session, exercises)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>{UI.unit()}</span>
             </span>
           </div>
         </div>
@@ -338,6 +390,9 @@ function RecentBannerDay({ banner, store, setStore, go, sch, userId, onOpenSkipS
         const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
         const entries = (dayData?.items || []).map(it => {
           const ex = LB.findExercise(store, it.exId);
+          if (ex?.movement_type === 'cardio') {
+            return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
+          }
           const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
           const isUni = ex?.unilateral || false;
           const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
@@ -354,6 +409,212 @@ function RecentBannerDay({ banner, store, setStore, go, sch, userId, onOpenSkipS
         Dismiss
       </button>
     </div>
+  );
+}
+
+// ─── CARDIO QUICK-LOG ─────────────────────────────────────────────────
+
+const CARDIO_DIST_KEY = 'logbook-cardio-dist-unit'; // 'km' | 'mi'
+const MI_TO_M = 1609.344;
+
+function distToM(val, unit) {
+  const n = parseFloat(String(val).replace(',', '.'));
+  if (isNaN(n)) return null;
+  return unit === 'mi' ? Math.round(n * MI_TO_M) : Math.round(n * 1000);
+}
+function mToDisplay(meters, unit) {
+  if (meters == null) return '';
+  return unit === 'mi' ? (meters / MI_TO_M).toFixed(2) : (meters / 1000).toFixed(2);
+}
+
+function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog }) {
+  const getDistUnit = () => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } };
+  const [distUnit, setDistUnitState] = useState(getDistUnit);
+  const setDistUnit = (u) => { try { localStorage.setItem(CARDIO_DIST_KEY, u); } catch (_) {} setDistUnitState(u); };
+
+  const todayStr = LB.todayISO();
+  const empty = () => ({ date: todayStr, type: '', duration: '', distance: '', paceFeeling: null, effort: null, note: '' });
+  const [form, setForm] = useState(empty);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    if (!open) return;
+    if (editLog) {
+      const du = getDistUnit();
+      setForm({
+        date: editLog.date,
+        type: editLog.type || '',
+        duration: editLog.durationMinutes ? String(editLog.durationMinutes) : '',
+        distance: editLog.distanceM != null ? mToDisplay(editLog.distanceM, du) : '',
+        paceFeeling: editLog.paceFeeling ?? null,
+        effort: editLog.effort ?? null,
+        note: editLog.note || '',
+      });
+    } else {
+      setForm(empty());
+    }
+  }, [open, editLog?.id]);
+
+  // Unique types from history, most-recently-used first
+  const typeChips = useMemo(() => {
+    const seen = new Set();
+    const result = [];
+    for (const l of (store.cardioLogs || [])) {
+      if (l.type && !seen.has(l.type)) { seen.add(l.type); result.push(l.type); }
+      if (result.length >= 6) break;
+    }
+    return result;
+  }, [store.cardioLogs]);
+
+  const canSave = form.date && form.duration && Number(form.duration) > 0;
+
+  const save = () => {
+    if (!canSave) return;
+    if (editLog) {
+      const updated = {
+        ...editLog,
+        date: form.date,
+        type: form.type.trim() || null,
+        durationMinutes: Math.round(Number(form.duration)),
+        distanceM: form.distance ? distToM(form.distance, distUnit) : null,
+        paceFeeling: form.paceFeeling,
+        effort: form.effort,
+        note: form.note.trim() || null,
+      };
+      setStore(s => ({ ...s, cardioLogs: (s.cardioLogs || []).map(l => l.id === editLog.id ? updated : l) }));
+    } else {
+      const log = {
+        id: LB.uid(),
+        date: form.date,
+        type: form.type.trim() || null,
+        durationMinutes: Math.round(Number(form.duration)),
+        distanceM: form.distance ? distToM(form.distance, distUnit) : null,
+        paceFeeling: form.paceFeeling,
+        effort: form.effort,
+        note: form.note.trim() || null,
+        createdAt: new Date().toISOString(),
+      };
+      setStore(s => ({ ...s, cardioLogs: [log, ...(s.cardioLogs || [])] }));
+    }
+    onClose();
+  };
+
+  const inputStyle = {
+    width: '100%', boxSizing: 'border-box', background: UI.bgInset,
+    border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+    padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14,
+    color: UI.ink, outline: 'none',
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title={editLog ? 'EDIT CARDIO' : 'LOG CARDIO'}>
+      {/* Date */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Date</div>
+        <div style={{ display: 'flex' }}>
+          <input type="date" value={form.date} max={todayStr} onChange={e => set('date', e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 0, colorScheme: 'dark' }} />
+        </div>
+      </div>
+
+      {/* Type */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Activity type</div>
+        <input
+          type="text" placeholder="e.g. Running, Cycling…"
+          value={form.type} onChange={e => set('type', e.target.value)}
+          style={inputStyle}
+        />
+        {typeChips.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+            {typeChips.map(t => (
+              <button key={t} onClick={() => set('type', t)} style={{
+                padding: '4px 10px', borderRadius: 4, cursor: 'pointer',
+                border: `1px solid ${form.type === t ? 'var(--accent)' : UI.hairStrong}`,
+                background: form.type === t ? `rgba(var(--accent-rgb),0.12)` : 'transparent',
+                color: form.type === t ? 'var(--accent)' : UI.inkFaint,
+                fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.04em',
+                WebkitTapHighlightColor: 'transparent',
+              }}>{t}</button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Duration + Distance */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'flex-end' }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Duration (min)</div>
+          <input type="number" inputMode="numeric" placeholder="—" value={form.duration} onChange={e => set('duration', e.target.value)} style={inputStyle} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Distance</span>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+              {['km', 'mi'].map(u => (
+                <button key={u} onClick={() => setDistUnit(u)} style={{
+                  padding: '2px 7px', cursor: 'pointer', border: 'none',
+                  background: distUnit === u ? 'var(--accent)' : 'transparent',
+                  color: distUnit === u ? UI.bg : UI.inkFaint,
+                  fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>{u}</button>
+              ))}
+            </div>
+          </div>
+          <input type="number" inputMode="decimal" placeholder="—" value={form.distance} onChange={e => set('distance', e.target.value)} style={inputStyle} />
+        </div>
+      </div>
+
+      {/* Pace feeling */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+          <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Pace feeling</span>
+          {form.paceFeeling != null && <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{form.paceFeeling}/6</span>}
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {[['1','Easy'],['2','Light'],['3','Steady'],['4','Power'],['5','Hard'],['6','Max']].map(([n, lbl]) => (
+            <button key={n} onClick={() => set('paceFeeling', form.paceFeeling === Number(n) ? null : Number(n))} style={{
+              flex: 1, padding: '7px 2px', borderRadius: 8, cursor: 'pointer',
+              border: `0.5px solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
+              background: form.paceFeeling === Number(n) ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <span className="num" style={{ fontSize: 13, color: form.paceFeeling === Number(n) ? 'var(--accent)' : UI.inkSoft }}>{n}</span>
+              <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.04em' }}>{lbl}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Effort 1–10 */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+          <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Effort</span>
+          {form.effort != null && <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{form.effort}/10</span>}
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {[1,2,3,4,5,6,7,8,9,10].map(n => (
+            <button key={n} onClick={() => set('effort', form.effort === n ? null : n)} style={{
+              flex: 1, padding: '7px 0', borderRadius: 6, cursor: 'pointer',
+              border: `0.5px solid ${form.effort === n ? 'var(--accent)' : UI.hairStrong}`,
+              background: form.effort === n ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <span className="num" style={{ fontSize: 11, color: form.effort === n ? 'var(--accent)' : UI.inkSoft }}>{n}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Note */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Note (optional)</div>
+        <textarea rows={2} placeholder="…" value={form.note} onChange={e => set('note', e.target.value)} style={{ ...inputStyle, resize: 'none' }} />
+      </div>
+
+      <Btn onClick={save} disabled={!canSave}>SAVE</Btn>
+    </Sheet>
   );
 }
 
@@ -400,6 +661,9 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [selectedSlot, setSelectedSlot] = useState(dayIdx);
   const [warmupPromptData, setWarmupPromptData] = useState(null);
   const [notLoggedModalOpen, setNotLoggedModalOpen] = useState(false);
+  const [cardioLogOpen, setCardioLogOpen] = useState(false);
+  const [cardioPopoverOpen, setCardioPopoverOpen] = useState(false);
+  const [editingCardioLog, setEditingCardioLog] = useState(null);
   // The not-logged Log handler awaits a seed fetch — guard against a double
   // tap creating two sessions inside that window.
   const loggingRef = useRef(false);
@@ -757,6 +1021,9 @@ function HomeScreen({ store, setStore, go, userId }) {
     const seedRefs = await LB.fetchSeedEntries(store, activeDay.items, activeDay.id, userId);
     const entries = activeDay.items.map(it => {
       const ex = LB.findExercise(store, it.exId);
+      if (ex?.movement_type === 'cardio') {
+        return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
+      }
       const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, activeDay.id);
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps, undefined, seedRefs[it.exId]);
@@ -1055,19 +1322,33 @@ function HomeScreen({ store, setStore, go, userId }) {
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
               <Btn kind="ghost" onClick={() => go({ name: 'plan-view' })} style={{ flex: 1 }}>View plan</Btn>
             </div>
+            <button onClick={() => setCardioPopoverOpen(true)} style={{
+              width: '100%', marginTop: 8, padding: '9px 16px',
+              background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+              border: '1px solid rgba(var(--accent-rgb),0.6)',
+              borderRadius: 8, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: 'rgba(10,8,5,0.6)' }} />
+              <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
+            </button>
           </BracketFrame>
         ) : (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
             {/* Fixed: label, name, stats, CTAs */}
             <div style={{ flexShrink: 0, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 4 }}>
             <div className="micro-gold" style={{ marginBottom: 6 }}>{cardLabel}</div>
-            <div style={{
-              fontFamily: UI.fontDisplay, fontSize: 72, fontWeight: 900,
-              textTransform: 'uppercase', letterSpacing: '0.04em',
-              color: UI.gold, lineHeight: 0.9, marginBottom: 20,
-            }}>
-              {activeDay.name}
-            </div>
+            <FitText
+              text={(activeDay.name || '').toUpperCase()}
+              max={72} min={28}
+              style={{
+                fontFamily: UI.fontDisplay, fontWeight: 900,
+                letterSpacing: '0.04em',
+                color: UI.gold, lineHeight: 0.9, marginBottom: 20,
+                maxWidth: '100%',
+              }}
+            />
 
             {/* Stats */}
             <div style={{ display: 'flex', alignItems: 'stretch', gap: 20, marginBottom: 18, width: '100%', justifyContent: 'center' }}>
@@ -1192,6 +1473,22 @@ function HomeScreen({ store, setStore, go, userId }) {
         )}
       </div>
 
+      {!isActiveRest && (
+        <div style={{ flexShrink: 0, padding: '6px 22px', paddingBottom: useIsPad() ? 'calc(env(safe-area-inset-bottom, 0px) + 16px)' : 0 }}>
+          <button onClick={() => setCardioPopoverOpen(true)} style={{
+            width: '100%', padding: '9px 16px',
+            background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+            border: '1px solid rgba(var(--accent-rgb),0.6)',
+            borderRadius: 8, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: 'rgba(10,8,5,0.6)' }} />
+            <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
+          </button>
+        </div>
+      )}
+
       {/* Last session + not-logged strip — fixed above tab bar */}
       {(lastSession || (recentBannerDay && !store.inProgress)) && (
         <div style={{ flexShrink: 0, padding: '10px 22px' }}>
@@ -1212,12 +1509,51 @@ function HomeScreen({ store, setStore, go, userId }) {
               </Frame>
             </div>
           ) : lastSession ? (
-            <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id, back: { name: 'home' } })} />
+            <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id, back: { name: 'home' } })} exercises={store.exercises} />
           ) : (
             <RecentBannerDay banner={recentBannerDay} store={store} setStore={setStore} go={go} sch={sch} userId={userId} onOpenSkipSheet={setSkipReasonModal} />
           )}
         </div>
       )}
+
+
+      {/* Cardio history popover */}
+      {cardioPopoverOpen && (() => {
+        const recentCardio = (store.cardioLogs || []).slice(0, 5);
+        const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } })();
+        return (
+          <Sheet open={true} onClose={() => setCardioPopoverOpen(false)}>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 15, fontWeight: 600, letterSpacing: '0.10em', textTransform: 'uppercase', color: UI.inkSoft, textAlign: 'center', marginBottom: recentCardio.length ? 16 : 10 }}>RECENT CARDIO</div>
+            {recentCardio.length === 0 ? (
+              <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, textAlign: 'center', marginBottom: 20 }}>No cardio logged yet.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 18 }}>
+                {recentCardio.map(l => (
+                  <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}` }}>
+                    <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: UI.inkFaint, width: 12 }} />
+                    <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.type || '—'}</span>
+                    <span className="num" style={{ fontSize: 12, color: UI.gold, flexShrink: 0 }}>{l.durationMinutes}<span style={{ color: UI.inkFaint, fontSize: 9 }}>min</span></span>
+                    {l.distanceM != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{mToDisplay(l.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>}
+                    <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, flexShrink: 0 }}>{l.date.slice(5).replace('-', '/')}</span>
+                    <button onClick={() => { setEditingCardioLog(l); setCardioPopoverOpen(false); setCardioLogOpen(true); }} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>
+                    <button onClick={async () => {
+                      if (!await confirm('Delete this cardio log?', { ok: 'Delete', danger: true })) return;
+                      setStore(s => ({ ...s, cardioLogs: (s.cardioLogs||[]).filter(x => x.id !== l.id) }));
+                    }} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 2px', color: UI.danger, fontSize: 16, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <Btn onClick={() => { setCardioPopoverOpen(false); setCardioLogOpen(true); }} style={{ minWidth: 200 }}>+ LOG CARDIO</Btn>
+            </div>
+          </Sheet>
+        );
+      })()}
+
+      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} />
 
       {/* Coach message banner */}
       <window.Screens.CoachingBannerGroup store={store} setStore={setStore} userId={userId} go={go} />
@@ -1243,6 +1579,9 @@ function HomeScreen({ store, setStore, go, userId }) {
               const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
               const entries = (dayData?.items || []).map(it => {
                 const ex = LB.findExercise(store, it.exId);
+                if (ex?.movement_type === 'cardio') {
+                  return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
+                }
                 const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
                 const isUni = ex?.unilateral || false;
                 const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
@@ -1325,4 +1664,4 @@ function PendingApprovalScreen({ onSignOut }) {
 }
 
 window.Screens = window.Screens || {};
-Object.assign(window.Screens, { LoginScreen, HomeScreen, SetPasswordScreen, PendingApprovalScreen });
+Object.assign(window.Screens, { LoginScreen, HomeScreen, SetPasswordScreen, PendingApprovalScreen, CardioQuickLogSheet });

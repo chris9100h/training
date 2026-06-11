@@ -231,10 +231,11 @@ function LibraryScreen({ store, setStore, go }) {
 
         {tab === 'all' && filtered.map((e, fi) => {
           const isSelected = selected.has(e.id);
+          const isSystemCardio = e.movement_type === 'cardio';
           return (
             <React.Fragment key={e.id}>
             <div
-              onClick={() => selecting ? toggleSelect(e.id) : go({ name: 'exercise', exId: e.id })}
+              onClick={() => (selecting && !isSystemCardio) ? toggleSelect(e.id) : go({ name: 'exercise', exId: e.id })}
               style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
                 padding: '13px 0',
@@ -378,6 +379,7 @@ function LibraryScreen({ store, setStore, go }) {
 const EXERCISE_SIZES = [['big','Big'],['medium','Medium'],['small','Small']];
 
 const EQUIPMENT_TYPES = [
+  { key: 'no_equipment',   label: 'No equipment' },
   { key: 'barbell_dual',   label: 'Dual plates' },
   { key: 'barbell_single', label: 'Single plate' },
   { key: 'cable',          label: 'Cable' },
@@ -389,14 +391,15 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
   const [name, setName] = useStateL(initialName);
   const [selectedTags, setSelectedTags] = useStateL([]);
   const [category, setCategory] = useStateL(null);
-  const [unilateral, setUnilateral] = useStateL(false);
+  const [movementType, setMovementType] = useStateL('bilateral');
+  const [noWeightReps, setNoWeightReps] = useStateL(false);
   const [equipment, setEquipment] = useStateL('barbell_dual');
   const [progressionReps, setProgressionReps] = useStateL(null);
   const [showSizeInfo, setShowSizeInfo] = useStateL(false);
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral, equipment: equipment || null, note: '', progression_reps: progressionReps ?? null };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: noWeightReps, equipment: equipment || null, note: '', progression_reps: progressionReps ?? null };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -453,8 +456,18 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
         <div>
           <span className="label">Movement type</span>
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-            <Pill gold={unilateral} onClick={() => setUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
+            {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
+              <Pill key={val} gold={movementType === val}
+                onClick={() => { setMovementType(val); setNoWeightReps(val === 'mobility'); if (val === 'mobility') setEquipment('no_equipment'); }}
+                style={{ cursor: 'pointer' }}>{label}</Pill>
+            ))}
           </div>
+          {movementType === 'mobility' && (
+            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+              <Pill gold={noWeightReps} onClick={() => setNoWeightReps(true)} style={{ cursor: 'pointer' }}>Checkbox only</Pill>
+              <Pill gold={!noWeightReps} onClick={() => setNoWeightReps(false)} style={{ cursor: 'pointer' }}>Weight & Reps</Pill>
+            </div>
+          )}
         </div>
         <div>
           <span className="label">Rep target</span>
@@ -491,7 +504,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editName, setEditName] = useStateL(autoEdit ? ex.name : '');
   const [editTags, setEditTags] = useStateL(autoEdit ? [...(ex.tags || [])] : []);
   const [editCategory, setEditCategory] = useStateL(autoEdit ? (ex.category || null) : null);
-  const [editUnilateral, setEditUnilateral] = useStateL(autoEdit ? !!ex.unilateral : false);
+  const [editMovementType, setEditMovementType] = useStateL(autoEdit ? (ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')) : 'bilateral');
+  const [editNoWeightReps, setEditNoWeightReps] = useStateL(autoEdit ? !!ex.no_weight_reps : false);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
   const [editProgressionReps, setEditProgressionReps] = useStateL(autoEdit ? (ex.progression_reps ?? null) : null);
   const [editNote, setEditNote] = useStateL(false);
@@ -507,7 +521,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     }
   };
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditUnilateral(!!ex.unilateral); setEditEquipment(ex.equipment || null); setEditProgressionReps(ex.progression_reps ?? null); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditNoWeightReps(!!ex.no_weight_reps); setEditEquipment(ex.equipment || null); setEditProgressionReps(ex.progression_reps ?? null); setEditMode(true); };
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
@@ -515,7 +529,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     const repsChanged = newProgressionReps !== (ex.progression_reps ?? null);
     setStore(s => {
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral, equipment: editEquipment || null, progression_reps: newProgressionReps }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: editNoWeightReps, equipment: editEquipment || null, progression_reps: newProgressionReps }
         : e);
       const schedules = (repsChanged && newProgressionReps != null)
         ? s.schedules.map(sch => ({ ...sch, days: sch.days.map(day => ({ ...day, items: (day.items || []).map(it => it.exId === exId ? { ...it, reps: newProgressionReps } : it) })) }))
@@ -605,6 +619,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>×</button>
               )
+            ) : ex.movement_type === 'cardio' ? (
+              <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.1em' }}>SYSTEM</span>
             ) : (
               <>
                 <button onClick={startEdit} style={{
@@ -677,8 +693,18 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             <div>
               <span className="label">Movement type</span>
               <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                <Pill gold={editUnilateral} onClick={() => setEditUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
+                {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
+                  <Pill key={val} gold={editMovementType === val}
+                    onClick={() => { setEditMovementType(val); setEditNoWeightReps(val === 'mobility'); if (val === 'mobility') setEditEquipment('no_equipment'); }}
+                    style={{ cursor: 'pointer' }}>{label}</Pill>
+                ))}
               </div>
+              {editMovementType === 'mobility' && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <Pill gold={editNoWeightReps} onClick={() => setEditNoWeightReps(true)} style={{ cursor: 'pointer' }}>Checkbox only</Pill>
+                  <Pill gold={!editNoWeightReps} onClick={() => setEditNoWeightReps(false)} style={{ cursor: 'pointer' }}>Weight & Reps</Pill>
+                </div>
+              )}
             </div>
             <div>
               <span className="label">Rep target</span>
@@ -704,10 +730,12 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {ex.category && <Pill gold>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
-            {ex.unilateral && <Pill gold>Unilateral</Pill>}
+            {ex.movement_type === 'unilateral' || (ex.unilateral && !ex.movement_type) ? <Pill gold>Unilateral</Pill> : null}
+            {ex.movement_type === 'mobility' && <Pill gold>Mobility</Pill>}
+            {ex.movement_type === 'cardio' && <Pill gold>Cardio</Pill>}
             {(ex.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
             {ex.equipment && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill>}
-            {!ex.category && !ex.unilateral && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
+            {!ex.category && !ex.unilateral && ex.movement_type !== 'mobility' && ex.movement_type !== 'cardio' && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
           </div>
         )}
       </div>
@@ -812,26 +840,121 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
 }
 
 function ProgressChart({ points }) {
-  const w = 280, h = 90, pad = 8;
+  const w = 280, h = 108, padT = 8, padB = 20, padL = 36, padR = 8;
   const max = Math.max(...points.map(p => p.est));
   const min = Math.min(...points.map(p => p.est));
   const range = max - min || 1;
   const xy = points.map((p, i) => {
-    const x = pad + (i / Math.max(1, points.length - 1)) * (w - pad * 2);
-    const y = h - pad - ((p.est - min) / range) * (h - pad * 2);
+    const x = padL + (i / Math.max(1, points.length - 1)) * (w - padL - padR);
+    const y = padT + (1 - (p.est - min) / range) * (h - padT - padB);
     return [x, y];
   });
   const path = xy.map(([x,y], i) => `${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const fmtDate = d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' });
+  const unit = UI.unit();
   return (
     <div style={{ padding: '10px 0', maxWidth: 380 }}>
       <div className="micro" style={{ marginBottom: 8, color: UI.inkFaint }}>EST. 1RM · HISTORY</div>
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
+        <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
+        <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
+        <text x={padL - 5} y={padT + 4} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{Math.round(max)} {unit}</text>
+        {max > min && <text x={padL - 5} y={h - padB} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{Math.round(min)} {unit}</text>}
         <path d={path} fill="none" stroke={UI.gold} strokeWidth="1" opacity="0.6" />
         {xy.map(([x,y], i) => (
           <circle key={i} cx={x} cy={y} r="2" fill={UI.gold} />
         ))}
+        {points.length > 1 && <>
+          <text x={padL} y={h - 6} textAnchor="start" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
+          <text x={w - padR} y={h - 6} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[points.length - 1].date)}</text>
+        </>}
       </svg>
     </div>
+  );
+}
+
+// ─── CARDIO TYPE DETAIL SHEET ────────────────────────────────────────
+function CardioLineChart({ points, label, formatVal }) {
+  if (!points || points.length < 2) return null;
+  const w = 200, h = 88, padT = 8, padB = 18, padL = 34, padR = 6;
+  const vals = points.map(p => p.value);
+  const max = Math.max(...vals);
+  const min = Math.min(...vals);
+  const range = max - min || 1;
+  const xy = points.map((p, i) => {
+    const x = padL + (i / Math.max(1, points.length - 1)) * (w - padL - padR);
+    const y = padT + (1 - (p.value - min) / range) * (h - padT - padB);
+    return [x, y];
+  });
+  const pathD = xy.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const fmtDate = d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' });
+  return (
+    <div style={{ background: UI.bgInset, borderRadius: 6, padding: '10px 12px', border: `0.5px solid ${UI.hair}` }}>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, marginBottom: 2 }}>
+        <span className="num" style={{ fontSize: 17, color: UI.gold }}>{formatVal(vals.reduce((s, v) => s + v, 0) / vals.length)}</span>
+        <span className="micro" style={{ color: UI.inkFaint }}>AVG</span>
+      </div>
+      <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
+        <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
+        <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
+        <text x={padL - 4} y={padT + 5} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
+        {max > min && <text x={padL - 4} y={h - padB} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
+        <path d={pathD} fill="none" stroke={UI.gold} strokeWidth="1.2" opacity="0.7" />
+        {xy.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={xy.length > 60 ? 0 : 1.5} fill={UI.gold} />)}
+        <text x={padL} y={h - 4} textAnchor="start" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
+        <text x={w - padR} y={h - 4} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[points.length - 1].date)}</text>
+      </svg>
+    </div>
+  );
+}
+
+function CardioTypeDetailSheet({ type, logs, open, onClose }) {
+  const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY_H) || 'km'; } catch (_) { return 'km'; } })();
+  if (!open || !type) return null;
+  const filtered = logs
+    .filter(l => (l.type || '').toLowerCase() === type.toLowerCase())
+    .slice(0, 360)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  if (filtered.length < 2) return (
+    <Sheet open={open} onClose={onClose} title={type}>
+      <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, paddingBottom: 20 }}>Log at least 2 sessions of this type to see charts.</div>
+    </Sheet>
+  );
+
+  const totalMin = filtered.reduce((s, l) => s + (l.durationMinutes || 0), 0);
+  const totalM = filtered.reduce((s, l) => s + (l.distanceM || 0), 0);
+
+  const durPoints = filtered.map(l => ({ date: l.date, value: l.durationMinutes }));
+  const distPoints = filtered.filter(l => l.distanceM != null).map(l => ({ date: l.date, value: du === 'mi' ? l.distanceM / MI_TO_M_H : l.distanceM / 1000 }));
+  const pacePoints = filtered.filter(l => l.distanceM != null && l.durationMinutes > 0).map(l => ({ date: l.date, value: (l.distanceM / 1000) * 60 / (du === 'mi' ? l.distanceM / MI_TO_M_H * (1000 / 1000) : 1) }));
+  const speedPoints = filtered.filter(l => l.distanceM != null && l.durationMinutes > 0).map(l => ({ date: l.date, value: parseFloat(((du === 'mi' ? l.distanceM / MI_TO_M_H : l.distanceM / 1000) / (l.durationMinutes / 60)).toFixed(2)) }));
+  const effortPoints = filtered.filter(l => l.effort != null).map(l => ({ date: l.date, value: l.effort }));
+  const paceFlPoints = filtered.filter(l => l.paceFeeling != null).map(l => ({ date: l.date, value: l.paceFeeling }));
+  const paceFlLabels = ['', 'Easy', 'Light', 'Steady', 'Power', 'Hard', 'Max'];
+
+  const charts = [
+    durPoints.length >= 2 && { points: durPoints, label: 'DURATION', formatVal: v => `${Math.round(v)}min` },
+    speedPoints.length >= 2 && { points: speedPoints, label: `SPEED (${du}/h)`, formatVal: v => v.toFixed(1) },
+    effortPoints.length >= 2 && { points: effortPoints, label: 'EFFORT', formatVal: v => `${v}/10` },
+    paceFlPoints.length >= 2 && { points: paceFlPoints, label: 'PACE FEELING', formatVal: v => paceFlLabels[Math.round(v)] || Math.round(v) },
+    distPoints.length >= 2 && { points: distPoints, label: `DISTANCE (${du})`, formatVal: v => v.toFixed(2) },
+  ].filter(Boolean);
+
+  const summaryParts = [
+    `${filtered.length} sessions`,
+    totalMin > 0 && `${Math.floor(totalMin / 60)}h ${totalMin % 60}min total`,
+    totalM > 0 && `${du === 'mi' ? (totalM / MI_TO_M_H).toFixed(1) : (totalM / 1000).toFixed(1)} ${du} total`,
+  ].filter(Boolean);
+
+  return (
+    <Sheet open={open} onClose={onClose} title={type}>
+      <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16 }}>{summaryParts.join(' · ')}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, paddingBottom: 8 }}>
+        {charts.map((c, i) => <CardioLineChart key={i} points={c.points} label={c.label} formatVal={c.formatVal} />)}
+      </div>
+    </Sheet>
   );
 }
 
@@ -910,7 +1033,7 @@ function StatsTab({ store, sessions, go }) {
       const wSun = new Date(wMon); wSun.setDate(wMon.getDate() + 6);
       const vol = sessions
         .filter(s => { const d = LB.parseDate(s.date); return d >= wMon && d <= wSun; })
-        .reduce((sum, s) => sum + LB.totalVolume(s), 0);
+        .reduce((sum, s) => sum + LB.totalVolume(s, store.exercises), 0);
       const label = wMon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       weeks.push({ label, vol });
     }
@@ -918,7 +1041,7 @@ function StatsTab({ store, sessions, go }) {
   }, [sessions, todayKey]);
 
   // All-time stats
-  const totalVol = sessions.reduce((sum, s) => sum + LB.totalVolume(s), 0);
+  const totalVol = sessions.reduce((sum, s) => sum + LB.totalVolume(s, store.exercises), 0);
   const avgVol = sessions.length ? Math.round(totalVol / sessions.length) : 0;
   const durations = sessions
     .map(s => s.durationMinutes != null
@@ -929,7 +1052,7 @@ function StatsTab({ store, sessions, go }) {
   const maxDuration = durations.length ? Math.max(...durations) : 0;
 
   // Best session by volume
-  const bestSession = sessions.length ? sessions.reduce((best, s) => LB.totalVolume(s) > LB.totalVolume(best) ? s : best, sessions[0]) : null;
+  const bestSession = sessions.length ? sessions.reduce((best, s) => LB.totalVolume(s, store.exercises) > LB.totalVolume(best, store.exercises) ? s : best, sessions[0]) : null;
 
   // Streaks — rest days are transparent, only missed training days break the streak
   const sessionDateSet = new Set(sessions.map(s => s.date.slice(0, 10)));
@@ -1172,11 +1295,22 @@ function StatsTab({ store, sessions, go }) {
 }
 
 // ─── HISTORY ─────────────────────────────────────────────────────────
-function HistoryScreen({ store, go, initialTab }) {
+const CARDIO_DIST_KEY_H = 'logbook-cardio-dist-unit';
+const MI_TO_M_H = 1609.344;
+function mToDisplayH(meters, unit) {
+  if (meters == null) return '';
+  return unit === 'mi' ? (meters / MI_TO_M_H).toFixed(2) : (meters / 1000).toFixed(2);
+}
+
+function HistoryScreen({ store, setStore, go, userId, initialTab }) {
   const [tab, setTab] = useStateL(initialTab || 'workouts');
   const [planFilter, setPlanFilter] = useStateL(null);
   const [periodFilter, setPeriodFilter] = useStateL(null);
   const [dayFilter, setDayFilter] = useStateL(null);
+  const [confirmEl, confirm] = useConfirm();
+  const [cardioLogOpen, setCardioLogOpen] = useStateL(false);
+  const [editingCardioLog, setEditingCardioLog] = useStateL(null);
+  const [cardioTypeDetail, setCardioTypeDetail] = useStateL(null);
 
   const sessions = useMemoL(() => {
     return [...store.sessions]
@@ -1273,7 +1407,7 @@ function HistoryScreen({ store, go, initialTab }) {
       ) : null} />
       {/* Tab strip */}
       <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
-        {[['workouts','Workouts'],['stats','Stats']].map(([id, label]) => (
+        {[['workouts','Workouts'],['cardio','Cardio'],['stats','Stats']].map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)} style={{
             flex: 1, background: 'transparent', border: 'none',
             padding: '11px 0', cursor: 'pointer',
@@ -1321,7 +1455,7 @@ function HistoryScreen({ store, go, initialTab }) {
               }
               const s = item.session;
               const setsLogged = LB.doneSetCount(s);
-              const vol = LB.totalVolume(s);
+              const vol = LB.totalVolume(s, store.exercises);
               const date = LB.parseDate(s.date);
               const days = Math.round((Date.now() - date) / 86400000);
               const isToday = days === 0;
@@ -1345,9 +1479,11 @@ function HistoryScreen({ store, go, initialTab }) {
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                    {s.feel && <div style={{ width: 9, height: 9, borderRadius: '50%', background: feelColor(s.feel), flexShrink: 0 }} />}
-                    <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
-                      {Math.round(vol).toLocaleString('en-US')}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
+                        {Math.round(vol).toLocaleString('en-US')}
+                      </div>
+                      {s.feel && <div style={{ width: 7, height: 7, borderRadius: '50%', background: feelColor(s.feel), flexShrink: 0 }} />}
                     </div>
                     <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>{UI.unit()}</div>
                   </div>
@@ -1359,6 +1495,93 @@ function HistoryScreen({ store, go, initialTab }) {
           </div>
         </div>
       )}
+
+      {tab === 'cardio' && (() => {
+        const logs = [...(store.cardioLogs || [])].sort((a, b) => b.date.localeCompare(a.date));
+        const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY_H) || 'km'; } catch (_) { return 'km'; } })();
+        const now = new Date(); now.setHours(12,0,0,0);
+        const dow = now.getDay();
+        const monday = new Date(now); monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
+        const lastMonday = new Date(monday); lastMonday.setDate(monday.getDate() - 7);
+        const getGroup = (dateStr) => {
+          const d = LB.parseDate(dateStr);
+          if (d >= monday) return 'THIS WEEK';
+          if (d >= lastMonday) return 'LAST WEEK';
+          return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
+        };
+        const paceLbl = ['', 'Easy', 'Light', 'Steady', 'Power', 'Hard', 'Max'];
+        return (
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px' }}>
+              {logs.length === 0 && (
+                <Empty title="No cardio logged" sub="Tap the button above to log your first cardio session." icon={<i className="fa-solid fa-person-running" style={{ fontSize: 28, color: UI.inkFaint }} />} />
+              )}
+              {(() => {
+                const items = [];
+                let lastGroup = null;
+                logs.forEach(l => {
+                  const group = getGroup(l.date);
+                  if (group !== lastGroup) { items.push({ type: 'header', label: group, key: `h-${group}`, isFirst: items.length === 0 }); lastGroup = group; }
+                  items.push({ type: 'log', log: l, key: l.id });
+                });
+                return items.map(item => {
+                  if (item.type === 'header') {
+                    return <div key={item.key} className="micro" style={{ marginTop: item.isFirst ? 6 : 24, marginBottom: 10, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>{item.label}</div>;
+                  }
+                  const l = item.log;
+                  return (
+                    <React.Fragment key={l.id}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>
+                            {LB.parseDate(l.date).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase()}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                            {l.type
+                              ? <button onClick={() => setCardioTypeDetail(l.type)} style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.ink, lineHeight: 1, background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', textDecorationColor: UI.hairStrong, textUnderlineOffset: 3 }}>{l.type}</button>
+                              : <span style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.ink, lineHeight: 1 }}>—</span>
+                            }
+                            <span className="num" style={{ fontSize: 13, color: UI.gold }}>{l.durationMinutes}<span style={{ fontSize: 10, color: UI.inkFaint }}>min</span></span>
+                            {l.distanceM != null && <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{mToDisplayH(l.distanceM, du)}<span style={{ fontSize: 9 }}>{du}</span></span>}
+                          </div>
+                          {(l.paceFeeling != null || l.effort != null || l.note) && (
+                            <div style={{ display: 'flex', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>
+                              {l.paceFeeling != null && <span className="micro" style={{ color: UI.inkFaint }}>PACE {paceLbl[l.paceFeeling] || l.paceFeeling}</span>}
+                              {l.effort != null && <span className="micro" style={{ color: UI.inkFaint }}>EFFORT {l.effort}/10</span>}
+                              {l.note && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic' }}>{l.note}</span>}
+                            </div>
+                          )}
+                        </div>
+                        <button onClick={() => { setEditingCardioLog(l); setCardioLogOpen(true); }} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        </button>
+                        <button onClick={async () => {
+                          if (!await confirm('Delete this cardio log?', { ok: 'Delete', danger: true })) return;
+                          setStore(s => ({ ...s, cardioLogs: (s.cardioLogs||[]).filter(x => x.id !== l.id) }));
+                        }} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 20, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
+                      </div>
+                    </React.Fragment>
+                  );
+                });
+              })()}
+            </div>
+            {window.Screens.CardioQuickLogSheet && (
+              <window.Screens.CardioQuickLogSheet
+                open={cardioLogOpen}
+                onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }}
+                store={store} setStore={setStore} userId={userId}
+                editLog={editingCardioLog}
+              />
+            )}
+            <CardioTypeDetailSheet
+              type={cardioTypeDetail}
+              logs={store.cardioLogs || []}
+              open={!!cardioTypeDetail}
+              onClose={() => setCardioTypeDetail(null)}
+            />
+          </div>
+        );
+      })()}
 
       {tab === 'stats' && <StatsTab store={store} sessions={sessions} go={go} />}
 
@@ -1435,17 +1658,18 @@ function HistoryScreen({ store, go, initialTab }) {
           </Sheet>
         );
       })()}
+      {confirmEl}
     </Screen>
   );
 }
 
 // ─── FEEL ────────────────────────────────────────────────────────────
 const FEEL_LEVELS = [
-  { key: 'easy',      label: 'EASY',      color: '#94a3b8' },
-  { key: 'good',      label: 'GOOD',      color: '#22c55e' },
-  { key: 'hard',      label: 'HARD',      color: UI.gold   },
+  { key: 'easy',      label: 'EASY',      color: '#38bdf8' },
+  { key: 'good',      label: 'GOOD',      color: '#4ade80' },
+  { key: 'hard',      label: 'HARD',      color: '#facc15' },
   { key: 'very_hard', label: 'VERY HARD', color: '#f97316' },
-  { key: 'max',       label: 'MAX',       color: UI.danger },
+  { key: 'max',       label: 'MAX',       color: '#ef4444' },
 ];
 
 function feelColor(key) {
@@ -1513,7 +1737,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     return () => { on = false; };
   }, [needsEntries, sessionId]);
   if (!s) return null;
-  const vol = LB.totalVolume(s);
+  const vol = LB.totalVolume(s, store.exercises);
   const duration = s.durationMinutes != null
     ? s.durationMinutes
     : (s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null);
@@ -1524,7 +1748,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
   const deleteSession = async () => {
     if (!await confirm('This session will be permanently deleted.', { title: 'Delete session?', ok: 'Delete', danger: true })) return;
-    setStore(s => ({ ...s, sessions: s.sessions.filter(x => x.id !== sessionId) }));
+    setStore(s => ({
+      ...s,
+      sessions: s.sessions.filter(x => x.id !== sessionId),
+      cardioLogs: (s.cardioLogs || []).filter(l => l.sessionId !== sessionId),
+    }));
     go({ name: 'hist' });
   };
 
@@ -1784,7 +2012,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               const showWarmup = store.settings?.showWarmupInSummary ?? true;
               const renderEntry = (e, i) => {
                 const prev = prevEntryMap[e.exId];
-                const exName = store.exercises.find(ex => ex.id === e.exId)?.name ?? e.name;
+                const exObj = store.exercises.find(ex => ex.id === e.exId);
+                const exName = exObj?.name ?? e.name;
+                const isCheckboxOnly = !!exObj?.no_weight_reps;
                 const filteredSets = e.sets.filter(st => !st.skipped && (showWarmup || !st.warmup));
                 // Compare working sets by position, warm-ups excluded on both sides.
                 const prevWorking = (prev?.sets || []).filter(st => !st.warmup);
@@ -1822,8 +2052,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           fontFamily: UI.fontNum, fontSize: 12,
                           color: isWarm ? UI.inkFaint : highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,
                         }}>
-                          {isWarm && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkFaint, marginRight: 4 }}>W</span>}
-                          {st.kg ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
+                          {isCheckboxOnly ? (st.done ? '✓' : '○') : (<>
+                            {isWarm && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkFaint, marginRight: 4 }}>W</span>}
+                            {st.kg ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
+                          </>)}
                         </span>
                       );
                     })}
@@ -2611,6 +2843,8 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
 
           {/* SVG Chart — maxWidth keeps it from ballooning on iPad */}
           <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" style={{ display: 'block', overflow: 'visible', marginBottom: 12, maxWidth: 480 }}>
+            <line x1={PAD_L} y1={PAD_T} x2={PAD_L} y2={VH - PAD_B} stroke={UI.hair} strokeWidth="0.5" />
+            <line x1={PAD_L} y1={VH - PAD_B} x2={VW - PAD_R} y2={VH - PAD_B} stroke={UI.hair} strokeWidth="0.5" />
             {/* Horizontal grid lines + Y labels */}
             {gridVals.map((v, i) => {
               const y = yPos(v);

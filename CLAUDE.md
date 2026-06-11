@@ -50,6 +50,13 @@
 - CSS Custom Properties in `:root` (kein CSS-Framework).
 - Akzentfarbe läuft über `--accent`, `--accent-light`, `--accent-deep`, `--accent-rgb`. Keine hardcodierten `rgba(r,g,b,x)`-Werte für die Akzentfarbe — immer `rgba(var(--accent-rgb), x)`.
 - Farb-Tokens im Code immer über `UI.xxx` referenzieren (z.B. `UI.gold`, `UI.ink`, `UI.hairStrong`).
+- **Border-Radius-Skala** — strikte Hierarchie, nie größere Werte verwenden:
+  - `4` — Inputs, kleine Buttons, Tags, Chips
+  - `6` — Buttons (`Btn`-Komponente), Container, Cards (Standard)
+  - `8` — Große Cards/Sections (maximum für normale UI-Elemente)
+  - `999` / `50%` — Pills und kreisförmige Elemente (Dots, Avatare, Toggle-Knöpfe)
+  - Ausnahme Toggle-Switch-Track: `13` (bewusst pill-förmig, 44×26px)
+  - Werte wie `10`, `12`, `16` sind **nicht erlaubt** — immer auf die nächst-kleinere Stufe reduzieren.
 - **Gewichtseinheit:** Angezeigte Gewichts-Labels nie hart `kg`/`KG` schreiben, sondern über `UI.unit()` (gibt `'kg'`/`'lbs'`, Großschreibung via `UI.unit().toUpperCase()`). Reines Anzeige-Label aus `settings.unit` — **keine Umrechnung**, die gespeicherten Zahlen bleiben gleich (lbs-Nutzer geben lbs direkt ein). `app.jsx` spiegelt `settings.unit` bei jedem Render nach `window.__UNIT`. Interne `.kg`-Felder/`field === 'kg'` bleiben immer `kg` (Datenstruktur).
 - **Typografie-Klassen** (definiert in `index.html`, nicht neu erfinden):
   - `.micro` — 9px uppercase Label
@@ -115,7 +122,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 ### Aktuelle Tabellen & Spalten
 
-**`zane_exercises`:** `id` (text), `user_id` (uuid), `name`, `note`, `category` (text), `tags` (text[]), `unilateral` (boolean), `equipment` (text), `progression_reps` (int)
+**`zane_exercises`:** `id` (text), `user_id` (uuid), `name`, `note`, `category` (text), `tags` (text[]), `unilateral` (boolean), `movement_type` (text: 'bilateral'|'unilateral'|'mobility'), `no_weight_reps` (boolean, default false), `equipment` (text), `progression_reps` (int)
 
 **`zane_feature_grants`:** `feature` (text), `email` (text)
 
@@ -140,6 +147,8 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 **`zane_coaching_macros`:** `id` (text), `coaching_id` (text), `set_by` (uuid), `set_at` (timestamptz), `calories_training` (int), `protein_training` (int), `carbs_training` (int), `fat_training` (int), `calories_rest` (int), `protein_rest` (int), `carbs_rest` (int), `fat_rest` (int)
 
 **`zane_checkins`:** `id` (text), `coaching_id` (text), `client_id` (uuid), `week_start` (date), `checked_in_at` (timestamptz), `weight_today` (numeric), `weight_avg_last_week` (numeric), `off_plan_notes` (text), `hydration_ml` (int), `days_trained` (int), `performance_vs_last_week` (text: worse|same|improved), `steps` (int), `cardio_minutes` (int), `cardio_distance_m` (int), `cardio_pace_feeling` (int 1–6), `cardio_effort` (int 1–10), `goal_note` (text), `hunger` (int), `sleep_quality` (int), `life_stress` (int), `work_stress` (int), `tiredness` (int), `issues_notes` (text), `general_note` (text) — UNIQUE (coaching_id, week_start)
+
+**`zane_cardio_logs`:** `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `type` (text, nullable), `duration_minutes` (int), `distance_m` (numeric, nullable), `pace_feeling` (int 1–6, nullable), `effort` (int 1–10, nullable), `note` (text, nullable), `created_at` (timestamptz)
 
 **`zane_skips`:** `id` (text), `user_id` (uuid), `date` (text), `day_id` (text), `day_name` (text), `skip_reason` (text), `skipped_at` (timestamptz)
 

@@ -78,6 +78,19 @@ CREATE TABLE public.zane_sets (
   updated_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
+CREATE TABLE public.zane_cardio_logs (
+  id               text        NOT NULL,
+  user_id          uuid        NOT NULL,
+  date             text        NOT NULL,
+  type             text,
+  duration_minutes integer     NOT NULL,
+  distance_m       numeric,
+  pace_feeling     integer     CHECK (pace_feeling BETWEEN 1 AND 6),
+  effort           integer     CHECK (effort BETWEEN 1 AND 10),
+  note             text,
+  created_at       timestamp with time zone NOT NULL DEFAULT now()
+);
+
 CREATE TABLE public.zane_skips (
   id text NOT NULL,
   user_id uuid,
@@ -233,6 +246,9 @@ ALTER TABLE public.zane_sets ADD CONSTRAINT zane_sets_entry_id_set_idx_key UNIQU
 ALTER TABLE public.zane_sets ADD CONSTRAINT zane_sets_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES zane_session_entries(id) ON DELETE CASCADE;
 ALTER TABLE public.zane_sets ADD CONSTRAINT zane_sets_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
 
+ALTER TABLE public.zane_cardio_logs ADD CONSTRAINT zane_cardio_logs_pkey PRIMARY KEY (id);
+ALTER TABLE public.zane_cardio_logs ADD CONSTRAINT zane_cardio_logs_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+
 ALTER TABLE public.zane_skips ADD CONSTRAINT zane_skips_pkey PRIMARY KEY (id);
 ALTER TABLE public.zane_skips ADD CONSTRAINT zane_skips_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
 
@@ -285,6 +301,7 @@ ALTER TABLE public.zane_schedules        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_sessions         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_session_entries  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_sets             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_cardio_logs      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_skips            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_user_settings    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_feature_grants   ENABLE ROW LEVEL SECURITY;  -- no policies: service-role / SECURITY DEFINER only
@@ -331,6 +348,9 @@ CREATE POLICY "coach can read client sets" ON public.zane_sets FOR SELECT TO pub
 CREATE POLICY "coach can write client sets" ON public.zane_sets FOR INSERT TO public WITH CHECK (zane_is_coach_of(user_id));
 CREATE POLICY "coach can update client sets" ON public.zane_sets FOR UPDATE TO public USING (zane_is_coach_of(user_id));
 CREATE POLICY "coach can delete client sets" ON public.zane_sets FOR DELETE TO public USING (zane_is_coach_of(user_id));
+
+-- cardio logs
+CREATE POLICY "Users manage own cardio logs" ON public.zane_cardio_logs FOR ALL TO authenticated USING ((auth.uid() = user_id)) WITH CHECK ((auth.uid() = user_id));
 
 -- skips
 CREATE POLICY "own skips" ON public.zane_skips FOR ALL TO public USING ((user_id = auth.uid())) WITH CHECK ((user_id = auth.uid()));

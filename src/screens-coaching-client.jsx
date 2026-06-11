@@ -113,7 +113,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'plan'       && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
           {tab === 'sessions'   && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
           {tab === 'checkins'   && (isSelf
-            ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} />
+            ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} store={store} />
             : <ClientCheckInsTab coachingId={coachingId} checkinEnabled={checkinEnabled} onToggle={handleToggleCheckin} toggling={ciToggling} />)}
           {tab === 'nutrition'  && <ClientNutritionTab coachingId={coachingId} userId={userId} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
@@ -339,7 +339,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
     [ended, planStartDate]
   );
   const avgVol = planSessions.length > 0
-    ? Math.round(planSessions.reduce((s, x) => s + LB.totalVolume(x), 0) / planSessions.length)
+    ? Math.round(planSessions.reduce((s, x) => s + LB.totalVolume(x, clientStore.exercises), 0) / planSessions.length)
     : null;
 
   const adherenceLabel = `Adherence (${weeks.length}w)`;
@@ -390,7 +390,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
           {todayDay?.items?.length > 0 ? (
             <div
               onClick={() => setPlanOpen(true)}
-              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, marginBottom: 20, cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 20, cursor: 'pointer' }}
             >
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{todayDay.name}</div>
@@ -404,7 +404,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
               <ChevronRight />
             </div>
           ) : (
-            <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, marginBottom: 20 }}>
+            <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 20 }}>
               <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi }}>Rest day</div>
             </div>
           )}
@@ -413,7 +413,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
             {trainedToday && todaySession ? (
               <div>
                 <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-                  <StatBox label="Volume" value={`${Math.round(LB.totalVolume(todaySession)).toLocaleString('en-US')}${UI.unit()}`} />
+                  <StatBox label="Volume" value={`${Math.round(LB.totalVolume(todaySession, clientStore.exercises)).toLocaleString('en-US')}${UI.unit()}`} />
                   <StatBox label="Sets" value={LB.doneSetCount(todaySession)} />
                   <StatBox label="Duration" value={todaySession.durationMinutes ? `${todaySession.durationMinutes}m` : '—'} />
                 </div>
@@ -500,7 +500,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
           <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>WEEKLY ADHERENCE</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
             {weeks.map((w, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}` }}>
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
                 <div style={{ width: 72, flexShrink: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{w.label}</div>
                 <div style={{ flex: 1, height: 4, background: UI.bgRaised, borderRadius: 2, overflow: 'hidden' }}>
                   {w.planned > 0 && (
@@ -530,12 +530,12 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       {/* Active plan */}
       <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>ACTIVE PLAN</div>
       {activeSch ? (
-        <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 20 }}>
+        <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 20 }}>
           <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{activeSch.name}</div>
           <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{trainingDayCount} training {trainingDayCount === 1 ? 'day' : 'days'}</div>
         </div>
       ) : (
-        <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 20, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No active plan</div>
+        <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 20, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No active plan</div>
       )}
 
       {/* Recent sessions */}
@@ -545,12 +545,12 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       {recentSessions.length === 0
         ? <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '12px 14px' }}>No sessions yet.</div>
         : recentSessions.map(s => (
-          <div key={s.id} onClick={() => onSelectSession?.(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 8, cursor: 'pointer' }}>
+          <div key={s.id} onClick={() => onSelectSession?.(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 8, cursor: 'pointer' }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{fmtDate(s.date)}</div>
             </div>
-            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(LB.totalVolume(s)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span></span>
+            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(LB.totalVolume(s, clientStore.exercises)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span></span>
             <ChevronRight />
           </div>
         ))
@@ -630,7 +630,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
   ended.forEach(s => {
     const key = getGroupKey(s.date.slice(0, 10));
     if (!byGroup[key]) byGroup[key] = { date: key, vol: 0, count: 0 };
-    byGroup[key].vol += LB.totalVolume(s);
+    byGroup[key].vol += LB.totalVolume(s, clientStore?.exercises);
     byGroup[key].count++;
   });
 
@@ -779,7 +779,7 @@ function SessionsWeekChart({ sessions, planStartDate }) {
 
 function StatBox({ label, value, gold, onClick }) {
   return (
-    <div onClick={onClick} style={{ flex: 1, background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, padding: '12px 10px', textAlign: 'center', cursor: onClick ? 'pointer' : 'default' }}>
+    <div onClick={onClick} style={{ flex: 1, background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, padding: '12px 10px', textAlign: 'center', cursor: onClick ? 'pointer' : 'default' }}>
       <div className="num" style={{ fontSize: 20, color: gold ? UI.gold : UI.ink, lineHeight: 1, marginBottom: 4 }}>{value}</div>
       <div className="micro" style={{ color: UI.inkFaint }}>{label}</div>
       {onClick && <div style={{ marginTop: 5 }}><i className="fa-solid fa-chart-line" style={{ fontSize: 7, color: UI.inkGhost }} /></div>}
@@ -903,7 +903,7 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
       {schedules.length === 0 ? (
         <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '12px 14px' }}>No plans yet.</div>
       ) : schedules.map(sch => (
-        <div key={sch.id} style={{ marginBottom: 10, background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${sch.id === active ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`, overflow: 'hidden' }}>
+        <div key={sch.id} style={{ marginBottom: 10, background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${sch.id === active ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`, overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px' }}>
             {sch.id === active && (
               <div style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--accent)', flexShrink: 0 }} />
@@ -1129,7 +1129,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
 
   // ── Session detail ─────────────────────────────────────────────────
   if (selected) {
-    const vol = LB.totalVolume(selected);
+    const vol = LB.totalVolume(selected, clientStore.exercises);
     const storeWithoutSelected = { ...clientStore, sessions: clientStore.sessions.filter(s => s.ended && s.ended < selected.ended) };
     return (
       <div style={{ overflowY: 'auto', flex: 1 }}>
@@ -1196,7 +1196,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
         </div>
         <Sheet open={noteOpen} onClose={() => setNoteOpen(false)} title="Session Note">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <textarea value={noteBody} onChange={e => setNoteBody(e.target.value)} placeholder={`Note for ${selected.dayName}…`} rows={4} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', resize: 'none', width: '100%', boxSizing: 'border-box' }} />
+            <textarea value={noteBody} onChange={e => setNoteBody(e.target.value)} placeholder={`Note for ${selected.dayName}…`} rows={4} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', resize: 'none', width: '100%', boxSizing: 'border-box' }} />
             <Btn onClick={saveNote} disabled={noteSaving || !noteBody.trim()}>{noteSaving ? 'Saving…' : 'Save Note'}</Btn>
           </div>
         </Sheet>
@@ -1231,7 +1231,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             {dayFilter ? `No "${dayFilter}" sessions yet.` : 'No sessions yet.'}
           </div>
         ) : filteredSessions.map(s => {
-          const vol = LB.totalVolume(s);
+          const vol = LB.totalVolume(s, clientStore.exercises);
           return (
             <div key={s.id} onClick={() => setSelected(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}>
               <div style={{ flex: 1 }}>

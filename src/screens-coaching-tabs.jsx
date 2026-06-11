@@ -221,7 +221,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
             onChange={e => { setInviteEmail(e.target.value); setInviteError(''); }}
             onKeyDown={e => { if (e.key === 'Enter') handleInvite(); }}
             autoFocus
-            style={{ width: '100%', boxSizing: 'border-box', padding: '11px 13px', borderRadius: 10, border: `1px solid ${inviteError ? 'rgba(var(--danger-rgb),0.6)' : UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none' }}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '11px 13px', borderRadius: 4, border: `1px solid ${inviteError ? 'rgba(var(--danger-rgb),0.6)' : UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none' }}
           />
           {inviteError && (
             <div style={{ fontSize: 12, color: 'rgba(var(--danger-rgb),0.85)', fontFamily: UI.fontUi }}>{inviteError}</div>
@@ -229,7 +229,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           <button
             onClick={handleInvite}
             disabled={inviting || !inviteEmail.trim()}
-            style={{ width: '100%', padding: '13px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, cursor: inviting || !inviteEmail.trim() ? 'not-allowed' : 'pointer', opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }}
+            style={{ width: '100%', padding: '13px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, cursor: inviting || !inviteEmail.trim() ? 'not-allowed' : 'pointer', opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }}
           >
             {inviting ? 'Sending…' : 'Send Invite'}
           </button>
@@ -248,7 +248,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
               <div
                 key={c.id}
                 onClick={() => handleEnd(c)}
-                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, cursor: ending === c.id ? 'wait' : 'pointer' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, cursor: ending === c.id ? 'wait' : 'pointer' }}
               >
                 <div style={{ width: 36, height: 36, borderRadius: 18, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <span style={{ fontFamily: UI.fontUi, fontSize: 15, color: UI.inkSoft, fontWeight: 700 }}>{(c.clientName || c.clientEmail || '?')[0].toUpperCase()}</span>
@@ -325,7 +325,7 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
   return (
     <div
       onClick={handleCardClick}
-      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${borderColor}`, cursor: isPending ? 'default' : 'pointer', position: 'relative', overflow: 'hidden', opacity: isPending ? 0.75 : 1 }}
+      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${borderColor}`, cursor: isPending ? 'default' : 'pointer', position: 'relative', overflow: 'hidden', opacity: isPending ? 0.75 : 1 }}
     >
       {inProgress && (
         <div style={{ position: 'absolute', inset: 0, background: `rgba(var(--accent-rgb),0.04)`, pointerEvents: 'none' }} />
@@ -354,7 +354,7 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
       {checkinDue && !isPending && (
         <button
           onClick={handleRequest}
-          style={{ background: requested ? `rgba(var(--accent-rgb),0.15)` : 'transparent', border: `0.5px solid ${requested ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, borderRadius: 7, padding: '5px 8px', cursor: requested ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}
+          style={{ background: requested ? `rgba(var(--accent-rgb),0.15)` : 'transparent', border: `0.5px solid ${requested ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, borderRadius: 4, padding: '5px 8px', cursor: requested ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}
         >
           <i className="fa-solid fa-bell" style={{ fontSize: 10, color: requested ? 'var(--accent)' : UI.inkFaint }} />
           <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.06em', color: requested ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase' }}>{requested ? 'Sent' : 'Remind'}</span>
@@ -417,7 +417,7 @@ function CheckInCard({ ci, defaultOpen = false, embedded = false, onEdit, onDele
   const hasMarkers = ci.hunger != null || ci.sleepQuality != null || ci.lifeStress != null || ci.workStress != null || ci.tiredness != null;
 
   return (
-    <div style={embedded ? { overflow: 'hidden' } : { background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+    <div style={embedded ? { overflow: 'hidden' } : { background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
       <button
         onClick={() => setOpen(o => !o)}
         style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', gap: 12 }}
@@ -461,7 +461,7 @@ function CheckInCard({ ci, defaultOpen = false, embedded = false, onEdit, onDele
                 )}
                 {ci.steps != null && <StatPill label="Steps" value={Number(ci.steps).toLocaleString()} />}
                 {ci.cardioMinutes != null && <StatPill label="Cardio" value={`${ci.cardioMinutes} min`} />}
-                {ci.cardioDistanceM != null && <StatPill label="Distance" value={`${(ci.cardioDistanceM / 1000).toFixed(1)} km`} />}
+                {ci.cardioDistanceM != null && <StatPill label="Distance" value={(() => { try { const u = localStorage.getItem('logbook-cardio-dist-unit') || 'km'; return u === 'mi' ? `${(ci.cardioDistanceM / 1609.344).toFixed(1)} mi` : `${(ci.cardioDistanceM / 1000).toFixed(1)} km`; } catch (_) { return `${(ci.cardioDistanceM / 1000).toFixed(1)} km`; } })()} />}
                 {ci.cardioPaceFeeling != null && <StatPill label="Pace feeling" value={`${ci.cardioPaceFeeling}/6`} />}
                 {ci.cardioEffort != null && <StatPill label="Effort" value={`${ci.cardioEffort}/10`} />}
               </div>
@@ -519,13 +519,13 @@ function CheckInCard({ ci, defaultOpen = false, embedded = false, onEdit, onDele
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 12, borderTop: `0.5px solid ${UI.hair}` }}>
               {onDelete && (
                 <button onClick={onDelete}
-                  style={{ background: confirmingDelete ? 'rgba(var(--danger-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${confirmingDelete ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 8, padding: '8px 16px', fontSize: 12, color: confirmingDelete ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                  style={{ background: confirmingDelete ? 'rgba(var(--danger-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${confirmingDelete ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', fontSize: 12, color: confirmingDelete ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                   {confirmingDelete ? 'Confirm?' : 'Delete'}
                 </button>
               )}
               {onEdit && (
                 <button onClick={onEdit}
-                  style={{ background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.4)', borderRadius: 8, padding: '8px 18px', fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Edit</button>
+                  style={{ background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.4)', borderRadius: 6, padding: '8px 18px', fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Edit</button>
               )}
             </div>
           )}
@@ -537,7 +537,7 @@ function CheckInCard({ ci, defaultOpen = false, embedded = false, onEdit, onDele
 
 function StatPill({ label, value }) {
   return (
-    <div style={{ background: UI.bgRaised, borderRadius: 8, padding: '7px 10px', border: `0.5px solid ${UI.hair}` }}>
+    <div style={{ background: UI.bgRaised, borderRadius: 6, padding: '7px 10px', border: `0.5px solid ${UI.hair}` }}>
       <div className="num" style={{ fontSize: 15, color: UI.ink, fontWeight: 300 }}>{value}</div>
       <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', marginTop: 1 }}>{label}</div>
     </div>
@@ -546,44 +546,61 @@ function StatPill({ label, value }) {
 
 // ─── CheckInForm ──────────────────────────────────────────────────────────────
 
-function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSaved }) {
+function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefill, onSaved }) {
   const REQUIRED_LABELS = {
     weightToday: 'Weight (today)', hunger: 'Hunger', sleepQuality: 'Sleep',
     lifeStress: 'Life Stress', workStress: 'Work Stress', tiredness: 'Tiredness',
   };
 
+  const getDistUnit = () => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch (_) { return 'km'; } };
+  const [distUnit, setDistUnitRaw] = useStateC(getDistUnit);
+  const setDistUnit = (u) => { try { localStorage.setItem('logbook-cardio-dist-unit', u); } catch (_) {} setDistUnitRaw(u); };
+
+  const distToM = (val) => { const n = parseFloat(String(val).replace(',', '.')); if (isNaN(n)) return null; return distUnit === 'mi' ? Math.round(n * 1609.344) : Math.round(n * 1000); };
+  const mToDisplay = (meters) => { if (meters == null || meters === '') return ''; return distUnit === 'mi' ? (meters / 1609.344).toFixed(2) : (meters / 1000).toFixed(2); };
+
   const empty = {
     weightToday: '', weightAvgLastWeek: '',
     offPlanNotes: '', hydrationMl: '',
     daysTrained: '', performanceVsLastWeek: null,
-    steps: '', cardioMinutes: '', cardioDistanceM: '',
+    steps: '', cardioMinutes: '', cardioDistanceDisplay: '',
     cardioPaceFeeling: null, cardioEffort: null,
     goalNote: '',
     hunger: null, sleepQuality: null, lifeStress: null, workStress: null, tiredness: null,
     issuesNotes: '', generalNote: '',
   };
 
-  const [form, setForm] = useStateC(() => existing ? {
-    weightToday: existing.weightToday ?? '',
-    weightAvgLastWeek: existing.weightAvgLastWeek ?? '',
-    offPlanNotes: existing.offPlanNotes ?? '',
-    hydrationMl: existing.hydrationMl ?? '',
-    daysTrained: existing.daysTrained ?? '',
-    performanceVsLastWeek: existing.performanceVsLastWeek ?? null,
-    steps: existing.steps ?? '',
-    cardioMinutes: existing.cardioMinutes ?? '',
-    cardioDistanceM: existing.cardioDistanceM ?? '',
-    cardioPaceFeeling: existing.cardioPaceFeeling ?? null,
-    cardioEffort: existing.cardioEffort ?? null,
-    goalNote: existing.goalNote ?? '',
-    hunger: existing.hunger ?? null,
-    sleepQuality: existing.sleepQuality ?? null,
-    lifeStress: existing.lifeStress ?? null,
-    workStress: existing.workStress ?? null,
-    tiredness: existing.tiredness ?? null,
-    issuesNotes: existing.issuesNotes ?? '',
-    generalNote: existing.generalNote ?? '',
-  } : empty);
+  const [form, setForm] = useStateC(() => {
+    if (existing) return {
+      weightToday: existing.weightToday ?? '',
+      weightAvgLastWeek: existing.weightAvgLastWeek ?? '',
+      offPlanNotes: existing.offPlanNotes ?? '',
+      hydrationMl: existing.hydrationMl ?? '',
+      daysTrained: existing.daysTrained ?? '',
+      performanceVsLastWeek: existing.performanceVsLastWeek ?? null,
+      steps: existing.steps ?? '',
+      cardioMinutes: existing.cardioMinutes ?? '',
+      cardioDistanceDisplay: existing.cardioDistanceM != null ? mToDisplay(existing.cardioDistanceM) : '',
+      cardioPaceFeeling: existing.cardioPaceFeeling ?? null,
+      cardioEffort: existing.cardioEffort ?? null,
+      goalNote: existing.goalNote ?? '',
+      hunger: existing.hunger ?? null,
+      sleepQuality: existing.sleepQuality ?? null,
+      lifeStress: existing.lifeStress ?? null,
+      workStress: existing.workStress ?? null,
+      tiredness: existing.tiredness ?? null,
+      issuesNotes: existing.issuesNotes ?? '',
+      generalNote: existing.generalNote ?? '',
+    };
+    if (prefill) return {
+      ...empty,
+      cardioMinutes: prefill.cardioMinutes ?? '',
+      cardioDistanceDisplay: prefill.cardioDistanceM != null ? mToDisplay(prefill.cardioDistanceM) : '',
+      cardioPaceFeeling: prefill.paceFeeling ?? null,
+      cardioEffort: prefill.effort ?? null,
+    };
+    return empty;
+  });
 
   const [saving, setSaving] = useStateC(false);
   const [error, setError] = useStateC('');
@@ -608,7 +625,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         daysTrained: num(form.daysTrained),
         steps: num(form.steps),
         cardioMinutes: num(form.cardioMinutes),
-        cardioDistanceM: num(form.cardioDistanceM),
+        cardioDistanceM: form.cardioDistanceDisplay ? distToM(form.cardioDistanceDisplay) : null,
         cardioPaceFeeling: form.cardioPaceFeeling,
         cardioEffort: form.cardioEffort,
         performanceVsLastWeek: form.performanceVsLastWeek || null,
@@ -626,7 +643,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
     finally { setSaving(false); }
   };
 
-  const inputStyle = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' };
+  const inputStyle = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' };
   const SectionHead = ({ label }) => <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10, marginTop: 4 }}>{label}</div>;
 
   return (
@@ -672,7 +689,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
             <div style={{ display: 'flex', gap: 5 }}>
               {[['worse', 'Worse'], ['same', 'Same'], ['improved', 'Improved']].map(([val, label]) => (
                 <button key={val} onClick={() => set('performanceVsLastWeek', form.performanceVsLastWeek === val ? null : val)}
-                  style={{ flex: 1, padding: '9px 4px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                  style={{ flex: 1, padding: '9px 4px', borderRadius: 6, border: 'none', cursor: 'pointer',
                     background: form.performanceVsLastWeek === val
                       ? val === 'improved' ? `rgba(var(--accent-rgb),0.2)` : val === 'worse' ? `rgba(var(--danger-rgb),0.15)` : UI.bgRaised
                       : UI.bgInset,
@@ -695,14 +712,39 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         </div>
 
         {/* Cardio */}
+        {prefill && !existing && (
+          <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, marginBottom: 10, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.08)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+            Prefilled from {prefill.count} cardio log{prefill.count !== 1 ? 's' : ''} this week
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Cardio (min)</div>
             <input type="number" inputMode="numeric" placeholder="–" value={form.cardioMinutes} onChange={e => set('cardioMinutes', e.target.value)} style={inputStyle} />
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Distance (m)</div>
-            <input type="number" inputMode="numeric" placeholder="–" value={form.cardioDistanceM} onChange={e => set('cardioDistanceM', e.target.value)} style={inputStyle} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>Distance</span>
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+                {['km', 'mi'].map(u => (
+                  <button key={u} onClick={() => {
+                    const curM = form.cardioDistanceDisplay ? distToM(form.cardioDistanceDisplay) : null;
+                    setDistUnit(u);
+                    if (curM != null) {
+                      const newDisp = u === 'mi' ? (curM / 1609.344).toFixed(2) : (curM / 1000).toFixed(2);
+                      set('cardioDistanceDisplay', newDisp);
+                    }
+                  }} style={{
+                    padding: '2px 7px', cursor: 'pointer', border: 'none',
+                    background: distUnit === u ? 'var(--accent)' : 'transparent',
+                    color: distUnit === u ? UI.bg : UI.inkFaint,
+                    fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>{u}</button>
+                ))}
+              </div>
+            </div>
+            <input type="number" inputMode="decimal" placeholder="–" value={form.cardioDistanceDisplay} onChange={e => set('cardioDistanceDisplay', e.target.value)} style={inputStyle} />
           </div>
         </div>
 
@@ -713,9 +755,9 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
             {form.cardioPaceFeeling != null && <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{form.cardioPaceFeeling}/6</span>}
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
-            {[['1','Stroll'],['2','Walk'],['3','Brisk'],['4','Power'],['5','Jog'],['6','Run']].map(([n, lbl]) => (
+            {[['1','Easy'],['2','Light'],['3','Steady'],['4','Power'],['5','Hard'],['6','Max']].map(([n, lbl]) => (
               <button key={n} onClick={() => set('cardioPaceFeeling', form.cardioPaceFeeling === Number(n) ? null : Number(n))}
-                style={{ flex: 1, padding: '7px 2px', borderRadius: 8, border: `0.5px solid ${form.cardioPaceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
+                style={{ flex: 1, padding: '7px 2px', borderRadius: 4, border: `0.5px solid ${form.cardioPaceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
                   background: form.cardioPaceFeeling === Number(n) ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
                   cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}
               >
@@ -762,7 +804,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
 
 // ─── ClientCheckInTab ─────────────────────────────────────────────────────────
 
-function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true }) {
+function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true, store }) {
   const weekStart = LB.checkinWeekStart();
   const [checkins, setCheckins] = useStateC(null);
   const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
@@ -812,6 +854,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true 
           userId={userId}
           weekStart={formWeek}
           existing={target}
+          prefill={!target ? LB.cardioWeekPrefill(store?.cardioLogs, formWeek) : undefined}
           onSaved={() => { setEditTarget(null); load(); }}
         />
       </div>
@@ -826,7 +869,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true 
       <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {!thisWeek && checkinEnabled && (
           <button onClick={() => setEditTarget('new')}
-            style={{ background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+            style={{ background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
             Submit this week's check-in
           </button>
         )}
@@ -838,7 +881,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true 
         )}
 
         {!checkinEnabled && (
-          <div style={{ background: UI.bgInset, borderRadius: 10, padding: '11px 14px', border: `0.5px solid ${UI.hair}` }}>
+          <div style={{ background: UI.bgInset, borderRadius: 8, padding: '11px 14px', border: `0.5px solid ${UI.hair}` }}>
             <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Check-ins are currently paused by your coach.</div>
           </div>
         )}
@@ -847,7 +890,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true 
         ) : null}
 
         {past.length > 0 && (
-          <div style={{ background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+          <div style={{ background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
             <button
               onClick={() => setPastOpen(o => !o)}
               style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', gap: 12 }}
@@ -904,7 +947,7 @@ function CheckInRequestModal({ coaching }) {
     }}>
       <div style={{
         background: UI.bg, border: `1px solid ${UI.hairStrong}`,
-        borderRadius: 16, padding: 28, maxWidth: 380, width: '100%',
+        borderRadius: 8, padding: 28, maxWidth: 380, width: '100%',
       }}>
         <div className="micro-gold" style={{ marginBottom: 10, letterSpacing: '0.15em' }}>WEEKLY CHECK-IN</div>
         <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, color: UI.ink, marginBottom: 6 }}>
@@ -917,7 +960,7 @@ function CheckInRequestModal({ coaching }) {
           onClick={handleOk}
           style={{
             width: '100%', padding: 14, background: 'var(--accent)', border: 'none',
-            borderRadius: 10, fontSize: 15, fontWeight: 700, color: '#fff',
+            borderRadius: 6, fontSize: 15, fontWeight: 700, color: '#fff',
             fontFamily: UI.fontUi, cursor: 'pointer', letterSpacing: '0.05em',
           }}
         >
@@ -981,7 +1024,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
       <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', background: UI.bgInset, borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 10, background: `rgba(var(--accent-rgb),0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 6, background: `rgba(var(--accent-rgb),0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <i className="fa-solid fa-dumbbell" style={{ fontSize: 16, color: 'var(--accent)' }} />
           </div>
           <div style={{ fontSize: 14, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.08em' }}>{(coaching.coachName || '').toUpperCase()}</div>
@@ -1056,7 +1099,7 @@ function ClientNutritionReadView({ coachingId }) {
   }
 
   const MacroDay = ({ label, calories, protein, carbs, fat }) => (
-    <div style={{ background: UI.bgInset, borderRadius: 12, padding: '16px 18px', border: `0.5px solid ${UI.hair}` }}>
+    <div style={{ background: UI.bgInset, borderRadius: 8, padding: '16px 18px', border: `0.5px solid ${UI.hair}` }}>
       <div className="micro-gold" style={{ marginBottom: 12 }}>{label}</div>
       {calories != null && (
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 14 }}>
@@ -1066,7 +1109,7 @@ function ClientNutritionReadView({ coachingId }) {
       )}
       <div style={{ display: 'flex', gap: 10 }}>
         {[{ label: 'Protein', value: protein }, { label: 'Carbs', value: carbs }, { label: 'Fat', value: fat }].map(m => (
-          <div key={m.label} style={{ flex: 1, background: UI.bgRaised, borderRadius: 8, padding: '10px 8px', textAlign: 'center', border: `0.5px solid ${UI.hair}` }}>
+          <div key={m.label} style={{ flex: 1, background: UI.bgRaised, borderRadius: 6, padding: '10px 8px', textAlign: 'center', border: `0.5px solid ${UI.hair}` }}>
             <div className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{m.value != null ? m.value : '—'}</div>
             <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', marginTop: 2 }}>g {m.label}</div>
           </div>

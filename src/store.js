@@ -184,7 +184,7 @@ async function importFromBackup(backup, userId) {
   await Promise.all([
     backup.user?.name && unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name })),
     backup.exercises?.length && unwrap(_supabase.from('zane_exercises').upsert(
-      backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, user_id: userId }))
+      backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, user_id: userId }))
     )),
     backup.schedules?.length && unwrap(_supabase.from('zane_schedules').upsert(
       backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
@@ -272,7 +272,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const histCutoff = historyWindowCutoffISO();
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps').eq('user_id', userId),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
@@ -305,10 +305,13 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
     // Self-coaching row (coach_id = client_id), if the user is their own coach
     isCoachLoad ? null : _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
+    // Cardio quick-logs — all records for the user (typically < a few hundred rows)
+    _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
-         coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes] = await Promise.all(queries);
+         coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
+         cardioLogsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -409,6 +412,12 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     skips: (skipsRes.data || []).map(s => ({
       id: s.id, date: s.date, dayId: s.day_id, dayName: s.day_name,
       skipReason: s.skip_reason, skippedAt: s.skipped_at,
+    })),
+    cardioLogs: (cardioLogsRes?.data || []).map(l => ({
+      id: l.id, date: l.date, type: l.type ?? null,
+      durationMinutes: l.duration_minutes, distanceM: l.distance_m ?? null,
+      paceFeeling: l.pace_feeling ?? null, effort: l.effort ?? null,
+      note: l.note ?? null, sessionId: l.session_id ?? null, createdAt: l.created_at,
     })),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
     // and via the local cache also offline). bestE1rmForExercise combines this
@@ -632,7 +641,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -679,6 +688,21 @@ async function syncStore(prev, next, userId) {
       skip_reason: s.skipReason, skipped_at: s.skippedAt ?? null,
     }))));
     if (removed.length) ops.push(_supabase.from('zane_skips').delete().in('id', removed.map(s => s.id)));
+  }
+
+  if (prev.cardioLogs !== next.cardioLogs) {
+    const upsert = (next.cardioLogs || []).filter(l => {
+      const p = (prev.cardioLogs || []).find(x => x.id === l.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(l);
+    });
+    const removed = (prev.cardioLogs || []).filter(l => !(next.cardioLogs || []).find(x => x.id === l.id));
+    if (upsert.length) ops.push(_supabase.from('zane_cardio_logs').upsert(upsert.map(l => ({
+      id: l.id, user_id: userId, date: l.date, type: l.type ?? null,
+      duration_minutes: l.durationMinutes, distance_m: l.distanceM ?? null,
+      pace_feeling: l.paceFeeling ?? null, effort: l.effort ?? null, note: l.note ?? null,
+      session_id: l.sessionId ?? null,
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_cardio_logs').delete().in('id', removed.map(l => l.id)));
   }
 
   if (prev.user?.name !== next.user?.name && next.user?.name) {
@@ -937,19 +961,24 @@ async function refreshExerciseBests(userId) {
 // done:false in Supabase even though the user actually performed them.
 // Ended sessions outside the boot window carry no entries — fall back to the
 // server aggregate (get_session_stats) attached at load time.
-function totalVolume(session) {
+function totalVolume(session, exercises) {
   const ended = !!session.ended;
   if (ended && !(session.entries || []).length && session.aggVolume != null) return session.aggVolume;
-  return (session.entries || []).reduce((sum, ex) =>
-    sum + (ex.sets || []).filter(st => {
+  const excludedIds = exercises
+    ? new Set(exercises.filter(e => e.movement_type === 'mobility' || e.movement_type === 'cardio').map(e => e.id))
+    : null;
+  return (session.entries || []).reduce((sum, entry) => {
+    if (entry.isCardio) return sum;
+    if (excludedIds && excludedIds.has(entry.exId)) return sum;
+    return sum + (entry.sets || []).filter(st => {
       if (st.warmup || st.skipped) return false;
       if (ended) return st.kg != null && (st.reps != null || st.repsL != null || st.repsR != null);
       return st.done;
     }).reduce((s, st) => {
       const reps = effReps(st) ?? 0;
       return s + (+st.kg || 0) * reps;
-    }, 0), 0
-  );
+    }, 0);
+  }, 0);
 }
 
 // Count of completed working sets in a session (warm-ups excluded).
@@ -1825,6 +1854,28 @@ async function deleteCheckin(checkinId, userId) {
   if (error) throw error;
 }
 
+// Aggregate cardio logs for a given week (weekStart = 'YYYY-MM-DD' Monday).
+// Returns { cardioMinutes, cardioDistanceM, paceFeeling, effort, count } or null.
+function cardioWeekPrefill(cardioLogs, weekStart) {
+  if (!cardioLogs?.length || !weekStart) return null;
+  const ws = weekStart.slice(0, 10);
+  const we = (() => { const d = new Date(ws + 'T12:00:00'); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })();
+  const logs = cardioLogs.filter(l => l.date >= ws && l.date < we);
+  if (!logs.length) return null;
+  const totalMin = logs.reduce((s, l) => s + (l.durationMinutes || 0), 0);
+  const hasDistArr = logs.filter(l => l.distanceM != null);
+  const totalDistM = hasDistArr.length ? Math.round(hasDistArr.reduce((s, l) => s + l.distanceM, 0)) : null;
+  const pfVals = logs.filter(l => l.paceFeeling != null).map(l => l.paceFeeling);
+  const efVals = logs.filter(l => l.effort != null).map(l => l.effort);
+  return {
+    cardioMinutes: totalMin || null,
+    cardioDistanceM: totalDistM,
+    paceFeeling: pfVals.length ? Math.round(pfVals.reduce((s, v) => s + v, 0) / pfVals.length) : null,
+    effort: efVals.length ? Math.round(efVals.reduce((s, v) => s + v, 0) / efVals.length) : null,
+    count: logs.length,
+  };
+}
+
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, fnFetch,
@@ -1843,4 +1894,5 @@ window.LB = {
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled,
+  cardioWeekPrefill,
 };
