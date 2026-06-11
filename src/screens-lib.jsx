@@ -871,6 +871,86 @@ function ProgressChart({ points }) {
   );
 }
 
+// ─── CARDIO TYPE DETAIL SHEET ────────────────────────────────────────
+function CardioLineChart({ points, label, formatVal }) {
+  if (!points || points.length < 2) return null;
+  const w = 200, h = 88, padT = 14, padB = 18, padL = 4, padR = 4;
+  const vals = points.map(p => p.value);
+  const max = Math.max(...vals);
+  const min = Math.min(...vals);
+  const range = max - min || 1;
+  const xy = points.map((p, i) => {
+    const x = padL + (i / Math.max(1, points.length - 1)) * (w - padL - padR);
+    const y = padT + (1 - (p.value - min) / range) * (h - padT - padB);
+    return [x, y];
+  });
+  const pathD = xy.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const fmtDate = d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' });
+  return (
+    <div style={{ background: UI.bgInset, borderRadius: 6, padding: '10px 12px', border: `0.5px solid ${UI.hair}` }}>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{label}</div>
+      <div className="num" style={{ fontSize: 17, color: UI.gold, marginBottom: 2 }}>{formatVal(vals[vals.length - 1])}</div>
+      <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
+        <text x={w - padR} y={padT - 2} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
+        {max > min && <text x={w - padR} y={h - padB + 2} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
+        <path d={pathD} fill="none" stroke={UI.gold} strokeWidth="1.2" opacity="0.7" />
+        {xy.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={xy.length > 60 ? 0 : 1.5} fill={UI.gold} />)}
+        <text x={padL} y={h - 4} textAnchor="start" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
+        <text x={w - padR} y={h - 4} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[points.length - 1].date)}</text>
+      </svg>
+    </div>
+  );
+}
+
+function CardioTypeDetailSheet({ type, logs, open, onClose }) {
+  const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY_H) || 'km'; } catch (_) { return 'km'; } })();
+  if (!open || !type) return null;
+  const filtered = logs
+    .filter(l => (l.type || '').toLowerCase() === type.toLowerCase())
+    .slice(0, 360)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  if (filtered.length < 2) return (
+    <Sheet open={open} onClose={onClose} title={type}>
+      <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, paddingBottom: 20 }}>Log at least 2 sessions of this type to see charts.</div>
+    </Sheet>
+  );
+
+  const totalMin = filtered.reduce((s, l) => s + (l.durationMinutes || 0), 0);
+  const totalM = filtered.reduce((s, l) => s + (l.distanceM || 0), 0);
+
+  const durPoints = filtered.map(l => ({ date: l.date, value: l.durationMinutes }));
+  const distPoints = filtered.filter(l => l.distanceM != null).map(l => ({ date: l.date, value: du === 'mi' ? l.distanceM / MI_TO_M_H : l.distanceM / 1000 }));
+  const pacePoints = filtered.filter(l => l.distanceM != null && l.durationMinutes > 0).map(l => ({ date: l.date, value: (l.distanceM / 1000) * 60 / (du === 'mi' ? l.distanceM / MI_TO_M_H * (1000 / 1000) : 1) }));
+  const speedPoints = filtered.filter(l => l.distanceM != null && l.durationMinutes > 0).map(l => ({ date: l.date, value: parseFloat(((du === 'mi' ? l.distanceM / MI_TO_M_H : l.distanceM / 1000) / (l.durationMinutes / 60)).toFixed(2)) }));
+  const effortPoints = filtered.filter(l => l.effort != null).map(l => ({ date: l.date, value: l.effort }));
+  const paceFlPoints = filtered.filter(l => l.paceFeeling != null).map(l => ({ date: l.date, value: l.paceFeeling }));
+  const paceFlLabels = ['', 'Easy', 'Light', 'Steady', 'Power', 'Hard', 'Max'];
+
+  const charts = [
+    durPoints.length >= 2 && { points: durPoints, label: 'DURATION', formatVal: v => `${Math.round(v)}min` },
+    speedPoints.length >= 2 && { points: speedPoints, label: `SPEED (${du}/h)`, formatVal: v => v.toFixed(1) },
+    effortPoints.length >= 2 && { points: effortPoints, label: 'EFFORT', formatVal: v => `${v}/10` },
+    paceFlPoints.length >= 2 && { points: paceFlPoints, label: 'PACE FEELING', formatVal: v => paceFlLabels[Math.round(v)] || Math.round(v) },
+    distPoints.length >= 2 && { points: distPoints, label: `DISTANCE (${du})`, formatVal: v => v.toFixed(2) },
+  ].filter(Boolean);
+
+  const summaryParts = [
+    `${filtered.length} sessions`,
+    totalMin > 0 && `${Math.floor(totalMin / 60)}h ${totalMin % 60}min total`,
+    totalM > 0 && `${du === 'mi' ? (totalM / MI_TO_M_H).toFixed(1) : (totalM / 1000).toFixed(1)} ${du} total`,
+  ].filter(Boolean);
+
+  return (
+    <Sheet open={open} onClose={onClose} title={type}>
+      <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16 }}>{summaryParts.join(' · ')}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, paddingBottom: 8 }}>
+        {charts.map((c, i) => <CardioLineChart key={i} points={c.points} label={c.label} formatVal={c.formatVal} />)}
+      </div>
+    </Sheet>
+  );
+}
+
 // ─── STATS TAB ───────────────────────────────────────────────────────
 function StatsTab({ store, sessions, go }) {
   const today = new Date(); today.setHours(12, 0, 0, 0);
@@ -1223,6 +1303,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
   const [confirmEl, confirm] = useConfirm();
   const [cardioLogOpen, setCardioLogOpen] = useStateL(false);
   const [editingCardioLog, setEditingCardioLog] = useStateL(null);
+  const [cardioTypeDetail, setCardioTypeDetail] = useStateL(null);
 
   const sessions = useMemoL(() => {
     return [...store.sessions]
@@ -1449,7 +1530,10 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                             {LB.parseDate(l.date).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase()}
                           </div>
                           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                            <span style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.ink, lineHeight: 1 }}>{l.type || '—'}</span>
+                            {l.type
+                              ? <button onClick={() => setCardioTypeDetail(l.type)} style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.ink, lineHeight: 1, background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', textDecorationColor: UI.hairStrong, textUnderlineOffset: 3 }}>{l.type}</button>
+                              : <span style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.ink, lineHeight: 1 }}>—</span>
+                            }
                             <span className="num" style={{ fontSize: 13, color: UI.gold }}>{l.durationMinutes}<span style={{ fontSize: 10, color: UI.inkFaint }}>min</span></span>
                             {l.distanceM != null && <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{mToDisplayH(l.distanceM, du)}<span style={{ fontSize: 9 }}>{du}</span></span>}
                           </div>
@@ -1482,6 +1566,12 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                 editLog={editingCardioLog}
               />
             )}
+            <CardioTypeDetailSheet
+              type={cardioTypeDetail}
+              logs={store.cardioLogs || []}
+              open={!!cardioTypeDetail}
+              onClose={() => setCardioTypeDetail(null)}
+            />
           </div>
         );
       })()}
