@@ -879,6 +879,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
             <CheckInTrendCards recent={recent} />
           </div>
         )}
+        {checkins.length > 0 && <div className="knurl" style={{ margin: '4px 0' }} />}
 
         {!checkinEnabled && (
           <div style={{ background: UI.bgInset, borderRadius: 8, padding: '11px 14px', border: `0.5px solid ${UI.hair}` }}>
