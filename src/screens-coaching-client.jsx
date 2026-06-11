@@ -113,7 +113,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'plan'       && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
           {tab === 'sessions'   && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
           {tab === 'checkins'   && (isSelf
-            ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} />
+            ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} store={store} />
             : <ClientCheckInsTab coachingId={coachingId} checkinEnabled={checkinEnabled} onToggle={handleToggleCheckin} toggling={ciToggling} />)}
           {tab === 'nutrition'  && <ClientNutritionTab coachingId={coachingId} userId={userId} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}

@@ -461,7 +461,7 @@ function CheckInCard({ ci, defaultOpen = false, embedded = false, onEdit, onDele
                 )}
                 {ci.steps != null && <StatPill label="Steps" value={Number(ci.steps).toLocaleString()} />}
                 {ci.cardioMinutes != null && <StatPill label="Cardio" value={`${ci.cardioMinutes} min`} />}
-                {ci.cardioDistanceM != null && <StatPill label="Distance" value={`${(ci.cardioDistanceM / 1000).toFixed(1)} km`} />}
+                {ci.cardioDistanceM != null && <StatPill label="Distance" value={(() => { try { const u = localStorage.getItem('logbook-cardio-dist-unit') || 'km'; return u === 'mi' ? `${(ci.cardioDistanceM / 1609.344).toFixed(1)} mi` : `${(ci.cardioDistanceM / 1000).toFixed(1)} km`; } catch (_) { return `${(ci.cardioDistanceM / 1000).toFixed(1)} km`; } })()} />}
                 {ci.cardioPaceFeeling != null && <StatPill label="Pace feeling" value={`${ci.cardioPaceFeeling}/6`} />}
                 {ci.cardioEffort != null && <StatPill label="Effort" value={`${ci.cardioEffort}/10`} />}
               </div>
@@ -546,44 +546,61 @@ function StatPill({ label, value }) {
 
 // ─── CheckInForm ──────────────────────────────────────────────────────────────
 
-function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSaved }) {
+function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefill, onSaved }) {
   const REQUIRED_LABELS = {
     weightToday: 'Weight (today)', hunger: 'Hunger', sleepQuality: 'Sleep',
     lifeStress: 'Life Stress', workStress: 'Work Stress', tiredness: 'Tiredness',
   };
 
+  const getDistUnit = () => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch (_) { return 'km'; } };
+  const [distUnit, setDistUnitRaw] = useStateC(getDistUnit);
+  const setDistUnit = (u) => { try { localStorage.setItem('logbook-cardio-dist-unit', u); } catch (_) {} setDistUnitRaw(u); };
+
+  const distToM = (val) => { const n = parseFloat(String(val).replace(',', '.')); if (isNaN(n)) return null; return distUnit === 'mi' ? Math.round(n * 1609.344) : Math.round(n * 1000); };
+  const mToDisplay = (meters) => { if (meters == null || meters === '') return ''; return distUnit === 'mi' ? (meters / 1609.344).toFixed(2) : (meters / 1000).toFixed(2); };
+
   const empty = {
     weightToday: '', weightAvgLastWeek: '',
     offPlanNotes: '', hydrationMl: '',
     daysTrained: '', performanceVsLastWeek: null,
-    steps: '', cardioMinutes: '', cardioDistanceM: '',
+    steps: '', cardioMinutes: '', cardioDistanceDisplay: '',
     cardioPaceFeeling: null, cardioEffort: null,
     goalNote: '',
     hunger: null, sleepQuality: null, lifeStress: null, workStress: null, tiredness: null,
     issuesNotes: '', generalNote: '',
   };
 
-  const [form, setForm] = useStateC(() => existing ? {
-    weightToday: existing.weightToday ?? '',
-    weightAvgLastWeek: existing.weightAvgLastWeek ?? '',
-    offPlanNotes: existing.offPlanNotes ?? '',
-    hydrationMl: existing.hydrationMl ?? '',
-    daysTrained: existing.daysTrained ?? '',
-    performanceVsLastWeek: existing.performanceVsLastWeek ?? null,
-    steps: existing.steps ?? '',
-    cardioMinutes: existing.cardioMinutes ?? '',
-    cardioDistanceM: existing.cardioDistanceM ?? '',
-    cardioPaceFeeling: existing.cardioPaceFeeling ?? null,
-    cardioEffort: existing.cardioEffort ?? null,
-    goalNote: existing.goalNote ?? '',
-    hunger: existing.hunger ?? null,
-    sleepQuality: existing.sleepQuality ?? null,
-    lifeStress: existing.lifeStress ?? null,
-    workStress: existing.workStress ?? null,
-    tiredness: existing.tiredness ?? null,
-    issuesNotes: existing.issuesNotes ?? '',
-    generalNote: existing.generalNote ?? '',
-  } : empty);
+  const [form, setForm] = useStateC(() => {
+    if (existing) return {
+      weightToday: existing.weightToday ?? '',
+      weightAvgLastWeek: existing.weightAvgLastWeek ?? '',
+      offPlanNotes: existing.offPlanNotes ?? '',
+      hydrationMl: existing.hydrationMl ?? '',
+      daysTrained: existing.daysTrained ?? '',
+      performanceVsLastWeek: existing.performanceVsLastWeek ?? null,
+      steps: existing.steps ?? '',
+      cardioMinutes: existing.cardioMinutes ?? '',
+      cardioDistanceDisplay: existing.cardioDistanceM != null ? mToDisplay(existing.cardioDistanceM) : '',
+      cardioPaceFeeling: existing.cardioPaceFeeling ?? null,
+      cardioEffort: existing.cardioEffort ?? null,
+      goalNote: existing.goalNote ?? '',
+      hunger: existing.hunger ?? null,
+      sleepQuality: existing.sleepQuality ?? null,
+      lifeStress: existing.lifeStress ?? null,
+      workStress: existing.workStress ?? null,
+      tiredness: existing.tiredness ?? null,
+      issuesNotes: existing.issuesNotes ?? '',
+      generalNote: existing.generalNote ?? '',
+    };
+    if (prefill) return {
+      ...empty,
+      cardioMinutes: prefill.cardioMinutes ?? '',
+      cardioDistanceDisplay: prefill.cardioDistanceM != null ? mToDisplay(prefill.cardioDistanceM) : '',
+      cardioPaceFeeling: prefill.paceFeeling ?? null,
+      cardioEffort: prefill.effort ?? null,
+    };
+    return empty;
+  });
 
   const [saving, setSaving] = useStateC(false);
   const [error, setError] = useStateC('');
@@ -608,7 +625,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         daysTrained: num(form.daysTrained),
         steps: num(form.steps),
         cardioMinutes: num(form.cardioMinutes),
-        cardioDistanceM: num(form.cardioDistanceM),
+        cardioDistanceM: form.cardioDistanceDisplay ? distToM(form.cardioDistanceDisplay) : null,
         cardioPaceFeeling: form.cardioPaceFeeling,
         cardioEffort: form.cardioEffort,
         performanceVsLastWeek: form.performanceVsLastWeek || null,
@@ -695,14 +712,39 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
         </div>
 
         {/* Cardio */}
+        {prefill && !existing && (
+          <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, marginBottom: 10, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.08)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+            Prefilled from {prefill.count} cardio log{prefill.count !== 1 ? 's' : ''} this week
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Cardio (min)</div>
             <input type="number" inputMode="numeric" placeholder="–" value={form.cardioMinutes} onChange={e => set('cardioMinutes', e.target.value)} style={inputStyle} />
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Distance (m)</div>
-            <input type="number" inputMode="numeric" placeholder="–" value={form.cardioDistanceM} onChange={e => set('cardioDistanceM', e.target.value)} style={inputStyle} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>Distance</span>
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+                {['km', 'mi'].map(u => (
+                  <button key={u} onClick={() => {
+                    const curM = form.cardioDistanceDisplay ? distToM(form.cardioDistanceDisplay) : null;
+                    setDistUnit(u);
+                    if (curM != null) {
+                      const newDisp = u === 'mi' ? (curM / 1609.344).toFixed(2) : (curM / 1000).toFixed(2);
+                      set('cardioDistanceDisplay', newDisp);
+                    }
+                  }} style={{
+                    padding: '2px 7px', cursor: 'pointer', border: 'none',
+                    background: distUnit === u ? 'var(--accent)' : 'transparent',
+                    color: distUnit === u ? UI.bg : UI.inkFaint,
+                    fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>{u}</button>
+                ))}
+              </div>
+            </div>
+            <input type="number" inputMode="decimal" placeholder="–" value={form.cardioDistanceDisplay} onChange={e => set('cardioDistanceDisplay', e.target.value)} style={inputStyle} />
           </div>
         </div>
 
@@ -762,7 +804,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, onSave
 
 // ─── ClientCheckInTab ─────────────────────────────────────────────────────────
 
-function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true }) {
+function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true, store }) {
   const weekStart = LB.checkinWeekStart();
   const [checkins, setCheckins] = useStateC(null);
   const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
@@ -812,6 +854,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true 
           userId={userId}
           weekStart={formWeek}
           existing={target}
+          prefill={!target ? LB.cardioWeekPrefill(store?.cardioLogs, formWeek) : undefined}
           onSaved={() => { setEditTarget(null); load(); }}
         />
       </div>
