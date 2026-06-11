@@ -1176,7 +1176,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!day) return [];
     return session.entries.reduce((acc, entry, i) => {
       const planItem = day.items[i];
-      if (!planItem) return acc;
+      if (!planItem || entry.isCardio) return acc;
       if (entry.exId !== planItem.exId) {
         const oldEx = LB.findExercise(store, planItem.exId);
         acc.push({ type: 'swap', idx: i, oldName: oldEx?.name || '?', newName: entry.name, newExId: entry.exId });

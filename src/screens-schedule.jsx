@@ -1444,8 +1444,9 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const removeItem = (idx) => setDraft(d => ({ ...d, items: normalizeSupersets(d.items.filter((_, i) => i !== idx)) }));
   const addExercise = (exId) => {
     const ex = LB.findExercise(store, exId);
+    const isCardioEx = ex?.movement_type === 'cardio';
     const defaultReps = ex?.progression_reps ?? 8;
-    setDraft(d => ({ ...d, items: [...d.items, { exId, sets: 3, reps: defaultReps }] }));
+    setDraft(d => ({ ...d, items: [...d.items, { exId, sets: isCardioEx ? 0 : 3, reps: isCardioEx ? 0 : defaultReps }] }));
     setAddingEx(false);
   };
   const moveItem = (idx, dir) => {
