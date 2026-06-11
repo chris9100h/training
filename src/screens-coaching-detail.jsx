@@ -42,6 +42,8 @@ function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) 
           <div style={{ textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, padding: '24px 0' }}>Need at least 2 check-ins for a trend.</div>
         ) : (
           <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+            <line x1={padX} y1={padTop} x2={padX} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+            <line x1={padX} y1={padTop + plotH} x2={W - padX} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
             <polygon points={`${xOf(0).toFixed(1)},${base} ${pts} ${xOf(n-1).toFixed(1)},${base}`} fill={`rgba(var(--accent-rgb),0.12)`} />
             <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
             {entries.map((e, i) => {
