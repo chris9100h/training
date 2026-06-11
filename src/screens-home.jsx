@@ -1315,7 +1315,7 @@ function HomeScreen({ store, setStore, go, userId }) {
               <Btn kind="ghost" onClick={() => go({ name: 'plan-view' })} style={{ flex: 1 }}>View plan</Btn>
             </div>
             <button onClick={() => setCardioPopoverOpen(true)} style={{
-              width: '50%', marginTop: 8, padding: '9px 16px',
+              width: '100%', marginTop: 8, padding: '9px 16px',
               background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
               border: '1px solid rgba(var(--accent-rgb),0.6)',
               borderRadius: 8, cursor: 'pointer',
@@ -1466,9 +1466,9 @@ function HomeScreen({ store, setStore, go, userId }) {
       </div>
 
       {!isActiveRest && (
-        <div style={{ flexShrink: 0, padding: '6px 22px 2px', display: 'flex', justifyContent: 'center' }}>
+        <div style={{ flexShrink: 0, padding: '6px 22px 2px' }}>
           <button onClick={() => setCardioPopoverOpen(true)} style={{
-            width: '50%', padding: '9px 16px',
+            width: '100%', padding: '9px 16px',
             background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
             border: '1px solid rgba(var(--accent-rgb),0.6)',
             borderRadius: 8, cursor: 'pointer',
