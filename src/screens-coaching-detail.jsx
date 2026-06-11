@@ -416,6 +416,7 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
       <div style={{ flex: 1, overflowY: 'auto' }}>
         <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
           <CheckInTrendCards recent={recent} />
+          <div className="knurl" style={{ margin: '4px 0' }} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
             {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
