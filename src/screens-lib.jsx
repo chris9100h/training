@@ -874,7 +874,7 @@ function ProgressChart({ points }) {
 // ─── CARDIO TYPE DETAIL SHEET ────────────────────────────────────────
 function CardioLineChart({ points, label, formatVal }) {
   if (!points || points.length < 2) return null;
-  const w = 200, h = 88, padT = 14, padB = 18, padL = 4, padR = 4;
+  const w = 200, h = 88, padT = 8, padB = 18, padL = 34, padR = 6;
   const vals = points.map(p => p.value);
   const max = Math.max(...vals);
   const min = Math.min(...vals);
@@ -891,8 +891,8 @@ function CardioLineChart({ points, label, formatVal }) {
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{label}</div>
       <div className="num" style={{ fontSize: 17, color: UI.gold, marginBottom: 2 }}>{formatVal(vals[vals.length - 1])}</div>
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
-        <text x={w - padR} y={padT - 2} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
-        {max > min && <text x={w - padR} y={h - padB + 2} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
+        <text x={padL - 4} y={padT + 5} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
+        {max > min && <text x={padL - 4} y={h - padB} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
         <path d={pathD} fill="none" stroke={UI.gold} strokeWidth="1.2" opacity="0.7" />
         {xy.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={xy.length > 60 ? 0 : 1.5} fill={UI.gold} />)}
         <text x={padL} y={h - 4} textAnchor="start" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
