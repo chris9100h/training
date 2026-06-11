@@ -659,6 +659,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [cardioLogOpen, setCardioLogOpen] = useState(false);
   const [cardioPopoverOpen, setCardioPopoverOpen] = useState(false);
   const [editingCardioLog, setEditingCardioLog] = useState(null);
+  const [deletingCardioId, setDeletingCardioId] = useState(null);
   // The not-logged Log handler awaits a seed fetch — guard against a double
   // tap creating two sessions inside that window.
   const loggingRef = useRef(false);
@@ -1510,7 +1511,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         const recentCardio = (store.cardioLogs || []).slice(0, 5);
         const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } })();
         return (
-          <Sheet open={true} onClose={() => setCardioPopoverOpen(false)}>
+          <Sheet open={true} onClose={() => { setCardioPopoverOpen(false); setDeletingCardioId(null); }}>
             <div style={{ fontFamily: UI.fontUi, fontSize: 15, fontWeight: 600, letterSpacing: '0.10em', textTransform: 'uppercase', color: UI.inkSoft, textAlign: 'center', marginBottom: recentCardio.length ? 16 : 10 }}>RECENT CARDIO</div>
             {recentCardio.length === 0 ? (
               <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, textAlign: 'center', marginBottom: 20 }}>No cardio logged yet.</div>
@@ -1526,7 +1527,14 @@ function HomeScreen({ store, setStore, go, userId }) {
                     <button onClick={() => { setEditingCardioLog(l); setCardioPopoverOpen(false); setCardioLogOpen(true); }} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                     </button>
-                    <button onClick={() => setStore(s => ({ ...s, cardioLogs: (s.cardioLogs || []).filter(x => x.id !== l.id) }))} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 2px', color: UI.danger, fontSize: 16, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
+                    {deletingCardioId === l.id ? (
+                      <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
+                        <button onClick={() => setDeletingCardioId(null)} style={{ background: 'none', border: `1px solid ${UI.hairStrong}`, borderRadius: 4, cursor: 'pointer', padding: '2px 7px', fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>Cancel</button>
+                        <button onClick={() => { setStore(s => ({ ...s, cardioLogs: (s.cardioLogs||[]).filter(x => x.id !== l.id) })); setDeletingCardioId(null); }} style={{ background: UI.danger, border: 'none', borderRadius: 4, cursor: 'pointer', padding: '2px 7px', fontSize: 10, color: '#fff', fontFamily: UI.fontUi, fontWeight: 600 }}>Delete</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setDeletingCardioId(l.id)} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 2px', color: UI.danger, fontSize: 16, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
+                    )}
                   </div>
                 ))}
               </div>

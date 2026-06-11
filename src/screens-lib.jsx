@@ -1217,6 +1217,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
   const [dayFilter, setDayFilter] = useStateL(null);
   const [cardioLogOpen, setCardioLogOpen] = useStateL(false);
   const [editingCardioLog, setEditingCardioLog] = useStateL(null);
+  const [deleteConfirmCardioId, setDeleteConfirmCardioId] = useStateL(null);
 
   const sessions = useMemoL(() => {
     return [...store.sessions]
@@ -1418,19 +1419,6 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
         const paceLbl = ['', 'Easy', 'Light', 'Steady', 'Power', 'Hard', 'Max'];
         return (
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div style={{ padding: '12px 22px 6px' }}>
-              <button onClick={() => { setEditingCardioLog(null); setCardioLogOpen(true); }} style={{
-                width: '100%', padding: '9px 16px',
-                background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-                border: '1px solid rgba(var(--accent-rgb),0.6)',
-                borderRadius: 8, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                WebkitTapHighlightColor: 'transparent',
-              }}>
-                <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: 'rgba(10,8,5,0.6)' }} />
-                <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>+ LOG CARDIO</span>
-              </button>
-            </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px' }}>
               {logs.length === 0 && (
                 <Empty title="No cardio logged" sub="Tap the button above to log your first cardio session." icon={<i className="fa-solid fa-person-running" style={{ fontSize: 28, color: UI.inkFaint }} />} />
@@ -1471,7 +1459,14 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                         <button onClick={() => { setEditingCardioLog(l); setCardioLogOpen(true); }} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint }}>
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                         </button>
-                        <button onClick={() => setStore(s => ({ ...s, cardioLogs: (s.cardioLogs || []).filter(x => x.id !== l.id) }))} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 20, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
+                        {deleteConfirmCardioId === l.id ? (
+                          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
+                            <button onClick={() => setDeleteConfirmCardioId(null)} style={{ background: 'none', border: `1px solid ${UI.hairStrong}`, borderRadius: 4, cursor: 'pointer', padding: '3px 8px', fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>Cancel</button>
+                            <button onClick={() => { setStore(s => ({ ...s, cardioLogs: (s.cardioLogs||[]).filter(x => x.id !== l.id) })); setDeleteConfirmCardioId(null); }} style={{ background: UI.danger, border: 'none', borderRadius: 4, cursor: 'pointer', padding: '3px 8px', fontSize: 10, color: '#fff', fontFamily: UI.fontUi, fontWeight: 600 }}>Delete</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => setDeleteConfirmCardioId(l.id)} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 20, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
+                        )}
                       </div>
                     </React.Fragment>
                   );
