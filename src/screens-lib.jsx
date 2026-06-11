@@ -1203,11 +1203,20 @@ function StatsTab({ store, sessions, go }) {
 }
 
 // ─── HISTORY ─────────────────────────────────────────────────────────
-function HistoryScreen({ store, go, initialTab }) {
+const CARDIO_DIST_KEY_H = 'logbook-cardio-dist-unit';
+const MI_TO_M_H = 1609.344;
+function mToDisplayH(meters, unit) {
+  if (meters == null) return '';
+  return unit === 'mi' ? (meters / MI_TO_M_H).toFixed(2) : (meters / 1000).toFixed(2);
+}
+
+function HistoryScreen({ store, setStore, go, userId, initialTab }) {
   const [tab, setTab] = useStateL(initialTab || 'workouts');
   const [planFilter, setPlanFilter] = useStateL(null);
   const [periodFilter, setPeriodFilter] = useStateL(null);
   const [dayFilter, setDayFilter] = useStateL(null);
+  const [cardioLogOpen, setCardioLogOpen] = useStateL(false);
+  const [editingCardioLog, setEditingCardioLog] = useStateL(null);
 
   const sessions = useMemoL(() => {
     return [...store.sessions]
@@ -1304,7 +1313,7 @@ function HistoryScreen({ store, go, initialTab }) {
       ) : null} />
       {/* Tab strip */}
       <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
-        {[['workouts','Workouts'],['stats','Stats']].map(([id, label]) => (
+        {[['workouts','Workouts'],['cardio','Cardio'],['stats','Stats']].map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)} style={{
             flex: 1, background: 'transparent', border: 'none',
             padding: '11px 0', cursor: 'pointer',
@@ -1392,6 +1401,94 @@ function HistoryScreen({ store, go, initialTab }) {
           </div>
         </div>
       )}
+
+      {tab === 'cardio' && (() => {
+        const logs = [...(store.cardioLogs || [])].sort((a, b) => b.date.localeCompare(a.date));
+        const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY_H) || 'km'; } catch (_) { return 'km'; } })();
+        const now = new Date(); now.setHours(12,0,0,0);
+        const dow = now.getDay();
+        const monday = new Date(now); monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
+        const lastMonday = new Date(monday); lastMonday.setDate(monday.getDate() - 7);
+        const getGroup = (dateStr) => {
+          const d = LB.parseDate(dateStr);
+          if (d >= monday) return 'THIS WEEK';
+          if (d >= lastMonday) return 'LAST WEEK';
+          return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
+        };
+        const paceLbl = ['', 'Easy', 'Light', 'Steady', 'Power', 'Hard', 'Max'];
+        return (
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div style={{ padding: '12px 22px 6px' }}>
+              <button onClick={() => { setEditingCardioLog(null); setCardioLogOpen(true); }} style={{
+                width: '100%', padding: '9px 16px',
+                background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+                border: '1px solid rgba(var(--accent-rgb),0.6)',
+                borderRadius: 8, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: 'rgba(10,8,5,0.6)' }} />
+                <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>+ LOG CARDIO</span>
+              </button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px' }}>
+              {logs.length === 0 && (
+                <Empty title="No cardio logged" sub="Tap the button above to log your first cardio session." icon={<i className="fa-solid fa-person-running" style={{ fontSize: 28, color: UI.inkFaint }} />} />
+              )}
+              {(() => {
+                const items = [];
+                let lastGroup = null;
+                logs.forEach(l => {
+                  const group = getGroup(l.date);
+                  if (group !== lastGroup) { items.push({ type: 'header', label: group, key: `h-${group}`, isFirst: items.length === 0 }); lastGroup = group; }
+                  items.push({ type: 'log', log: l, key: l.id });
+                });
+                return items.map(item => {
+                  if (item.type === 'header') {
+                    return <div key={item.key} className="micro" style={{ marginTop: item.isFirst ? 6 : 24, marginBottom: 10, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>{item.label}</div>;
+                  }
+                  const l = item.log;
+                  return (
+                    <React.Fragment key={l.id}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>
+                            {LB.parseDate(l.date).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase()}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.ink, lineHeight: 1 }}>{l.type || '—'}</span>
+                            <span className="num" style={{ fontSize: 13, color: UI.gold }}>{l.durationMinutes}<span style={{ fontSize: 10, color: UI.inkFaint }}>min</span></span>
+                            {l.distanceM != null && <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{mToDisplayH(l.distanceM, du)}<span style={{ fontSize: 9 }}>{du}</span></span>}
+                          </div>
+                          {(l.paceFeeling != null || l.effort != null || l.note) && (
+                            <div style={{ display: 'flex', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>
+                              {l.paceFeeling != null && <span className="micro" style={{ color: UI.inkFaint }}>PACE {paceLbl[l.paceFeeling] || l.paceFeeling}</span>}
+                              {l.effort != null && <span className="micro" style={{ color: UI.inkFaint }}>EFFORT {l.effort}/10</span>}
+                              {l.note && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic' }}>{l.note}</span>}
+                            </div>
+                          )}
+                        </div>
+                        <button onClick={() => { setEditingCardioLog(l); setCardioLogOpen(true); }} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        </button>
+                        <button onClick={() => setStore(s => ({ ...s, cardioLogs: (s.cardioLogs || []).filter(x => x.id !== l.id) }))} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 20, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
+                      </div>
+                    </React.Fragment>
+                  );
+                });
+              })()}
+            </div>
+            {window.Screens.CardioQuickLogSheet && (
+              <window.Screens.CardioQuickLogSheet
+                open={cardioLogOpen}
+                onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }}
+                store={store} setStore={setStore} userId={userId}
+                editLog={editingCardioLog}
+              />
+            )}
+          </div>
+        );
+      })()}
 
       {tab === 'stats' && <StatsTab store={store} sessions={sessions} go={go} />}
 

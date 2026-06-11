@@ -755,7 +755,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
             {form.cardioPaceFeeling != null && <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{form.cardioPaceFeeling}/6</span>}
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
-            {[['1','Stroll'],['2','Walk'],['3','Brisk'],['4','Power'],['5','Jog'],['6','Run']].map(([n, lbl]) => (
+            {[['1','Easy'],['2','Light'],['3','Steady'],['4','Power'],['5','Hard'],['6','Max']].map(([n, lbl]) => (
               <button key={n} onClick={() => set('cardioPaceFeeling', form.cardioPaceFeeling === Number(n) ? null : Number(n))}
                 style={{ flex: 1, padding: '7px 2px', borderRadius: 8, border: `0.5px solid ${form.cardioPaceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
                   background: form.cardioPaceFeeling === Number(n) ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,

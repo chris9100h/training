@@ -424,7 +424,7 @@ function mToDisplay(meters, unit) {
   return unit === 'mi' ? (meters / MI_TO_M).toFixed(2) : (meters / 1000).toFixed(2);
 }
 
-function CardioQuickLogSheet({ open, onClose, store, setStore, userId }) {
+function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog }) {
   const getDistUnit = () => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } };
   const [distUnit, setDistUnitState] = useState(getDistUnit);
   const setDistUnit = (u) => { try { localStorage.setItem(CARDIO_DIST_KEY, u); } catch (_) {} setDistUnitState(u); };
@@ -434,7 +434,23 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId }) {
   const [form, setForm] = useState(empty);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  useEffect(() => { if (open) setForm(empty()); }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    if (editLog) {
+      const du = getDistUnit();
+      setForm({
+        date: editLog.date,
+        type: editLog.type || '',
+        duration: editLog.durationMinutes ? String(editLog.durationMinutes) : '',
+        distance: editLog.distanceM != null ? mToDisplay(editLog.distanceM, du) : '',
+        paceFeeling: editLog.paceFeeling ?? null,
+        effort: editLog.effort ?? null,
+        note: editLog.note || '',
+      });
+    } else {
+      setForm(empty());
+    }
+  }, [open, editLog?.id]);
 
   // Unique types from history, most-recently-used first
   const typeChips = useMemo(() => {
@@ -451,18 +467,32 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId }) {
 
   const save = () => {
     if (!canSave) return;
-    const log = {
-      id: LB.uid(),
-      date: form.date,
-      type: form.type.trim() || null,
-      durationMinutes: Math.round(Number(form.duration)),
-      distanceM: form.distance ? distToM(form.distance, distUnit) : null,
-      paceFeeling: form.paceFeeling,
-      effort: form.effort,
-      note: form.note.trim() || null,
-      createdAt: new Date().toISOString(),
-    };
-    setStore(s => ({ ...s, cardioLogs: [log, ...(s.cardioLogs || [])] }));
+    if (editLog) {
+      const updated = {
+        ...editLog,
+        date: form.date,
+        type: form.type.trim() || null,
+        durationMinutes: Math.round(Number(form.duration)),
+        distanceM: form.distance ? distToM(form.distance, distUnit) : null,
+        paceFeeling: form.paceFeeling,
+        effort: form.effort,
+        note: form.note.trim() || null,
+      };
+      setStore(s => ({ ...s, cardioLogs: (s.cardioLogs || []).map(l => l.id === editLog.id ? updated : l) }));
+    } else {
+      const log = {
+        id: LB.uid(),
+        date: form.date,
+        type: form.type.trim() || null,
+        durationMinutes: Math.round(Number(form.duration)),
+        distanceM: form.distance ? distToM(form.distance, distUnit) : null,
+        paceFeeling: form.paceFeeling,
+        effort: form.effort,
+        note: form.note.trim() || null,
+        createdAt: new Date().toISOString(),
+      };
+      setStore(s => ({ ...s, cardioLogs: [log, ...(s.cardioLogs || [])] }));
+    }
     onClose();
   };
 
@@ -474,7 +504,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId }) {
   };
 
   return (
-    <Sheet open={open} onClose={onClose} title="LOG CARDIO">
+    <Sheet open={open} onClose={onClose} title={editLog ? 'EDIT CARDIO' : 'LOG CARDIO'}>
       {/* Date */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Date</div>
@@ -537,7 +567,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId }) {
           {form.paceFeeling != null && <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{form.paceFeeling}/6</span>}
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
-          {[['1','Stroll'],['2','Walk'],['3','Brisk'],['4','Power'],['5','Jog'],['6','Run']].map(([n, lbl]) => (
+          {[['1','Easy'],['2','Light'],['3','Steady'],['4','Power'],['5','Hard'],['6','Max']].map(([n, lbl]) => (
             <button key={n} onClick={() => set('paceFeeling', form.paceFeeling === Number(n) ? null : Number(n))} style={{
               flex: 1, padding: '7px 2px', borderRadius: 8, cursor: 'pointer',
               border: `0.5px solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
@@ -628,6 +658,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [notLoggedModalOpen, setNotLoggedModalOpen] = useState(false);
   const [cardioLogOpen, setCardioLogOpen] = useState(false);
   const [cardioPopoverOpen, setCardioPopoverOpen] = useState(false);
+  const [editingCardioLog, setEditingCardioLog] = useState(null);
   // The not-logged Log handler awaits a seed fetch — guard against a double
   // tap creating two sessions inside that window.
   const loggingRef = useRef(false);
@@ -1488,10 +1519,14 @@ function HomeScreen({ store, setStore, go, userId }) {
                 {recentCardio.map(l => (
                   <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}` }}>
                     <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: UI.inkFaint, width: 12 }} />
-                    <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>{l.type || '—'}</span>
-                    <span className="num" style={{ fontSize: 12, color: UI.gold }}>{l.durationMinutes}<span style={{ color: UI.inkFaint, fontSize: 9 }}>min</span></span>
-                    {l.distanceM != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{mToDisplay(l.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>}
-                    <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{l.date.slice(5).replace('-', '/')}</span>
+                    <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.type || '—'}</span>
+                    <span className="num" style={{ fontSize: 12, color: UI.gold, flexShrink: 0 }}>{l.durationMinutes}<span style={{ color: UI.inkFaint, fontSize: 9 }}>min</span></span>
+                    {l.distanceM != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{mToDisplay(l.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>}
+                    <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, flexShrink: 0 }}>{l.date.slice(5).replace('-', '/')}</span>
+                    <button onClick={() => { setEditingCardioLog(l); setCardioPopoverOpen(false); setCardioLogOpen(true); }} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>
+                    <button onClick={() => setStore(s => ({ ...s, cardioLogs: (s.cardioLogs || []).filter(x => x.id !== l.id) }))} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 2px', color: UI.danger, fontSize: 16, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
                   </div>
                 ))}
               </div>
@@ -1503,7 +1538,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         );
       })()}
 
-      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => setCardioLogOpen(false)} store={store} setStore={setStore} userId={userId} />
+      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} />
 
       {/* Coach message banner */}
       <window.Screens.CoachingBannerGroup store={store} setStore={setStore} userId={userId} go={go} />
@@ -1611,4 +1646,4 @@ function PendingApprovalScreen({ onSignOut }) {
 }
 
 window.Screens = window.Screens || {};
-Object.assign(window.Screens, { LoginScreen, HomeScreen, SetPasswordScreen, PendingApprovalScreen });
+Object.assign(window.Screens, { LoginScreen, HomeScreen, SetPasswordScreen, PendingApprovalScreen, CardioQuickLogSheet });
