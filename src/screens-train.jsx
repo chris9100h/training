@@ -702,7 +702,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     runPhase('ecc', ctx.currentTime);
   };
 
-  const finish = () => {
+  const finish = (feel = null) => {
     cancelPushover();
     updateSession(sess => {
       const now = new Date();
@@ -723,7 +723,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           }),
         };
       });
-      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }) };
+      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }) };
     });
     setStore(s => ({
       ...s,
@@ -855,6 +855,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [restModalOpen, setRestModalOpen] = useStateT(false);
   const [confirmEl, confirm] = useConfirm();
   const [finishOpen, setFinishOpen] = useStateT(false);
+  const [finishStep, setFinishStep] = useStateT('confirm');
+  const [pendingFeel, setPendingFeel] = useStateT(null);
   const [notePicker, setNotePicker] = useStateT(false);
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
@@ -1132,13 +1134,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const tryFinish = () => {
+    setFinishStep('feel');
+    setPendingFeel(null);
+  };
+
+  const confirmWithFeel = (feel) => {
     const diffs = computePlanDiff();
     if (diffs.length > 0) {
+      setPendingFeel(feel);
       setPlanDiff(diffs);
       setFinishOpen(false);
+      setFinishStep('confirm');
       setPlanDiffOpen(true);
     } else {
-      finish();
+      setFinishOpen(false);
+      setFinishStep('confirm');
+      finish(feel);
     }
   };
 
@@ -1161,7 +1172,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         } : sch),
       }));
     }
-    finish();
+    finish(pendingFeel);
+    setPendingFeel(null);
   };
 
   if (!entry) {
@@ -1897,48 +1909,56 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </div>
 
       {/* finish confirmation */}
-      <Sheet open={finishOpen} onClose={() => setFinishOpen(false)} title="End session?">
-        <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 18, lineHeight: 1.6 }}>
-          {(() => {
-            const incomplete = session.entries
-              .map(e => ({ name: e.name, remaining: e.sets.filter(s => !s.done && !s.skipped).length }))
-              .filter(e => e.remaining > 0);
-            if (!incomplete.length) return null;
-            return (
-              <div style={{ background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '10px 12px', marginBottom: 14 }}>
-                <div className="label" style={{ color: 'var(--accent)', marginBottom: 8 }}>Incomplete sets</div>
-                {incomplete.map(e => (
-                  <div key={e.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 4 }}>
-                    <span style={{ color: UI.inkSoft }}>{e.name}</span>
-                    <span className="num" style={{ color: 'var(--accent)' }}>{e.remaining} left</span>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
-            <span>Sets</span>
-            <span className="num" style={{ color: UI.ink }}>
-              {session.entries.reduce((c, e) => c + e.sets.filter(s => s.done).length, 0)} / {session.entries.reduce((c, e) => c + e.sets.length, 0)}
-            </span>
+      <Sheet open={finishOpen} onClose={() => { setFinishOpen(false); setFinishStep('confirm'); setPendingFeel(null); }} title={finishStep === 'confirm' ? "End session?" : "Rate workout effort"}>
+        {finishStep === 'confirm' ? (<>
+          <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 18, lineHeight: 1.6 }}>
+            {(() => {
+              const incomplete = session.entries
+                .map(e => ({ name: e.name, remaining: e.sets.filter(s => !s.done && !s.skipped).length }))
+                .filter(e => e.remaining > 0);
+              if (!incomplete.length) return null;
+              return (
+                <div style={{ background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '10px 12px', marginBottom: 14 }}>
+                  <div className="label" style={{ color: 'var(--accent)', marginBottom: 8 }}>Incomplete sets</div>
+                  {incomplete.map(e => (
+                    <div key={e.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 4 }}>
+                      <span style={{ color: UI.inkSoft }}>{e.name}</span>
+                      <span className="num" style={{ color: 'var(--accent)' }}>{e.remaining} left</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
+              <span>Sets</span>
+              <span className="num" style={{ color: UI.ink }}>
+                {session.entries.reduce((c, e) => c + e.sets.filter(s => s.done).length, 0)} / {session.entries.reduce((c, e) => c + e.sets.length, 0)}
+              </span>
+            </div>
+            <div className="knurl" />
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
+              <span>Volume</span>
+              <span className="num" style={{ color: UI.gold }}>
+                {Math.round(LB.totalVolume(session)).toLocaleString('en-US')} {UI.unit()}
+              </span>
+            </div>
+            <div className="knurl" />
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
+              <span>Duration</span>
+              <span className="num" style={{ color: UI.ink }}>{sessionTimeStr}</span>
+            </div>
           </div>
-          <div className="knurl" />
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
-            <span>Volume</span>
-            <span className="num" style={{ color: UI.gold }}>
-              {Math.round(LB.totalVolume(session)).toLocaleString('en-US')} {UI.unit()}
-            </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn kind="ghost" onClick={() => setFinishOpen(false)} style={{ flex: 1 }}>Continue</Btn>
+            <Btn onClick={tryFinish} style={{ flex: 2 }}>Finish ✓</Btn>
           </div>
-          <div className="knurl" />
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
-            <span>Duration</span>
-            <span className="num" style={{ color: UI.ink }}>{sessionTimeStr}</span>
+        </>) : (<>
+          <FeelSelector value={pendingFeel} onChange={setPendingFeel} />
+          <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+            <Btn kind="ghost" onClick={() => confirmWithFeel(null)} style={{ flex: 1 }}>Skip</Btn>
+            <Btn onClick={() => confirmWithFeel(pendingFeel)} style={{ flex: 2 }}>Done ✓</Btn>
           </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Btn kind="ghost" onClick={() => setFinishOpen(false)} style={{ flex: 1 }}>Continue</Btn>
-          <Btn onClick={tryFinish} style={{ flex: 2 }}>Finish ✓</Btn>
-        </div>
+        </>)}
       </Sheet>
 
       {/* note type picker */}
@@ -1996,7 +2016,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {/* plan diff */}
-      <Sheet open={planDiffOpen} onClose={() => { setPlanDiffOpen(false); finish(); }} title="Update plan?">
+      <Sheet open={planDiffOpen} onClose={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} title="Update plan?">
         <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>Changes vs. plan:</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
           {planDiff.map((d, i) => (
@@ -2019,7 +2039,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ))}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn kind="ghost" onClick={() => { setPlanDiffOpen(false); finish(); }} style={{ flex: 1 }}>No</Btn>
+          <Btn kind="ghost" onClick={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} style={{ flex: 1 }}>No</Btn>
           <Btn onClick={() => { setPlanDiffOpen(false); applyPlanAndFinish(); }} style={{ flex: 2 }}>Yes, update</Btn>
         </div>
       </Sheet>

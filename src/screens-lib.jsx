@@ -1353,9 +1353,11 @@ function HistoryScreen({ store, go, initialTab }) {
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                    {s.feel && <div style={{ width: 9, height: 9, borderRadius: '50%', background: feelColor(s.feel), flexShrink: 0 }} />}
-                    <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
-                      {Math.round(vol).toLocaleString('en-US')}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <div className="num" style={{ fontSize: 21, color: UI.gold, lineHeight: 1 }}>
+                        {Math.round(vol).toLocaleString('en-US')}
+                      </div>
+                      {s.feel && <div style={{ width: 7, height: 7, borderRadius: '50%', background: feelColor(s.feel), flexShrink: 0 }} />}
                     </div>
                     <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>{UI.unit()}</div>
                   </div>
