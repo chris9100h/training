@@ -1459,23 +1459,27 @@ function HomeScreen({ store, setStore, go, userId }) {
               </div>
             )}
 
-            <button onClick={() => setCardioPopoverOpen(true)} style={{
-              width: '50%', marginTop: 10, padding: '9px 16px',
-              background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-              border: '1px solid rgba(var(--accent-rgb),0.6)',
-              borderRadius: 8, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-              WebkitTapHighlightColor: 'transparent',
-            }}>
-              <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: 'rgba(10,8,5,0.6)' }} />
-              <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
-            </button>
-
             </div>{/* end fixed header */}
 
           </div>
         )}
       </div>
+
+      {!isActiveRest && (
+        <div style={{ flexShrink: 0, padding: '6px 22px 2px', display: 'flex', justifyContent: 'center' }}>
+          <button onClick={() => setCardioPopoverOpen(true)} style={{
+            width: '50%', padding: '9px 16px',
+            background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+            border: '1px solid rgba(var(--accent-rgb),0.6)',
+            borderRadius: 8, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: 'rgba(10,8,5,0.6)' }} />
+            <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
+          </button>
+        </div>
+      )}
 
       {/* Last session + not-logged strip — fixed above tab bar */}
       {(lastSession || (recentBannerDay && !store.inProgress)) && (
