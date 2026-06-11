@@ -1466,7 +1466,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       </div>
 
       {!isActiveRest && (
-        <div style={{ flexShrink: 0, padding: '6px 22px', paddingBottom: 'max(12px, env(safe-area-inset-bottom, 0px))' }}>
+        <div style={{ flexShrink: 0, padding: '6px 22px', paddingBottom: useIsPad() ? 'calc(env(safe-area-inset-bottom, 0px) + 16px)' : 0 }}>
           <button onClick={() => setCardioPopoverOpen(true)} style={{
             width: '100%', padding: '9px 16px',
             background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
