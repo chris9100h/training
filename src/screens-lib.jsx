@@ -1651,7 +1651,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
   const deleteSession = async () => {
     if (!await confirm('This session will be permanently deleted.', { title: 'Delete session?', ok: 'Delete', danger: true })) return;
-    setStore(s => ({ ...s, sessions: s.sessions.filter(x => x.id !== sessionId) }));
+    setStore(s => ({
+      ...s,
+      sessions: s.sessions.filter(x => x.id !== sessionId),
+      cardioLogs: (s.cardioLogs || []).filter(l => l.sessionId !== sessionId),
+    }));
     go({ name: 'hist' });
   };
 

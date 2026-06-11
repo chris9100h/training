@@ -741,7 +741,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const sessionDate = session.date.slice(0, 10);
     const newCardioLogs = session.entries
       .filter(e => e.isCardio && e.cardioDone && e.cardioData)
-      .map(e => ({ id: LB.uid(), date: sessionDate, type: e.cardioData.type || e.name, durationMinutes: e.cardioData.durationMinutes, distanceM: e.cardioData.distanceM ?? null, paceFeeling: e.cardioData.paceFeeling ?? null, effort: e.cardioData.effort ?? null, note: null }));
+      .map(e => ({ id: LB.uid(), date: sessionDate, type: e.cardioData.type || e.name, durationMinutes: e.cardioData.durationMinutes, distanceM: e.cardioData.distanceM ?? null, paceFeeling: e.cardioData.paceFeeling ?? null, effort: e.cardioData.effort ?? null, note: null, sessionId: session.id }));
     updateSession(sess => {
       const now = new Date();
       const mins = sess.startedAt ? Math.round((now - new Date(sess.startedAt)) / 60000) : null;

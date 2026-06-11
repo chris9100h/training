@@ -306,7 +306,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Self-coaching row (coach_id = client_id), if the user is their own coach
     isCoachLoad ? null : _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
     // Cardio quick-logs — all records for the user (typically < a few hundred rows)
-    _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -417,7 +417,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       id: l.id, date: l.date, type: l.type ?? null,
       durationMinutes: l.duration_minutes, distanceM: l.distance_m ?? null,
       paceFeeling: l.pace_feeling ?? null, effort: l.effort ?? null,
-      note: l.note ?? null, createdAt: l.created_at,
+      note: l.note ?? null, sessionId: l.session_id ?? null, createdAt: l.created_at,
     })),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
     // and via the local cache also offline). bestE1rmForExercise combines this
@@ -700,6 +700,7 @@ async function syncStore(prev, next, userId) {
       id: l.id, user_id: userId, date: l.date, type: l.type ?? null,
       duration_minutes: l.durationMinutes, distance_m: l.distanceM ?? null,
       pace_feeling: l.paceFeeling ?? null, effort: l.effort ?? null, note: l.note ?? null,
+      session_id: l.sessionId ?? null,
     }))));
     if (removed.length) ops.push(_supabase.from('zane_cardio_logs').delete().in('id', removed.map(l => l.id)));
   }
