@@ -1632,7 +1632,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 {/* Distance */}
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                    <span className="label">Distance (optional)</span>
+                    <span className="label">Distance</span>
                     <div style={{ display: 'flex', gap: 4 }}>
                       {['km','mi'].map(u => (
                         <button key={u} onClick={() => { localStorage.setItem(CARDIO_DIST_KEY_T, u); setCardioForm(f => ({ ...f, distUnit: u })); }} style={{ padding: '2px 8px', borderRadius: 4, border: `1px solid ${cardioForm.distUnit === u ? UI.gold : UI.hairStrong}`, background: cardioForm.distUnit === u ? UI.goldFaint : 'transparent', color: cardioForm.distUnit === u ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', cursor: 'pointer' }}>{u}</button>
@@ -1649,7 +1649,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
                 {/* Pace feeling */}
                 <div style={{ marginBottom: 14 }}>
-                  <div className="label" style={{ marginBottom: 8 }}>Pace feeling (optional)</div>
+                  <div className="label" style={{ marginBottom: 8 }}>Pace feeling</div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {[['1','Easy'],['2','Light'],['3','Steady'],['4','Power'],['5','Hard'],['6','Max']].map(([v, l]) => (
                       <Pill key={v} gold={cardioForm.paceFeeling === Number(v)}
@@ -1661,7 +1661,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
                 {/* Effort */}
                 <div style={{ marginBottom: 18 }}>
-                  <div className="label" style={{ marginBottom: 8 }}>Effort 1–10 (optional)</div>
+                  <div className="label" style={{ marginBottom: 8 }}>Effort 1–10</div>
                   <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                     {[1,2,3,4,5,6,7,8,9,10].map(v => (
                       <button key={v} onClick={() => setCardioForm(f => ({ ...f, effort: f.effort === v ? null : v }))} style={{ width: 30, height: 30, borderRadius: 4, border: `1px solid ${cardioForm.effort === v ? UI.gold : UI.hairStrong}`, background: cardioForm.effort === v ? UI.goldFaint : 'transparent', color: cardioForm.effort === v ? UI.gold : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>{v}</button>

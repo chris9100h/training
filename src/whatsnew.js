@@ -19,7 +19,7 @@ window.WHATS_NEW = [
     title: 'Cardio in your training plan',
     items: [
       'Add the CARDIO exercise to any training day in your plan — ideal if cardio is already part of your routine.',
-      'When you reach it during a session, pick your activity, then log duration, distance and effort.',
+      'When you reach it during a session, type your activity or tap a chip — your past activities appear automatically as quick-select shortcuts.',
       'Done — the data lands straight in your cardio history. No double-logging.',
       'Cardio exercises never count toward your training volume or workout streaks.',
     ],
