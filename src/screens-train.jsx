@@ -1651,7 +1651,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <div style={{ marginBottom: 14 }}>
                   <div className="label" style={{ marginBottom: 8 }}>Pace feeling</div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {[['1','Easy'],['2','Light'],['3','Steady'],['4','Power'],['5','Hard'],['6','Max']].map(([v, l]) => (
+                    {[['1','Easy'],['2','Light'],['3','Steady'],['4','Solid'],['5','Hard'],['6','Max']].map(([v, l]) => (
                       <Pill key={v} gold={cardioForm.paceFeeling === Number(v)}
                         onClick={() => setCardioForm(f => ({ ...f, paceFeeling: f.paceFeeling === Number(v) ? null : Number(v) }))}
                         style={{ cursor: 'pointer' }}>{l}</Pill>

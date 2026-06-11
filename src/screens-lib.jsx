@@ -932,7 +932,7 @@ function CardioTypeDetailSheet({ type, logs, open, onClose }) {
   const speedPoints = filtered.filter(l => l.distanceM != null && l.durationMinutes > 0).map(l => ({ date: l.date, value: parseFloat(((du === 'mi' ? l.distanceM / MI_TO_M_H : l.distanceM / 1000) / (l.durationMinutes / 60)).toFixed(2)) }));
   const effortPoints = filtered.filter(l => l.effort != null).map(l => ({ date: l.date, value: l.effort }));
   const paceFlPoints = filtered.filter(l => l.paceFeeling != null).map(l => ({ date: l.date, value: l.paceFeeling }));
-  const paceFlLabels = ['', 'Easy', 'Light', 'Steady', 'Power', 'Hard', 'Max'];
+  const paceFlLabels = ['', 'Easy', 'Light', 'Steady', 'Solid', 'Hard', 'Max'];
 
   const charts = [
     durPoints.length >= 2 && { points: durPoints, label: 'DURATION', formatVal: v => `${Math.round(v)}min` },
@@ -1509,7 +1509,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
           if (d >= lastMonday) return 'LAST WEEK';
           return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
         };
-        const paceLbl = ['', 'Easy', 'Light', 'Steady', 'Power', 'Hard', 'Max'];
+        const paceLbl = ['', 'Easy', 'Light', 'Steady', 'Solid', 'Hard', 'Max'];
         return (
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px' }}>
