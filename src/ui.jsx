@@ -612,8 +612,8 @@ function useConfirm() {
   const close = (result) => { state?.resolve(result); setState(null); };
   const el = state && (
     <Sheet open={true} onClose={() => close(false)}>
-      <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, marginBottom: 10 }}>{state.title}</div>
-      <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 22, lineHeight: 1.5 }}>{state.message}</div>
+      <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, marginBottom: 10, textAlign: 'center' }}>{state.title}</div>
+      <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 22, lineHeight: 1.5, textAlign: 'center' }}>{state.message}</div>
       <div style={{ display: 'flex', gap: 8 }}>
         <Btn kind="ghost" onClick={() => close(false)} style={{ flex: 1 }}>{state.cancel}</Btn>
         <Btn onClick={() => close(true)} style={{

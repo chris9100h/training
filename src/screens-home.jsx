@@ -1315,7 +1315,7 @@ function HomeScreen({ store, setStore, go, userId }) {
               <Btn kind="ghost" onClick={() => go({ name: 'plan-view' })} style={{ flex: 1 }}>View plan</Btn>
             </div>
             <button onClick={() => setCardioPopoverOpen(true)} style={{
-              width: '100%', marginTop: 8, padding: '9px 16px',
+              width: '50%', marginTop: 8, padding: '9px 16px',
               background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
               border: '1px solid rgba(var(--accent-rgb),0.6)',
               borderRadius: 8, cursor: 'pointer',
@@ -1460,7 +1460,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             )}
 
             <button onClick={() => setCardioPopoverOpen(true)} style={{
-              width: '100%', marginTop: 10, padding: '9px 16px',
+              width: '50%', marginTop: 10, padding: '9px 16px',
               background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
               border: '1px solid rgba(var(--accent-rgb),0.6)',
               borderRadius: 8, cursor: 'pointer',
@@ -1527,7 +1527,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                     </button>
                     <button onClick={async () => {
-                      if (!await confirm('Delete this cardio log?', { ok: 'Delete', danger: true })) return;
+                      if (!await confirm('Delete this cardio log?', { ok: 'Confirm?' })) return;
                       setStore(s => ({ ...s, cardioLogs: (s.cardioLogs||[]).filter(x => x.id !== l.id) }));
                     }} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 2px', color: UI.danger, fontSize: 16, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
                   </div>
