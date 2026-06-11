@@ -1548,7 +1548,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                             <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                               {l.paceFeeling != null && <span className="micro" style={{ color: UI.inkFaint }}>PACE : {paceLbl[l.paceFeeling] || l.paceFeeling}</span>}
                               {l.paceFeeling != null && l.effort != null && <span style={{ fontSize: 9, color: UI.inkGhost, lineHeight: 1 }}>·</span>}
-                              {l.effort != null && <span className="micro" style={{ color: UI.inkFaint }}>EFFORT : <span style={{ color: UI.inkSoft }}>{l.effort}/10</span></span>}
+                              {l.effort != null && <span className="micro" style={{ color: UI.inkFaint }}>EFFORT : <span style={{ color: UI.gold }}>{l.effort}/10</span></span>}
                               {l.note && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic' }}>{l.note}</span>}
                             </div>
                           )}
