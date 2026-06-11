@@ -889,7 +889,10 @@ function CardioLineChart({ points, label, formatVal }) {
   return (
     <div style={{ background: UI.bgInset, borderRadius: 6, padding: '10px 12px', border: `0.5px solid ${UI.hair}` }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{label}</div>
-      <div className="num" style={{ fontSize: 17, color: UI.gold, marginBottom: 2 }}>{formatVal(vals[vals.length - 1])}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, marginBottom: 2 }}>
+        <span className="num" style={{ fontSize: 17, color: UI.gold }}>{formatVal(vals.reduce((s, v) => s + v, 0) / vals.length)}</span>
+        <span className="micro" style={{ color: UI.inkFaint }}>AVG</span>
+      </div>
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
         <text x={padL - 4} y={padT + 5} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
         {max > min && <text x={padL - 4} y={h - padB} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
