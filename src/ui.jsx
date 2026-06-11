@@ -515,11 +515,15 @@ function Pill({ children, gold = false, style = {}, ...rest }) {
 // ─── Sheet ──────────────────────────────────────────────────────────
 function Sheet({ open, onClose, title, children }) {
   const [kbHeight, setKbHeight] = React.useState(0);
+  const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
   React.useEffect(() => {
     if (!open) return;
     const vv = window.visualViewport;
     if (!vv) return;
-    const update = () => setKbHeight(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+    const update = () => {
+      setKbHeight(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+      setVvHeight(vv.height);
+    };
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
     update();
@@ -542,7 +546,7 @@ function Sheet({ open, onClose, title, children }) {
         boxShadow: '0 -16px 48px rgba(0,0,0,0.6)',
         padding: `16px 22px ${kbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
         animation: 'sheet-up 0.22s ease',
-        maxHeight: '88dvh', overflow: 'auto',
+        maxHeight: kbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto',
       }}>
         <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 2, margin: '0 auto 16px' }} />
         {title && (
