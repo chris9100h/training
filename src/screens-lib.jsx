@@ -458,7 +458,7 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
             {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
               <Pill key={val} gold={movementType === val}
-                onClick={() => { setMovementType(val); setNoWeightReps(val === 'mobility'); }}
+                onClick={() => { setMovementType(val); setNoWeightReps(val === 'mobility'); if (val === 'mobility') setEquipment('no_equipment'); }}
                 style={{ cursor: 'pointer' }}>{label}</Pill>
             ))}
           </div>
@@ -695,7 +695,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
               <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                 {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
                   <Pill key={val} gold={editMovementType === val}
-                    onClick={() => { setEditMovementType(val); setEditNoWeightReps(val === 'mobility'); }}
+                    onClick={() => { setEditMovementType(val); setEditNoWeightReps(val === 'mobility'); if (val === 'mobility') setEditEquipment('no_equipment'); }}
                     style={{ cursor: 'pointer' }}>{label}</Pill>
                 ))}
               </div>
