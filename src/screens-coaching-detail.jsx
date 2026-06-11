@@ -413,7 +413,7 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
   return (
     <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       {toggleRow}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
         <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
           <CheckInTrendCards recent={recent} />
           <div className="knurl" style={{ margin: '4px 0' }} />
