@@ -28,7 +28,7 @@ function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) 
 
   const content = (
     <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 400, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
-      <div style={{ background: UI.bg, borderRadius: '16px 16px 0 0', padding: '20px 20px 44px', borderTop: `0.5px solid ${UI.hairStrong}`, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', padding: '20px 20px 44px', borderTop: `0.5px solid ${UI.hairStrong}`, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: 'var(--accent)' }} />
@@ -228,7 +228,7 @@ function CheckInTrendCards({ recent }) {
     );
   };
 
-  const cardStyle = { flex: 1, minWidth: 80, background: UI.bgInset, borderRadius: 10, padding: '8px 10px', border: `0.5px solid ${UI.hair}`, display: 'flex', flexDirection: 'column', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
+  const cardStyle = { flex: 1, minWidth: 80, background: UI.bgInset, borderRadius: 6, padding: '8px 10px', border: `0.5px solid ${UI.hair}`, display: 'flex', flexDirection: 'column', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
 
   const TrendCard = ({ label, icon, values, format, invertColor, sub }) => {
     const valid = values.filter(v => v != null);
@@ -531,7 +531,7 @@ function ClientNutritionTab({ coachingId, userId }) {
   const renderSection = (prefix, label, cals) => (
     <div style={{ marginBottom: 20 }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{label}</div>
-      <div style={{ background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', gap: 10 }}>
           {renderCals(cals)}
           {renderInput(`protein${prefix}`, 'PROTEIN', 'g')}
@@ -566,7 +566,7 @@ function ClientNutritionTab({ coachingId, userId }) {
             const td = [m.caloriesTraining && `${m.caloriesTraining} kcal`, m.proteinTraining && `${m.proteinTraining}g P`, m.carbsTraining && `${m.carbsTraining}g C`, m.fatTraining && `${m.fatTraining}g F`].filter(Boolean).join(' · ');
             const rd = [m.caloriesRest && `${m.caloriesRest} kcal`, m.proteinRest && `${m.proteinRest}g P`, m.carbsRest && `${m.carbsRest}g C`, m.fatRest && `${m.fatRest}g F`].filter(Boolean).join(' · ');
             return (
-              <div key={m.id} style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 8 }}>
+              <div key={m.id} style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, marginBottom: 8 }}>
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>
                   {fmtDate(m.setAt)} · {new Date(m.setAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
                 </div>

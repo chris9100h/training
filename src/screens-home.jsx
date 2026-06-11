@@ -511,7 +511,9 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog }
       {/* Date */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Date</div>
-        <input type="date" value={form.date} max={todayStr} onChange={e => set('date', e.target.value)} style={{ ...inputStyle, colorScheme: 'dark', maxWidth: '100%' }} />
+        <div style={{ display: 'flex' }}>
+          <input type="date" value={form.date} max={todayStr} onChange={e => set('date', e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 0, colorScheme: 'dark' }} />
+        </div>
       </div>
 
       {/* Type */}
