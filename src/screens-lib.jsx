@@ -1215,9 +1215,9 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
   const [planFilter, setPlanFilter] = useStateL(null);
   const [periodFilter, setPeriodFilter] = useStateL(null);
   const [dayFilter, setDayFilter] = useStateL(null);
+  const [confirmEl, confirm] = useConfirm();
   const [cardioLogOpen, setCardioLogOpen] = useStateL(false);
   const [editingCardioLog, setEditingCardioLog] = useStateL(null);
-  const [deleteConfirmCardioId, setDeleteConfirmCardioId] = useStateL(null);
 
   const sessions = useMemoL(() => {
     return [...store.sessions]
@@ -1459,14 +1459,10 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                         <button onClick={() => { setEditingCardioLog(l); setCardioLogOpen(true); }} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint }}>
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                         </button>
-                        {deleteConfirmCardioId === l.id ? (
-                          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
-                            <button onClick={() => setDeleteConfirmCardioId(null)} style={{ background: 'none', border: `1px solid ${UI.hairStrong}`, borderRadius: 4, cursor: 'pointer', padding: '3px 8px', fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>Cancel</button>
-                            <button onClick={() => { setStore(s => ({ ...s, cardioLogs: (s.cardioLogs||[]).filter(x => x.id !== l.id) })); setDeleteConfirmCardioId(null); }} style={{ background: UI.danger, border: 'none', borderRadius: 4, cursor: 'pointer', padding: '3px 8px', fontSize: 10, color: '#fff', fontFamily: UI.fontUi, fontWeight: 600 }}>Delete</button>
-                          </div>
-                        ) : (
-                          <button onClick={() => setDeleteConfirmCardioId(l.id)} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 20, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
-                        )}
+                        <button onClick={async () => {
+                          if (!await confirm('Delete this cardio log?', { ok: 'Delete', danger: true })) return;
+                          setStore(s => ({ ...s, cardioLogs: (s.cardioLogs||[]).filter(x => x.id !== l.id) }));
+                        }} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 20, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
                       </div>
                     </React.Fragment>
                   );
@@ -1560,6 +1556,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
           </Sheet>
         );
       })()}
+      {confirmEl}
     </Screen>
   );
 }
