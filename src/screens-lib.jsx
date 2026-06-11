@@ -379,7 +379,7 @@ function LibraryScreen({ store, setStore, go }) {
 const EXERCISE_SIZES = [['big','Big'],['medium','Medium'],['small','Small']];
 
 const EQUIPMENT_TYPES = [
-  { key: 'bodyweight',     label: 'Bodyweight' },
+  { key: 'no_equipment',   label: 'No equipment' },
   { key: 'barbell_dual',   label: 'Dual plates' },
   { key: 'barbell_single', label: 'Single plate' },
   { key: 'cable',          label: 'Cable' },
