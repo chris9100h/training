@@ -627,6 +627,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [warmupPromptData, setWarmupPromptData] = useState(null);
   const [notLoggedModalOpen, setNotLoggedModalOpen] = useState(false);
   const [cardioLogOpen, setCardioLogOpen] = useState(false);
+  const [cardioPopoverOpen, setCardioPopoverOpen] = useState(false);
   // The not-logged Log handler awaits a seed fetch — guard against a double
   // tap creating two sessions inside that window.
   const loggingRef = useRef(false);
@@ -1282,6 +1283,17 @@ function HomeScreen({ store, setStore, go, userId }) {
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
               <Btn kind="ghost" onClick={() => go({ name: 'plan-view' })} style={{ flex: 1 }}>View plan</Btn>
             </div>
+            <button onClick={() => setCardioPopoverOpen(true)} style={{
+              width: '100%', marginTop: 8, padding: '9px 16px',
+              background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+              border: '1px solid rgba(var(--accent-rgb),0.6)',
+              borderRadius: 8, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: 'rgba(10,8,5,0.6)' }} />
+              <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
+            </button>
           </BracketFrame>
         ) : (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
@@ -1416,6 +1428,18 @@ function HomeScreen({ store, setStore, go, userId }) {
               </div>
             )}
 
+            <button onClick={() => setCardioPopoverOpen(true)} style={{
+              width: '100%', marginTop: 10, padding: '9px 16px',
+              background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+              border: '1px solid rgba(var(--accent-rgb),0.6)',
+              borderRadius: 8, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: 'rgba(10,8,5,0.6)' }} />
+              <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
+            </button>
+
             </div>{/* end fixed header */}
 
           </div>
@@ -1449,39 +1473,31 @@ function HomeScreen({ store, setStore, go, userId }) {
         </div>
       )}
 
-      {/* Cardio quick-log strip */}
-      {(() => {
-        const recentCardio = (store.cardioLogs || []).slice(0, 3);
-        const getDistUnit = () => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } };
-        const du = getDistUnit();
+
+      {/* Cardio history popover */}
+      {cardioPopoverOpen && (() => {
+        const recentCardio = (store.cardioLogs || []).slice(0, 5);
+        const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } })();
         return (
-          <div style={{ flexShrink: 0, padding: '0 22px 10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: recentCardio.length ? 6 : 0 }}>
-              <span className="micro" style={{ color: UI.inkGhost }}>CARDIO</span>
-              <button onClick={() => setCardioLogOpen(true)} style={{
-                display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
-                background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
-                borderRadius: 4, cursor: 'pointer', color: UI.inkFaint,
-                fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.08em',
-                WebkitTapHighlightColor: 'transparent',
-              }}>
-                <i className="fa-solid fa-plus" style={{ fontSize: 8 }} /> LOG
-              </button>
-            </div>
-            {recentCardio.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <Sheet open={true} onClose={() => setCardioPopoverOpen(false)}>
+            <div className="micro" style={{ marginBottom: recentCardio.length ? 14 : 6, color: UI.inkFaint }}>RECENT CARDIO</div>
+            {recentCardio.length === 0 ? (
+              <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, textAlign: 'center', marginBottom: 18 }}>No cardio logged yet.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 18 }}>
                 {recentCardio.map(l => (
-                  <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}` }}>
-                    <i className="fa-solid fa-person-running" style={{ fontSize: 10, color: UI.inkFaint, width: 12 }} />
-                    <span style={{ flex: 1, fontSize: 11, color: UI.ink, fontFamily: UI.fontUi }}>{l.type || '—'}</span>
-                    <span className="num" style={{ fontSize: 11, color: UI.gold }}>{l.durationMinutes}<span style={{ color: UI.inkFaint, fontSize: 9 }}>min</span></span>
-                    {l.distanceM != null && <span className="num" style={{ fontSize: 10, color: UI.inkSoft }}>{mToDisplay(l.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>}
+                  <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}` }}>
+                    <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: UI.inkFaint, width: 12 }} />
+                    <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>{l.type || '—'}</span>
+                    <span className="num" style={{ fontSize: 12, color: UI.gold }}>{l.durationMinutes}<span style={{ color: UI.inkFaint, fontSize: 9 }}>min</span></span>
+                    {l.distanceM != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{mToDisplay(l.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>}
                     <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{l.date.slice(5).replace('-', '/')}</span>
                   </div>
                 ))}
               </div>
             )}
-          </div>
+            <Btn onClick={() => { setCardioPopoverOpen(false); setCardioLogOpen(true); }}>+ LOG CARDIO</Btn>
+          </Sheet>
         );
       })()}
 
