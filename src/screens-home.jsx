@@ -1480,9 +1480,9 @@ function HomeScreen({ store, setStore, go, userId }) {
         const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } })();
         return (
           <Sheet open={true} onClose={() => setCardioPopoverOpen(false)}>
-            <div className="micro" style={{ marginBottom: recentCardio.length ? 14 : 6, color: UI.inkFaint }}>RECENT CARDIO</div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 15, fontWeight: 600, letterSpacing: '0.10em', textTransform: 'uppercase', color: UI.inkSoft, textAlign: 'center', marginBottom: recentCardio.length ? 16 : 10 }}>RECENT CARDIO</div>
             {recentCardio.length === 0 ? (
-              <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, textAlign: 'center', marginBottom: 18 }}>No cardio logged yet.</div>
+              <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, textAlign: 'center', marginBottom: 20 }}>No cardio logged yet.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 18 }}>
                 {recentCardio.map(l => (
@@ -1496,7 +1496,9 @@ function HomeScreen({ store, setStore, go, userId }) {
                 ))}
               </div>
             )}
-            <Btn onClick={() => { setCardioPopoverOpen(false); setCardioLogOpen(true); }}>+ LOG CARDIO</Btn>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <Btn onClick={() => { setCardioPopoverOpen(false); setCardioLogOpen(true); }} style={{ minWidth: 200 }}>+ LOG CARDIO</Btn>
+            </div>
           </Sheet>
         );
       })()}
