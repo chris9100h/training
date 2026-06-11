@@ -15,30 +15,13 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
-    id: 'v2.118',
-    title: 'Cardio in your training plan',
+    id: 'v2.124',
+    title: 'Cardio & Mobility',
     items: [
-      'Add the CARDIO exercise to any training day — perfect if cardio is part of your regular routine.',
-      'When you reach it in a session, type your activity or tap a quick-select chip. Your past activities appear automatically as you build up a history.',
-      'Logged data goes straight into your cardio history when the session ends. No double-logging.',
-      'Cardio never counts toward your training volume or workout streaks.',
-    ],
-  },
-  {
-    id: 'v2.115a',
-    title: 'Cardio Logging',
-    items: [
-      'Track cardio directly in the app — runs, rides, rows, anything you do.',
-      'Log duration, distance (km or mi), pace feeling and effort. Quick-log via the CARDIO button on the home screen, full history under History → Cardio.',
-      'Check-in forms auto-fill with your cardio data from the week, so nothing needs to be entered twice.',
-    ],
-  },
-  {
-    id: 'v2.115b',
-    title: 'Mobility & Fixes',
-    items: [
-      'New Mobility exercise type for stretching and mobility work — excluded from training volume.',
-      'Rest timer audio and Pushover notifications are working reliably again.',
+      'Two ways to log cardio: quick-log via the CARDIO button on the home screen, or add the CARDIO exercise to any training day — it saves to your history automatically when the session ends.',
+      'Track activity type, duration, distance (km or mi), pace feeling and effort. Your past activities appear as quick-select chips the more you log.',
+      'Full cardio history under History → Cardio; check-in forms auto-fill with your week\'s cardio data. Cardio never counts toward training volume or workout streaks.',
+      'New Mobility exercise type for stretching work, excluded from volume. Rest timer audio and Pushover notifications are back.',
     ],
   },
   {
