@@ -115,7 +115,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 ### Aktuelle Tabellen & Spalten
 
-**`zane_exercises`:** `id` (text), `user_id` (uuid), `name`, `note`, `category` (text), `tags` (text[]), `unilateral` (boolean), `equipment` (text), `progression_reps` (int)
+**`zane_exercises`:** `id` (text), `user_id` (uuid), `name`, `note`, `category` (text), `tags` (text[]), `unilateral` (boolean), `movement_type` (text: 'bilateral'|'unilateral'|'mobility'), `no_weight_reps` (boolean, default false), `equipment` (text), `progression_reps` (int)
 
 **`zane_feature_grants`:** `feature` (text), `email` (text)
 

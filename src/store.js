@@ -184,7 +184,7 @@ async function importFromBackup(backup, userId) {
   await Promise.all([
     backup.user?.name && unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name })),
     backup.exercises?.length && unwrap(_supabase.from('zane_exercises').upsert(
-      backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, user_id: userId }))
+      backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, user_id: userId }))
     )),
     backup.schedules?.length && unwrap(_supabase.from('zane_schedules').upsert(
       backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
@@ -272,7 +272,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const histCutoff = historyWindowCutoffISO();
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps').eq('user_id', userId),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
@@ -632,7 +632,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -937,19 +937,23 @@ async function refreshExerciseBests(userId) {
 // done:false in Supabase even though the user actually performed them.
 // Ended sessions outside the boot window carry no entries — fall back to the
 // server aggregate (get_session_stats) attached at load time.
-function totalVolume(session) {
+function totalVolume(session, exercises) {
   const ended = !!session.ended;
   if (ended && !(session.entries || []).length && session.aggVolume != null) return session.aggVolume;
-  return (session.entries || []).reduce((sum, ex) =>
-    sum + (ex.sets || []).filter(st => {
+  const mobilityIds = exercises
+    ? new Set(exercises.filter(e => e.movement_type === 'mobility').map(e => e.id))
+    : null;
+  return (session.entries || []).reduce((sum, entry) => {
+    if (mobilityIds && mobilityIds.has(entry.exId)) return sum;
+    return sum + (entry.sets || []).filter(st => {
       if (st.warmup || st.skipped) return false;
       if (ended) return st.kg != null && (st.reps != null || st.repsL != null || st.repsR != null);
       return st.done;
     }).reduce((s, st) => {
       const reps = effReps(st) ?? 0;
       return s + (+st.kg || 0) * reps;
-    }, 0), 0
-  );
+    }, 0);
+  }, 0);
 }
 
 // Count of completed working sets in a session (warm-ups excluded).

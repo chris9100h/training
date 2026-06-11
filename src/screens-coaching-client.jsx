@@ -339,7 +339,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
     [ended, planStartDate]
   );
   const avgVol = planSessions.length > 0
-    ? Math.round(planSessions.reduce((s, x) => s + LB.totalVolume(x), 0) / planSessions.length)
+    ? Math.round(planSessions.reduce((s, x) => s + LB.totalVolume(x, clientStore.exercises), 0) / planSessions.length)
     : null;
 
   const adherenceLabel = `Adherence (${weeks.length}w)`;
@@ -413,7 +413,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
             {trainedToday && todaySession ? (
               <div>
                 <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-                  <StatBox label="Volume" value={`${Math.round(LB.totalVolume(todaySession)).toLocaleString('en-US')}${UI.unit()}`} />
+                  <StatBox label="Volume" value={`${Math.round(LB.totalVolume(todaySession, clientStore.exercises)).toLocaleString('en-US')}${UI.unit()}`} />
                   <StatBox label="Sets" value={LB.doneSetCount(todaySession)} />
                   <StatBox label="Duration" value={todaySession.durationMinutes ? `${todaySession.durationMinutes}m` : '—'} />
                 </div>
@@ -550,7 +550,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
               <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{fmtDate(s.date)}</div>
             </div>
-            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(LB.totalVolume(s)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span></span>
+            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(LB.totalVolume(s, clientStore.exercises)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span></span>
             <ChevronRight />
           </div>
         ))
@@ -630,7 +630,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
   ended.forEach(s => {
     const key = getGroupKey(s.date.slice(0, 10));
     if (!byGroup[key]) byGroup[key] = { date: key, vol: 0, count: 0 };
-    byGroup[key].vol += LB.totalVolume(s);
+    byGroup[key].vol += LB.totalVolume(s, clientStore?.exercises);
     byGroup[key].count++;
   });
 
@@ -1129,7 +1129,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
 
   // ── Session detail ─────────────────────────────────────────────────
   if (selected) {
-    const vol = LB.totalVolume(selected);
+    const vol = LB.totalVolume(selected, clientStore.exercises);
     const storeWithoutSelected = { ...clientStore, sessions: clientStore.sessions.filter(s => s.ended && s.ended < selected.ended) };
     return (
       <div style={{ overflowY: 'auto', flex: 1 }}>
@@ -1231,7 +1231,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             {dayFilter ? `No "${dayFilter}" sessions yet.` : 'No sessions yet.'}
           </div>
         ) : filteredSessions.map(s => {
-          const vol = LB.totalVolume(s);
+          const vol = LB.totalVolume(s, clientStore.exercises);
           return (
             <div key={s.id} onClick={() => setSelected(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}>
               <div style={{ flex: 1 }}>

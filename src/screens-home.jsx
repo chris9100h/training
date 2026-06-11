@@ -344,7 +344,7 @@ function LastSessionStrip({ session, onClick }) {
               {LB.parseDate(session.date).toLocaleDateString('en-US', { day:'2-digit', month:'short' }).toUpperCase()}
             </span>
             <span className="num" style={{ color: UI.gold, fontSize: 11 }}>
-              {Math.round(LB.totalVolume(session)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>{UI.unit()}</span>
+              {Math.round(LB.totalVolume(session, store.exercises)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>{UI.unit()}</span>
             </span>
           </div>
         </div>

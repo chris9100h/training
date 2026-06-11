@@ -395,7 +395,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return () => { on = false; };
   }, [entry?.exId]);
   const last = localLast ?? (entry ? remoteLast[entry.exId] : null) ?? null;
-  const isUnilateral = !!exercise?.unilateral;
+  const isUnilateral = (exercise?.movement_type ?? (exercise?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
+  const isNoWeightReps = !!exercise?.no_weight_reps;
   const progressionTargetForSet = (workingSetIdx) => {
     if (!store.settings?.smartProgression) return null;
     const perSet = entry?.plannedRepsPerSet;
@@ -1201,7 +1202,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const workingSetsArr = entry.sets.filter(s => !s.warmup);
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
-  const anyMissingData = workingSetsArr.some(st => !st.done && !st.skipped && (st.kg == null || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
+  const anyMissingData = !isNoWeightReps && workingSetsArr.some(st => !st.done && !st.skipped && (st.kg == null || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
 
   const checkAllSets = async () => {
     if (allWorkingDone || anyMissingData) return;
@@ -1549,8 +1550,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 </div>
               </div>
 
-              {/* HUGE inputs */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '0 14px' }}>
+              {/* HUGE inputs — hidden for checkbox-only mobility exercises */}
+              {!isNoWeightReps && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '0 14px' }}>
                 <div style={{ flex: 1, textAlign: 'center' }}>
                   <KgInput
                     value={heroSet.kg}
@@ -1617,7 +1618,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     <div className="micro" style={{ marginTop: 2 }}>REPETITIONS</div>
                   </div>
                 )}
-              </div>
+              </div>}
 
               {/* Big confirm button */}
               <div style={{ marginTop: 12, padding: '0 18px' }}>
@@ -1628,16 +1629,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     if (currentSetIdx < 0) return;
                     completeSet(currentSetIdx);
                   }}
-                  disabled={warmupSetsRemaining || postWarmupRest || heroSet.kg == null || (!(kbField?.setIdx === bgSetIdx && kbField?.field !== 'kg') && (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps))}
+                  disabled={warmupSetsRemaining || postWarmupRest || (!isNoWeightReps && (heroSet.kg == null || (!(kbField?.setIdx === bgSetIdx && kbField?.field !== 'kg') && (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps))))}
                   style={{
                     width: '100%', minHeight: 44,
-                    background: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-                    border: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? `1px solid ${UI.hairStrong}` : `1px solid var(--accent-deep)`,
-                    color: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? UI.inkFaint : '#0a0805',
+                    background: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
+                    border: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? `1px solid ${UI.hairStrong}` : `1px solid var(--accent-deep)`,
+                    color: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? UI.inkFaint : '#0a0805',
                     borderRadius: 6,
                     fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em', textTransform: 'uppercase',
-                    cursor: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'default' : 'pointer',
-                    boxShadow: heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps) ? 'none' : '0 8px 30px rgba(var(--accent-rgb),0.30)',
+                    cursor: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? 'default' : 'pointer',
+                    boxShadow: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? 'none' : '0 8px 30px rgba(var(--accent-rgb),0.30)',
                     WebkitTapHighlightColor: 'transparent',
                   }}>
                   ✓ Check set
@@ -1663,7 +1664,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             }}>{allWorkingDone ? '✓ All' : 'All ✓'}</button>
           </div>
 
-          <div style={{
+          {!isNoWeightReps && <div style={{
             display: 'grid',
             gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
             gap: 8, alignItems: 'baseline',
@@ -1681,7 +1682,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{store.settings?.smartProgression ? 'Reps (min)' : 'Reps'}</span>
             )}
             <div /><div />
-          </div>
+          </div>}
           <div className="knurl" style={{ marginBottom: 2 }} />
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1711,7 +1712,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   )}
                   <div data-kb-row={i} style={{
                     display: 'grid',
-                    gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
+                    gridTemplateColumns: isNoWeightReps ? '28px 1fr 28px 18px' : (isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px'),
                     gap: 8, alignItems: 'center',
                     padding: '10px 4px',
                     opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
@@ -1726,14 +1727,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
                     }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
-                    <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
+                    {isNoWeightReps ? <div /> : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                       {isWarmupRow
                         ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
                         : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
                       }
-                    </div>
+                    </div>}
 
-                    <KgInput
+                    {!isNoWeightReps && <KgInput
                       value={s.kg}
                       done={s.done || s.skipped}
                       style={setInputStyle(s.done || s.skipped, isCurrent)}
@@ -1751,16 +1752,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           ),
                         }),
                       }))}
-                    />
+                    />}
 
-                    {isUnilateral ? (
+                    {!isNoWeightReps && (isUnilateral ? (
                       <>
                         <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsL'); }} />
                         <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsR'); }} />
                       </>
                     ) : (
                       <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
-                    )}
+                    ))}
 
                     <button
                       data-complete-btn
@@ -1779,18 +1780,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           updateSet(i, { done: false });
                           return;
                         }
-                        if (s.kg == null) return;
+                        if (!isNoWeightReps && s.kg == null) return;
                         _log(`row${i} → completeSet`);
                         completeSet(i);
                       }}
-                      disabled={!s.done && !s.skipped && (s.kg == null || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)))}
+                      disabled={!s.done && !s.skipped && !isNoWeightReps && (s.kg == null || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)))}
                       style={{
-                        width: 26, height: 26, borderRadius: 3, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (s.kg == null || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
+                        width: 26, height: 26, borderRadius: 3, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (!isNoWeightReps && (s.kg == null || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null))) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
                         background: s.done ? UI.gold : 'transparent',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontSize: s.skipped ? 12 : 14, fontWeight: 700,
                         color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
-                        opacity: !s.done && !s.skipped && (s.kg == null || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
+                        opacity: !s.done && !s.skipped && !isNoWeightReps && (s.kg == null || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
                         flexShrink: 0,
                         WebkitTapHighlightColor: 'transparent',
                       }}>{s.skipped ? '×' : '✓'}</button>
@@ -1939,7 +1940,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
               <span>Volume</span>
               <span className="num" style={{ color: UI.gold }}>
-                {Math.round(LB.totalVolume(session)).toLocaleString('en-US')} {UI.unit()}
+                {Math.round(LB.totalVolume(session, store.exercises)).toLocaleString('en-US')} {UI.unit()}
               </span>
             </div>
             <div className="knurl" />

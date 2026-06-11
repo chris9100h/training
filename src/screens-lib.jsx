@@ -389,14 +389,15 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
   const [name, setName] = useStateL(initialName);
   const [selectedTags, setSelectedTags] = useStateL([]);
   const [category, setCategory] = useStateL(null);
-  const [unilateral, setUnilateral] = useStateL(false);
+  const [movementType, setMovementType] = useStateL('bilateral');
+  const [noWeightReps, setNoWeightReps] = useStateL(false);
   const [equipment, setEquipment] = useStateL('barbell_dual');
   const [progressionReps, setProgressionReps] = useStateL(null);
   const [showSizeInfo, setShowSizeInfo] = useStateL(false);
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral, equipment: equipment || null, note: '', progression_reps: progressionReps ?? null };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: noWeightReps, equipment: equipment || null, note: '', progression_reps: progressionReps ?? null };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -453,8 +454,18 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
         <div>
           <span className="label">Movement type</span>
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-            <Pill gold={unilateral} onClick={() => setUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
+            {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
+              <Pill key={val} gold={movementType === val}
+                onClick={() => { setMovementType(val); setNoWeightReps(val === 'mobility'); }}
+                style={{ cursor: 'pointer' }}>{label}</Pill>
+            ))}
           </div>
+          {movementType === 'mobility' && (
+            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+              <Pill gold={noWeightReps} onClick={() => setNoWeightReps(true)} style={{ cursor: 'pointer' }}>Checkbox only</Pill>
+              <Pill gold={!noWeightReps} onClick={() => setNoWeightReps(false)} style={{ cursor: 'pointer' }}>Weight & Reps</Pill>
+            </div>
+          )}
         </div>
         <div>
           <span className="label">Rep target</span>
@@ -491,7 +502,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editName, setEditName] = useStateL(autoEdit ? ex.name : '');
   const [editTags, setEditTags] = useStateL(autoEdit ? [...(ex.tags || [])] : []);
   const [editCategory, setEditCategory] = useStateL(autoEdit ? (ex.category || null) : null);
-  const [editUnilateral, setEditUnilateral] = useStateL(autoEdit ? !!ex.unilateral : false);
+  const [editMovementType, setEditMovementType] = useStateL(autoEdit ? (ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')) : 'bilateral');
+  const [editNoWeightReps, setEditNoWeightReps] = useStateL(autoEdit ? !!ex.no_weight_reps : false);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
   const [editProgressionReps, setEditProgressionReps] = useStateL(autoEdit ? (ex.progression_reps ?? null) : null);
   const [editNote, setEditNote] = useStateL(false);
@@ -507,7 +519,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     }
   };
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditUnilateral(!!ex.unilateral); setEditEquipment(ex.equipment || null); setEditProgressionReps(ex.progression_reps ?? null); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditNoWeightReps(!!ex.no_weight_reps); setEditEquipment(ex.equipment || null); setEditProgressionReps(ex.progression_reps ?? null); setEditMode(true); };
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
@@ -515,7 +527,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     const repsChanged = newProgressionReps !== (ex.progression_reps ?? null);
     setStore(s => {
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editUnilateral, equipment: editEquipment || null, progression_reps: newProgressionReps }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: editNoWeightReps, equipment: editEquipment || null, progression_reps: newProgressionReps }
         : e);
       const schedules = (repsChanged && newProgressionReps != null)
         ? s.schedules.map(sch => ({ ...sch, days: sch.days.map(day => ({ ...day, items: (day.items || []).map(it => it.exId === exId ? { ...it, reps: newProgressionReps } : it) })) }))
@@ -677,8 +689,18 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             <div>
               <span className="label">Movement type</span>
               <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                <Pill gold={editUnilateral} onClick={() => setEditUnilateral(v => !v)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
+                {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
+                  <Pill key={val} gold={editMovementType === val}
+                    onClick={() => { setEditMovementType(val); setEditNoWeightReps(val === 'mobility'); }}
+                    style={{ cursor: 'pointer' }}>{label}</Pill>
+                ))}
               </div>
+              {editMovementType === 'mobility' && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <Pill gold={editNoWeightReps} onClick={() => setEditNoWeightReps(true)} style={{ cursor: 'pointer' }}>Checkbox only</Pill>
+                  <Pill gold={!editNoWeightReps} onClick={() => setEditNoWeightReps(false)} style={{ cursor: 'pointer' }}>Weight & Reps</Pill>
+                </div>
+              )}
             </div>
             <div>
               <span className="label">Rep target</span>
@@ -704,10 +726,11 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {ex.category && <Pill gold>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
-            {ex.unilateral && <Pill gold>Unilateral</Pill>}
+            {ex.movement_type === 'unilateral' || (ex.unilateral && !ex.movement_type) ? <Pill gold>Unilateral</Pill> : null}
+            {ex.movement_type === 'mobility' && <Pill gold>Mobility</Pill>}
             {(ex.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
             {ex.equipment && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill>}
-            {!ex.category && !ex.unilateral && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
+            {!ex.category && !ex.unilateral && ex.movement_type !== 'mobility' && !(ex.tags || []).length && <span className="micro" style={{ fontStyle: 'italic', color: UI.inkFaint }}>No muscle group — Edit</span>}
           </div>
         )}
       </div>
@@ -918,7 +941,7 @@ function StatsTab({ store, sessions, go }) {
       const wSun = new Date(wMon); wSun.setDate(wMon.getDate() + 6);
       const vol = sessions
         .filter(s => { const d = LB.parseDate(s.date); return d >= wMon && d <= wSun; })
-        .reduce((sum, s) => sum + LB.totalVolume(s), 0);
+        .reduce((sum, s) => sum + LB.totalVolume(s, store.exercises), 0);
       const label = wMon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       weeks.push({ label, vol });
     }
@@ -926,7 +949,7 @@ function StatsTab({ store, sessions, go }) {
   }, [sessions, todayKey]);
 
   // All-time stats
-  const totalVol = sessions.reduce((sum, s) => sum + LB.totalVolume(s), 0);
+  const totalVol = sessions.reduce((sum, s) => sum + LB.totalVolume(s, store.exercises), 0);
   const avgVol = sessions.length ? Math.round(totalVol / sessions.length) : 0;
   const durations = sessions
     .map(s => s.durationMinutes != null
@@ -937,7 +960,7 @@ function StatsTab({ store, sessions, go }) {
   const maxDuration = durations.length ? Math.max(...durations) : 0;
 
   // Best session by volume
-  const bestSession = sessions.length ? sessions.reduce((best, s) => LB.totalVolume(s) > LB.totalVolume(best) ? s : best, sessions[0]) : null;
+  const bestSession = sessions.length ? sessions.reduce((best, s) => LB.totalVolume(s, store.exercises) > LB.totalVolume(best, store.exercises) ? s : best, sessions[0]) : null;
 
   // Streaks — rest days are transparent, only missed training days break the streak
   const sessionDateSet = new Set(sessions.map(s => s.date.slice(0, 10)));
@@ -1329,7 +1352,7 @@ function HistoryScreen({ store, go, initialTab }) {
               }
               const s = item.session;
               const setsLogged = LB.doneSetCount(s);
-              const vol = LB.totalVolume(s);
+              const vol = LB.totalVolume(s, store.exercises);
               const date = LB.parseDate(s.date);
               const days = Math.round((Date.now() - date) / 86400000);
               const isToday = days === 0;
@@ -1451,11 +1474,11 @@ function HistoryScreen({ store, go, initialTab }) {
 
 // ─── FEEL ────────────────────────────────────────────────────────────
 const FEEL_LEVELS = [
-  { key: 'easy',      label: 'EASY',      color: '#94a3b8' },
-  { key: 'good',      label: 'GOOD',      color: '#22c55e' },
-  { key: 'hard',      label: 'HARD',      color: UI.gold   },
+  { key: 'easy',      label: 'EASY',      color: '#38bdf8' },
+  { key: 'good',      label: 'GOOD',      color: '#4ade80' },
+  { key: 'hard',      label: 'HARD',      color: '#facc15' },
   { key: 'very_hard', label: 'VERY HARD', color: '#f97316' },
-  { key: 'max',       label: 'MAX',       color: UI.danger },
+  { key: 'max',       label: 'MAX',       color: '#ef4444' },
 ];
 
 function feelColor(key) {
@@ -1523,7 +1546,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     return () => { on = false; };
   }, [needsEntries, sessionId]);
   if (!s) return null;
-  const vol = LB.totalVolume(s);
+  const vol = LB.totalVolume(s, store.exercises);
   const duration = s.durationMinutes != null
     ? s.durationMinutes
     : (s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null);
