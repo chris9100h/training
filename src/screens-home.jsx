@@ -613,7 +613,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog }
         <textarea rows={2} placeholder="…" value={form.note} onChange={e => set('note', e.target.value)} style={{ ...inputStyle, resize: 'none' }} />
       </div>
 
-      <Btn onClick={save} disabled={!canSave}>SAVE</Btn>
+      <Btn onClick={save} disabled={!canSave} style={{ width: '100%' }}>SAVE</Btn>
     </Sheet>
   );
 }
