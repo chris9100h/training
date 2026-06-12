@@ -375,11 +375,13 @@ function CheckInTrendCards({ recent, schema }) {
           </button>
         )}
       </div>
-      {resolvedSchema.map(section => (
-        <TrendSection key={section.id} label={section.label.toUpperCase()}>
-          {(section.fields || []).map(field => renderFieldCard(field))}
-        </TrendSection>
-      ))}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {resolvedSchema.map(section => (
+          <TrendSection key={section.id} label={section.label.toUpperCase()}>
+            {(section.fields || []).map(field => renderFieldCard(field))}
+          </TrendSection>
+        ))}
+      </div>
     </>
   );
 }
