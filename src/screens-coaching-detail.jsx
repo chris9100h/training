@@ -223,7 +223,10 @@ function CheckInTrendCards({ recent }) {
     return (
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, marginTop: 8, height: 20 }}>
         {vals.map((v, i) => {
-          const h = Math.max(3, Math.round(((v - min) / range) * 16) + 3);
+          // Floor the shortest bar at 6px (not glued to the baseline) and let
+          // the tallest reach 19px — a visible minimum bar reads better than a
+          // 3px sliver, even when the lowest value is 0.
+          const h = Math.round(((v - min) / range) * 13) + 6;
           return <div key={i} style={{ flex: 1, height: h, borderRadius: 2, background: i === vals.length - 1 ? 'var(--accent)' : `rgba(var(--accent-rgb),0.3)` }} />;
         })}
       </div>
