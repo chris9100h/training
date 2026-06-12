@@ -824,6 +824,23 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
 // Kept in sync with store.settings.unit by app.jsx on every render.
 UI.unit = () => (typeof window !== 'undefined' && window.__UNIT) || 'kg';
 
+// Chart Y-axis domain with breathing room. Pads the data range so plotted
+// points never cling to the top/bottom edge of the plot:
+//   • top    = dataMax + 5%   (unless a fixed `max` is supplied)
+//   • bottom = dataMin − 5%, clamped at 0 — every metric here is non-negative
+//     and 0 is a hard floor (unless a fixed `min` is supplied, or `zeroFloor`
+//     pins it to 0 for bar / area-from-baseline charts).
+// Returns { min, max, range } for a linear scale; range is never 0.
+UI.chartDomain = (dataMin, dataMax, opts) => {
+  opts = opts || {};
+  const top = opts.max != null ? opts.max : dataMax + Math.abs(dataMax) * 0.05;
+  let bottom;
+  if (opts.min != null) bottom = opts.min;
+  else if (opts.zeroFloor) bottom = 0;
+  else bottom = Math.max(0, dataMin - Math.abs(dataMin) * 0.05);
+  return { min: bottom, max: top, range: (top - bottom) || 1 };
+};
+
 Object.assign(window, {
   UI, Screen, TopBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty,
   ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,

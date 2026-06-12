@@ -651,16 +651,16 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
   const n = points.length;
   const maxV = Math.max(...points.map(p => p.avg));
   const minV = Math.min(...points.map(p => p.avg));
-  const vRange = maxV - minV || 1;
+  const dom = UI.chartDomain(minV, maxV);
   const px = i => PAD_L + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
-  const py = v => PAD_T + plotH - ((v - minV) / vRange) * plotH;
+  const py = v => PAD_T + plotH - ((v - dom.min) / dom.range) * plotH;
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(p.avg).toFixed(1)}`).join(' ');
   const areaPath = `${linePath} L${px(n-1).toFixed(1)},${PAD_T + plotH} L${px(0).toFixed(1)},${PAD_T + plotH} Z`;
   const trend = allGroups[allGroups.length - 1].avg - allGroups[0].avg;
   const unit = UI.unit();
   const periodLabel = isWd ? 'WEEK' : `CYCLE (${cycleLen}d)`;
   const fmtY = v => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`;
-  const gridVals = [minV, minV + vRange / 2, maxV];
+  const gridVals = [dom.min, dom.min + dom.range / 2, dom.max];
   const labelIdxs = n <= 5 ? points.map((_, i) => i) : [0, Math.floor((n - 1) / 2), n - 1];
   const listGroups = [...allGroups].reverse();
 
@@ -756,14 +756,14 @@ function SessionsWeekChart({ sessions, planStartDate }) {
   const n = weeks.length;
   const W = 300, H = 110, gap = 4;
   const barW = Math.max(6, Math.floor((W - gap * (n + 1)) / n));
-  const maxCount = Math.max(...weeks.map(w => w.count), 1);
+  const dom = UI.chartDomain(0, Math.max(...weeks.map(w => w.count), 1), { zeroFloor: true });
   const labelIdxs = new Set([0, Math.floor((n - 1) / 2), n - 1]);
 
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`} style={{ overflow: 'visible' }}>
       {weeks.map((w, i) => {
         const x = gap + i * (barW + gap);
-        const h = (w.count / maxCount) * H;
+        const h = (w.count / dom.max) * H;
         return (
           <g key={i}>
             <rect x={x} y={0} width={barW} height={H} rx={2} style={{ fill: UI.bgRaised }} />
@@ -973,14 +973,13 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack }) {
   const allVals = exSessions.flatMap(s => s.sets.map(getValue)).filter(v => v != null);
   const minVal = allVals.length ? Math.min(...allVals) : 0;
   const rawMax = allVals.length ? Math.max(...allVals) : 10;
-  const maxVal = rawMax === minVal ? rawMax + 1 : rawMax;
-  const valRange = maxVal - minVal;
+  const dom = UI.chartDomain(minVal, rawMax);
 
   const PAD_L = 36, PAD_R = 12, PAD_T = 14, PAD_B = 26, VW = 320, VH = 170;
   const plotW = VW - PAD_L - PAD_R, plotH = VH - PAD_T - PAD_B, n = exSessions.length;
   const xPos = (i) => PAD_L + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
-  const yPos = (v) => PAD_T + plotH - ((v - minVal) / valRange) * plotH;
-  const gridVals = Array.from({ length: 4 }, (_, i) => minVal + (valRange / 3) * i);
+  const yPos = (v) => PAD_T + plotH - ((v - dom.min) / dom.range) * plotH;
+  const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const setAlphas = [1, 0.55, 0.35, 0.22, 0.14];
   const labelIdxs = (() => {
     if (n <= 5) return exSessions.map((_, i) => i);

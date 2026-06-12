@@ -8,9 +8,7 @@ function LineChartSheet({ label, icon, entries, format, invertColor, yMin, yMax,
   const vals = entries.map(e => e.value);
   const minV = Math.min(...vals);
   const maxV = Math.max(...vals);
-  const effectiveMin = yMin !== undefined ? yMin : minV * 0.95;
-  const effectiveMax = yMax !== undefined ? yMax : maxV;
-  const range = effectiveMax - effectiveMin || 1;
+  const dom = UI.chartDomain(minV, maxV, { min: yMin, max: yMax });
   const n = entries.length;
   // Thin out point labels (value + date) so they don't overlap when there are
   // many check-ins — show roughly 5 across, always including the last point.
@@ -18,7 +16,7 @@ function LineChartSheet({ label, icon, entries, format, invertColor, yMin, yMax,
   const showLabel = i => i === n - 1 || i % labelStep === 0;
 
   const xOf = i => padX + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
-  const yOf = v => padTop + (1 - (v - effectiveMin) / range) * plotH;
+  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
 
   const fmtD = s => {
     const d = new Date(s + 'T12:00:00');
@@ -149,10 +147,10 @@ async function exportCheckinCharts(recent) {
     const n = entries.length;
     const vals = entries.map(e => e.value);
     const minV = Math.min(...vals), maxV = Math.max(...vals);
-    const range = maxV - minV || 1;
+    const dom = UI.chartDomain(minV, maxV);
     const plotW = W - 2 * padX;
     const xOf = i => padX + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
-    const yOf = v => padTop + (1 - (v - minV) / range) * plotH;
+    const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
     const step = Math.max(1, Math.round(n / 5));
     const showLbl = i => i === n - 1 || i % step === 0;
     const pts = entries.map((e, i) => `${xOf(i).toFixed(1)},${yOf(e.value).toFixed(1)}`).join(' ');

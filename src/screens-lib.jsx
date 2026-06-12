@@ -843,11 +843,11 @@ function ProgressChart({ points }) {
   const w = 280, h = 108, padT = 8, padB = 20, padL = 36, padR = 8;
   const max = Math.max(...points.map(p => p.est));
   const min = Math.min(...points.map(p => p.est));
-  const range = max - min || 1;
+  const dom = UI.chartDomain(min, max);
+  const yOf = v => padT + (1 - (v - dom.min) / dom.range) * (h - padT - padB);
   const xy = points.map((p, i) => {
     const x = padL + (i / Math.max(1, points.length - 1)) * (w - padL - padR);
-    const y = padT + (1 - (p.est - min) / range) * (h - padT - padB);
-    return [x, y];
+    return [x, yOf(p.est)];
   });
   const path = xy.map(([x,y], i) => `${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   const fmtDate = d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' });
@@ -858,8 +858,8 @@ function ProgressChart({ points }) {
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
         <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
         <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
-        <text x={padL - 5} y={padT + 4} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{Math.round(max)} {unit}</text>
-        {max > min && <text x={padL - 5} y={h - padB} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{Math.round(min)} {unit}</text>}
+        <text x={padL - 5} y={(yOf(max) + 3).toFixed(1)} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{Math.round(max)} {unit}</text>
+        {max > min && <text x={padL - 5} y={(yOf(min) + 3).toFixed(1)} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{Math.round(min)} {unit}</text>}
         <path d={path} fill="none" stroke={UI.gold} strokeWidth="1" opacity="0.6" />
         {xy.map(([x,y], i) => (
           <circle key={i} cx={x} cy={y} r="2" fill={UI.gold} />
@@ -880,10 +880,8 @@ function CardioLineChart({ points, label, formatVal, yMin, yMax }) {
   const vals = points.map(p => p.value);
   const max = Math.max(...vals);
   const min = Math.min(...vals);
-  const effectiveMin = yMin !== undefined ? yMin : min * 0.95;
-  const effectiveMax = yMax !== undefined ? yMax : max;
-  const range = effectiveMax - effectiveMin || 1;
-  const yOf = v => padT + (1 - (v - effectiveMin) / range) * (h - padT - padB);
+  const dom = UI.chartDomain(min, max, { min: yMin, max: yMax });
+  const yOf = v => padT + (1 - (v - dom.min) / dom.range) * (h - padT - padB);
   const xy = points.map((p, i) => {
     const x = padL + (i / Math.max(1, points.length - 1)) * (w - padL - padR);
     return [x, yOf(p.value)];
@@ -900,8 +898,8 @@ function CardioLineChart({ points, label, formatVal, yMin, yMax }) {
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
         <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
         <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
-        <text x={padL - 4} y={padT + 5} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
-        {max > min && <text x={padL - 4} y={yOf(min).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
+        <text x={padL - 4} y={(yOf(max) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
+        {max > min && <text x={padL - 4} y={(yOf(min) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
         <path d={pathD} fill="none" stroke={UI.gold} strokeWidth="1.2" opacity="0.7" />
         {xy.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={xy.length > 60 ? 0 : 1.5} fill={UI.gold} />)}
         <text x={padL} y={h - 4} textAnchor="start" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
@@ -973,8 +971,8 @@ function WorkoutEffortSheet({ dayId, dayName, sessions, onClose }) {
   const W = 300, padX = 20, padTop = 36, padBottom = 26, plotH = 110;
   const H = padTop + plotH + padBottom;
   const plotW = W - 2 * padX;
-  const maxV = Math.max(...points.map(p => p.value), 5);
-  const yOf = v => padTop + (1 - v / maxV) * plotH;
+  const dom = UI.chartDomain(0, Math.max(...points.map(p => p.value), 5), { zeroFloor: true });
+  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const xOf = i => padX + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
   const pts = points.map((p, i) => `${xOf(i).toFixed(1)},${yOf(p.value).toFixed(1)}`).join(' ');
   const base = (padTop + plotH).toFixed(1);
@@ -2862,8 +2860,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
   const allVals = allSessions.flatMap(s => s.sets.map(getValue)).filter(v => v != null);
   const minVal = allVals.length ? Math.min(...allVals) : 0;
   const rawMax = allVals.length ? Math.max(...allVals) : 10;
-  const maxVal = rawMax === minVal ? rawMax + 1 : rawMax;
-  const valRange = maxVal - minVal;
+  const dom = UI.chartDomain(minVal, rawMax);
 
   const PAD_L = 36, PAD_R = 12, PAD_T = 14, PAD_B = 26;
   const VW = 320, VH = 180;
@@ -2871,9 +2868,9 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
   const plotH = VH - PAD_T - PAD_B;
   const n = allSessions.length;
   const xPos = (i) => PAD_L + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
-  const yPos = (v) => PAD_T + plotH - ((v - minVal) / valRange) * plotH;
+  const yPos = (v) => PAD_T + plotH - ((v - dom.min) / dom.range) * plotH;
 
-  const gridVals = Array.from({ length: 4 }, (_, i) => minVal + (valRange / 3) * i);
+  const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const setAlphas = [1, 0.55, 0.35, 0.22, 0.14];
 
   const labelIdxs = (() => {
