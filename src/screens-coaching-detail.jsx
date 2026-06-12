@@ -299,28 +299,35 @@ function CheckInTrendCards({ recent, schema }) {
     if (field.key === 'steps') return v => `${Math.round(v / 1000)}k`;
     if (field._distanceField) return v => distUnit === 'mi' ? `${(v/1609.344).toFixed(1)} mi` : `${(v/1000).toFixed(1)} km`;
     if (field.type === 'stepper') return v => `${v}/${field.max || 10}`;
-    if (field.type === 'choice' && field.options?.length && field.options.every(o => typeof o.value === 'number'))
-      return v => `${v}/${Math.max(...field.options.map(o => o.value))}`;
+    if (field.type === 'choice' && field.options?.length)
+      return v => `${v}/${field.options.length}`;
     if (field.unit) return v => `${v} ${field.unit}`;
     return v => String(Math.round(v * 10) / 10);
   };
 
   const getYRange = (field) => {
     if (field.type === 'stepper') return { yMin: 0, yMax: field.max || 10 };
-    if (field.type === 'choice' && field.options?.length) {
-      const nums = field.options.map(o => Number(o.value)).filter(n => !isNaN(n));
-      if (nums.length) return { yMin: 0, yMax: Math.max(...nums) };
-    }
+    if (field.type === 'choice' && field.options?.length) return { yMin: 0, yMax: field.options.length };
     return {};
+  };
+
+  // Map a stored choice response to its 1-based rank among the field's options
+  // (works for text or numeric values; falls back to a legacy numeric value).
+  const choiceRank = (field, resp) => {
+    if (resp == null || resp === '') return null;
+    const idx = (field.options || []).findIndex(o => String(o.value) === String(resp));
+    if (idx >= 0) return idx + 1;
+    const n = Number(resp);
+    return isNaN(n) ? null : n;
   };
 
   const renderFieldCard = (field) => {
     if (field.type === 'text') return null;
     if (SUB_KEYS.has(field.key)) return null;
-    // String-valued choice fields (e.g. performance) have no numeric chart
-    if (field.type === 'choice' && field.options?.length && field.options.every(o => typeof o.value === 'string')) return null;
 
-    const vals = recent.map(c => { const v = c.responses?.[field.key]; return (v != null && v !== '') ? Number(v) : null; });
+    const vals = field.type === 'choice'
+      ? recent.map(c => choiceRank(field, c.responses?.[field.key]))
+      : recent.map(c => { const v = c.responses?.[field.key]; return (v != null && v !== '') ? Number(v) : null; });
 
     if (field.key === 'days_trained') {
       const valid = vals.filter(v => v != null);
@@ -425,8 +432,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     min:           'Lowest selectable value on the stepper scale.',
     max:           'Highest selectable value on the stepper scale.',
     rows:          'How many lines tall the text area appears in the form (1–8). More rows = more vertical space.',
-    options:       'Each option is numbered automatically by its order (1, 2, 3 …) — you only write the label shown on the button. Order them to match your trend direction (e.g. with "Lower better", put the best option first).',
-    labeled:       'When on, each button shows its number above and the label text below — like the Pace feeling field in the default form.',
+    options:       'Add one button per option as plain text (e.g. Worse, Same, Improved). The text is shown to the client and saved as-is; its position sets the rank used in trends — order them to match your trend direction.',
     unit:          'Text appended after the value in trend charts. Use "weight" to auto-switch between kg and lbs based on the client\'s setting.',
     hint:          'Small helper text shown below the input to guide the client (e.g. "1 = easy, 10 = max").',
     section_label: 'The heading shown above this group of fields in the check-in form.',
@@ -515,13 +521,10 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     if (fd.type === 'stepper') { f.min = parseInt(fd.min) || 1; f.max = parseInt(fd.max) || 10; }
     if (fd.type === 'text') f.rows = parseInt(fd.rows) || 2;
     if (fd.type === 'choice') {
-      // Numeric choices get values auto-assigned by position (1, 2, 3 …).
-      // Legacy string-valued choices (e.g. the built-in Performance field)
-      // keep their stored values untouched.
-      const isStringChoice = fd.options.some(o => o.value !== '' && o.value != null && isNaN(Number(o.value)));
-      f.options = fd.options.map((o, i) => isStringChoice
-        ? { ...o, value: (o.value !== '' && !isNaN(Number(o.value))) ? Number(o.value) : o.value }
-        : { ...o, value: i + 1 });
+      // Each option stores its own text as the value; the position gives the
+      // rank used for trends (see the direction hint in the editor). Empty
+      // options are dropped.
+      f.options = fd.options.filter(o => String(o.label ?? '').trim()).map(o => ({ ...o }));
       if (fd.labeled) f.labeled = true;
     }
     setDraft(d => {
@@ -645,8 +648,6 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     const fd = fieldDraft;
     const set = (k, v) => setFieldDraft(f => ({ ...f, [k]: v }));
     const canSave = fd.label.trim().length > 0;
-    const stringChoice = fd.type === 'choice' && fd.options.some(o => o.value !== '' && o.value != null && isNaN(Number(o.value)));
-    const numericChoice = fd.type === 'choice' && fd.options.length > 0 && !stringChoice;
 
     return (
       <div style={overlayStyle}>
@@ -765,7 +766,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
                   <span style={lbl}>Options</span>
                   {renderHelpBtn('options')}
                 </div>
-                <button onClick={() => set('options', [...fd.options, { value: stringChoice ? '' : fd.options.length + 1, label: '' }])}
+                <button onClick={() => set('options', [...fd.options, { value: '', label: '' }])}
                   style={{ background: 'var(--accent)', border: 'none', borderRadius: 4, padding: '4px 10px', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: '#0a0805', cursor: 'pointer' }}>
                   + ADD
                 </button>
@@ -774,14 +775,9 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {fd.options.map((o, i) => (
                   <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    {stringChoice ? (
-                      <input value={o.value} onChange={e => set('options', fd.options.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
-                        placeholder="val" style={{ ...inp, width: 58, flex: '0 0 58px', fontSize: 13 }} />
-                    ) : (
-                      <div style={{ ...inp, width: 44, flex: '0 0 44px', fontSize: 13, textAlign: 'center', color: UI.inkFaint, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</div>
-                    )}
-                    <input value={o.label} onChange={e => set('options', fd.options.map((x, j) => j === i ? { ...x, label: e.target.value } : x))}
-                      placeholder="label" style={{ ...inp, flex: 1, fontSize: 13 }} />
+                    <div style={{ width: 22, flex: '0 0 22px', textAlign: 'center', fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi }}>{i + 1}</div>
+                    <input value={o.label} onChange={e => set('options', fd.options.map((x, j) => j === i ? { ...x, value: e.target.value, label: e.target.value } : x))}
+                      placeholder="e.g. Improved" style={{ ...inp, flex: 1, fontSize: 13 }} />
                     <button onClick={() => set('options', fd.options.filter((_, j) => j !== i))}
                       style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.8)', fontSize: 16, lineHeight: 1, flexShrink: 0 }}>
                       <i className="fa-solid fa-xmark" />
@@ -790,24 +786,12 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
                 ))}
                 {!fd.options.length && <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>No options yet — tap + ADD</div>}
               </div>
-              {fd.type === 'choice' && fd.direction && fd.options.length > 0 && (
+              {fd.direction && fd.options.length > 0 && (
                 <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 8, padding: '7px 10px', background: 'rgba(var(--accent-rgb),0.08)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 7 }}>
                   <i className={`fa-solid ${fd.direction === 'higher_better' ? 'fa-arrow-up' : 'fa-arrow-down'}`} style={{ color: 'var(--accent)', fontSize: 12, flexShrink: 0 }} />
                   <span>{fd.direction === 'higher_better'
                     ? 'Higher counts as better — order from worst (top) to best (bottom).'
                     : 'Lower counts as better — order from best (top) to worst (bottom).'}</span>
-                </div>
-              )}
-              {numericChoice && (
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginTop: 12 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 2 }}>
-                      <span style={{ fontSize: 13, fontFamily: UI.fontUi, color: UI.ink }}>Show labels under numbers</span>
-                      {renderHelpBtn('labeled')}
-                    </div>
-                    {renderHelp('labeled')}
-                  </div>
-                  {renderToggle(fd.labeled, () => set('labeled', !fd.labeled))}
                 </div>
               )}
             </div>
