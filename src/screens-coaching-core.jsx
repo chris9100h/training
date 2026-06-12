@@ -90,15 +90,16 @@ const CHECKIN_DEFAULT_SCHEMA = [
   {
     id: 'nutrition', label: 'Nutrition',
     fields: [
-      { key: 'off_plan_notes', label: 'Off-plan days / notes', type: 'text', rows: 3, width: 'full', required: false },
-      { key: 'hydration_ml', label: 'Avg hydration / day (ml)', type: 'integer', width: 'full', required: false, direction: 'higher_better', icon: 'fa-droplet' },
+      { key: 'off_plan_days', label: 'Off-plan days', type: 'integer', width: 'half', required: false, direction: null },
+      { key: 'hydration_ml', label: 'Avg hydration / day (ml)', type: 'integer', width: 'half', required: false, direction: 'higher_better', icon: 'fa-droplet' },
+      { key: 'off_plan_notes', label: 'Off-plan notes', type: 'text', rows: 2, width: 'full', required: false },
     ],
   },
   {
     id: 'goals', label: 'Goals / Notes',
     fields: [
-      { key: 'goal_note', label: 'Goals / Notes', type: 'text', rows: 2, width: 'full', required: false },
-      { key: 'issues_notes', label: 'Issues / things to address', type: 'text', rows: 3, width: 'full', required: false },
+      { key: 'goal_note', label: 'Goals', type: 'text', rows: 2, width: 'full', required: false },
+      { key: 'issues_notes', label: 'Issues', type: 'text', rows: 3, width: 'full', required: false },
       { key: 'general_note', label: 'General note', type: 'text', rows: 2, width: 'full', required: false },
     ],
   },

@@ -1817,13 +1817,14 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
     // Standard bottom block
     const bLines = [];
     if (responses.hydration_ml != null) bLines.push(`Hydration: ${(responses.hydration_ml / 1000).toFixed(1)} L/day`);
-    if (responses.off_plan_notes) bLines.push(`Off-plan: ${responses.off_plan_notes}`);
+    if (responses.off_plan_days != null) bLines.push(`Off-plan days: ${responses.off_plan_days}`);
+    if (responses.off_plan_notes) bLines.push(`Off-plan notes: ${responses.off_plan_notes}`);
     if (responses.goal_note) bLines.push(`Goal: ${responses.goal_note}`);
     if (responses.issues_notes) bLines.push(`Issues: ${responses.issues_notes}`);
     if (responses.general_note) bLines.push(`General: ${responses.general_note}`);
     if (bLines.length) lines.push('', ...bLines);
     // Custom fields (keys outside the default set)
-    const defaultKeys = new Set(['weight_today','weight_avg_last_week','off_plan_notes','hydration_ml','days_trained','performance_vs_last_week','steps','cardio_minutes','cardio_distance_m','cardio_pace_feeling','cardio_effort','goal_note','hunger','sleep_quality','life_stress','work_stress','tiredness','issues_notes','general_note']);
+    const defaultKeys = new Set(['weight_today','weight_avg_last_week','off_plan_days','off_plan_notes','hydration_ml','days_trained','performance_vs_last_week','steps','cardio_minutes','cardio_distance_m','cardio_pace_feeling','cardio_effort','goal_note','hunger','sleep_quality','life_stress','work_stress','tiredness','issues_notes','general_note']);
     const customLines = Object.entries(responses).filter(([k, v]) => !defaultKeys.has(k) && v != null).map(([k, v]) => `  ${k.replace(/_/g, ' ')}: ${v}`);
     if (customLines.length) lines.push('', 'Custom fields:', ...customLines);
     const threadId = await getOrCreateCoachingThread(coachingId, 'Weekly Check-in', userId);
@@ -1857,7 +1858,7 @@ async function loadCheckins(coachingId) {
       responses: resp,
       // camelCase aliases kept for CheckInCard and exportCheckinCharts
       weightToday: resp.weight_today, weightAvgLastWeek: resp.weight_avg_last_week,
-      offPlanNotes: resp.off_plan_notes, hydrationMl: resp.hydration_ml,
+      offPlanDays: resp.off_plan_days, offPlanNotes: resp.off_plan_notes, hydrationMl: resp.hydration_ml,
       daysTrained: resp.days_trained, steps: resp.steps,
       cardioMinutes: resp.cardio_minutes, cardioDistanceM: resp.cardio_distance_m,
       cardioPaceFeeling: resp.cardio_pace_feeling, cardioEffort: resp.cardio_effort,

@@ -292,15 +292,16 @@ function CheckInTrendCards({ recent, schema }) {
   const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch(_) { return 'km'; } })();
 
   // Keys shown as sub-labels on another card — don't render as standalone
-  const SUB_KEYS = new Set(['cardio_distance_m', 'performance_vs_last_week']);
+  const SUB_KEYS = new Set(['cardio_distance_m']);
 
   const getFormat = (field) => {
     if (field.unit === 'weight') return v => `${Math.round(v * 100) / 100}${UI.unit()}`;
     if (field.key === 'steps') return v => `${Math.round(v / 1000)}k`;
+    if (field.key === 'days_trained') return v => `${v}d`;
     if (field._distanceField) return v => distUnit === 'mi' ? `${(v/1609.344).toFixed(1)} mi` : `${(v/1000).toFixed(1)} km`;
     if (field.type === 'stepper') return v => `${v}/${field.max || 10}`;
     if (field.type === 'choice' && field.options?.length)
-      return v => `${v}/${field.options.length}`;
+      return v => { const opt = field.options[Math.round(v) - 1]; return opt ? opt.label : `${v}/${field.options.length}`; };
     if (field.unit) return v => `${v} ${field.unit}`;
     return v => String(Math.round(v * 10) / 10);
   };
@@ -328,33 +329,6 @@ function CheckInTrendCards({ recent, schema }) {
     const vals = field.type === 'choice'
       ? recent.map(c => choiceRank(field, c.responses?.[field.key]))
       : recent.map(c => { const v = c.responses?.[field.key]; return (v != null && v !== '') ? Number(v) : null; });
-
-    if (field.key === 'days_trained') {
-      const valid = vals.filter(v => v != null);
-      if (!valid.length) return null;
-      const lastPerf = [...recent].reverse().find(c => c.responses?.performance_vs_last_week)?.responses?.performance_vs_last_week;
-      const perfColor = lastPerf === 'improved' ? 'var(--accent)' : lastPerf === 'worse' ? 'rgba(var(--danger-rgb),0.8)' : UI.inkSoft;
-      const perfLabel = lastPerf === 'improved' ? '↑ Better' : lastPerf === 'worse' ? '↓ Worse' : lastPerf === 'same' ? '= Same' : null;
-      const last = valid[valid.length - 1];
-      const prev = valid.length > 1 ? valid[valid.length - 2] : null;
-      const delta = prev != null ? last - prev : null;
-      return (
-        <div key={field.key} onClick={() => openChart('Training days', field.icon || 'fa-dumbbell', vals, v => `${v}d`, false)} style={cardStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
-            <i className={`fa-solid ${field.icon || 'fa-dumbbell'}`} style={{ fontSize: 10, color: UI.inkFaint }} />
-            <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Training</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last}d</span>
-            {delta != null && Math.abs(delta) > 0 && (
-              <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
-            )}
-            {perfLabel && <span style={{ fontSize: 9, color: perfColor, fontFamily: UI.fontUi, fontWeight: 700 }}>{perfLabel}</span>}
-          </div>
-          <Sparkline vals={valid} />
-        </div>
-      );
-    }
 
     if (field.key === 'cardio_minutes') {
       const validItems = recent.filter(c => c.responses?.cardio_minutes != null);

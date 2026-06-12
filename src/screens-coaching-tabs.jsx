@@ -487,9 +487,17 @@ function CheckInCard({ ci, defaultOpen = false, embedded = false, onEdit, onDele
           )}
 
           {/* Off-plan */}
-          {ci.offPlanNotes && (
-            <div><div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>OFF-PLAN</div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ci.offPlanNotes}</div>
+          {(ci.offPlanDays != null || ci.offPlanNotes) && (
+            <div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>OFF-PLAN</div>
+              {ci.offPlanDays != null && (
+                <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, marginBottom: ci.offPlanNotes ? 4 : 0 }}>
+                  {ci.offPlanDays} {ci.offPlanDays === 1 ? 'day' : 'days'}
+                </div>
+              )}
+              {ci.offPlanNotes && (
+                <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ci.offPlanNotes}</div>
+              )}
             </div>
           )}
 
