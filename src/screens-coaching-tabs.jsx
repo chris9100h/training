@@ -411,10 +411,42 @@ function MarkerRow({ label, value, onChange, readOnly }) {
   );
 }
 
-function CheckInCard({ ci, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false }) {
+function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false }) {
   const [open, setOpen] = useStateC(defaultOpen);
-  const hasActivity = ci.daysTrained != null || ci.steps != null || ci.cardioMinutes != null || ci.performanceVsLastWeek != null;
-  const hasMarkers = ci.hunger != null || ci.sleepQuality != null || ci.lifeStress != null || ci.workStress != null || ci.tiredness != null;
+  const sections = schema || CHECKIN_DEFAULT_SCHEMA;
+  const responses = ci.responses || {};
+  const has = v => v != null && v !== '';
+  const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch (_) { return 'km'; } })();
+
+  // Format one field's stored value for display (mirrors the trend-card formatter).
+  const fmtValue = (f, v) => {
+    if (f.unit === 'weight') return `${v} ${UI.unit()}`;
+    if (f._distanceField) return distUnit === 'mi' ? `${(v / 1609.344).toFixed(1)} mi` : `${(v / 1000).toFixed(1)} km`;
+    if (f.key === 'hydration_ml') return `${(v / 1000).toFixed(1)} L / day`;
+    if (f.key === 'steps') return Number(v).toLocaleString();
+    if (f.type === 'choice' && f.options?.length) {
+      const opt = f.options.find(o => String(o.value) === String(v));
+      return opt ? opt.label : String(v);
+    }
+    if (f.unit) return `${v} ${f.unit}`;
+    return String(v);
+  };
+
+  // Color a stepper value by where it sits on its scale, respecting direction.
+  const stepperColor = (f, v) => {
+    const min = f.min ?? 1, max = f.max ?? 10;
+    const t = max > min ? (v - min) / (max - min) : 0.5;
+    const good = 'var(--accent)', bad = 'rgba(var(--danger-rgb),0.8)';
+    if (f.direction === 'lower_better') return t <= 0.25 ? good : t >= 0.65 ? bad : UI.ink;
+    if (f.direction === 'higher_better') return t >= 0.65 ? good : t <= 0.25 ? bad : UI.ink;
+    return UI.ink;
+  };
+
+  const wToday = responses.weight_today, wAvg = responses.weight_avg_last_week;
+  // Response keys not in the current schema (e.g. fields the coach later removed)
+  // — surfaced in an "Additional" block so submitted data never silently vanishes.
+  const schemaKeys = new Set(sections.flatMap(s => (s.fields || []).map(f => f.key)));
+  const extraKeys = Object.keys(responses).filter(k => !schemaKeys.has(k) && has(responses[k]));
 
   return (
     <div style={embedded ? { overflow: 'hidden' } : { background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
@@ -424,9 +456,9 @@ function CheckInCard({ ci, defaultOpen = false, embedded = false, onEdit, onDele
       >
         <div style={{ flex: 1, textAlign: 'left' }}>
           <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>Week of {fmtWeek(ci.weekStart)}</div>
-          {ci.weightToday != null && (
+          {has(wToday) && (
             <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginTop: 2 }}>
-              {ci.weightToday} {UI.unit()}{ci.weightAvgLastWeek != null ? ` · avg ${ci.weightAvgLastWeek} ${UI.unit()}` : ''}
+              {wToday} {UI.unit()}{has(wAvg) ? ` · avg ${wAvg} ${UI.unit()}` : ''}
             </div>
           )}
         </div>
@@ -435,90 +467,45 @@ function CheckInCard({ ci, defaultOpen = false, embedded = false, onEdit, onDele
 
       {open && (
         <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Markers */}
-          {hasMarkers && (
-            <div>
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>MARKERS (1=good/low, 10=bad/high)</div>
-              {[['Hunger', ci.hunger], ['Sleep', ci.sleepQuality], ['Life Stress', ci.lifeStress], ['Work Stress', ci.workStress], ['Tiredness', ci.tiredness]].filter(([, v]) => v != null).map(([label, value]) => (
-                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
-                  <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
-                  <span className="num" style={{ fontSize: 12, color: value <= 3 ? 'var(--accent)' : value >= 7 ? 'rgba(var(--danger-rgb),0.8)' : UI.ink }}>{value}/10</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Activity */}
-          {hasActivity && (
-            <div>
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ACTIVITY</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {ci.daysTrained != null && <StatPill label="Days trained" value={ci.daysTrained} />}
-                {ci.performanceVsLastWeek && (
-                  <StatPill label="Performance"
-                    value={ci.performanceVsLastWeek === 'improved' ? '↑ Better' : ci.performanceVsLastWeek === 'worse' ? '↓ Worse' : '= Same'}
-                  />
+          {/* Schema-driven sections: pills for numbers/choices, rows for steppers, blocks for text */}
+          {sections.map(section => {
+            const fields = (section.fields || []).filter(f => has(responses[f.key]));
+            if (!fields.length) return null;
+            const pills = fields.filter(f => f.type === 'integer' || f.type === 'decimal' || f.type === 'choice');
+            const steppers = fields.filter(f => f.type === 'stepper');
+            const texts = fields.filter(f => f.type === 'text');
+            const headLabel = section.label.toUpperCase() + (section.sectionHint ? ` (${section.sectionHint})` : '');
+            return (
+              <div key={section.id}>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{headLabel}</div>
+                {pills.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {pills.map(f => <StatPill key={f.key} label={f.label} value={fmtValue(f, responses[f.key])} />)}
+                  </div>
                 )}
-                {ci.steps != null && <StatPill label="Steps" value={Number(ci.steps).toLocaleString()} />}
-                {ci.cardioMinutes != null && <StatPill label="Cardio" value={`${ci.cardioMinutes} min`} />}
-                {ci.cardioDistanceM != null && <StatPill label="Distance" value={(() => { try { const u = localStorage.getItem('logbook-cardio-dist-unit') || 'km'; return u === 'mi' ? `${(ci.cardioDistanceM / 1609.344).toFixed(1)} mi` : `${(ci.cardioDistanceM / 1000).toFixed(1)} km`; } catch (_) { return `${(ci.cardioDistanceM / 1000).toFixed(1)} km`; } })()} />}
-                {ci.cardioPaceFeeling != null && <StatPill label="Pace feeling" value={`${ci.cardioPaceFeeling}/6`} />}
-                {ci.cardioEffort != null && <StatPill label="Effort" value={`${ci.cardioEffort}/10`} />}
+                {steppers.map(f => (
+                  <div key={f.key} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `0.5px solid ${UI.hair}`, marginTop: pills.length ? 4 : 0 }}>
+                    <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>{f.label}</span>
+                    <span className="num" style={{ fontSize: 12, color: stepperColor(f, responses[f.key]) }}>{responses[f.key]}/{f.max ?? 10}</span>
+                  </div>
+                ))}
+                {texts.map(f => (
+                  <div key={f.key} style={{ marginTop: pills.length || steppers.length ? 10 : 0 }}>
+                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{f.label.toUpperCase()}</div>
+                    <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{responses[f.key]}</div>
+                  </div>
+                ))}
               </div>
-            </div>
-          )}
+            );
+          })}
 
-          {/* Weight detail */}
-          {ci.weightToday != null && (
+          {/* Submitted fields no longer in the schema — kept visible, never dropped */}
+          {extraKeys.length > 0 && (
             <div>
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>WEIGHT</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <StatPill label="Today" value={`${ci.weightToday} ${UI.unit()}`} />
-                {ci.weightAvgLastWeek != null && <StatPill label="Last week avg" value={`${ci.weightAvgLastWeek} ${UI.unit()}`} />}
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ADDITIONAL</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {extraKeys.map(k => <StatPill key={k} label={k.replace(/_/g, ' ')} value={String(responses[k])} />)}
               </div>
-            </div>
-          )}
-
-          {/* Hydration */}
-          {ci.hydrationMl != null && (
-            <div><div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>HYDRATION</div>
-              <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{(ci.hydrationMl / 1000).toFixed(1)} L / day</div>
-            </div>
-          )}
-
-          {/* Off-plan */}
-          {(ci.offPlanDays != null || ci.offPlanNotes) && (
-            <div>
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>OFF-PLAN</div>
-              {ci.offPlanDays != null && (
-                <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, marginBottom: ci.offPlanNotes ? 4 : 0 }}>
-                  {ci.offPlanDays} {ci.offPlanDays === 1 ? 'day' : 'days'}
-                </div>
-              )}
-              {ci.offPlanNotes && (
-                <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ci.offPlanNotes}</div>
-              )}
-            </div>
-          )}
-
-          {/* Goal */}
-          {ci.goalNote && (
-            <div><div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>GOAL</div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>{ci.goalNote}</div>
-            </div>
-          )}
-
-          {/* Issues */}
-          {ci.issuesNotes && (
-            <div><div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>ISSUES / TO ADDRESS</div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ci.issuesNotes}</div>
-            </div>
-          )}
-
-          {/* General note */}
-          {ci.generalNote && (
-            <div><div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>NOTE</div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ci.generalNote}</div>
             </div>
           )}
 
@@ -947,7 +934,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           </div>
         )}
         {thisWeek ? (
-          <CheckInCard ci={thisWeek} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} />
+          <CheckInCard ci={thisWeek} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} />
         ) : null}
 
         {past.length > 0 && (
@@ -968,7 +955,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               <div style={{ paddingLeft: 16 }}>
                 {past.map(ci => (
                   <div key={ci.id} style={{ borderTop: `0.5px solid ${UI.hair}` }}>
-                    <CheckInCard ci={ci} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
+                    <CheckInCard ci={ci} schema={resolvedSchema} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
                   </div>
                 ))}
               </div>

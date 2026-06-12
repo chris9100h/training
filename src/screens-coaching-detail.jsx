@@ -397,7 +397,15 @@ function generatePreviewData(schema) {
   const dow = now.getDay() || 7;
   const mon = new Date(now); mon.setDate(now.getDate() - dow + 1); mon.setHours(0, 0, 0, 0);
 
-  const allFields = (schema || []).flatMap(sec => sec.fields || []).filter(f => f.type !== 'text');
+  const flat = (schema || []).flatMap(sec => sec.fields || []);
+  const allFields = flat.filter(f => f.type !== 'text');
+  const textFields = flat.filter(f => f.type === 'text');
+  const SAMPLE_NOTES = [
+    'Felt strong this week, hit all my sessions and stuck to the plan.',
+    'A couple of social meals on the weekend, otherwise on track.',
+    'Sleep was a little off midweek but energy held up well.',
+    'Right knee felt a bit tight on squats — kept the weight conservative.',
+  ];
 
   const baseOf = f => {
     if (f.type === 'stepper') return { base: (f.min + f.max) * 0.6, range: (f.max - f.min) * 0.25 };
@@ -441,6 +449,9 @@ function generatePreviewData(schema) {
         responses[f.key] = Math.max(0, Math.round((base + slope + noise) * 10) / 10);
       }
     });
+
+    // Text fields: deterministic placeholder so the sample card shows their layout.
+    textFields.forEach((f, ti) => { responses[f.key] = SAMPLE_NOTES[(ti + wk) % SAMPLE_NOTES.length]; });
 
     return { weekStart, responses };
   });
@@ -883,19 +894,32 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
 
   // ── PREVIEW VIEW ─────────────────────────────────────────────────────────
   if (view === 'preview') {
-    const hasChartableFields = (draft || []).flatMap(s => s.fields || []).some(f => f.type !== 'text');
+    const allFields = (draft || []).flatMap(s => s.fields || []);
+    const hasChartableFields = allFields.some(f => f.type !== 'text');
+    const sample = previewData[previewData.length - 1];
     return (
       <div style={overlayStyle}>
         <div style={headerStyle}>
           {backBtn(() => setView('list'))}
           <div style={{ flex: 1, minWidth: 0 }}>
             <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink }}>Preview</span>
-            <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 1 }}>20 weeks of sample data</div>
+            <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 1 }}>Sample weekly check-in + 20-week trends</div>
           </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '12px 14px 40px' }}>
-          {hasChartableFields ? (
-            <CheckInTrendCards recent={previewData} schema={draft} />
+          {allFields.length ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <div>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>WEEKLY CHECK-IN (what the coach receives)</div>
+                <CheckInCard ci={sample} schema={draft} defaultOpen />
+              </div>
+              {hasChartableFields && (
+                <>
+                  <div className="knurl" style={{ margin: '2px 0' }} />
+                  <CheckInTrendCards recent={previewData} schema={draft} />
+                </>
+              )}
+            </div>
           ) : (
             <div style={{ textAlign: 'center', padding: '60px 20px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
               Add fields to see a preview.
@@ -1113,7 +1137,7 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
             <div className="knurl" style={{ margin: '4px 0' }} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
-              {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
+              {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} schema={resolvedSchema} />)}
             </div>
           </div>
         </div>
