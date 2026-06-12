@@ -86,29 +86,65 @@ function LineChartSheet({ label, icon, entries, format, invertColor, yMin, yMax,
 // Shared trend cards component used by both coach and client check-in views.
 // recent = last 6 check-ins sorted oldest → newest.
 
-async function exportCheckinCharts(recent) {
+// ─── Shared check-in field helpers ────────────────────────────────────────────
+// Used by both the on-screen trend cards and the PNG export so they always stay
+// in lock-step with the (possibly customized) schema — no hardcoded field lists.
+
+// Map a stored choice response to its 1-based rank among the field's options
+// (text or numeric value; falls back to a legacy numeric value).
+function checkinChoiceRank(field, resp) {
+  if (resp == null || resp === '') return null;
+  const idx = (field.options || []).findIndex(o => String(o.value) === String(resp));
+  if (idx >= 0) return idx + 1;
+  const n = Number(resp);
+  return isNaN(n) ? null : n;
+}
+
+// Y-axis override for discrete fields so the chart starts at the lowest level.
+function checkinFieldYRange(field) {
+  if (field.type === 'stepper') return { yMin: field.min ?? 1, yMax: field.max || 10 };
+  if (field.type === 'choice' && field.options?.length) return { yMin: 1, yMax: field.options.length };
+  return {};
+}
+
+// Value formatter for a field's chart axis and headline number.
+function checkinFieldFormat(field, distUnit) {
+  if (field.unit === 'weight') return v => `${Math.round(v * 100) / 100}${UI.unit()}`;
+  if (field.key === 'steps') return v => `${Math.round(v / 1000)}k`;
+  if (field.key === 'days_trained') return v => `${v}d`;
+  if (field.key === 'cardio_minutes') return v => `${v} min`;
+  if (field._distanceField) return v => distUnit === 'mi' ? `${(v / 1609.344).toFixed(1)} mi` : `${(v / 1000).toFixed(1)} km`;
+  if (field.type === 'stepper') return v => `${v}/${field.max || 10}`;
+  if (field.type === 'choice' && field.options?.length)
+    return v => { const opt = field.options[Math.round(v) - 1]; return opt ? opt.label : `${v}/${field.options.length}`; };
+  if (field.unit) return v => `${v} ${field.unit}`;
+  return v => String(Math.round(v * 10) / 10);
+}
+
+// Build the per-field chart series for a set of check-ins, in schema order.
+// Skips text fields; choice fields are charted by option rank.
+function checkinChartMetrics(recent, schema, distUnit) {
+  const metrics = [];
+  (schema || CHECKIN_DEFAULT_SCHEMA).forEach(section => (section.fields || []).forEach(field => {
+    if (field.type === 'text') return;
+    const values = field.type === 'choice'
+      ? recent.map(c => checkinChoiceRank(field, c.responses?.[field.key]))
+      : recent.map(c => { const v = c.responses?.[field.key]; return (v != null && v !== '') ? Number(v) : null; });
+    metrics.push({ label: field.label, values, format: checkinFieldFormat(field, distUnit), ...checkinFieldYRange(field) });
+  }));
+  return metrics;
+}
+
+async function exportCheckinCharts(recent, schema) {
   const cs = getComputedStyle(document.documentElement);
   const accent    = cs.getPropertyValue('--accent').trim();
   const accentRgb = cs.getPropertyValue('--accent-rgb').trim();
   const inkFaint  = cs.getPropertyValue('--ink-faint').trim();
   const bgColor   = cs.getPropertyValue('--bg').trim();
   const hairColor = cs.getPropertyValue('--hair').trim();
-  const unit = UI.unit();
+  const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch (_) { return 'km'; } })();
 
-  const metrics = [
-    { label: 'Weight – avg last week', values: recent.map(c => c.weightAvgLastWeek), format: v => `${Math.round(v * 10) / 10}${unit}` },
-    { label: 'Weight – today',         values: recent.map(c => c.weightToday),        format: v => `${Math.round(v * 10) / 10}${unit}` },
-    { label: 'Training days',          values: recent.map(c => c.daysTrained),        format: v => `${v}d` },
-    { label: 'Steps',                  values: recent.map(c => c.steps),              format: v => `${Math.round(v / 1000)}k` },
-    { label: 'Cardio',                 values: recent.map(c => c.cardioMinutes),      format: v => `${v} min` },
-    { label: 'Pace feeling',           values: recent.map(c => c.cardioPaceFeeling),  format: v => `${v}/6` },
-    { label: 'Cardio effort',          values: recent.map(c => c.cardioEffort),       format: v => `${v}/10` },
-    { label: 'Hunger',                 values: recent.map(c => c.hunger),             format: v => `${v}` },
-    { label: 'Sleep quality',          values: recent.map(c => c.sleepQuality),       format: v => `${v}` },
-    { label: 'Life stress',            values: recent.map(c => c.lifeStress),         format: v => `${v}` },
-    { label: 'Work stress',            values: recent.map(c => c.workStress),         format: v => `${v}` },
-    { label: 'Tiredness',              values: recent.map(c => c.tiredness),          format: v => `${v}` },
-  ];
+  const metrics = checkinChartMetrics(recent, schema, distUnit);
 
   const charts = metrics.map(m => {
     const entries = m.values
@@ -158,11 +194,11 @@ async function exportCheckinCharts(recent) {
   const hr = hairColor || 'rgba(139,125,107,0.25)';
 
   let y = 40;
-  for (const { label, entries, format } of charts) {
+  for (const { label, entries, format, yMin, yMax } of charts) {
     const n = entries.length;
     const vals = entries.map(e => e.value);
     const minV = Math.min(...vals), maxV = Math.max(...vals);
-    const dom = UI.chartDomain(minV, maxV);
+    const dom = UI.chartDomain(minV, maxV, { min: yMin, max: yMax });
     const plotW = W - padL - padR;
     const xOf = i => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
     const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
@@ -172,7 +208,11 @@ async function exportCheckinCharts(recent) {
     const base = (padTop + plotH).toFixed(1);
 
     const dec = dom.range >= 4 ? 0 : 1;
-    const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+    const levels = dom.max - dom.min + 1;
+    const intDomain = Number.isInteger(dom.min) && Number.isInteger(dom.max) && levels >= 2 && levels <= 6;
+    const gridVals = intDomain
+      ? Array.from({ length: levels }, (_, i) => dom.min + i)
+      : Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
     const grid = gridVals.map((v, i) =>
       (i > 0 ? `<line x1="${padL}" y1="${yOf(v).toFixed(1)}" x2="${W - padR}" y2="${yOf(v).toFixed(1)}" stroke="${hr}" stroke-width="0.5" stroke-dasharray="3 3"/>` : '') +
       `<text x="${padL - 5}" y="${(yOf(v) + 3).toFixed(1)}" text-anchor="end" font-size="8" font-family="Arial,sans-serif" fill="${fi}">${format(Number(v.toFixed(dec)))}</text>`
@@ -230,7 +270,7 @@ function CheckInTrendCards({ recent, schema }) {
   const handleExport = () => {
     if (exporting || n < 2) return;
     setExporting(true);
-    exportCheckinCharts(recent).catch(() => {}).finally(() => setExporting(false));
+    exportCheckinCharts(recent, resolvedSchema).catch(() => {}).finally(() => setExporting(false));
   };
 
   const openChart = (label, icon, values, format, invertColor, yMin, yMax) => {
@@ -301,33 +341,10 @@ function CheckInTrendCards({ recent, schema }) {
   // Keys shown as sub-labels on another card — don't render as standalone
   const SUB_KEYS = new Set();
 
-  const getFormat = (field) => {
-    if (field.unit === 'weight') return v => `${Math.round(v * 100) / 100}${UI.unit()}`;
-    if (field.key === 'steps') return v => `${Math.round(v / 1000)}k`;
-    if (field.key === 'days_trained') return v => `${v}d`;
-    if (field._distanceField) return v => distUnit === 'mi' ? `${(v/1609.344).toFixed(1)} mi` : `${(v/1000).toFixed(1)} km`;
-    if (field.type === 'stepper') return v => `${v}/${field.max || 10}`;
-    if (field.type === 'choice' && field.options?.length)
-      return v => { const opt = field.options[Math.round(v) - 1]; return opt ? opt.label : `${v}/${field.options.length}`; };
-    if (field.unit) return v => `${v} ${field.unit}`;
-    return v => String(Math.round(v * 10) / 10);
-  };
-
-  const getYRange = (field) => {
-    if (field.type === 'stepper') return { yMin: field.min ?? 1, yMax: field.max || 10 };
-    if (field.type === 'choice' && field.options?.length) return { yMin: 1, yMax: field.options.length };
-    return {};
-  };
-
-  // Map a stored choice response to its 1-based rank among the field's options
-  // (works for text or numeric values; falls back to a legacy numeric value).
-  const choiceRank = (field, resp) => {
-    if (resp == null || resp === '') return null;
-    const idx = (field.options || []).findIndex(o => String(o.value) === String(resp));
-    if (idx >= 0) return idx + 1;
-    const n = Number(resp);
-    return isNaN(n) ? null : n;
-  };
+  // Field chart helpers are shared module-level (also used by the PNG export).
+  const getFormat = (field) => checkinFieldFormat(field, distUnit);
+  const getYRange = checkinFieldYRange;
+  const choiceRank = checkinChoiceRank;
 
   const renderFieldCard = (field) => {
     if (field.type === 'text') return null;
