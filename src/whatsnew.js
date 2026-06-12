@@ -15,6 +15,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.161',
+    title: 'Your Coaching, Your Rules',
+    items: [
+      'Build a fully custom weekly check-in form: add your own fields, group them into sections, set scales, choose icons and control exactly what your clients report each week.',
+      'Design your form once and apply it to all clients with one tap — or override it individually for clients who need a different setup.',
+      'The form builder guides you through every option with inline explanations and a visual icon picker with 50+ fitness icons, so there\'s no guesswork.',
+      '"Be your own coach" users can now customise their personal check-in form too — the full builder is available right from the check-in tab.',
+    ],
+  },
+  {
     id: 'v2.134',
     title: 'Cardio & Mobility',
     items: [

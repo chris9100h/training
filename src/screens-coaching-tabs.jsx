@@ -487,9 +487,17 @@ function CheckInCard({ ci, defaultOpen = false, embedded = false, onEdit, onDele
           )}
 
           {/* Off-plan */}
-          {ci.offPlanNotes && (
-            <div><div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>OFF-PLAN</div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ci.offPlanNotes}</div>
+          {(ci.offPlanDays != null || ci.offPlanNotes) && (
+            <div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>OFF-PLAN</div>
+              {ci.offPlanDays != null && (
+                <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, marginBottom: ci.offPlanNotes ? 4 : 0 }}>
+                  {ci.offPlanDays} {ci.offPlanDays === 1 ? 'day' : 'days'}
+                </div>
+              )}
+              {ci.offPlanNotes && (
+                <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ci.offPlanNotes}</div>
+              )}
             </div>
           )}
 
@@ -544,257 +552,287 @@ function StatPill({ label, value }) {
   );
 }
 
+// ─── Check-in form helpers ────────────────────────────────────────────────────
+
+// Group adjacent half-width fields into two-column rows.
+function layoutRows(fields) {
+  const rows = [];
+  let i = 0;
+  while (i < fields.length) {
+    const f = fields[i];
+    if (f.width === 'half' && i + 1 < fields.length && fields[i + 1].width === 'half') {
+      rows.push([f, fields[i + 1]]);
+      i += 2;
+    } else {
+      rows.push([f]);
+      i++;
+    }
+  }
+  return rows;
+}
+
+// Convert a raw form value to a submission-ready response value.
+function toResponse(field, raw, distUnit) {
+  if (raw === '' || raw == null) return null;
+  if (field._distanceField) {
+    const n = parseFloat(String(raw).replace(',', '.'));
+    if (isNaN(n) || n <= 0) return null;
+    return distUnit === 'mi' ? Math.round(n * 1609.344) : Math.round(n * 1000);
+  }
+  if (field.type === 'integer') { const n = parseInt(raw, 10); return isNaN(n) ? null : n; }
+  if (field.type === 'decimal') { const n = parseFloat(String(raw).replace(',', '.')); return isNaN(n) ? null : n; }
+  return raw; // text, stepper, choice
+}
+
+// Build initial form state from existing responses + schema.
+function initFormState(sections, responses, distUnit) {
+  const form = {};
+  (sections || []).forEach(sec => (sec.fields || []).forEach(field => {
+    const v = responses?.[field.key];
+    if (field._distanceField) {
+      form[field.key] = v != null ? (distUnit === 'mi' ? (v / 1609.344).toFixed(2) : (v / 1000).toFixed(2)) : '';
+    } else if (field.type === 'text') {
+      form[field.key] = v != null ? String(v) : '';
+    } else if (field.type === 'stepper' || field.type === 'choice') {
+      form[field.key] = v != null ? v : null;
+    } else {
+      form[field.key] = v != null ? String(v) : '';
+    }
+  }));
+  return form;
+}
+
+// ─── FieldWidget ──────────────────────────────────────────────────────────────
+// Renders the inner content (label + input) for a single form field.
+// The row-layout wrapper provides the outer container / flex column.
+
+function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle }) {
+  const req = field.required ? ' *' : '';
+  const lbl = (field.unit === 'weight'
+    ? `${field.label} (${UI.unit()})`
+    : field.unit ? `${field.label} (${field.unit})` : field.label) + req;
+
+  if (field.type === 'text') {
+    return (
+      <>
+        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>{lbl}</div>
+        <textarea placeholder="–" value={value || ''} onChange={e => onChange(e.target.value)}
+          rows={field.rows || 2} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }} />
+      </>
+    );
+  }
+
+  if (field._distanceField) {
+    return (
+      <>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{field.label + req}</span>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+            {['km', 'mi'].map(u => (
+              <button key={u} onClick={() => {
+                const n = parseFloat(String(value || '').replace(',', '.'));
+                setDistUnit(u);
+                if (!isNaN(n) && n > 0) {
+                  const m = distUnit === 'mi' ? Math.round(n * 1609.344) : Math.round(n * 1000);
+                  onChange(u === 'mi' ? (m / 1609.344).toFixed(2) : (m / 1000).toFixed(2));
+                }
+              }} style={{ padding: '2px 7px', cursor: 'pointer', border: 'none',
+                background: distUnit === u ? 'var(--accent)' : 'transparent',
+                color: distUnit === u ? UI.bg : UI.inkFaint,
+                fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
+                WebkitTapHighlightColor: 'transparent' }}>
+              {u}
+              </button>
+            ))}
+          </div>
+        </div>
+        <input type="number" inputMode="decimal" placeholder="–" value={value || ''} onChange={e => onChange(e.target.value)} style={inputStyle} />
+      </>
+    );
+  }
+
+  if (field.type === 'integer' || field.type === 'decimal') {
+    return (
+      <>
+        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>{lbl}</div>
+        <input type="number" inputMode={field.type === 'decimal' ? 'decimal' : 'numeric'}
+          step={field.type === 'decimal' ? '0.1' : '1'} placeholder="–"
+          value={value || ''} onChange={e => onChange(e.target.value)} style={inputStyle} />
+      </>
+    );
+  }
+
+  if (field.type === 'stepper') {
+    const min = field.min || 1, max = field.max || 10;
+    const nums = Array.from({ length: max - min + 1 }, (_, i) => min + i);
+    const stepLabel = field.hint ? `${lbl} (${field.hint})` : lbl;
+    const dir = field.direction;
+    const btnColor = (n) => {
+      if (value === n) return '#0a0805';
+      if (dir === 'lower_better') return n <= min + Math.floor((max - min) * 0.3) ? 'var(--accent)' : n >= min + Math.ceil((max - min) * 0.7) ? 'rgba(var(--danger-rgb),0.7)' : UI.inkSoft;
+      if (dir === 'higher_better') return n >= min + Math.ceil((max - min) * 0.7) ? 'var(--accent)' : UI.inkFaint;
+      return n <= min + Math.floor((max - min) * 0.3) ? 'var(--accent)' : n <= min + Math.floor((max - min) * 0.6) ? UI.inkSoft : UI.inkFaint;
+    };
+    return (
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+          <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>{stepLabel}</span>
+          {value != null && <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{value}/{max}</span>}
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {nums.map(n => (
+            <button key={n} onClick={() => onChange(value === n ? null : n)}
+              style={{ flex: 1, padding: '6px 0', borderRadius: 5, border: 'none', cursor: 'pointer',
+                background: value === n ? 'var(--accent)' : value != null && n <= value ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
+                color: btnColor(n),
+                fontSize: 10, fontFamily: UI.fontUi, fontWeight: value === n ? 700 : 400, transition: 'background 0.1s' }}>
+              {n}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (field.type === 'choice') {
+    const { options = [], labeled } = field;
+    if (labeled) {
+      return (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+            <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{lbl}</span>
+            {value != null && <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{value}/{options.length}</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {options.map(opt => (
+              <button key={opt.value} onClick={() => onChange(value === opt.value ? null : opt.value)}
+                style={{ flex: 1, padding: '7px 2px', borderRadius: 4, cursor: 'pointer',
+                  border: `0.5px solid ${value === opt.value ? 'var(--accent)' : UI.hairStrong}`,
+                  background: value === opt.value ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                <span className="num" style={{ fontSize: 13, color: value === opt.value ? 'var(--accent)' : UI.inkSoft }}>{opt.value}</span>
+                <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.04em' }}>{opt.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+    return (
+      <>
+        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>{lbl}</div>
+        <div style={{ display: 'flex', gap: 5 }}>
+          {options.map(opt => {
+            const sel = value === opt.value;
+            const bg = sel ? opt.color === 'accent' ? `rgba(var(--accent-rgb),0.2)` : opt.color === 'danger' ? `rgba(var(--danger-rgb),0.15)` : UI.bgRaised : UI.bgInset;
+            const fg = sel ? opt.color === 'accent' ? 'var(--accent)' : opt.color === 'danger' ? 'rgba(var(--danger-rgb),0.85)' : UI.ink : UI.inkFaint;
+            return (
+              <button key={opt.value} onClick={() => onChange(sel ? null : opt.value)}
+                style={{ flex: 1, padding: '9px 4px', borderRadius: 6, cursor: 'pointer', background: bg, color: fg,
+                  fontFamily: UI.fontUi, fontSize: 10, fontWeight: sel ? 700 : 400, letterSpacing: '0.04em',
+                  border: `0.5px solid ${sel ? 'currentColor' : UI.hairStrong}` }}>
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </>
+    );
+  }
+
+  return null;
+}
+
 // ─── CheckInForm ──────────────────────────────────────────────────────────────
 
-function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefill, onSaved }) {
-  const REQUIRED_LABELS = {
-    weightToday: 'Weight (today)', hunger: 'Hunger', sleepQuality: 'Sleep',
-    lifeStress: 'Life Stress', workStress: 'Work Stress', tiredness: 'Tiredness',
-  };
+function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefill, onSaved, schema }) {
+  const sections = schema || CHECKIN_DEFAULT_SCHEMA;
+  const allFields = sections.flatMap(s => s.fields || []);
 
   const getDistUnit = () => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch (_) { return 'km'; } };
   const [distUnit, setDistUnitRaw] = useStateC(getDistUnit);
-  const setDistUnit = (u) => { try { localStorage.setItem('logbook-cardio-dist-unit', u); } catch (_) {} setDistUnitRaw(u); };
-
-  const distToM = (val) => { const n = parseFloat(String(val).replace(',', '.')); if (isNaN(n)) return null; return distUnit === 'mi' ? Math.round(n * 1609.344) : Math.round(n * 1000); };
-  const mToDisplay = (meters) => { if (meters == null || meters === '') return ''; return distUnit === 'mi' ? (meters / 1609.344).toFixed(2) : (meters / 1000).toFixed(2); };
-
-  const empty = {
-    weightToday: '', weightAvgLastWeek: '',
-    offPlanNotes: '', hydrationMl: '',
-    daysTrained: '', performanceVsLastWeek: null,
-    steps: '', cardioMinutes: '', cardioDistanceDisplay: '',
-    cardioPaceFeeling: null, cardioEffort: null,
-    goalNote: '',
-    hunger: null, sleepQuality: null, lifeStress: null, workStress: null, tiredness: null,
-    issuesNotes: '', generalNote: '',
-  };
+  const setDistUnit = u => { try { localStorage.setItem('logbook-cardio-dist-unit', u); } catch (_) {} setDistUnitRaw(u); };
 
   const [form, setForm] = useStateC(() => {
-    if (existing) return {
-      weightToday: existing.weightToday ?? '',
-      weightAvgLastWeek: existing.weightAvgLastWeek ?? '',
-      offPlanNotes: existing.offPlanNotes ?? '',
-      hydrationMl: existing.hydrationMl ?? '',
-      daysTrained: existing.daysTrained ?? '',
-      performanceVsLastWeek: existing.performanceVsLastWeek ?? null,
-      steps: existing.steps ?? '',
-      cardioMinutes: existing.cardioMinutes ?? '',
-      cardioDistanceDisplay: existing.cardioDistanceM != null ? mToDisplay(existing.cardioDistanceM) : '',
-      cardioPaceFeeling: existing.cardioPaceFeeling ?? null,
-      cardioEffort: existing.cardioEffort ?? null,
-      goalNote: existing.goalNote ?? '',
-      hunger: existing.hunger ?? null,
-      sleepQuality: existing.sleepQuality ?? null,
-      lifeStress: existing.lifeStress ?? null,
-      workStress: existing.workStress ?? null,
-      tiredness: existing.tiredness ?? null,
-      issuesNotes: existing.issuesNotes ?? '',
-      generalNote: existing.generalNote ?? '',
-    };
-    if (prefill) return {
-      ...empty,
-      cardioMinutes: prefill.cardioMinutes ?? '',
-      cardioDistanceDisplay: prefill.cardioDistanceM != null ? mToDisplay(prefill.cardioDistanceM) : '',
-      cardioPaceFeeling: prefill.paceFeeling ?? null,
-      cardioEffort: prefill.effort ?? null,
-    };
-    return empty;
+    const du = getDistUnit();
+    if (existing) return initFormState(sections, existing.responses || {}, du);
+    if (prefill) {
+      const base = initFormState(sections, {}, du);
+      if (prefill.cardioMinutes != null) base.cardio_minutes = String(prefill.cardioMinutes);
+      if (prefill.cardioDistanceM != null) base.cardio_distance_m = du === 'mi' ? (prefill.cardioDistanceM / 1609.344).toFixed(2) : (prefill.cardioDistanceM / 1000).toFixed(2);
+      if (prefill.paceFeeling != null) base.cardio_pace_feeling = prefill.paceFeeling;
+      if (prefill.effort != null) base.cardio_effort = prefill.effort;
+      return base;
+    }
+    return initFormState(sections, {}, du);
   });
 
   const [saving, setSaving] = useStateC(false);
   const [error, setError] = useStateC('');
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
-  const num = (v) => v === '' || v == null ? null : Number(v);
 
-  const missing = Object.entries(REQUIRED_LABELS)
-    .filter(([k]) => form[k] === '' || form[k] == null)
-    .map(([, label]) => label);
+  const missing = allFields.filter(f => f.required).filter(f => { const v = form[f.key]; return v === '' || v == null; }).map(f => f.label);
   const canSubmit = missing.length === 0;
 
   const handleSubmit = async () => {
     if (!canSubmit) { setError(`Can't submit — please fill in: ${missing.join(', ')}.`); return; }
     setSaving(true); setError('');
     try {
-      await LB.submitCheckin(coachingId, clientId, {
-        weightToday: num(form.weightToday),
-        weightAvgLastWeek: num(form.weightAvgLastWeek),
-        offPlanNotes: form.offPlanNotes || null,
-        hydrationMl: num(form.hydrationMl),
-        daysTrained: num(form.daysTrained),
-        steps: num(form.steps),
-        cardioMinutes: num(form.cardioMinutes),
-        cardioDistanceM: form.cardioDistanceDisplay ? distToM(form.cardioDistanceDisplay) : null,
-        cardioPaceFeeling: form.cardioPaceFeeling,
-        cardioEffort: form.cardioEffort,
-        performanceVsLastWeek: form.performanceVsLastWeek || null,
-        goalNote: form.goalNote || null,
-        hunger: form.hunger,
-        sleepQuality: form.sleepQuality,
-        lifeStress: form.lifeStress,
-        workStress: form.workStress,
-        tiredness: form.tiredness,
-        issuesNotes: form.issuesNotes || null,
-        generalNote: form.generalNote || null,
-      }, userId, weekStart, !!existing);
+      const responses = {};
+      allFields.forEach(field => {
+        const val = toResponse(field, form[field.key], distUnit);
+        if (val != null) responses[field.key] = val;
+      });
+      await LB.submitCheckin(coachingId, clientId, responses, userId, weekStart, !!existing);
       onSaved();
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
   };
 
   const inputStyle = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' };
-  const SectionHead = ({ label }) => <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10, marginTop: 4 }}>{label}</div>;
+
+  const renderRow = (row, key) => {
+    if (row.length === 1) {
+      const f = row[0];
+      if (f.type === 'stepper' || (f.type === 'choice' && !f.labeled)) {
+        return <div key={f.key} style={{ marginBottom: 14 }}><FieldWidget field={f} value={form[f.key]} onChange={v => set(f.key, v)} distUnit={distUnit} setDistUnit={setDistUnit} inputStyle={inputStyle} /></div>;
+      }
+      if (f.type === 'choice' && f.labeled) {
+        return <FieldWidget key={f.key} field={f} value={form[f.key]} onChange={v => set(f.key, v)} distUnit={distUnit} setDistUnit={setDistUnit} inputStyle={inputStyle} />;
+      }
+      return <div key={f.key} style={{ marginBottom: 14 }}><FieldWidget field={f} value={form[f.key]} onChange={v => set(f.key, v)} distUnit={distUnit} setDistUnit={setDistUnit} inputStyle={inputStyle} /></div>;
+    }
+    return (
+      <div key={key} style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'stretch' }}>
+        {row.map(f => (
+          <div key={f.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <FieldWidget field={f} value={form[f.key]} onChange={v => set(f.key, v)} distUnit={distUnit} setDistUnit={setDistUnit} inputStyle={inputStyle} />
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-      {/* Weight */}
-      <div>
-        <SectionHead label="WEIGHT *" />
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Today ({UI.unit()})</div>
-            <input type="number" inputMode="decimal" step="0.1" placeholder="–" value={form.weightToday} onChange={e => set('weightToday', e.target.value)} style={inputStyle} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Last week avg ({UI.unit()})</div>
-            <input type="number" inputMode="decimal" step="0.1" placeholder="–" value={form.weightAvgLastWeek} onChange={e => set('weightAvgLastWeek', e.target.value)} style={inputStyle} />
-          </div>
+      {prefill && !existing && (
+        <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.08)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+          Cardio prefilled from {prefill.count} log{prefill.count !== 1 ? 's' : ''} this week
         </div>
-      </div>
-
-      {/* Markers */}
-      <div>
-        <SectionHead label="MARKERS * (1 = good/low, 10 = bad/high)" />
-        <MarkerRow label="Hunger" value={form.hunger} onChange={v => set('hunger', v)} />
-        <MarkerRow label="Sleep" value={form.sleepQuality} onChange={v => set('sleepQuality', v)} />
-        <MarkerRow label="Life Stress" value={form.lifeStress} onChange={v => set('lifeStress', v)} />
-        <MarkerRow label="Work Stress" value={form.workStress} onChange={v => set('workStress', v)} />
-        <MarkerRow label="Tiredness" value={form.tiredness} onChange={v => set('tiredness', v)} />
-      </div>
-
-      {/* Activity */}
-      <div>
-        <SectionHead label="ACTIVITY" />
-
-        {/* Days trained + performance vs last week */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Days trained</div>
-            <input type="number" min="0" max="7" placeholder="–" value={form.daysTrained} onChange={e => set('daysTrained', e.target.value)} style={inputStyle} />
+      )}
+      {sections.map(section => {
+        const rows = layoutRows(section.fields || []);
+        if (!rows.length) return null;
+        const headLabel = section.label.toUpperCase() + (section.sectionHint ? ` (${section.sectionHint})` : '');
+        return (
+          <div key={section.id}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10, marginTop: 4 }}>{headLabel}</div>
+            {rows.map((row, ri) => renderRow(row, ri))}
           </div>
-          <div style={{ flex: 2 }}>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Performance vs last week</div>
-            <div style={{ display: 'flex', gap: 5 }}>
-              {[['worse', 'Worse'], ['same', 'Same'], ['improved', 'Improved']].map(([val, label]) => (
-                <button key={val} onClick={() => set('performanceVsLastWeek', form.performanceVsLastWeek === val ? null : val)}
-                  style={{ flex: 1, padding: '9px 4px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                    background: form.performanceVsLastWeek === val
-                      ? val === 'improved' ? `rgba(var(--accent-rgb),0.2)` : val === 'worse' ? `rgba(var(--danger-rgb),0.15)` : UI.bgRaised
-                      : UI.bgInset,
-                    color: form.performanceVsLastWeek === val
-                      ? val === 'improved' ? 'var(--accent)' : val === 'worse' ? 'rgba(var(--danger-rgb),0.85)' : UI.ink
-                      : UI.inkFaint,
-                    fontFamily: UI.fontUi, fontSize: 10, fontWeight: form.performanceVsLastWeek === val ? 700 : 400,
-                    letterSpacing: '0.04em', border: `0.5px solid ${form.performanceVsLastWeek === val ? 'currentColor' : UI.hairStrong}`,
-                  }}
-                >{label}</button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Steps */}
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Steps</div>
-          <input type="number" inputMode="numeric" placeholder="–" value={form.steps} onChange={e => set('steps', e.target.value)} style={inputStyle} />
-        </div>
-
-        {/* Cardio */}
-        {prefill && !existing && (
-          <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, marginBottom: 10, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.08)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
-            Prefilled from {prefill.count} cardio log{prefill.count !== 1 ? 's' : ''} this week
-          </div>
-        )}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Cardio (min)</div>
-            <input type="number" inputMode="numeric" placeholder="–" value={form.cardioMinutes} onChange={e => set('cardioMinutes', e.target.value)} style={inputStyle} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-              <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>Distance</span>
-              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
-                {['km', 'mi'].map(u => (
-                  <button key={u} onClick={() => {
-                    const curM = form.cardioDistanceDisplay ? distToM(form.cardioDistanceDisplay) : null;
-                    setDistUnit(u);
-                    if (curM != null) {
-                      const newDisp = u === 'mi' ? (curM / 1609.344).toFixed(2) : (curM / 1000).toFixed(2);
-                      set('cardioDistanceDisplay', newDisp);
-                    }
-                  }} style={{
-                    padding: '2px 7px', cursor: 'pointer', border: 'none',
-                    background: distUnit === u ? 'var(--accent)' : 'transparent',
-                    color: distUnit === u ? UI.bg : UI.inkFaint,
-                    fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
-                    WebkitTapHighlightColor: 'transparent',
-                  }}>{u}</button>
-                ))}
-              </div>
-            </div>
-            <input type="number" inputMode="decimal" placeholder="–" value={form.cardioDistanceDisplay} onChange={e => set('cardioDistanceDisplay', e.target.value)} style={inputStyle} />
-          </div>
-        </div>
-
-        {/* Pace feeling 1–6 */}
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-            <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Pace feeling</span>
-            {form.cardioPaceFeeling != null && <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{form.cardioPaceFeeling}/6</span>}
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {[['1','Easy'],['2','Light'],['3','Steady'],['4','Power'],['5','Hard'],['6','Max']].map(([n, lbl]) => (
-              <button key={n} onClick={() => set('cardioPaceFeeling', form.cardioPaceFeeling === Number(n) ? null : Number(n))}
-                style={{ flex: 1, padding: '7px 2px', borderRadius: 4, border: `0.5px solid ${form.cardioPaceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
-                  background: form.cardioPaceFeeling === Number(n) ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
-                  cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}
-              >
-                <span className="num" style={{ fontSize: 13, color: form.cardioPaceFeeling === Number(n) ? 'var(--accent)' : UI.inkSoft }}>{n}</span>
-                <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.04em' }}>{lbl}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Cardio effort 1–10 */}
-        <MarkerRow label="Cardio effort (1 = easy, 10 = max)" value={form.cardioEffort} onChange={v => set('cardioEffort', v)} />
-      </div>
-
-      {/* Nutrition */}
-      <div>
-        <SectionHead label="NUTRITION" />
-        <div style={{ marginBottom: 8 }}>
-          <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Off-plan days / notes</div>
-          <textarea placeholder="–" value={form.offPlanNotes} onChange={e => set('offPlanNotes', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }} />
-        </div>
-        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Avg hydration / day (ml)</div>
-        <input type="number" placeholder="–" value={form.hydrationMl} onChange={e => set('hydrationMl', e.target.value)} style={inputStyle} />
-      </div>
-
-      {/* Goals */}
-      <div>
-        <SectionHead label="GOALS / NOTES" />
-        <textarea placeholder="–" value={form.goalNote} onChange={e => set('goalNote', e.target.value)} rows={2} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5, marginBottom: 8 }} />
-        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Issues / things to address</div>
-        <textarea placeholder="–" value={form.issuesNotes} onChange={e => set('issuesNotes', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5, marginBottom: 8 }} />
-        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>General note</div>
-        <textarea placeholder="–" value={form.generalNote} onChange={e => set('generalNote', e.target.value)} rows={2} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }} />
-      </div>
-
+        );
+      })}
       {error && <div style={{ fontSize: 12, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{error}</div>}
-
       <Btn onClick={handleSubmit} disabled={saving}>
         {saving ? 'Sending…' : existing ? 'Update Check-in' : 'Submit Check-in'}
       </Btn>
@@ -804,16 +842,21 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
 
 // ─── ClientCheckInTab ─────────────────────────────────────────────────────────
 
-function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true, store }) {
+function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true, store, isSelf = false }) {
   const weekStart = LB.checkinWeekStart();
   const [checkins, setCheckins] = useStateC(null);
+  const [schema, setSchema] = useStateC(null); // null = loading, then resolved or CHECKIN_DEFAULT_SCHEMA
   const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
   const [confirmDelete, setConfirmDelete] = useStateC(null); // id of check-in awaiting delete confirm
   const [deleting, setDeleting] = useStateC(false);
   const [pastOpen, setPastOpen] = useStateC(false);
+  const [builderOpen, setBuilderOpen] = useStateC(false);
 
   const load = () => LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
-  useEffectC(() => { load(); }, [coachingId]);
+  useEffectC(() => {
+    load();
+    LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
+  }, [coachingId]);
 
   const thisWeek = (checkins || []).find(c => c.weekStart === weekStart);
   const past = (checkins || []).filter(c => c.weekStart !== weekStart);
@@ -832,6 +875,8 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   if (checkins === null) {
     return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div></div>;
   }
+
+  const resolvedSchema = schema || store?.settings?.defaultCheckinSchema || CHECKIN_DEFAULT_SCHEMA;
 
   // ── Form: new check-in or editing any existing one ──
   if (editTarget) {
@@ -856,6 +901,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           existing={target}
           prefill={!target ? LB.cardioWeekPrefill(store?.cardioLogs, formWeek) : undefined}
           onSaved={() => { setEditTarget(null); load(); }}
+          schema={resolvedSchema}
         />
       </div>
     );
@@ -865,18 +911,32 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   const recent = [...checkins].reverse();
 
   return (
-    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+    <>
+      {builderOpen && isSelf && (
+        <CheckInSchemaBuilder coachingId={coachingId} initial={resolvedSchema}
+          onSave={s => { setSchema(s); setBuilderOpen(false); }}
+          onClose={() => setBuilderOpen(false)} />
+      )}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {!thisWeek && checkinEnabled && (
-          <button onClick={() => setEditTarget('new')}
-            style={{ background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
-            Submit this week's check-in
-          </button>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {!thisWeek && checkinEnabled && (
+            <button onClick={() => setEditTarget('new')}
+              style={{ flex: 1, background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+              Submit this week's check-in
+            </button>
+          )}
+          {isSelf && (
+            <button onClick={() => setBuilderOpen(true)}
+              style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '11px 13px', cursor: 'pointer', color: UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
+              <i className="fa-solid fa-sliders" />
+            </button>
+          )}
+        </div>
 
         {checkins.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <CheckInTrendCards recent={recent} />
+            <CheckInTrendCards recent={recent} schema={resolvedSchema} />
           </div>
         )}
         {checkins.length > 0 && <div className="knurl" style={{ margin: '4px 0' }} />}
@@ -917,6 +977,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
         )}
       </div>
     </div>
+    </>
   );
 }
 

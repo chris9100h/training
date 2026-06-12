@@ -453,6 +453,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         showCoachingTab: sett.show_coaching_tab ?? false,
         beYourOwnCoach: sett.be_your_own_coach ?? false,
         sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
+        defaultCheckinSchema: sett.default_checkin_schema ?? null,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -1739,7 +1740,9 @@ function checkinWeekStart() {
   return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
 }
 
-async function submitCheckin(coachingId, clientId, data, userId, weekStartArg = null, isEdit = false) {
+// responses = plain object with snake_case keys matching the form schema fields.
+// Writes both the responses jsonb column and backward-compat fixed columns.
+async function submitCheckin(coachingId, clientId, responses, userId, weekStartArg = null, isEdit = false) {
   const weekStart = weekStartArg || checkinWeekStart();
   const id = 'ci_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   const row = {
@@ -1748,25 +1751,27 @@ async function submitCheckin(coachingId, clientId, data, userId, weekStartArg = 
     client_id: clientId,
     week_start: weekStart,
     checked_in_at: new Date().toISOString(),
-    weight_today: data.weightToday ?? null,
-    weight_avg_last_week: data.weightAvgLastWeek ?? null,
-    off_plan_notes: data.offPlanNotes || null,
-    hydration_ml: data.hydrationMl ?? null,
-    days_trained: data.daysTrained ?? null,
-    steps: data.steps ?? null,
-    cardio_minutes: data.cardioMinutes ?? null,
-    cardio_distance_m: data.cardioDistanceM ?? null,
-    cardio_pace_feeling: data.cardioPaceFeeling ?? null,
-    cardio_effort: data.cardioEffort ?? null,
-    performance_vs_last_week: data.performanceVsLastWeek || null,
-    goal_note: data.goalNote || null,
-    hunger: data.hunger ?? null,
-    sleep_quality: data.sleepQuality ?? null,
-    life_stress: data.lifeStress ?? null,
-    work_stress: data.workStress ?? null,
-    tiredness: data.tiredness ?? null,
-    issues_notes: data.issuesNotes || null,
-    general_note: data.generalNote || null,
+    responses,
+    // Fixed-column backward compat: old SW caches read these columns directly.
+    weight_today: responses.weight_today ?? null,
+    weight_avg_last_week: responses.weight_avg_last_week ?? null,
+    off_plan_notes: responses.off_plan_notes || null,
+    hydration_ml: responses.hydration_ml ?? null,
+    days_trained: responses.days_trained ?? null,
+    steps: responses.steps ?? null,
+    cardio_minutes: responses.cardio_minutes ?? null,
+    cardio_distance_m: responses.cardio_distance_m ?? null,
+    cardio_pace_feeling: responses.cardio_pace_feeling ?? null,
+    cardio_effort: responses.cardio_effort ?? null,
+    performance_vs_last_week: responses.performance_vs_last_week || null,
+    goal_note: responses.goal_note || null,
+    hunger: responses.hunger ?? null,
+    sleep_quality: responses.sleep_quality ?? null,
+    life_stress: responses.life_stress ?? null,
+    work_stress: responses.work_stress ?? null,
+    tiredness: responses.tiredness ?? null,
+    issues_notes: responses.issues_notes || null,
+    general_note: responses.general_note || null,
   };
   const { error } = await _supabase.from('zane_checkins').upsert(row, { onConflict: 'coaching_id,week_start' });
   if (error) throw error;
@@ -1780,43 +1785,48 @@ async function submitCheckin(coachingId, clientId, data, userId, weekStartArg = 
     const fmt = (dt) => dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
     const weekLabel = `${isEdit ? '✏️ EDITED · ' : ''}Week of ${fmt(d)} – ${fmt(endDate)}`;
     const lines = [weekLabel, '------------'];
+    const wUnit = (typeof window !== 'undefined' && window.__UNIT) || 'kg';
     // Weight
     const wLines = [];
-    const wUnit = (typeof window !== 'undefined' && window.__UNIT) || 'kg';
-    if (data.weightToday != null) wLines.push(`Weight: ${data.weightToday} ${wUnit}`);
-    if (data.weightAvgLastWeek != null) wLines.push(`Avg last week: ${data.weightAvgLastWeek} ${wUnit}`);
+    if (responses.weight_today != null) wLines.push(`Weight: ${responses.weight_today} ${wUnit}`);
+    if (responses.weight_avg_last_week != null) wLines.push(`Avg last week: ${responses.weight_avg_last_week} ${wUnit}`);
     if (wLines.length) lines.push('', ...wLines);
     // Training
     const tLines = [];
-    if (data.daysTrained != null) tLines.push(`Training: ${data.daysTrained} days`);
-    if (data.performanceVsLastWeek) tLines.push(`Performance: ${data.performanceVsLastWeek}`);
+    if (responses.days_trained != null) tLines.push(`Training: ${responses.days_trained} days`);
+    if (responses.performance_vs_last_week) tLines.push(`Performance: ${responses.performance_vs_last_week}`);
     if (tLines.length) lines.push('', ...tLines);
     // Cardio
     const cLines = [];
-    if (data.steps != null) cLines.push(`Steps: ${Number(data.steps).toLocaleString()}`);
-    if (data.cardioMinutes != null) {
-      const dist = data.cardioDistanceM != null ? ` · ${(data.cardioDistanceM / 1000).toFixed(1)} km` : '';
-      cLines.push(`Cardio: ${data.cardioMinutes} min${dist}`);
+    if (responses.steps != null) cLines.push(`Steps: ${Number(responses.steps).toLocaleString()}`);
+    if (responses.cardio_minutes != null) {
+      const dist = responses.cardio_distance_m != null ? ` · ${(responses.cardio_distance_m / 1000).toFixed(1)} km` : '';
+      cLines.push(`Cardio: ${responses.cardio_minutes} min${dist}`);
     }
-    if (data.cardioPaceFeeling != null) cLines.push(`Pace: ${data.cardioPaceFeeling}/6`);
-    if (data.cardioEffort != null) cLines.push(`Effort: ${data.cardioEffort}/10`);
+    if (responses.cardio_pace_feeling != null) cLines.push(`Pace: ${responses.cardio_pace_feeling}/6`);
+    if (responses.cardio_effort != null) cLines.push(`Effort: ${responses.cardio_effort}/10`);
     if (cLines.length) lines.push('', ...cLines);
     // Markers
     const mLines = [];
-    if (data.hunger != null) mLines.push(`  Hunger: ${data.hunger}/10`);
-    if (data.sleepQuality != null) mLines.push(`  Sleep: ${data.sleepQuality}/10`);
-    if (data.lifeStress != null) mLines.push(`  Life stress: ${data.lifeStress}/10`);
-    if (data.workStress != null) mLines.push(`  Work stress: ${data.workStress}/10`);
-    if (data.tiredness != null) mLines.push(`  Tiredness: ${data.tiredness}/10`);
+    if (responses.hunger != null) mLines.push(`  Hunger: ${responses.hunger}/10`);
+    if (responses.sleep_quality != null) mLines.push(`  Sleep: ${responses.sleep_quality}/10`);
+    if (responses.life_stress != null) mLines.push(`  Life stress: ${responses.life_stress}/10`);
+    if (responses.work_stress != null) mLines.push(`  Work stress: ${responses.work_stress}/10`);
+    if (responses.tiredness != null) mLines.push(`  Tiredness: ${responses.tiredness}/10`);
     if (mLines.length) lines.push('', 'Markers:', ...mLines);
-    // Bottom block — no blank lines between items
+    // Standard bottom block
     const bLines = [];
-    if (data.hydrationMl != null) bLines.push(`Hydration: ${(data.hydrationMl / 1000).toFixed(1)} L/day`);
-    if (data.offPlanNotes) bLines.push(`Off-plan: ${data.offPlanNotes}`);
-    if (data.goalNote) bLines.push(`Goal: ${data.goalNote}`);
-    if (data.issuesNotes) bLines.push(`Issues: ${data.issuesNotes}`);
-    if (data.generalNote) bLines.push(`General: ${data.generalNote}`);
+    if (responses.hydration_ml != null) bLines.push(`Hydration: ${(responses.hydration_ml / 1000).toFixed(1)} L/day`);
+    if (responses.off_plan_days != null) bLines.push(`Off-plan days: ${responses.off_plan_days}`);
+    if (responses.off_plan_notes) bLines.push(`Off-plan notes: ${responses.off_plan_notes}`);
+    if (responses.goal_note) bLines.push(`Goal: ${responses.goal_note}`);
+    if (responses.issues_notes) bLines.push(`Issues: ${responses.issues_notes}`);
+    if (responses.general_note) bLines.push(`General: ${responses.general_note}`);
     if (bLines.length) lines.push('', ...bLines);
+    // Custom fields (keys outside the default set)
+    const defaultKeys = new Set(['weight_today','weight_avg_last_week','off_plan_days','off_plan_notes','hydration_ml','days_trained','performance_vs_last_week','steps','cardio_minutes','cardio_distance_m','cardio_pace_feeling','cardio_effort','goal_note','hunger','sleep_quality','life_stress','work_stress','tiredness','issues_notes','general_note']);
+    const customLines = Object.entries(responses).filter(([k, v]) => !defaultKeys.has(k) && v != null).map(([k, v]) => `  ${k.replace(/_/g, ' ')}: ${v}`);
+    if (customLines.length) lines.push('', 'Custom fields:', ...customLines);
     const threadId = await getOrCreateCoachingThread(coachingId, 'Weekly Check-in', userId);
     await addCoachingNote(coachingId, 'general', null, null, lines.filter((_, i) => !(i === 1 && lines[2] === undefined)).join('\n'), userId, threadId);
   } catch (e) { console.error('Failed to send check-in note', e); }
@@ -1829,20 +1839,60 @@ async function loadCheckins(coachingId) {
     .eq('coaching_id', coachingId)
     .order('week_start', { ascending: false });
   if (error) throw error;
-  return (data || []).map(r => ({
-    id: r.id, coachingId: r.coaching_id, clientId: r.client_id,
-    weekStart: r.week_start, checkedInAt: r.checked_in_at,
-    weightToday: r.weight_today, weightAvgLastWeek: r.weight_avg_last_week,
-    offPlanNotes: r.off_plan_notes, hydrationMl: r.hydration_ml,
-    daysTrained: r.days_trained, steps: r.steps,
-    cardioMinutes: r.cardio_minutes, cardioDistanceM: r.cardio_distance_m,
-    cardioPaceFeeling: r.cardio_pace_feeling, cardioEffort: r.cardio_effort,
-    performanceVsLastWeek: r.performance_vs_last_week,
-    goalNote: r.goal_note,
-    hunger: r.hunger, sleepQuality: r.sleep_quality,
-    lifeStress: r.life_stress, workStress: r.work_stress, tiredness: r.tiredness,
-    issuesNotes: r.issues_notes, generalNote: r.general_note,
-  }));
+  return (data || []).map(r => {
+    // Prefer the responses jsonb (written by new code); fall back to fixed columns
+    // for rows that predate the migration and weren't backfilled.
+    const resp = r.responses || {
+      weight_today: r.weight_today, weight_avg_last_week: r.weight_avg_last_week,
+      off_plan_notes: r.off_plan_notes, hydration_ml: r.hydration_ml,
+      days_trained: r.days_trained, performance_vs_last_week: r.performance_vs_last_week,
+      steps: r.steps, cardio_minutes: r.cardio_minutes, cardio_distance_m: r.cardio_distance_m,
+      cardio_pace_feeling: r.cardio_pace_feeling, cardio_effort: r.cardio_effort,
+      goal_note: r.goal_note, hunger: r.hunger, sleep_quality: r.sleep_quality,
+      life_stress: r.life_stress, work_stress: r.work_stress, tiredness: r.tiredness,
+      issues_notes: r.issues_notes, general_note: r.general_note,
+    };
+    return {
+      id: r.id, coachingId: r.coaching_id, clientId: r.client_id,
+      weekStart: r.week_start, checkedInAt: r.checked_in_at,
+      responses: resp,
+      // camelCase aliases kept for CheckInCard and exportCheckinCharts
+      weightToday: resp.weight_today, weightAvgLastWeek: resp.weight_avg_last_week,
+      offPlanDays: resp.off_plan_days, offPlanNotes: resp.off_plan_notes, hydrationMl: resp.hydration_ml,
+      daysTrained: resp.days_trained, steps: resp.steps,
+      cardioMinutes: resp.cardio_minutes, cardioDistanceM: resp.cardio_distance_m,
+      cardioPaceFeeling: resp.cardio_pace_feeling, cardioEffort: resp.cardio_effort,
+      performanceVsLastWeek: resp.performance_vs_last_week,
+      goalNote: resp.goal_note,
+      hunger: resp.hunger, sleepQuality: resp.sleep_quality,
+      lifeStress: resp.life_stress, workStress: resp.work_stress, tiredness: resp.tiredness,
+      issuesNotes: resp.issues_notes, generalNote: resp.general_note,
+    };
+  });
+}
+
+async function loadCheckinSchema(coachingId) {
+  const { data } = await _supabase.from('zane_coaching')
+    .select('checkin_schema').eq('id', coachingId).maybeSingle();
+  return data?.checkin_schema || null; // null → caller uses CHECKIN_DEFAULT_SCHEMA
+}
+
+async function saveCheckinSchema(coachingId, schema) {
+  const { error } = await _supabase.from('zane_coaching')
+    .update({ checkin_schema: schema }).eq('id', coachingId);
+  if (error) throw error;
+}
+
+async function saveDefaultCheckinSchema(schema, coachId) {
+  const { error: e1 } = await _supabase.from('zane_user_settings')
+    .upsert({ user_id: coachId, default_checkin_schema: schema }, { onConflict: 'user_id' });
+  if (e1) throw e1;
+  // Clear all per-client overrides so every client falls back to the new default
+  const { error: e2 } = await _supabase.from('zane_coaching')
+    .update({ checkin_schema: null })
+    .eq('coach_id', coachId)
+    .neq('client_id', coachId);
+  if (e2) throw e2;
 }
 
 async function deleteCheckin(checkinId, userId) {
@@ -1893,6 +1943,6 @@ window.LB = {
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
-  checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled,
+  checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill,
 };

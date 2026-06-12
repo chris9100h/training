@@ -824,6 +824,28 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
 // Kept in sync with store.settings.unit by app.jsx on every render.
 UI.unit = () => (typeof window !== 'undefined' && window.__UNIT) || 'kg';
 
+// Chart Y-axis domain with breathing room. Pads by 5% of the visible value
+// SPAN (max − min) — not of the value itself — so a point keeps a consistent
+// gap from the edge no matter how far the data sits from zero. (Value-based
+// padding fails when the min is small relative to the span: e.g. steps 25k–101k
+// gave the 25k point only ~1.5% headroom and it looked glued to the bottom.)
+//   • top    = dataMax + 5% of span   (unless a fixed `max` is supplied)
+//   • bottom = dataMin − 5% of span, clamped at 0 — every metric here is
+//     non-negative and 0 stays a hard floor (unless a fixed `min` is supplied,
+//     or `zeroFloor` pins it to 0 for bar / area-from-baseline charts).
+// A flat series (span 0) falls back to 5% of the value so it still centres.
+// Returns { min, max, range } for a linear scale; range is never 0.
+UI.chartDomain = (dataMin, dataMax, opts) => {
+  opts = opts || {};
+  const pad = 0.05 * ((dataMax - dataMin) || Math.abs(dataMax) || 1);
+  const top = opts.max != null ? opts.max : dataMax + pad;
+  let bottom;
+  if (opts.min != null) bottom = opts.min;
+  else if (opts.zeroFloor) bottom = 0;
+  else bottom = Math.max(0, dataMin - pad);
+  return { min: bottom, max: top, range: (top - bottom) || 1 };
+};
+
 Object.assign(window, {
   UI, Screen, TopBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty,
   ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,

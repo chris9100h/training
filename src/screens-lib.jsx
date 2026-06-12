@@ -843,11 +843,12 @@ function ProgressChart({ points }) {
   const w = 280, h = 108, padT = 8, padB = 20, padL = 36, padR = 8;
   const max = Math.max(...points.map(p => p.est));
   const min = Math.min(...points.map(p => p.est));
-  const range = max - min || 1;
+  const dom = UI.chartDomain(min, max);
+  const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+  const yOf = v => padT + (1 - (v - dom.min) / dom.range) * (h - padT - padB);
   const xy = points.map((p, i) => {
     const x = padL + (i / Math.max(1, points.length - 1)) * (w - padL - padR);
-    const y = padT + (1 - (p.est - min) / range) * (h - padT - padB);
-    return [x, y];
+    return [x, yOf(p.est)];
   });
   const path = xy.map(([x,y], i) => `${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   const fmtDate = d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' });
@@ -856,10 +857,14 @@ function ProgressChart({ points }) {
     <div style={{ padding: '10px 0', maxWidth: 380 }}>
       <div className="micro" style={{ marginBottom: 8, color: UI.inkFaint }}>EST. 1RM · HISTORY</div>
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
+        {gridVals.map((v, i) => (
+          <g key={`g${i}`}>
+            {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={w - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
+            <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontNum}>{i === 3 ? `${Math.round(v)} ${unit}` : Math.round(v)}</text>
+          </g>
+        ))}
         <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
         <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
-        <text x={padL - 5} y={padT + 4} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{Math.round(max)} {unit}</text>
-        {max > min && <text x={padL - 5} y={h - padB} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{Math.round(min)} {unit}</text>}
         <path d={path} fill="none" stroke={UI.gold} strokeWidth="1" opacity="0.6" />
         {xy.map(([x,y], i) => (
           <circle key={i} cx={x} cy={y} r="2" fill={UI.gold} />
@@ -874,17 +879,17 @@ function ProgressChart({ points }) {
 }
 
 // ─── CARDIO TYPE DETAIL SHEET ────────────────────────────────────────
-function CardioLineChart({ points, label, formatVal }) {
+function CardioLineChart({ points, label, formatVal, yMin, yMax }) {
   if (!points || points.length < 2) return null;
   const w = 200, h = 88, padT = 8, padB = 18, padL = 34, padR = 6;
   const vals = points.map(p => p.value);
   const max = Math.max(...vals);
   const min = Math.min(...vals);
-  const range = max - min || 1;
+  const dom = UI.chartDomain(min, max, { min: yMin, max: yMax });
+  const yOf = v => padT + (1 - (v - dom.min) / dom.range) * (h - padT - padB);
   const xy = points.map((p, i) => {
     const x = padL + (i / Math.max(1, points.length - 1)) * (w - padL - padR);
-    const y = padT + (1 - (p.value - min) / range) * (h - padT - padB);
-    return [x, y];
+    return [x, yOf(p.value)];
   });
   const pathD = xy.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   const fmtDate = d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' });
@@ -898,8 +903,10 @@ function CardioLineChart({ points, label, formatVal }) {
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
         <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
         <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
-        <text x={padL - 4} y={padT + 5} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
-        {max > min && <text x={padL - 4} y={h - padB} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
+        <line x1={padL} y1={yOf(max).toFixed(1)} x2={w - padR} y2={yOf(max).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="2 2" />
+        {max > min && <line x1={padL} y1={yOf(min).toFixed(1)} x2={w - padR} y2={yOf(min).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="2 2" />}
+        <text x={padL - 4} y={(yOf(max) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
+        {max > min && <text x={padL - 4} y={(yOf(min) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
         <path d={pathD} fill="none" stroke={UI.gold} strokeWidth="1.2" opacity="0.7" />
         {xy.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={xy.length > 60 ? 0 : 1.5} fill={UI.gold} />)}
         <text x={padL} y={h - 4} textAnchor="start" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
@@ -932,13 +939,13 @@ function CardioTypeDetailSheet({ type, logs, open, onClose }) {
   const speedPoints = filtered.filter(l => l.distanceM != null && l.durationMinutes > 0).map(l => ({ date: l.date, value: parseFloat(((du === 'mi' ? l.distanceM / MI_TO_M_H : l.distanceM / 1000) / (l.durationMinutes / 60)).toFixed(2)) }));
   const effortPoints = filtered.filter(l => l.effort != null).map(l => ({ date: l.date, value: l.effort }));
   const paceFlPoints = filtered.filter(l => l.paceFeeling != null).map(l => ({ date: l.date, value: l.paceFeeling }));
-  const paceFlLabels = ['', 'Easy', 'Light', 'Steady', 'Power', 'Hard', 'Max'];
+  const paceFlLabels = ['', 'Easy', 'Light', 'Steady', 'Solid', 'Hard', 'Max'];
 
   const charts = [
     durPoints.length >= 2 && { points: durPoints, label: 'DURATION', formatVal: v => `${Math.round(v)}min` },
     speedPoints.length >= 2 && { points: speedPoints, label: `SPEED (${du}/h)`, formatVal: v => v.toFixed(1) },
-    effortPoints.length >= 2 && { points: effortPoints, label: 'EFFORT', formatVal: v => `${v}/10` },
-    paceFlPoints.length >= 2 && { points: paceFlPoints, label: 'PACE FEELING', formatVal: v => paceFlLabels[Math.round(v)] || Math.round(v) },
+    effortPoints.length >= 2 && { points: effortPoints, label: 'EFFORT', formatVal: v => `${v}/10`, yMin: 0, yMax: 10 },
+    paceFlPoints.length >= 2 && { points: paceFlPoints, label: 'PACE FEELING', formatVal: v => paceFlLabels[Math.round(v)] || Math.round(v), yMin: 0, yMax: 6 },
     distPoints.length >= 2 && { points: distPoints, label: `DISTANCE (${du})`, formatVal: v => v.toFixed(2) },
   ].filter(Boolean);
 
@@ -952,10 +959,75 @@ function CardioTypeDetailSheet({ type, logs, open, onClose }) {
     <Sheet open={open} onClose={onClose} title={type}>
       <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16 }}>{summaryParts.join(' · ')}</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, paddingBottom: 8 }}>
-        {charts.map((c, i) => <CardioLineChart key={i} points={c.points} label={c.label} formatVal={c.formatVal} />)}
+        {charts.map((c, i) => <CardioLineChart key={i} points={c.points} label={c.label} formatVal={c.formatVal} yMin={c.yMin} yMax={c.yMax} />)}
       </div>
     </Sheet>
   );
+}
+
+// ─── WORKOUT EFFORT CHART ─────────────────────────────────────────────
+function WorkoutEffortSheet({ dayId, dayName, sessions, onClose }) {
+  const FEEL_NUM = { easy: 1, good: 2, hard: 3, very_hard: 4, max: 5 };
+  const FEEL_LBL = { 1: 'Easy', 2: 'Good', 3: 'Hard', 4: 'Very Hard', 5: 'Max' };
+  const points = [...sessions]
+    .filter(s => s.feel && s.ended && (dayId ? s.dayId === dayId : s.dayName === dayName))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(s => ({ date: s.date.slice(0, 10), value: FEEL_NUM[s.feel] }))
+    .filter(p => p.value);
+  const n = points.length;
+  const W = 300, padL = 52, padR = 16, padTop = 36, padBottom = 26, plotH = 110;
+  const H = padTop + plotH + padBottom;
+  const plotW = W - padL - padR;
+  const dom = UI.chartDomain(0, Math.max(...points.map(p => p.value), 5), { zeroFloor: true });
+  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
+  const xOf = i => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+  const pts = points.map((p, i) => `${xOf(i).toFixed(1)},${yOf(p.value).toFixed(1)}`).join(' ');
+  const base = (padTop + plotH).toFixed(1);
+  const labelStep = Math.max(1, Math.round(n / 5));
+  const showLbl = i => i === n - 1 || i % labelStep === 0;
+  const fmtDate = s => { const d = new Date(s + 'T12:00:00'); return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`; };
+  const content = (
+    <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 400, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
+      <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', padding: '20px 20px 44px', borderTop: `0.5px solid ${UI.hairStrong}`, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <i className="fa-solid fa-gauge-high" style={{ fontSize: 13, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{dayName} — Effort</span>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, fontSize: 18, lineHeight: 1 }}>
+            <i className="fa-solid fa-xmark" />
+          </button>
+        </div>
+        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+          {[1, 2, 3, 4, 5].map(lvl => (
+            <g key={`g${lvl}`}>
+              <line x1={padL} y1={yOf(lvl).toFixed(1)} x2={W - padR} y2={yOf(lvl).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
+              <text x={padL - 6} y={(yOf(lvl) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{FEEL_LBL[lvl]}</text>
+            </g>
+          ))}
+          <line x1={padL} y1={padTop} x2={padL} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+          <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+          <polygon points={`${xOf(0).toFixed(1)},${base} ${pts} ${xOf(n - 1).toFixed(1)},${base}`} fill={`rgba(var(--accent-rgb),0.12)`} />
+          <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+          {points.map((p, i) => {
+            const cx = xOf(i).toFixed(1);
+            const cy = yOf(p.value).toFixed(1);
+            const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+            return (
+              <g key={i}>
+                <circle cx={cx} cy={cy} r={i === n - 1 ? '3.5' : '2.5'} fill="var(--accent)" />
+                {showLbl(i) && <text x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtDate(p.date)}</text>}
+              </g>
+            );
+          })}
+        </svg>
+        <div style={{ marginTop: 6, textAlign: 'center' }}>
+          <span className="micro" style={{ color: UI.inkFaint }}>{n} SESSION{n !== 1 ? 'S' : ''} WITH EFFORT RATING</span>
+        </div>
+      </div>
+    </div>
+  );
+  return ReactDOM.createPortal(content, document.body);
 }
 
 // ─── STATS TAB ───────────────────────────────────────────────────────
@@ -1311,6 +1383,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
   const [cardioLogOpen, setCardioLogOpen] = useStateL(false);
   const [editingCardioLog, setEditingCardioLog] = useStateL(null);
   const [cardioTypeDetail, setCardioTypeDetail] = useStateL(null);
+  const [effortChart, setEffortChart] = useStateL(null);
 
   const sessions = useMemoL(() => {
     return [...store.sessions]
@@ -1379,6 +1452,14 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
     base.forEach(s => { if (s.dayName && s.dayName !== 'REST') counts[s.dayName] = (counts[s.dayName] || 0) + 1; });
     return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([name]) => name);
   }, [sessions, planFilter, periodFilter, sessionPeriods]);
+
+  const dayEffortCounts = useMemoL(() => {
+    const counts = {};
+    sessions.forEach(s => {
+      if (s.feel) { const k = s.dayId || s.dayName; counts[k] = (counts[k] || 0) + 1; }
+    });
+    return counts;
+  }, [sessions]);
 
   const filteredSessions = useMemoL(() => {
     let s = sessions;
@@ -1473,7 +1554,20 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                     <div className="micro" style={{ color: isToday ? UI.gold : UI.inkFaint, marginBottom: 5 }}>
                       {date.toLocaleDateString('en-US', { weekday:'short', day:'numeric', month:'short' }).toUpperCase()} · {isToday ? 'TODAY' : `${days}D AGO`}
                     </div>
-                    <div className="display" style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4 }}>{s.dayName}</div>
+                    {(() => {
+                      const ek = s.dayId || s.dayName;
+                      const hasEffort = (dayEffortCounts[ek] || 0) >= 3;
+                      return (
+                        <div
+                          className="display"
+                          style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                          onClick={hasEffort ? e => { e.stopPropagation(); setEffortChart({ dayId: s.dayId, dayName: s.dayName }); } : undefined}
+                        >
+                          {s.dayName}
+                          {hasEffort && <i className="fa-solid fa-chart-line" style={{ fontSize: 10, color: UI.gold }} />}
+                        </div>
+                      );
+                    })()}
                     <div className="micro" style={{ color: UI.inkFaint }}>
                       {s.entries.length || s.aggExercises || 0} Exercises · {setsLogged} Sets
                     </div>
@@ -1509,7 +1603,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
           if (d >= lastMonday) return 'LAST WEEK';
           return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
         };
-        const paceLbl = ['', 'Easy', 'Light', 'Steady', 'Power', 'Hard', 'Max'];
+        const paceLbl = ['', 'Easy', 'Light', 'Steady', 'Solid', 'Hard', 'Max'];
         return (
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div style={{ flex: 1, overflowY: 'auto', padding: '6px 22px 22px' }}>
@@ -1545,9 +1639,10 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                             {l.distanceM != null && <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{mToDisplayH(l.distanceM, du)}<span style={{ fontSize: 9 }}>{du}</span></span>}
                           </div>
                           {(l.paceFeeling != null || l.effort != null || l.note) && (
-                            <div style={{ display: 'flex', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>
-                              {l.paceFeeling != null && <span className="micro" style={{ color: UI.inkFaint }}>PACE {paceLbl[l.paceFeeling] || l.paceFeeling}</span>}
-                              {l.effort != null && <span className="micro" style={{ color: UI.inkFaint }}>EFFORT {l.effort}/10</span>}
+                            <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                              {l.paceFeeling != null && <span className="micro" style={{ color: UI.inkFaint }}>PACE : {paceLbl[l.paceFeeling] || l.paceFeeling}</span>}
+                              {l.paceFeeling != null && l.effort != null && <span style={{ fontSize: 14, color: UI.gold, lineHeight: 1 }}>·</span>}
+                              {l.effort != null && <span className="micro" style={{ color: UI.inkFaint }}>EFFORT : <span style={{ color: UI.gold }}>{l.effort}/10</span></span>}
                               {l.note && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic' }}>{l.note}</span>}
                             </div>
                           )}
@@ -1659,6 +1754,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
         );
       })()}
       {confirmEl}
+      {effortChart && <WorkoutEffortSheet dayId={effortChart.dayId} dayName={effortChart.dayName} sessions={sessions} onClose={() => setEffortChart(null)} />}
     </Screen>
   );
 }
@@ -2775,8 +2871,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
   const allVals = allSessions.flatMap(s => s.sets.map(getValue)).filter(v => v != null);
   const minVal = allVals.length ? Math.min(...allVals) : 0;
   const rawMax = allVals.length ? Math.max(...allVals) : 10;
-  const maxVal = rawMax === minVal ? rawMax + 1 : rawMax;
-  const valRange = maxVal - minVal;
+  const dom = UI.chartDomain(minVal, rawMax);
 
   const PAD_L = 36, PAD_R = 12, PAD_T = 14, PAD_B = 26;
   const VW = 320, VH = 180;
@@ -2784,9 +2879,9 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
   const plotH = VH - PAD_T - PAD_B;
   const n = allSessions.length;
   const xPos = (i) => PAD_L + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
-  const yPos = (v) => PAD_T + plotH - ((v - minVal) / valRange) * plotH;
+  const yPos = (v) => PAD_T + plotH - ((v - dom.min) / dom.range) * plotH;
 
-  const gridVals = Array.from({ length: 4 }, (_, i) => minVal + (valRange / 3) * i);
+  const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const setAlphas = [1, 0.55, 0.35, 0.22, 0.14];
 
   const labelIdxs = (() => {

@@ -572,7 +572,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog }
           {form.paceFeeling != null && <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{form.paceFeeling}/6</span>}
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
-          {[['1','Easy'],['2','Light'],['3','Steady'],['4','Power'],['5','Hard'],['6','Max']].map(([n, lbl]) => (
+          {[['1','Easy'],['2','Light'],['3','Steady'],['4','Solid'],['5','Hard'],['6','Max']].map(([n, lbl]) => (
             <button key={n} onClick={() => set('paceFeeling', form.paceFeeling === Number(n) ? null : Number(n))} style={{
               flex: 1, padding: '7px 2px', borderRadius: 8, cursor: 'pointer',
               border: `0.5px solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
