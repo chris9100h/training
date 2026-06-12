@@ -453,6 +453,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         showCoachingTab: sett.show_coaching_tab ?? false,
         beYourOwnCoach: sett.be_your_own_coach ?? false,
         sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
+        defaultCheckinSchema: sett.default_checkin_schema ?? null,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -1881,6 +1882,18 @@ async function saveCheckinSchema(coachingId, schema) {
   if (error) throw error;
 }
 
+async function saveDefaultCheckinSchema(schema, coachId) {
+  const { error: e1 } = await _supabase.from('zane_user_settings')
+    .upsert({ user_id: coachId, default_checkin_schema: schema }, { onConflict: 'user_id' });
+  if (e1) throw e1;
+  // Clear all per-client overrides so every client falls back to the new default
+  const { error: e2 } = await _supabase.from('zane_coaching')
+    .update({ checkin_schema: null })
+    .eq('coach_id', coachId)
+    .neq('client_id', coachId);
+  if (e2) throw e2;
+}
+
 async function deleteCheckin(checkinId, userId) {
   const { error } = await _supabase
     .from('zane_checkins')
@@ -1929,6 +1942,6 @@ window.LB = {
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
-  checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema,
+  checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill,
 };

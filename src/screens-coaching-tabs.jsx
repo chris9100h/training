@@ -846,7 +846,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   const load = () => LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
   useEffectC(() => {
     load();
-    LB.loadCheckinSchema(coachingId).then(s => setSchema(s || CHECKIN_DEFAULT_SCHEMA)).catch(() => setSchema(CHECKIN_DEFAULT_SCHEMA));
+    LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
   }, [coachingId]);
 
   const thisWeek = (checkins || []).find(c => c.weekStart === weekStart);
@@ -866,6 +866,8 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   if (checkins === null) {
     return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div></div>;
   }
+
+  const resolvedSchema = schema || store?.settings?.defaultCheckinSchema || CHECKIN_DEFAULT_SCHEMA;
 
   // ── Form: new check-in or editing any existing one ──
   if (editTarget) {
@@ -890,7 +892,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           existing={target}
           prefill={!target ? LB.cardioWeekPrefill(store?.cardioLogs, formWeek) : undefined}
           onSaved={() => { setEditTarget(null); load(); }}
-          schema={schema || CHECKIN_DEFAULT_SCHEMA}
+          schema={resolvedSchema}
         />
       </div>
     );
@@ -898,7 +900,6 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
 
   // ── Overview: every check-in is editable/deletable (edit/delete live inside each card) ──
   const recent = [...checkins].reverse();
-  const resolvedSchema = schema || CHECKIN_DEFAULT_SCHEMA;
 
   return (
     <>

@@ -405,7 +405,7 @@ function CheckInTrendCards({ recent, schema }) {
 
 // ─── CheckInSchemaBuilder ──────────────────────────────────────────────────────
 
-function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
+function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClose }) {
   const [draft, setDraft] = useStateC(() => JSON.parse(JSON.stringify(initial || CHECKIN_DEFAULT_SCHEMA)));
   const [view, setView] = useStateC('list');
   const [editCtx, setEditCtx] = useStateC(null);
@@ -413,6 +413,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
   const [sectionDraft, setSectionDraft] = useStateC(null);
   const [saving, setSaving] = useStateC(false);
   const [helpTip, setHelpTip] = useStateC(null);
+  const [savePicker, setSavePicker] = useStateC(false);
 
   const HELP = {
     key:           'Unique database key — lowercase letters, numbers and underscores only. Cannot be changed once the field is created.',
@@ -540,6 +541,12 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
   const handleSave = async () => {
     setSaving(true);
     try { await LB.saveCheckinSchema(coachingId, draft); onSave(draft); }
+    catch (e) { alert(e.message); setSaving(false); }
+  };
+
+  const handleSaveForAll = async () => {
+    setSaving(true);
+    try { await onSaveForAll(draft); }
     catch (e) { alert(e.message); setSaving(false); }
   };
 
@@ -838,6 +845,27 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
   // ── LIST VIEW ─────────────────────────────────────────────────────────────
   return (
     <div style={overlayStyle}>
+      {savePicker && (
+        <div onClick={() => setSavePicker(false)}
+          style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 10, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '20px 16px', paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 20px)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 2 }}>Apply changes to</div>
+            <button onClick={() => { setSavePicker(false); handleSaveForAll(); }}
+              style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: '#0a0805', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
+              <i className="fa-solid fa-users" style={{ fontSize: 14, flexShrink: 0 }} />
+              <span style={{ flex: 1 }}>All clients</span>
+              <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.75 }}>New default for everyone</span>
+            </button>
+            <button onClick={() => { setSavePicker(false); handleSave(); }}
+              style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
+              <i className="fa-solid fa-person" style={{ fontSize: 14, flexShrink: 0 }} />
+              <span style={{ flex: 1 }}>This client only</span>
+              <span style={{ fontSize: 11, fontWeight: 400, color: UI.inkSoft }}>Override for this client</span>
+            </button>
+          </div>
+        </div>
+      )}
       <div style={headerStyle}>
         <button onClick={onClose} style={{ background: 'none', border: 'none', padding: '4px 8px 4px 0', cursor: 'pointer', color: UI.inkFaint, fontSize: 18, lineHeight: 1 }}>
           <i className="fa-solid fa-xmark" />
@@ -847,7 +875,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
           style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11 }}>
           Reset
         </button>
-        <button onClick={handleSave} disabled={saving}
+        <button onClick={() => onSaveForAll ? setSavePicker(true) : handleSave()} disabled={saving}
           style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '7px 16px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: '#0a0805', cursor: 'pointer', opacity: saving ? 0.6 : 1 }}>
           {saving ? 'Saving…' : 'Save'}
         </button>
@@ -930,19 +958,17 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
 
 // ─── ClientCheckInsTab (coach view) ───────────────────────────────────────────
 
-function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggling = false }) {
+function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggling = false, store, setStore, userId }) {
   const [checkins, setCheckins] = useStateC(null);
   const [schema, setSchema] = useStateC(null);
   const [builderOpen, setBuilderOpen] = useStateC(false);
 
   useEffectC(() => {
     LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
-    LB.loadCheckinSchema(coachingId)
-      .then(s => setSchema(s || CHECKIN_DEFAULT_SCHEMA))
-      .catch(() => setSchema(CHECKIN_DEFAULT_SCHEMA));
+    LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
   }, [coachingId]);
 
-  const resolvedSchema = schema || CHECKIN_DEFAULT_SCHEMA;
+  const resolvedSchema = schema || store?.settings?.defaultCheckinSchema || CHECKIN_DEFAULT_SCHEMA;
 
   const toggleRow = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
@@ -968,6 +994,12 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
   const builder = builderOpen && (
     <CheckInSchemaBuilder coachingId={coachingId} initial={resolvedSchema}
       onSave={s => { setSchema(s); setBuilderOpen(false); }}
+      onSaveForAll={async (s) => {
+        await LB.saveDefaultCheckinSchema(s, userId);
+        setStore(st => ({ ...st, settings: { ...st.settings, defaultCheckinSchema: s } }));
+        setSchema(s);
+        setBuilderOpen(false);
+      }}
       onClose={() => setBuilderOpen(false)} />
   );
 
