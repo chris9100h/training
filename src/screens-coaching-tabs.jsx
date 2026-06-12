@@ -599,9 +599,10 @@ function initFormState(sections, responses, distUnit) {
 // The row-layout wrapper provides the outer container / flex column.
 
 function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle }) {
-  const lbl = field.unit === 'weight'
+  const req = field.required ? ' *' : '';
+  const lbl = (field.unit === 'weight'
     ? `${field.label} (${UI.unit()})`
-    : field.unit ? `${field.label} (${field.unit})` : field.label;
+    : field.unit ? `${field.label} (${field.unit})` : field.label) + req;
 
   if (field.type === 'text') {
     return (
@@ -617,7 +618,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
     return (
       <>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{field.label}</span>
+          <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{field.label + req}</span>
           <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
             {['km', 'mi'].map(u => (
               <button key={u} onClick={() => {
@@ -815,7 +816,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
       {sections.map(section => {
         const rows = layoutRows(section.fields || []);
         if (!rows.length) return null;
-        const headLabel = section.label.toUpperCase() + (section.requiredMark ? ' *' : '') + (section.sectionHint ? ` (${section.sectionHint})` : '');
+        const headLabel = section.label.toUpperCase() + (section.sectionHint ? ` (${section.sectionHint})` : '');
         return (
           <div key={section.id}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10, marginTop: 4 }}>{headLabel}</div>

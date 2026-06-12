@@ -55,14 +55,14 @@ const isDecline = LB.isDecline;
 // relationship by saving a custom checkin_schema to zane_coaching.
 const CHECKIN_DEFAULT_SCHEMA = [
   {
-    id: 'weight', label: 'Weight', requiredMark: true,
+    id: 'weight', label: 'Weight',
     fields: [
       { key: 'weight_today', label: 'Today', type: 'decimal', width: 'half', unit: 'weight', required: true, direction: null, icon: 'fa-weight-scale' },
       { key: 'weight_avg_last_week', label: 'Last week avg', type: 'decimal', width: 'half', unit: 'weight', required: false, direction: null, icon: 'fa-weight-scale' },
     ],
   },
   {
-    id: 'markers', label: 'Markers', requiredMark: true, sectionHint: '1 = good/low, 10 = bad/high',
+    id: 'markers', label: 'Markers', sectionHint: '1 = good/low, 10 = bad/high',
     fields: [
       { key: 'hunger', label: 'Hunger', type: 'stepper', min: 1, max: 10, width: 'full', required: true, direction: 'lower_better', icon: 'fa-bowl-food' },
       { key: 'sleep_quality', label: 'Sleep', type: 'stepper', min: 1, max: 10, width: 'full', required: true, direction: 'lower_better', icon: 'fa-moon' },
