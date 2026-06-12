@@ -1,14 +1,15 @@
 /* Coaching screens — charts, check-in summaries, nutrition + plan editors.
    Shares globals with screens-coaching-core.jsx (loaded first). */
 
-function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) {
+function LineChartSheet({ label, icon, entries, format, invertColor, yMin, onClose }) {
   const W = 300, padX = 20, padTop = 36, padBottom = 26, plotH = 110;
   const H = padTop + plotH + padBottom;
   const plotW = W - 2 * padX;
   const vals = entries.map(e => e.value);
   const minV = Math.min(...vals);
   const maxV = Math.max(...vals);
-  const range = maxV - minV || 1;
+  const effectiveMin = yMin !== undefined ? yMin : minV * 0.95;
+  const range = maxV - effectiveMin || 1;
   const n = entries.length;
   // Thin out point labels (value + date) so they don't overlap when there are
   // many check-ins — show roughly 5 across, always including the last point.
@@ -16,7 +17,7 @@ function LineChartSheet({ label, icon, entries, format, invertColor, onClose }) 
   const showLabel = i => i === n - 1 || i % labelStep === 0;
 
   const xOf = i => padX + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
-  const yOf = v => padTop + (1 - (v - minV) / range) * plotH;
+  const yOf = v => padTop + (1 - (v - effectiveMin) / range) * plotH;
 
   const fmtD = s => {
     const d = new Date(s + 'T12:00:00');
@@ -209,11 +210,11 @@ function CheckInTrendCards({ recent }) {
     exportCheckinCharts(recent).catch(() => {}).finally(() => setExporting(false));
   };
 
-  const openChart = (label, icon, values, format, invertColor) => {
+  const openChart = (label, icon, values, format, invertColor, yMin) => {
     const entries = values
       .map((v, i) => v != null ? { weekStart: recent[i].weekStart, value: v } : null)
       .filter(Boolean);
-    if (entries.length) setChartModal({ label, icon, entries, format, invertColor });
+    if (entries.length) setChartModal({ label, icon, entries, format, invertColor, yMin });
   };
 
   const Sparkline = ({ vals }) => {
@@ -232,7 +233,7 @@ function CheckInTrendCards({ recent }) {
 
   const cardStyle = { flex: 1, minWidth: 80, background: UI.bgInset, borderRadius: 6, padding: '8px 10px', border: `0.5px solid ${UI.hair}`, display: 'flex', flexDirection: 'column', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
 
-  const TrendCard = ({ label, icon, values, format, invertColor, sub }) => {
+  const TrendCard = ({ label, icon, values, format, invertColor, sub, yMin }) => {
     const valid = values.filter(v => v != null);
     if (!valid.length) return null;
     const last = valid[valid.length - 1];
@@ -243,7 +244,7 @@ function CheckInTrendCards({ recent }) {
       : invertColor ? (up ? 'rgba(var(--danger-rgb),0.8)' : 'var(--accent)')
       : (up ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)');
     return (
-      <div onClick={() => openChart(label, icon, values, format, invertColor)} style={cardStyle}>
+      <div onClick={() => openChart(label, icon, values, format, invertColor, yMin)} style={cardStyle}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
           <i className={`fa-solid ${icon}`} style={{ fontSize: 10, color: UI.inkFaint }} />
           <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</span>
@@ -341,11 +342,11 @@ function CheckInTrendCards({ recent }) {
         <TrendCard label="Today" icon="fa-weight-scale" values={recent.map(c => c.weightToday)} format={v => `${Math.round(v * 100) / 100}${UI.unit()}`} invertColor={false} />
       </TrendSection>
       <TrendSection label="MARKERS">
-        <TrendCard label="Hunger" icon="fa-bowl-food" values={recent.map(c => c.hunger)} format={v => `${v}`} invertColor={true} />
-        <TrendCard label="Sleep" icon="fa-moon" values={recent.map(c => c.sleepQuality)} format={v => `${v}`} invertColor={true} />
-        <TrendCard label="Life stress" icon="fa-brain" values={recent.map(c => c.lifeStress)} format={v => `${v}`} invertColor={true} />
-        <TrendCard label="Work stress" icon="fa-briefcase" values={recent.map(c => c.workStress)} format={v => `${v}`} invertColor={true} />
-        <TrendCard label="Tiredness" icon="fa-battery-half" values={recent.map(c => c.tiredness)} format={v => `${v}`} invertColor={true} />
+        <TrendCard label="Hunger" icon="fa-bowl-food" values={recent.map(c => c.hunger)} format={v => `${v}`} invertColor={true} yMin={0} />
+        <TrendCard label="Sleep" icon="fa-moon" values={recent.map(c => c.sleepQuality)} format={v => `${v}`} invertColor={true} yMin={0} />
+        <TrendCard label="Life stress" icon="fa-brain" values={recent.map(c => c.lifeStress)} format={v => `${v}`} invertColor={true} yMin={0} />
+        <TrendCard label="Work stress" icon="fa-briefcase" values={recent.map(c => c.workStress)} format={v => `${v}`} invertColor={true} yMin={0} />
+        <TrendCard label="Tiredness" icon="fa-battery-half" values={recent.map(c => c.tiredness)} format={v => `${v}`} invertColor={true} yMin={0} />
       </TrendSection>
       <TrendSection label="TRAINING">
         <TrainingTrendCard />
@@ -353,8 +354,8 @@ function CheckInTrendCards({ recent }) {
       </TrendSection>
       <TrendSection label="CARDIO">
         <CardioTrendCard />
-        <TrendCard label="Pace feeling" icon="fa-gauge" values={recent.map(c => c.cardioPaceFeeling)} format={v => `${v}/6`} invertColor={false} />
-        <TrendCard label="Effort" icon="fa-fire" values={recent.map(c => c.cardioEffort)} format={v => `${v}/10`} invertColor={true} />
+        <TrendCard label="Pace feeling" icon="fa-gauge" values={recent.map(c => c.cardioPaceFeeling)} format={v => `${v}/6`} invertColor={false} yMin={0} />
+        <TrendCard label="Effort" icon="fa-fire" values={recent.map(c => c.cardioEffort)} format={v => `${v}/10`} invertColor={true} yMin={0} />
         <TrendCard label="Distance" icon="fa-road" values={recent.map(c => c.cardioDistanceM)} format={v => { const du = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch(_) { return 'km'; } })(); return du === 'mi' ? `${(v/1609.344).toFixed(1)} mi` : `${(v/1000).toFixed(1)} km`; }} invertColor={false} />
       </TrendSection>
     </>
