@@ -446,6 +446,17 @@ function SettingsScreen({ store, setStore, go, userId }) {
               } catch (e) {
                 setStore(s => ({ ...s, settings: { ...s.settings, beYourOwnCoach: false } }));
               }
+            } else {
+              const selfId = store.coaching?.asSelf?.id;
+              if (selfId) {
+                try {
+                  await LB.endCoaching(selfId);
+                  const cs = await LB.reloadCoachingState(userId);
+                  setStore(s => s ? { ...s, coaching: cs } : s);
+                } catch (e) {
+                  setStore(s => ({ ...s, settings: { ...s.settings, beYourOwnCoach: true } }));
+                }
+              }
             }
           };
 
