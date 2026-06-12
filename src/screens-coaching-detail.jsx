@@ -416,7 +416,6 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
   const [savePicker, setSavePicker] = useStateC(false);
 
   const HELP = {
-    key:           'Unique database key — lowercase letters, numbers and underscores only. Cannot be changed once the field is created.',
     label:         'The display name shown to clients in the check-in form.',
     type:          'How the client fills in this field. Text = free-form notes. Int/Dec = number input. Stepper = tap buttons on a 1–N scale. Choice = pick one from a fixed list.',
     width:         'Full = the field takes the whole row. Half = two fields sit side by side in one row.',
@@ -494,10 +493,22 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     setView('edit-section');
   };
 
+  // Keys are generated automatically from the label (readable slug, made unique
+  // within this form) — coaches never type or see them. Generated once at
+  // creation and never changed afterwards, so historical responses keep theirs.
+  const genFieldKey = (label) => {
+    const used = new Set(draft.flatMap(s => (s.fields || []).map(f => f.key)));
+    const base = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || 'field';
+    let key = base;
+    while (used.has(key)) key = base + '_' + Math.random().toString(36).slice(2, 6);
+    return key;
+  };
+
   const commitField = () => {
     const fd = fieldDraft;
-    if (!fd.key.trim() || !fd.label.trim()) return;
-    const f = { key: fd.key.trim(), label: fd.label.trim(), type: fd.type, width: fd.width, required: fd.required, direction: fd.direction };
+    if (!fd.label.trim()) return;
+    const key = fd.isNew ? genFieldKey(fd.label) : fd.key;
+    const f = { key, label: fd.label.trim(), type: fd.type, width: fd.width, required: fd.required, direction: fd.direction };
     if (fd.icon.trim()) f.icon = fd.icon.trim();
     if (fd.unit) f.unit = fd.unit;
     if (fd.hint.trim()) f.hint = fd.hint.trim();
@@ -627,7 +638,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
   if (view === 'edit-field' && fieldDraft) {
     const fd = fieldDraft;
     const set = (k, v) => setFieldDraft(f => ({ ...f, [k]: v }));
-    const canSave = fd.key.trim().length > 0 && fd.label.trim().length > 0;
+    const canSave = fd.label.trim().length > 0;
     const numericChoice = fd.type === 'choice' && fd.options.length > 0 && fd.options.every(o => o.value !== '' && !isNaN(Number(o.value)));
 
     return (
@@ -638,16 +649,6 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
           {doneBtn(commitField, !canSave)}
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 40px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div>
-            {fieldHeader('Field key', 'key')}
-            {renderHelp('key')}
-            <input value={fd.key}
-              onChange={e => set('key', e.target.value.replace(/[^a-z0-9_]/g, '').toLowerCase())}
-              disabled={!fd.isNew} placeholder="e.g. muscle_soreness"
-              style={{ ...inp, opacity: fd.isNew ? 1 : 0.6 }} />
-            {!fd.isNew && <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 3 }}>Key is fixed after creation</div>}
-          </div>
-
           <div>
             {fieldHeader('Label', 'label')}
             {renderHelp('label')}
