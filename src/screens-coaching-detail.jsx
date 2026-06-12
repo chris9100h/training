@@ -15,9 +15,15 @@ function LineChartSheet({ label, icon, entries, format, invertColor, yMin, yMax,
   const labelStep = Math.max(1, Math.round(n / 5));
   const showLabel = i => i === n - 1 || i % labelStep === 0;
 
-  // Four Y gridlines across the padded domain. Round decimal noise off the
-  // axis labels (one decimal only for tight ranges like bodyweight).
-  const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+  // Y gridlines. For a small integer domain (choice ranks 1–3, short stepper
+  // scales) place exactly one line per integer level, so axis labels never
+  // collapse two gridlines onto the same option (e.g. a 3-option choice was
+  // drawing 4 lines → "1, w, w, x"). Otherwise four evenly-spaced lines.
+  const levels = dom.max - dom.min + 1;
+  const intDomain = Number.isInteger(dom.min) && Number.isInteger(dom.max) && levels >= 2 && levels <= 6;
+  const gridVals = intDomain
+    ? Array.from({ length: levels }, (_, i) => dom.min + i)
+    : Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const dec = dom.range >= 4 ? 0 : 1;
 
   const xOf = i => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);

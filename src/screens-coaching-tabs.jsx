@@ -483,7 +483,7 @@ function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit
               const items = run; run = []; const kind = runKind; runKind = null;
               if (kind === 'pill') {
                 blocks.push(
-                  <div key={`p-${items[0].key}`} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  <div key={`p-${items[0].key}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
                     {items.map(f => <StatPill key={f.key} label={f.label} value={fmtValue(f, responses[f.key])} />)}
                   </div>
                 );
@@ -529,7 +529,7 @@ function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit
           {extraKeys.length > 0 && (
             <div>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ADDITIONAL</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
                 {extraKeys.map(k => <StatPill key={k} label={k.replace(/_/g, ' ')} value={String(responses[k])} />)}
               </div>
             </div>
