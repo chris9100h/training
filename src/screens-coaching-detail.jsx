@@ -790,6 +790,14 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
                 ))}
                 {!fd.options.length && <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>No options yet — tap + ADD</div>}
               </div>
+              {fd.type === 'choice' && fd.direction && fd.options.length > 0 && (
+                <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 8, padding: '7px 10px', background: 'rgba(var(--accent-rgb),0.08)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <i className={`fa-solid ${fd.direction === 'higher_better' ? 'fa-arrow-up' : 'fa-arrow-down'}`} style={{ color: 'var(--accent)', fontSize: 12, flexShrink: 0 }} />
+                  <span>{fd.direction === 'higher_better'
+                    ? 'Higher counts as better — order from worst (top) to best (bottom).'
+                    : 'Lower counts as better — order from best (top) to worst (bottom).'}</span>
+                </div>
+              )}
               {numericChoice && (
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginTop: 12 }}>
                   <div style={{ flex: 1 }}>
