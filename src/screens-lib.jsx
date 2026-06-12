@@ -874,14 +874,15 @@ function ProgressChart({ points }) {
 }
 
 // ─── CARDIO TYPE DETAIL SHEET ────────────────────────────────────────
-function CardioLineChart({ points, label, formatVal, yMin }) {
+function CardioLineChart({ points, label, formatVal, yMin, yMax }) {
   if (!points || points.length < 2) return null;
   const w = 200, h = 88, padT = 8, padB = 18, padL = 34, padR = 6;
   const vals = points.map(p => p.value);
   const max = Math.max(...vals);
   const min = Math.min(...vals);
   const effectiveMin = yMin !== undefined ? yMin : min * 0.95;
-  const range = max - effectiveMin || 1;
+  const effectiveMax = yMax !== undefined ? yMax : max;
+  const range = effectiveMax - effectiveMin || 1;
   const yOf = v => padT + (1 - (v - effectiveMin) / range) * (h - padT - padB);
   const xy = points.map((p, i) => {
     const x = padL + (i / Math.max(1, points.length - 1)) * (w - padL - padR);
@@ -938,8 +939,8 @@ function CardioTypeDetailSheet({ type, logs, open, onClose }) {
   const charts = [
     durPoints.length >= 2 && { points: durPoints, label: 'DURATION', formatVal: v => `${Math.round(v)}min` },
     speedPoints.length >= 2 && { points: speedPoints, label: `SPEED (${du}/h)`, formatVal: v => v.toFixed(1) },
-    effortPoints.length >= 2 && { points: effortPoints, label: 'EFFORT', formatVal: v => `${v}/10`, yMin: 0 },
-    paceFlPoints.length >= 2 && { points: paceFlPoints, label: 'PACE FEELING', formatVal: v => paceFlLabels[Math.round(v)] || Math.round(v), yMin: 0 },
+    effortPoints.length >= 2 && { points: effortPoints, label: 'EFFORT', formatVal: v => `${v}/10`, yMin: 0, yMax: 10 },
+    paceFlPoints.length >= 2 && { points: paceFlPoints, label: 'PACE FEELING', formatVal: v => paceFlLabels[Math.round(v)] || Math.round(v), yMin: 0, yMax: 6 },
     distPoints.length >= 2 && { points: distPoints, label: `DISTANCE (${du})`, formatVal: v => v.toFixed(2) },
   ].filter(Boolean);
 
@@ -953,7 +954,7 @@ function CardioTypeDetailSheet({ type, logs, open, onClose }) {
     <Sheet open={open} onClose={onClose} title={type}>
       <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16 }}>{summaryParts.join(' · ')}</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, paddingBottom: 8 }}>
-        {charts.map((c, i) => <CardioLineChart key={i} points={c.points} label={c.label} formatVal={c.formatVal} yMin={c.yMin} />)}
+        {charts.map((c, i) => <CardioLineChart key={i} points={c.points} label={c.label} formatVal={c.formatVal} yMin={c.yMin} yMax={c.yMax} />)}
       </div>
     </Sheet>
   );
