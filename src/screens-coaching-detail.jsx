@@ -215,7 +215,8 @@ async function exportCheckinCharts(recent) {
   }, 'image/png'));
 }
 
-function CheckInTrendCards({ recent }) {
+function CheckInTrendCards({ recent, schema }) {
+  const resolvedSchema = schema || CHECKIN_DEFAULT_SCHEMA;
   const [chartModal, setChartModal] = useStateC(null);
   const [exporting, setExporting] = useStateC(false);
   const n = recent.length;
@@ -240,9 +241,6 @@ function CheckInTrendCards({ recent }) {
     return (
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, marginTop: 8, height: 20 }}>
         {vals.map((v, i) => {
-          // Floor the shortest bar at 6px (not glued to the baseline) and let
-          // the tallest reach 19px — a visible minimum bar reads better than a
-          // 3px sliver, even when the lowest value is 0.
           const h = Math.round(((v - min) / range) * 13) + 6;
           return <div key={i} style={{ flex: 1, height: h, borderRadius: 2, background: i === vals.length - 1 ? 'var(--accent)' : `rgba(var(--accent-rgb),0.3)` }} />;
         })}
@@ -280,60 +278,6 @@ function CheckInTrendCards({ recent }) {
     );
   };
 
-  const TrainingTrendCard = () => {
-    const dtVals = recent.map(c => c.daysTrained);
-    const valid = dtVals.filter(v => v != null);
-    if (!valid.length) return null;
-    const last = valid[valid.length - 1];
-    const prev = valid.length > 1 ? valid[valid.length - 2] : null;
-    const delta = prev != null ? last - prev : null;
-    const lastPerf = [...recent].reverse().find(c => c.performanceVsLastWeek)?.performanceVsLastWeek;
-    const perfColor = lastPerf === 'improved' ? 'var(--accent)' : lastPerf === 'worse' ? 'rgba(var(--danger-rgb),0.8)' : UI.inkSoft;
-    const perfLabel = lastPerf === 'improved' ? '↑ Better' : lastPerf === 'worse' ? '↓ Worse' : lastPerf === 'same' ? '= Same' : null;
-    return (
-      <div onClick={() => openChart('Training days', 'fa-dumbbell', dtVals, v => `${v}d`, false)} style={cardStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
-          <i className="fa-solid fa-dumbbell" style={{ fontSize: 10, color: UI.inkFaint }} />
-          <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Training</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last}d</span>
-          {delta != null && Math.abs(delta) > 0 && (
-            <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
-          )}
-          {perfLabel && <span style={{ fontSize: 9, color: perfColor, fontFamily: UI.fontUi, fontWeight: 700 }}>{perfLabel}</span>}
-        </div>
-        <Sparkline vals={valid} />
-      </div>
-    );
-  };
-
-  const CardioTrendCard = () => {
-    const allMins = recent.map(c => c.cardioMinutes);
-    const validItems = recent.filter(c => c.cardioMinutes != null);
-    if (!validItems.length) return null;
-    const last = validItems[validItems.length - 1];
-    const prev = validItems.length > 1 ? validItems[validItems.length - 2] : null;
-    const delta = prev != null ? last.cardioMinutes - prev.cardioMinutes : null;
-    const sub = last.cardioDistanceM != null ? `${(last.cardioDistanceM / 1000).toFixed(1)} km` : null;
-    return (
-      <div onClick={() => openChart('Cardio', 'fa-person-running', allMins, v => `${v} min`, false)} style={cardStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
-          <i className="fa-solid fa-person-running" style={{ fontSize: 10, color: UI.inkFaint }} />
-          <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Cardio</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
-          <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last.cardioMinutes} min</span>
-          {delta != null && Math.abs(delta) > 0 && (
-            <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
-          )}
-        </div>
-        {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, textAlign: 'center' }}>{sub}</div>}
-        <Sparkline vals={validItems.map(c => c.cardioMinutes)} />
-      </div>
-    );
-  };
-
   const TrendSection = ({ label, children }) => {
     const hasAny = React.Children.toArray(children).some(Boolean);
     if (!hasAny) return null;
@@ -342,6 +286,100 @@ function CheckInTrendCards({ recent }) {
         <div className="micro" style={{ fontWeight: 700, color: UI.inkFaint, marginBottom: 8, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>{label}</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>{children}</div>
       </div>
+    );
+  };
+
+  const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch(_) { return 'km'; } })();
+
+  // Keys shown as sub-labels on another card — don't render as standalone
+  const SUB_KEYS = new Set(['cardio_distance_m', 'performance_vs_last_week']);
+
+  const getFormat = (field) => {
+    if (field.unit === 'weight') return v => `${Math.round(v * 100) / 100}${UI.unit()}`;
+    if (field.key === 'steps') return v => `${Math.round(v / 1000)}k`;
+    if (field._distanceField) return v => distUnit === 'mi' ? `${(v/1609.344).toFixed(1)} mi` : `${(v/1000).toFixed(1)} km`;
+    if (field.type === 'stepper') return v => `${v}/${field.max || 10}`;
+    if (field.type === 'choice' && field.options?.length && field.options.every(o => typeof o.value === 'number'))
+      return v => `${v}/${Math.max(...field.options.map(o => o.value))}`;
+    if (field.unit) return v => `${v} ${field.unit}`;
+    return v => String(Math.round(v * 10) / 10);
+  };
+
+  const getYRange = (field) => {
+    if (field.type === 'stepper') return { yMin: 0, yMax: field.max || 10 };
+    if (field.type === 'choice' && field.options?.length) {
+      const nums = field.options.map(o => Number(o.value)).filter(n => !isNaN(n));
+      if (nums.length) return { yMin: 0, yMax: Math.max(...nums) };
+    }
+    return {};
+  };
+
+  const renderFieldCard = (field) => {
+    if (field.type === 'text') return null;
+    if (SUB_KEYS.has(field.key)) return null;
+    // String-valued choice fields (e.g. performance) have no numeric chart
+    if (field.type === 'choice' && field.options?.length && field.options.every(o => typeof o.value === 'string')) return null;
+
+    const vals = recent.map(c => { const v = c.responses?.[field.key]; return (v != null && v !== '') ? Number(v) : null; });
+
+    if (field.key === 'days_trained') {
+      const valid = vals.filter(v => v != null);
+      if (!valid.length) return null;
+      const lastPerf = [...recent].reverse().find(c => c.responses?.performance_vs_last_week)?.responses?.performance_vs_last_week;
+      const perfColor = lastPerf === 'improved' ? 'var(--accent)' : lastPerf === 'worse' ? 'rgba(var(--danger-rgb),0.8)' : UI.inkSoft;
+      const perfLabel = lastPerf === 'improved' ? '↑ Better' : lastPerf === 'worse' ? '↓ Worse' : lastPerf === 'same' ? '= Same' : null;
+      const last = valid[valid.length - 1];
+      const prev = valid.length > 1 ? valid[valid.length - 2] : null;
+      const delta = prev != null ? last - prev : null;
+      return (
+        <div key={field.key} onClick={() => openChart('Training days', field.icon || 'fa-dumbbell', vals, v => `${v}d`, false)} style={cardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
+            <i className={`fa-solid ${field.icon || 'fa-dumbbell'}`} style={{ fontSize: 10, color: UI.inkFaint }} />
+            <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Training</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last}d</span>
+            {delta != null && Math.abs(delta) > 0 && (
+              <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
+            )}
+            {perfLabel && <span style={{ fontSize: 9, color: perfColor, fontFamily: UI.fontUi, fontWeight: 700 }}>{perfLabel}</span>}
+          </div>
+          <Sparkline vals={valid} />
+        </div>
+      );
+    }
+
+    if (field.key === 'cardio_minutes') {
+      const validItems = recent.filter(c => c.responses?.cardio_minutes != null);
+      if (!validItems.length) return null;
+      const last = validItems[validItems.length - 1];
+      const prev = validItems.length > 1 ? validItems[validItems.length - 2] : null;
+      const delta = prev != null ? last.responses.cardio_minutes - prev.responses.cardio_minutes : null;
+      const lastDist = last.responses?.cardio_distance_m;
+      const sub = lastDist != null ? (distUnit === 'mi' ? `${(lastDist/1609.344).toFixed(1)} mi` : `${(lastDist/1000).toFixed(1)} km`) : null;
+      return (
+        <div key={field.key} onClick={() => openChart('Cardio', field.icon || 'fa-person-running', vals, v => `${v} min`, false)} style={cardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
+            <i className={`fa-solid ${field.icon || 'fa-person-running'}`} style={{ fontSize: 10, color: UI.inkFaint }} />
+            <span style={{ fontSize: 9, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Cardio</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
+            <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last.responses.cardio_minutes} min</span>
+            {delta != null && Math.abs(delta) > 0 && (
+              <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
+            )}
+          </div>
+          {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, textAlign: 'center' }}>{sub}</div>}
+          <Sparkline vals={validItems.map(c => c.responses.cardio_minutes)} />
+        </div>
+      );
+    }
+
+    const fmt = getFormat(field);
+    const { yMin, yMax } = getYRange(field);
+    return (
+      <TrendCard key={field.key} label={field.label} icon={field.icon || 'fa-circle-dot'} values={vals}
+        format={fmt} invertColor={field.direction === 'lower_better'} yMin={yMin} yMax={yMax} />
     );
   };
 
@@ -356,28 +394,398 @@ function CheckInTrendCards({ recent }) {
           </button>
         )}
       </div>
-      <TrendSection label="WEIGHT">
-        <TrendCard label="Avg last week" icon="fa-weight-scale" values={recent.map(c => c.weightAvgLastWeek)} format={v => `${Math.round(v * 100) / 100}${UI.unit()}`} invertColor={false} />
-        <TrendCard label="Today" icon="fa-weight-scale" values={recent.map(c => c.weightToday)} format={v => `${Math.round(v * 100) / 100}${UI.unit()}`} invertColor={false} />
-      </TrendSection>
-      <TrendSection label="MARKERS">
-        <TrendCard label="Hunger" icon="fa-bowl-food" values={recent.map(c => c.hunger)} format={v => `${v}`} invertColor={true} yMin={0} yMax={10} />
-        <TrendCard label="Sleep" icon="fa-moon" values={recent.map(c => c.sleepQuality)} format={v => `${v}`} invertColor={true} yMin={0} yMax={10} />
-        <TrendCard label="Life stress" icon="fa-brain" values={recent.map(c => c.lifeStress)} format={v => `${v}`} invertColor={true} yMin={0} yMax={10} />
-        <TrendCard label="Work stress" icon="fa-briefcase" values={recent.map(c => c.workStress)} format={v => `${v}`} invertColor={true} yMin={0} yMax={10} />
-        <TrendCard label="Tiredness" icon="fa-battery-half" values={recent.map(c => c.tiredness)} format={v => `${v}`} invertColor={true} yMin={0} yMax={10} />
-      </TrendSection>
-      <TrendSection label="TRAINING">
-        <TrainingTrendCard />
-        <TrendCard label="Steps" icon="fa-shoe-prints" values={recent.map(c => c.steps)} format={v => `${Math.round(v / 1000)}k`} invertColor={false} />
-      </TrendSection>
-      <TrendSection label="CARDIO">
-        <CardioTrendCard />
-        <TrendCard label="Pace feeling" icon="fa-gauge" values={recent.map(c => c.cardioPaceFeeling)} format={v => `${v}/6`} invertColor={false} yMin={0} yMax={6} />
-        <TrendCard label="Effort" icon="fa-fire" values={recent.map(c => c.cardioEffort)} format={v => `${v}/10`} invertColor={true} yMin={0} yMax={10} />
-        <TrendCard label="Distance" icon="fa-road" values={recent.map(c => c.cardioDistanceM)} format={v => { const du = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch(_) { return 'km'; } })(); return du === 'mi' ? `${(v/1609.344).toFixed(1)} mi` : `${(v/1000).toFixed(1)} km`; }} invertColor={false} />
-      </TrendSection>
+      {resolvedSchema.map(section => (
+        <TrendSection key={section.id} label={section.label.toUpperCase()}>
+          {(section.fields || []).map(field => renderFieldCard(field))}
+        </TrendSection>
+      ))}
     </>
+  );
+}
+
+// ─── CheckInSchemaBuilder ──────────────────────────────────────────────────────
+
+function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
+  const [draft, setDraft] = useStateC(() => JSON.parse(JSON.stringify(initial || CHECKIN_DEFAULT_SCHEMA)));
+  const [view, setView] = useStateC('list');
+  const [editCtx, setEditCtx] = useStateC(null);
+  const [fieldDraft, setFieldDraft] = useStateC(null);
+  const [sectionDraft, setSectionDraft] = useStateC(null);
+  const [saving, setSaving] = useStateC(false);
+
+  const backToList = () => { setView('list'); setFieldDraft(null); setSectionDraft(null); setEditCtx(null); };
+
+  const openEditField = (sIdx, fIdx) => {
+    const f = draft[sIdx].fields[fIdx];
+    setFieldDraft({
+      key: f.key || '', label: f.label || '', type: f.type || 'integer', width: f.width || 'full',
+      required: !!f.required, direction: f.direction || null, icon: f.icon || '', unit: f.unit || '',
+      hint: f.hint || '', min: f.min != null ? String(f.min) : '1', max: f.max != null ? String(f.max) : '10',
+      rows: f.rows != null ? String(f.rows) : '2',
+      options: f.options ? JSON.parse(JSON.stringify(f.options)) : [], labeled: !!f.labeled, isNew: false,
+    });
+    setEditCtx({ sectionIdx: sIdx, fieldIdx: fIdx });
+    setView('edit-field');
+  };
+
+  const openAddField = (sIdx) => {
+    setFieldDraft({ key: '', label: '', type: 'integer', width: 'full', required: false, direction: null, icon: '', unit: '', hint: '', min: '1', max: '10', rows: '2', options: [], labeled: false, isNew: true });
+    setEditCtx({ sectionIdx: sIdx, fieldIdx: null });
+    setView('edit-field');
+  };
+
+  const openEditSection = (sIdx) => {
+    const s = draft[sIdx];
+    setSectionDraft({ label: s.label || '', hint: s.sectionHint || '' });
+    setEditCtx({ sectionIdx: sIdx, isNew: false });
+    setView('edit-section');
+  };
+
+  const openAddSection = () => {
+    setSectionDraft({ label: '', hint: '' });
+    setEditCtx({ isNew: true });
+    setView('edit-section');
+  };
+
+  const commitField = () => {
+    const fd = fieldDraft;
+    if (!fd.key.trim() || !fd.label.trim()) return;
+    const f = { key: fd.key.trim(), label: fd.label.trim(), type: fd.type, width: fd.width, required: fd.required, direction: fd.direction };
+    if (fd.icon.trim()) f.icon = fd.icon.trim();
+    if (fd.unit) f.unit = fd.unit;
+    if (fd.hint.trim()) f.hint = fd.hint.trim();
+    if (fd.type === 'stepper') { f.min = parseInt(fd.min) || 1; f.max = parseInt(fd.max) || 10; }
+    if (fd.type === 'text') f.rows = parseInt(fd.rows) || 2;
+    if (fd.type === 'choice') {
+      f.options = fd.options.map(o => ({ ...o, value: (o.value !== '' && !isNaN(Number(o.value))) ? Number(o.value) : o.value }));
+      if (fd.labeled) f.labeled = true;
+    }
+    setDraft(d => {
+      const n = JSON.parse(JSON.stringify(d));
+      if (fd.isNew) n[editCtx.sectionIdx].fields.push(f);
+      else n[editCtx.sectionIdx].fields[editCtx.fieldIdx] = f;
+      return n;
+    });
+    backToList();
+  };
+
+  const commitSection = () => {
+    const sd = sectionDraft;
+    if (!sd.label.trim()) return;
+    setDraft(d => {
+      const n = JSON.parse(JSON.stringify(d));
+      if (editCtx.isNew) {
+        n.push({ id: `s${Date.now()}`, label: sd.label.trim(), ...(sd.hint.trim() ? { sectionHint: sd.hint.trim() } : {}), fields: [] });
+      } else {
+        n[editCtx.sectionIdx].label = sd.label.trim();
+        if (sd.hint.trim()) n[editCtx.sectionIdx].sectionHint = sd.hint.trim();
+        else delete n[editCtx.sectionIdx].sectionHint;
+      }
+      return n;
+    });
+    backToList();
+  };
+
+  const moveSection = (i, dir) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); const j = i + dir; if (j < 0 || j >= n.length) return n; [n[i], n[j]] = [n[j], n[i]]; return n; });
+  const removeSection = (i) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); n.splice(i, 1); return n; });
+  const moveField = (si, fi, dir) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); const flds = n[si].fields; const j = fi + dir; if (j < 0 || j >= flds.length) return n; [flds[fi], flds[j]] = [flds[j], flds[fi]]; return n; });
+  const removeField = (si, fi) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); n[si].fields.splice(fi, 1); return n; });
+
+  const handleSave = async () => {
+    setSaving(true);
+    try { await LB.saveCheckinSchema(coachingId, draft); onSave(draft); }
+    catch (e) { alert(e.message); setSaving(false); }
+  };
+
+  const handleReset = () => {
+    if (confirm('Reset to the default check-in form? All customizations will be lost.'))
+      setDraft(JSON.parse(JSON.stringify(CHECKIN_DEFAULT_SCHEMA)));
+  };
+
+  const TYPE_LABEL = { text: 'Text', integer: 'Int', decimal: 'Dec', stepper: 'Steps', choice: 'Choice' };
+  const TYPE_COLOR = { text: UI.inkSoft, integer: 'var(--accent)', decimal: 'var(--accent)', stepper: UI.gold, choice: '#7b8cde' };
+  const inp = { width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '9px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', boxSizing: 'border-box' };
+  const lbl = { display: 'block', fontSize: 10, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 };
+  const segBtn = (active) => ({ flex: 1, padding: '7px 4px', borderRadius: 6, border: `0.5px solid ${active ? 'var(--accent)' : UI.hairStrong}`, background: active ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: active ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', fontWeight: active ? 700 : 400 });
+  const renderToggle = (on, onToggle) => (
+    <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
+      <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: on ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
+    </div>
+  );
+
+  const overlayStyle = { position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 350, background: UI.bg, display: 'flex', flexDirection: 'column' };
+  const headerStyle = { display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 };
+  const backBtn = (onClick) => (
+    <button onClick={onClick} style={{ background: 'none', border: 'none', padding: '4px 8px 4px 0', cursor: 'pointer', color: UI.inkFaint, fontSize: 18, lineHeight: 1 }}>
+      <i className="fa-solid fa-chevron-left" />
+    </button>
+  );
+  const doneBtn = (onClick, disabled) => (
+    <button onClick={onClick} disabled={disabled}
+      style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '7px 16px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: '#0a0805', cursor: 'pointer', opacity: disabled ? 0.4 : 1 }}>
+      Done
+    </button>
+  );
+
+  // ── FIELD EDITOR ──────────────────────────────────────────────────────────
+  if (view === 'edit-field' && fieldDraft) {
+    const fd = fieldDraft;
+    const set = (k, v) => setFieldDraft(f => ({ ...f, [k]: v }));
+    const canSave = fd.key.trim().length > 0 && fd.label.trim().length > 0;
+    const numericChoice = fd.type === 'choice' && fd.options.length > 0 && fd.options.every(o => o.value !== '' && !isNaN(Number(o.value)));
+
+    return (
+      <div style={overlayStyle}>
+        <div style={headerStyle}>
+          {backBtn(backToList)}
+          <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink, flex: 1 }}>{fd.isNew ? 'Add Field' : 'Edit Field'}</span>
+          {doneBtn(commitField, !canSave)}
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 40px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <label style={lbl}>Field key <span style={{ textTransform: 'none', fontWeight: 400, fontSize: 9 }}>(no spaces, used as response key)</span></label>
+            <input value={fd.key}
+              onChange={e => set('key', e.target.value.replace(/[^a-z0-9_]/g, '').toLowerCase())}
+              disabled={!fd.isNew} placeholder="e.g. muscle_soreness"
+              style={{ ...inp, opacity: fd.isNew ? 1 : 0.6 }} />
+            {!fd.isNew && <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 3 }}>Key is fixed after creation</div>}
+          </div>
+
+          <div>
+            <label style={lbl}>Label</label>
+            <input value={fd.label} onChange={e => set('label', e.target.value)} placeholder="e.g. Muscle Soreness" style={inp} />
+          </div>
+
+          <div>
+            <label style={lbl}>Type</label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {['text','integer','decimal','stepper','choice'].map(t => (
+                <button key={t} onClick={() => set('type', t)} style={segBtn(fd.type === t)}>{TYPE_LABEL[t]}</button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label style={lbl}>Width</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => set('width', 'full')} style={segBtn(fd.width === 'full')}>Full width</button>
+              <button onClick={() => set('width', 'half')} style={segBtn(fd.width === 'half')}>Half width</button>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 13, fontFamily: UI.fontUi, color: UI.ink }}>Required</span>
+            {renderToggle(fd.required, () => set('required', !fd.required))}
+          </div>
+
+          <div>
+            <label style={lbl}>Trend direction</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[{ v: null, l: 'None' }, { v: 'higher_better', l: '↑ Higher' }, { v: 'lower_better', l: '↓ Lower' }].map(({ v, l }) => (
+                <button key={String(v)} onClick={() => set('direction', v)} style={segBtn(fd.direction === v)}>{l}</button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label style={lbl}>Icon <span style={{ textTransform: 'none', fontWeight: 400, fontSize: 9 }}>(Font Awesome solid name)</span></label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {fd.icon && <i className={`fa-solid ${fd.icon}`} style={{ fontSize: 16, color: 'var(--accent)', width: 22, textAlign: 'center', flexShrink: 0 }} />}
+              <input value={fd.icon} onChange={e => set('icon', e.target.value)} placeholder="fa-dumbbell" style={{ ...inp, flex: 1, width: 'auto' }} />
+            </div>
+          </div>
+
+          {fd.type === 'stepper' && (
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label style={lbl}>Min</label>
+                <input type="number" value={fd.min} onChange={e => set('min', e.target.value)} style={inp} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={lbl}>Max</label>
+                <input type="number" value={fd.max} onChange={e => set('max', e.target.value)} style={inp} />
+              </div>
+            </div>
+          )}
+
+          {fd.type === 'text' && (
+            <div>
+              <label style={lbl}>Rows (textarea height)</label>
+              <input type="number" min="1" max="8" value={fd.rows} onChange={e => set('rows', e.target.value)} style={inp} />
+            </div>
+          )}
+
+          {fd.type === 'choice' && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <label style={{ ...lbl, marginBottom: 0 }}>Options</label>
+                <button onClick={() => {
+                  const nv = numericChoice ? (fd.options.length ? Math.max(...fd.options.map(o => Number(o.value))) + 1 : 1) : '';
+                  set('options', [...fd.options, { value: nv, label: '' }]);
+                }} style={{ background: 'var(--accent)', border: 'none', borderRadius: 4, padding: '4px 10px', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: '#0a0805', cursor: 'pointer' }}>
+                  + ADD
+                </button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {fd.options.map((o, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input value={o.value} onChange={e => set('options', fd.options.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
+                      placeholder="val" style={{ ...inp, width: 58, flex: '0 0 58px', fontSize: 13 }} />
+                    <input value={o.label} onChange={e => set('options', fd.options.map((x, j) => j === i ? { ...x, label: e.target.value } : x))}
+                      placeholder="label" style={{ ...inp, flex: 1, fontSize: 13 }} />
+                    <button onClick={() => set('options', fd.options.filter((_, j) => j !== i))}
+                      style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.8)', fontSize: 16, lineHeight: 1, flexShrink: 0 }}>
+                      <i className="fa-solid fa-xmark" />
+                    </button>
+                  </div>
+                ))}
+                {!fd.options.length && <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>No options yet — tap + ADD</div>}
+              </div>
+              {numericChoice && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontFamily: UI.fontUi, color: UI.ink }}>Show labels under numbers</div>
+                    <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>Displays num + text label on each button</div>
+                  </div>
+                  {renderToggle(fd.labeled, () => set('labeled', !fd.labeled))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {(fd.type === 'integer' || fd.type === 'decimal') && (
+            <div>
+              <label style={lbl}>Unit suffix <span style={{ textTransform: 'none', fontWeight: 400, fontSize: 9 }}>(appended to value; "weight" for kg/lbs)</span></label>
+              <input value={fd.unit} onChange={e => set('unit', e.target.value)} placeholder='ml, steps — or "weight"' style={inp} />
+            </div>
+          )}
+
+          {fd.type !== 'text' && fd.type !== 'choice' && (
+            <div>
+              <label style={lbl}>Hint <span style={{ fontWeight: 400 }}>(shown below field)</span></label>
+              <input value={fd.hint} onChange={e => set('hint', e.target.value)} placeholder="e.g. 1 = easy, 10 = max" style={inp} />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── SECTION EDITOR ────────────────────────────────────────────────────────
+  if (view === 'edit-section' && sectionDraft) {
+    const sd = sectionDraft;
+    const set = (k, v) => setSectionDraft(s => ({ ...s, [k]: v }));
+    return (
+      <div style={overlayStyle}>
+        <div style={headerStyle}>
+          {backBtn(backToList)}
+          <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink, flex: 1 }}>{editCtx?.isNew ? 'Add Section' : 'Edit Section'}</span>
+          {doneBtn(commitSection, !sd.label.trim())}
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 40px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <label style={lbl}>Section label</label>
+            <input value={sd.label} onChange={e => set('label', e.target.value)} placeholder="e.g. Wellness" style={inp} />
+          </div>
+          <div>
+            <label style={lbl}>Hint <span style={{ fontWeight: 400 }}>(optional, shown below section title)</span></label>
+            <input value={sd.hint} onChange={e => set('hint', e.target.value)} placeholder="e.g. 1 = good, 10 = bad" style={inp} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── LIST VIEW ─────────────────────────────────────────────────────────────
+  return (
+    <div style={overlayStyle}>
+      <div style={headerStyle}>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', padding: '4px 8px 4px 0', cursor: 'pointer', color: UI.inkFaint, fontSize: 18, lineHeight: 1 }}>
+          <i className="fa-solid fa-xmark" />
+        </button>
+        <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink, flex: 1 }}>Customize Check-in</span>
+        <button onClick={handleReset}
+          style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11 }}>
+          Reset
+        </button>
+        <button onClick={handleSave} disabled={saving}
+          style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '7px 16px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: '#0a0805', cursor: 'pointer', opacity: saving ? 0.6 : 1 }}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 12px 40px' }}>
+        {draft.map((sec, sIdx) => (
+          <div key={sec.id || sIdx} style={{ marginBottom: 12, background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', background: UI.bgRaised, borderBottom: `0.5px solid ${UI.hair}` }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{sec.label}</span>
+                {sec.sectionHint && <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginLeft: 8 }}>{sec.sectionHint}</span>}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <button onClick={() => moveSection(sIdx, -1)} disabled={sIdx === 0}
+                  style={{ background: 'none', border: 'none', padding: '5px 7px', cursor: 'pointer', color: sIdx === 0 ? UI.inkGhost : UI.inkFaint, fontSize: 11 }}>
+                  <i className="fa-solid fa-chevron-up" />
+                </button>
+                <button onClick={() => moveSection(sIdx, 1)} disabled={sIdx === draft.length - 1}
+                  style={{ background: 'none', border: 'none', padding: '5px 7px', cursor: 'pointer', color: sIdx === draft.length - 1 ? UI.inkGhost : UI.inkFaint, fontSize: 11 }}>
+                  <i className="fa-solid fa-chevron-down" />
+                </button>
+                <button onClick={() => openEditSection(sIdx)}
+                  style={{ background: 'none', border: 'none', padding: '5px 7px', cursor: 'pointer', color: UI.inkFaint, fontSize: 11 }}>
+                  <i className="fa-solid fa-pen" />
+                </button>
+                <button onClick={() => { if (confirm('Remove section "' + sec.label + '" and all its fields?')) removeSection(sIdx); }}
+                  style={{ background: 'none', border: 'none', padding: '5px 7px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 11 }}>
+                  <i className="fa-solid fa-trash" />
+                </button>
+              </div>
+            </div>
+            {(sec.fields || []).map((f, fIdx) => (
+              <div key={f.key || fIdx} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                    {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 11, color: UI.inkGhost, flexShrink: 0 }} />}
+                    <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{f.label}</span>
+                    <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkGhost, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
+                    {f.width === 'half' && <span style={{ fontSize: 9, color: UI.inkGhost, fontFamily: UI.fontUi, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}` }}>½</span>}
+                    {f.required && <span style={{ fontSize: 11, color: 'var(--accent)', lineHeight: 1 }}>*</span>}
+                  </div>
+                  <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>{f.key}</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                  <button onClick={() => moveField(sIdx, fIdx, -1)} disabled={fIdx === 0}
+                    style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: fIdx === 0 ? UI.inkGhost : UI.inkFaint, fontSize: 10 }}>
+                    <i className="fa-solid fa-chevron-up" />
+                  </button>
+                  <button onClick={() => moveField(sIdx, fIdx, 1)} disabled={fIdx === (sec.fields?.length ?? 1) - 1}
+                    style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: fIdx === (sec.fields?.length ?? 1) - 1 ? UI.inkGhost : UI.inkFaint, fontSize: 10 }}>
+                    <i className="fa-solid fa-chevron-down" />
+                  </button>
+                  <button onClick={() => openEditField(sIdx, fIdx)}
+                    style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: UI.inkFaint, fontSize: 10 }}>
+                    <i className="fa-solid fa-pen" />
+                  </button>
+                  <button onClick={() => { if (confirm('Remove "' + f.label + '"?')) removeField(sIdx, fIdx); }}
+                    style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 10 }}>
+                    <i className="fa-solid fa-xmark" />
+                  </button>
+                </div>
+              </div>
+            ))}
+            <button onClick={() => openAddField(sIdx)}
+              style={{ width: '100%', padding: '9px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12 }}>
+              <i className="fa-solid fa-plus" style={{ fontSize: 10 }} />
+              Add field
+            </button>
+          </div>
+        ))}
+        <button onClick={openAddSection}
+          style={{ width: '100%', padding: '12px', background: 'transparent', borderRadius: 8, border: `0.5px dashed ${UI.hairStrong}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
+          <i className="fa-solid fa-plus" />
+          Add section
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -385,10 +793,17 @@ function CheckInTrendCards({ recent }) {
 
 function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggling = false }) {
   const [checkins, setCheckins] = useStateC(null);
+  const [schema, setSchema] = useStateC(null);
+  const [builderOpen, setBuilderOpen] = useStateC(false);
 
   useEffectC(() => {
     LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
+    LB.loadCheckinSchema(coachingId)
+      .then(s => setSchema(s || CHECKIN_DEFAULT_SCHEMA))
+      .catch(() => setSchema(CHECKIN_DEFAULT_SCHEMA));
   }, [coachingId]);
+
+  const resolvedSchema = schema || CHECKIN_DEFAULT_SCHEMA;
 
   const toggleRow = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
@@ -396,54 +811,75 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
         <div style={{ fontSize: 13, fontFamily: UI.fontUi, fontWeight: 600, color: UI.ink }}>Check-ins enabled</div>
         <div style={{ fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, marginTop: 2 }}>Allow client to submit weekly check-ins</div>
       </div>
-      <div
-        onClick={onToggle}
-        style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: checkinEnabled ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${checkinEnabled ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent', opacity: toggling ? 0.6 : 1 }}
-      >
-        <div style={{ position: 'absolute', top: 3, left: checkinEnabled ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: checkinEnabled ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button onClick={() => setBuilderOpen(true)}
+          style={{ background: 'none', border: 'none', padding: 6, cursor: 'pointer', color: UI.inkFaint, fontSize: 15, lineHeight: 1 }}>
+          <i className="fa-solid fa-sliders" />
+        </button>
+        <div
+          onClick={onToggle}
+          style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: checkinEnabled ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${checkinEnabled ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent', opacity: toggling ? 0.6 : 1 }}
+        >
+          <div style={{ position: 'absolute', top: 3, left: checkinEnabled ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: checkinEnabled ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
+        </div>
       </div>
     </div>
   );
 
+  const builder = builderOpen && (
+    <CheckInSchemaBuilder coachingId={coachingId} initial={resolvedSchema}
+      onSave={s => { setSchema(s); setBuilderOpen(false); }}
+      onClose={() => setBuilderOpen(false)} />
+  );
+
   if (checkins === null) {
     return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {toggleRow}
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div>
+      <>
+        {builder}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {toggleRow}
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   if (!checkins.length) {
     return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {toggleRow}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
-          <i className="fa-solid fa-clipboard-list" style={{ fontSize: 28, color: UI.inkGhost }} />
-          <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center' }}>No check-ins yet.</div>
+      <>
+        {builder}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {toggleRow}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
+            <i className="fa-solid fa-clipboard-list" style={{ fontSize: 28, color: UI.inkGhost }} />
+            <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center' }}>No check-ins yet.</div>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   const recent = [...checkins].reverse();
 
   return (
-    <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      {toggleRow}
-      <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-        <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <CheckInTrendCards recent={recent} />
-          <div className="knurl" style={{ margin: '4px 0' }} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
-            {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
+    <>
+      {builder}
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {toggleRow}
+        <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <CheckInTrendCards recent={recent} schema={resolvedSchema} />
+            <div className="knurl" style={{ margin: '4px 0' }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
+              {checkins.map(ci => <CheckInCard key={ci.id} ci={ci} />)}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

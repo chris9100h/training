@@ -50,6 +50,60 @@ function fmtRelative(iso) {
 const isImprovement = LB.isImprovement;
 const isDecline = LB.isDecline;
 
+// ─── Default check-in form schema ────────────────────────────────────────────
+// Mirrors the current fixed fields. A coach can replace this per coaching
+// relationship by saving a custom checkin_schema to zane_coaching.
+const CHECKIN_DEFAULT_SCHEMA = [
+  {
+    id: 'weight', label: 'Weight', requiredMark: true,
+    fields: [
+      { key: 'weight_today', label: 'Today', type: 'decimal', width: 'half', unit: 'weight', required: true, direction: null, icon: 'fa-weight-scale' },
+      { key: 'weight_avg_last_week', label: 'Last week avg', type: 'decimal', width: 'half', unit: 'weight', required: false, direction: null, icon: 'fa-weight-scale' },
+    ],
+  },
+  {
+    id: 'markers', label: 'Markers', requiredMark: true, sectionHint: '1 = good/low, 10 = bad/high',
+    fields: [
+      { key: 'hunger', label: 'Hunger', type: 'stepper', min: 1, max: 10, width: 'full', required: true, direction: 'lower_better', icon: 'fa-bowl-food' },
+      { key: 'sleep_quality', label: 'Sleep', type: 'stepper', min: 1, max: 10, width: 'full', required: true, direction: 'lower_better', icon: 'fa-moon' },
+      { key: 'life_stress', label: 'Life Stress', type: 'stepper', min: 1, max: 10, width: 'full', required: true, direction: 'lower_better', icon: 'fa-brain' },
+      { key: 'work_stress', label: 'Work Stress', type: 'stepper', min: 1, max: 10, width: 'full', required: true, direction: 'lower_better', icon: 'fa-briefcase' },
+      { key: 'tiredness', label: 'Tiredness', type: 'stepper', min: 1, max: 10, width: 'full', required: true, direction: 'lower_better', icon: 'fa-battery-half' },
+    ],
+  },
+  {
+    id: 'activity', label: 'Activity',
+    fields: [
+      { key: 'days_trained', label: 'Days trained', type: 'integer', width: 'half', required: false, direction: null, icon: 'fa-dumbbell' },
+      { key: 'performance_vs_last_week', label: 'Performance vs last week', type: 'choice',
+        options: [{ value: 'worse', label: 'Worse', color: 'danger' }, { value: 'same', label: 'Same', color: null }, { value: 'improved', label: 'Improved', color: 'accent' }],
+        width: 'full', required: false, direction: 'higher_better', icon: 'fa-chart-line' },
+      { key: 'steps', label: 'Steps', type: 'integer', width: 'full', required: false, direction: 'higher_better', icon: 'fa-shoe-prints' },
+      { key: 'cardio_minutes', label: 'Cardio (min)', type: 'integer', width: 'half', required: false, direction: null, icon: 'fa-person-running' },
+      { key: 'cardio_distance_m', label: 'Distance', type: 'decimal', width: 'half', required: false, direction: null, _distanceField: true },
+      { key: 'cardio_pace_feeling', label: 'Pace feeling', type: 'choice',
+        options: [{ value: 1, label: 'Easy' }, { value: 2, label: 'Light' }, { value: 3, label: 'Steady' }, { value: 4, label: 'Solid' }, { value: 5, label: 'Hard' }, { value: 6, label: 'Max' }],
+        labeled: true, width: 'full', required: false, direction: null, icon: 'fa-gauge' },
+      { key: 'cardio_effort', label: 'Cardio effort', type: 'stepper', min: 1, max: 10, width: 'full', required: false, direction: null, hint: '1 = easy, 10 = max', icon: 'fa-fire' },
+    ],
+  },
+  {
+    id: 'nutrition', label: 'Nutrition',
+    fields: [
+      { key: 'off_plan_notes', label: 'Off-plan days / notes', type: 'text', rows: 3, width: 'full', required: false },
+      { key: 'hydration_ml', label: 'Avg hydration / day (ml)', type: 'integer', width: 'full', required: false, direction: 'higher_better', icon: 'fa-droplet' },
+    ],
+  },
+  {
+    id: 'goals', label: 'Goals / Notes',
+    fields: [
+      { key: 'goal_note', label: 'Goals / Notes', type: 'text', rows: 2, width: 'full', required: false },
+      { key: 'issues_notes', label: 'Issues / things to address', type: 'text', rows: 3, width: 'full', required: false },
+      { key: 'general_note', label: 'General note', type: 'text', rows: 2, width: 'full', required: false },
+    ],
+  },
+];
+
 // ─── CoachingPendingBanner ────────────────────────────────────────────────────
 // Shown on app boot when the user has a pending coaching invite.
 
