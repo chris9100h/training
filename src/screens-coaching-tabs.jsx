@@ -467,34 +467,60 @@ function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit
 
       {open && (
         <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Schema-driven sections: pills for numbers/choices, rows for steppers, blocks for text */}
+          {/* Schema-driven sections, rendered in schema order. Consecutive
+              number/choice fields share a pill row; consecutive steppers stack
+              as rows; text fields are their own block. Order always matches the
+              form so the coach sees fields where they put them. */}
           {sections.map(section => {
             const fields = (section.fields || []).filter(f => has(responses[f.key]));
             if (!fields.length) return null;
-            const pills = fields.filter(f => f.type === 'integer' || f.type === 'decimal' || f.type === 'choice');
-            const steppers = fields.filter(f => f.type === 'stepper');
-            const texts = fields.filter(f => f.type === 'text');
             const headLabel = section.label.toUpperCase() + (section.sectionHint ? ` (${section.sectionHint})` : '');
-            return (
-              <div key={section.id}>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{headLabel}</div>
-                {pills.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {pills.map(f => <StatPill key={f.key} label={f.label} value={fmtValue(f, responses[f.key])} />)}
+            const kindOf = f => f.type === 'stepper' ? 'stepper' : f.type === 'text' ? 'text' : 'pill';
+            const blocks = [];
+            let run = [], runKind = null;
+            const flush = () => {
+              if (!run.length) return;
+              const items = run; run = []; const kind = runKind; runKind = null;
+              if (kind === 'pill') {
+                blocks.push(
+                  <div key={`p-${items[0].key}`} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {items.map(f => <StatPill key={f.key} label={f.label} value={fmtValue(f, responses[f.key])} />)}
                   </div>
-                )}
-                {steppers.map(f => (
-                  <div key={f.key} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `0.5px solid ${UI.hair}`, marginTop: pills.length ? 4 : 0 }}>
-                    <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>{f.label}</span>
-                    <span className="num" style={{ fontSize: 12, color: stepperColor(f, responses[f.key]) }}>{responses[f.key]}/{f.max ?? 10}</span>
+                );
+              } else {
+                blocks.push(
+                  <div key={`s-${items[0].key}`}>
+                    {items.map(f => (
+                      <div key={f.key} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+                        <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>{f.label}</span>
+                        <span className="num" style={{ fontSize: 12, color: stepperColor(f, responses[f.key]) }}>{responses[f.key]}/{f.max ?? 10}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-                {texts.map(f => (
-                  <div key={f.key} style={{ marginTop: pills.length || steppers.length ? 10 : 0 }}>
+                );
+              }
+            };
+            fields.forEach(f => {
+              const kind = kindOf(f);
+              if (kind === 'text') {
+                flush();
+                blocks.push(
+                  <div key={`t-${f.key}`}>
                     <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{f.label.toUpperCase()}</div>
                     <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{responses[f.key]}</div>
                   </div>
-                ))}
+                );
+                return;
+              }
+              if (runKind && runKind !== kind) flush();
+              runKind = kind;
+              run.push(f);
+            });
+            flush();
+            return (
+              <div key={section.id}>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{headLabel}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{blocks}</div>
               </div>
             );
           })}
