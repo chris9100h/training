@@ -307,8 +307,8 @@ function CheckInTrendCards({ recent, schema }) {
   };
 
   const getYRange = (field) => {
-    if (field.type === 'stepper') return { yMin: 0, yMax: field.max || 10 };
-    if (field.type === 'choice' && field.options?.length) return { yMin: 0, yMax: field.options.length };
+    if (field.type === 'stepper') return { yMin: field.min ?? 1, yMax: field.max || 10 };
+    if (field.type === 'choice' && field.options?.length) return { yMin: 1, yMax: field.options.length };
     return {};
   };
 
