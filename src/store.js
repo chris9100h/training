@@ -1913,6 +1913,49 @@ function cardioWeekPrefill(cardioLogs, weekStart) {
   };
 }
 
+// Cardio PR detection. Compares a freshly saved log against the user's prior
+// logs OF THE SAME ACTIVITY TYPE and reports, per metric, whether it's an
+// all-time best or an improvement over the most recent prior log. Mirrors the
+// strength NEW BEST / IMPROVEMENT tiers. Returns null when nothing was beaten
+// (incl. the first-ever log of a type — no baseline to beat).
+//   metrics: pace (min/km, lower better; needs distance+duration),
+//            distance (higher better; needs distance), duration (higher better)
+function detectCardioPRs(log, allLogs) {
+  if (!log) return null;
+  const norm = t => (t || '').trim().toLowerCase();
+  const ty = norm(log.type);
+  const prior = (allLogs || []).filter(l => l.id !== log.id && norm(l.type) === ty);
+  if (!prior.length) return null;
+
+  // Most-recent prior log (by date, then createdAt) — the "last time" baseline.
+  const last = [...prior].sort((a, b) =>
+    String(b.date || '').localeCompare(String(a.date || '')) ||
+    String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0];
+
+  const paceOf = l => (l.distanceM > 0 && l.durationMinutes > 0) ? l.durationMinutes / (l.distanceM / 1000) : null;
+  const round = (key, v) => v == null ? null : (key === 'pace' ? Math.round(v * 100) / 100 : v);
+  const defs = [
+    { key: 'pace',     dir: -1, val: paceOf },
+    { key: 'distance', dir: +1, val: l => (l.distanceM > 0 ? l.distanceM : null) },
+    { key: 'duration', dir: +1, val: l => (l.durationMinutes > 0 ? l.durationMinutes : null) },
+  ];
+
+  const items = [];
+  for (const m of defs) {
+    const cur = round(m.key, m.val(log));
+    if (cur == null) continue;
+    const priorVals = prior.map(l => round(m.key, m.val(l))).filter(v => v != null);
+    if (!priorVals.length) continue; // nothing of this metric to beat yet
+    const beats = (a, b) => m.dir > 0 ? a > b : a < b;
+    const best = m.dir > 0 ? Math.max(...priorVals) : Math.min(...priorVals);
+    const lastVal = round(m.key, m.val(last));
+    if (beats(cur, best)) items.push({ metric: m.key, tier: 'best', value: cur, prev: best });
+    else if (lastVal != null && beats(cur, lastVal)) items.push({ metric: m.key, tier: 'improvement', value: cur, prev: lastVal });
+  }
+  if (!items.length) return null;
+  return { tier: items.some(i => i.tier === 'best') ? 'best' : 'improvement', type: log.type || null, items };
+}
+
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, fnFetch,
@@ -1931,5 +1974,5 @@ window.LB = {
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
-  cardioWeekPrefill,
+  cardioWeekPrefill, detectCardioPRs,
 };

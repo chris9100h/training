@@ -273,6 +273,46 @@ async function testAsync(name, fn) {
     assert.strictEqual(cutoff, '2026-04-01');
   });
 
+  // ── detectCardioPRs ───────────────────────────────────────────────────────
+  const cLog = (o) => ({ id: o.id || 'x', type: o.type ?? 'Running', durationMinutes: o.dur, distanceM: o.dist ?? null, date: o.date || '2026-06-01', createdAt: o.createdAt || o.date || '2026-06-01' });
+
+  test('detectCardioPRs returns null on the first-ever log of a type', () => {
+    assert.strictEqual(LB.detectCardioPRs(cLog({ id: 'n', dur: 30, dist: 5000 }), []), null);
+  });
+
+  test('detectCardioPRs flags all-time bests for distance, duration and pace', () => {
+    const prior = [cLog({ id: 'a', dur: 30, dist: 5000, date: '2026-05-01' })]; // 6 min/km
+    const r = LB.detectCardioPRs(cLog({ id: 'n', dur: 50, dist: 10000, date: '2026-06-01' }), prior); // 5 min/km, longer, farther
+    assert.strictEqual(r.tier, 'best');
+    const byKey = Object.fromEntries(r.items.map(i => [i.metric, i]));
+    assert.ok(byKey.distance && byKey.distance.tier === 'best', 'distance best');
+    assert.ok(byKey.duration && byKey.duration.tier === 'best', 'duration best');
+    assert.ok(byKey.pace && byKey.pace.tier === 'best', 'pace best');
+  });
+
+  test('detectCardioPRs only compares within the same activity type', () => {
+    const prior = [cLog({ id: 'b', type: 'Cycling', dur: 120, dist: 40000, date: '2026-05-01' })];
+    // A 30-min / 5k run vs a long bike ride — no run history → null
+    assert.strictEqual(LB.detectCardioPRs(cLog({ id: 'n', type: 'Running', dur: 30, dist: 5000 }), prior), null);
+  });
+
+  test('detectCardioPRs reports improvement over the last log when not an all-time best', () => {
+    const prior = [
+      cLog({ id: 'best', dur: 90, dist: 18000, date: '2026-04-01' }), // all-time longest 90 min
+      cLog({ id: 'last', dur: 40, dist: 8000, date: '2026-05-20' }),  // most recent: 40 min
+    ];
+    const r = LB.detectCardioPRs(cLog({ id: 'n', dur: 50, dist: 9000, date: '2026-06-01' }), prior);
+    const dur = r.items.find(i => i.metric === 'duration');
+    assert.ok(dur && dur.tier === 'improvement', 'duration beats last (40) but not best (90) → improvement');
+    assert.strictEqual(dur.prev, 40);
+  });
+
+  test('detectCardioPRs ignores the new log id and ties do not count', () => {
+    const prior = [cLog({ id: 'a', dur: 30, dist: 5000, date: '2026-05-01' })];
+    // Identical numbers → no strict beat → null
+    assert.strictEqual(LB.detectCardioPRs(cLog({ id: 'n', dur: 30, dist: 5000, date: '2026-06-01' }), prior), null);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

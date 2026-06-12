@@ -427,7 +427,67 @@ function mToDisplay(meters, unit) {
   return unit === 'mi' ? (meters / MI_TO_M).toFixed(2) : (meters / 1000).toFixed(2);
 }
 
-function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog }) {
+// Full-screen celebratory flash when a freshly logged cardio session beats a
+// personal best (★ NEW BEST) or the last same-type session (↑ IMPROVEMENT).
+// Mirrors the strength-training overlays (same animations + gold treatment).
+function CardioPROverlay({ pr, onDone }) {
+  useEffect(() => {
+    if (!pr) return;
+    const t = setTimeout(onDone, 3800);
+    return () => clearTimeout(t);
+  }, [pr]);
+  if (!pr) return null;
+
+  const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } })();
+  const isBest = pr.tier === 'best';
+  const fmtPace = (minPerKm) => {
+    const perUnit = du === 'mi' ? minPerKm * MI_TO_M / 1000 : minPerKm;
+    let mins = Math.floor(perUnit);
+    let secs = Math.round((perUnit - mins) * 60);
+    if (secs === 60) { mins += 1; secs = 0; }
+    return `${mins}:${String(secs).padStart(2, '0')} /${du}`;
+  };
+  const fmtDist = (m) => du === 'mi' ? `${(m / MI_TO_M).toFixed(1)} mi` : `${(m / 1000).toFixed(1)} km`;
+  const META = {
+    pace:     { label: 'Fastest Pace',     fmt: fmtPace },
+    distance: { label: 'Longest Distance', fmt: fmtDist },
+    duration: { label: 'Longest Session',  fmt: v => `${v} min` },
+  };
+
+  return (
+    <div onClick={onDone} style={{
+      position: 'fixed', inset: 0, zIndex: 200, background: 'rgb(8,6,3)',
+      animation: 'improvedFade 3.8s ease forwards',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
+    }}>
+      <div style={{ position: 'absolute', inset: 0, animation: 'improvedBorderPulse 0.7s ease-in-out infinite' }} />
+      <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,1), 0 0 70px rgba(201,169,97,0.6)' }}>{isBest ? '★' : '↑'}</span>
+      <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8)' }}>{isBest ? 'NEW BEST' : 'IMPROVEMENT'}</span>
+      {pr.type && <span style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, fontWeight: 700, letterSpacing: '0.28em', textTransform: 'uppercase' }}>{pr.type}</span>}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 20, minWidth: 220 }}>
+        {pr.items.map(it => {
+          const meta = META[it.metric];
+          if (!meta) return null;
+          const itemBest = it.tier === 'best';
+          return (
+            <div key={it.metric} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 14, color: itemBest ? UI.gold : UI.inkSoft, width: 14, textAlign: 'center', flexShrink: 0 }}>{itemBest ? '★' : '↑'}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="micro" style={{ color: itemBest ? UI.gold : UI.inkFaint, letterSpacing: '0.14em' }}>{meta.label}</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <span className="num" style={{ fontSize: 22, color: UI.ink, fontWeight: 300 }}>{meta.fmt(it.value)}</span>
+                  <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>prev {meta.fmt(it.prev)}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, onPR }) {
   const getDistUnit = () => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } };
   const [distUnit, setDistUnitState] = useState(getDistUnit);
   const setDistUnit = (u) => { try { localStorage.setItem(CARDIO_DIST_KEY, u); } catch (_) {} setDistUnitState(u); };
@@ -495,6 +555,8 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog }
         createdAt: new Date().toISOString(),
       };
       setStore(s => ({ ...s, cardioLogs: [log, ...(s.cardioLogs || [])] }));
+      const pr = LB.detectCardioPRs(log, store.cardioLogs);
+      if (pr && onPR) onPR(pr);
     }
     onClose();
   };
@@ -664,6 +726,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [cardioLogOpen, setCardioLogOpen] = useState(false);
   const [cardioPopoverOpen, setCardioPopoverOpen] = useState(false);
   const [editingCardioLog, setEditingCardioLog] = useState(null);
+  const [cardioPR, setCardioPR] = useState(null);
   const isPad = useIsPad();
   // The not-logged Log handler awaits a seed fetch — guard against a double
   // tap creating two sessions inside that window.
@@ -1594,7 +1657,8 @@ function HomeScreen({ store, setStore, go, userId }) {
         );
       })()}
 
-      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} />
+      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} onPR={setCardioPR} />
+      <CardioPROverlay pr={cardioPR} onDone={() => setCardioPR(null)} />
 
       {/* Coach message banner */}
       <window.Screens.CoachingBannerGroup store={store} setStore={setStore} userId={userId} go={go} />
