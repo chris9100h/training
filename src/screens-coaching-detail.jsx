@@ -293,7 +293,7 @@ function CheckInTrendCards({ recent, schema }) {
   const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch(_) { return 'km'; } })();
 
   // Keys shown as sub-labels on another card — don't render as standalone
-  const SUB_KEYS = new Set(['cardio_distance_m']);
+  const SUB_KEYS = new Set();
 
   const getFormat = (field) => {
     if (field.unit === 'weight') return v => `${Math.round(v * 100) / 100}${UI.unit()}`;
@@ -337,8 +337,6 @@ function CheckInTrendCards({ recent, schema }) {
       const last = validItems[validItems.length - 1];
       const prev = validItems.length > 1 ? validItems[validItems.length - 2] : null;
       const delta = prev != null ? last.responses.cardio_minutes - prev.responses.cardio_minutes : null;
-      const lastDist = last.responses?.cardio_distance_m;
-      const sub = lastDist != null ? (distUnit === 'mi' ? `${(lastDist/1609.344).toFixed(1)} mi` : `${(lastDist/1000).toFixed(1)} km`) : null;
       return (
         <div key={field.key} onClick={() => openChart('Cardio', field.icon || 'fa-person-running', vals, v => `${v} min`, false)} style={cardStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 }}>
@@ -351,7 +349,6 @@ function CheckInTrendCards({ recent, schema }) {
               <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
             )}
           </div>
-          {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, textAlign: 'center' }}>{sub}</div>}
           <div style={{ flex: 1 }} />
           <Sparkline vals={validItems.map(c => c.responses.cardio_minutes)} />
         </div>
