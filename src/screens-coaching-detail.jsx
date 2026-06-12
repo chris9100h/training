@@ -2,20 +2,25 @@
    Shares globals with screens-coaching-core.jsx (loaded first). */
 
 function LineChartSheet({ label, icon, entries, format, invertColor, yMin, yMax, onClose }) {
-  const W = 300, padX = 20, padTop = 36, padBottom = 26, plotH = 110;
+  const W = 300, padL = 44, padR = 14, padTop = 36, padBottom = 26, plotH = 110;
   const H = padTop + plotH + padBottom;
-  const plotW = W - 2 * padX;
+  const plotW = W - padL - padR;
   const vals = entries.map(e => e.value);
   const minV = Math.min(...vals);
   const maxV = Math.max(...vals);
   const dom = UI.chartDomain(minV, maxV, { min: yMin, max: yMax });
   const n = entries.length;
-  // Thin out point labels (value + date) so they don't overlap when there are
-  // many check-ins — show roughly 5 across, always including the last point.
+  // Thin out the X (date) labels so they don't overlap with many check-ins —
+  // show roughly 5 across, always including the last point.
   const labelStep = Math.max(1, Math.round(n / 5));
   const showLabel = i => i === n - 1 || i % labelStep === 0;
 
-  const xOf = i => padX + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+  // Four Y gridlines across the padded domain. Round decimal noise off the
+  // axis labels (one decimal only for tight ranges like bodyweight).
+  const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+  const dec = dom.range >= 4 ? 0 : 1;
+
+  const xOf = i => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
 
   const fmtD = s => {
@@ -42,20 +47,24 @@ function LineChartSheet({ label, icon, entries, format, invertColor, yMin, yMax,
           <div style={{ textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, padding: '24px 0' }}>Need at least 2 check-ins for a trend.</div>
         ) : (
           <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
-            <line x1={padX} y1={padTop} x2={padX} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
-            <line x1={padX} y1={padTop + plotH} x2={W - padX} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+            {gridVals.map((v, i) => (
+              <g key={`g${i}`}>
+                {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
+                <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{format(Number(v.toFixed(dec)))}</text>
+              </g>
+            ))}
+            <line x1={padL} y1={padTop} x2={padL} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+            <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
             <polygon points={`${xOf(0).toFixed(1)},${base} ${pts} ${xOf(n-1).toFixed(1)},${base}`} fill={`rgba(var(--accent-rgb),0.12)`} />
             <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
             {entries.map((e, i) => {
               const cx = xOf(i).toFixed(1);
               const cy = yOf(e.value).toFixed(1);
               const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
-              const lbl = showLabel(i);
               return (
                 <g key={i}>
-                  <circle cx={cx} cy={cy} r={lbl ? '4' : '2.5'} fill="var(--accent)" />
-                  {lbl && <text x={cx} y={(yOf(e.value) - 9).toFixed(1)} textAnchor="middle" fontSize="9" fontFamily={UI.fontUi} fill={UI.ink}>{format(e.value)}</text>}
-                  {lbl && <text x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtD(e.weekStart)}</text>}
+                  <circle cx={cx} cy={cy} r={i === n - 1 ? '3' : '2'} fill="var(--accent)" />
+                  {showLabel(i) && <text x={cx} y={(padTop + plotH + 16).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtD(e.weekStart)}</text>}
                 </g>
               );
             })}
@@ -75,9 +84,9 @@ async function exportCheckinCharts(recent) {
   const cs = getComputedStyle(document.documentElement);
   const accent    = cs.getPropertyValue('--accent').trim();
   const accentRgb = cs.getPropertyValue('--accent-rgb').trim();
-  const ink       = cs.getPropertyValue('--ink').trim();
   const inkFaint  = cs.getPropertyValue('--ink-faint').trim();
   const bgColor   = cs.getPropertyValue('--bg').trim();
+  const hairColor = cs.getPropertyValue('--hair').trim();
   const unit = UI.unit();
 
   const metrics = [
@@ -104,7 +113,7 @@ async function exportCheckinCharts(recent) {
 
   if (!charts.length) return;
 
-  const W = 320, padX = 24, padTop = 32, padBottom = 22, plotH = 90;
+  const W = 320, padL = 46, padR = 18, padTop = 32, padBottom = 22, plotH = 90;
   const chartH = padTop + plotH + padBottom;
   const blockH = 22 + chartH + 20;
   const cW = W + 48;
@@ -139,8 +148,8 @@ async function exportCheckinCharts(recent) {
 
   const a = accent || '#b8902b';
   const aRgb = accentRgb || '184,144,43';
-  const fg = ink || '#f0ebe0';
   const fi = inkFaint || '#8b7d6b';
+  const hr = hairColor || 'rgba(139,125,107,0.25)';
 
   let y = 40;
   for (const { label, entries, format } of charts) {
@@ -148,24 +157,32 @@ async function exportCheckinCharts(recent) {
     const vals = entries.map(e => e.value);
     const minV = Math.min(...vals), maxV = Math.max(...vals);
     const dom = UI.chartDomain(minV, maxV);
-    const plotW = W - 2 * padX;
-    const xOf = i => padX + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+    const plotW = W - padL - padR;
+    const xOf = i => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
     const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
     const step = Math.max(1, Math.round(n / 5));
     const showLbl = i => i === n - 1 || i % step === 0;
     const pts = entries.map((e, i) => `${xOf(i).toFixed(1)},${yOf(e.value).toFixed(1)}`).join(' ');
     const base = (padTop + plotH).toFixed(1);
 
+    const dec = dom.range >= 4 ? 0 : 1;
+    const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+    const grid = gridVals.map((v, i) =>
+      (i > 0 ? `<line x1="${padL}" y1="${yOf(v).toFixed(1)}" x2="${W - padR}" y2="${yOf(v).toFixed(1)}" stroke="${hr}" stroke-width="0.5" stroke-dasharray="3 3"/>` : '') +
+      `<text x="${padL - 5}" y="${(yOf(v) + 3).toFixed(1)}" text-anchor="end" font-size="8" font-family="Arial,sans-serif" fill="${fi}">${format(Number(v.toFixed(dec)))}</text>`
+    ).join('') +
+      `<line x1="${padL}" y1="${padTop}" x2="${padL}" y2="${padTop + plotH}" stroke="${hr}" stroke-width="0.5"/>` +
+      `<line x1="${padL}" y1="${padTop + plotH}" x2="${W - padR}" y2="${padTop + plotH}" stroke="${hr}" stroke-width="0.5"/>`;
+
     const nodes = entries.map((e, i) => {
       const cx = xOf(i).toFixed(1), cy = yOf(e.value).toFixed(1);
-      const lbl = showLbl(i);
       const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
-      return `<circle cx="${cx}" cy="${cy}" r="${lbl ? 4 : 2.5}" fill="${a}"/>` +
-        (lbl ? `<text x="${cx}" y="${(yOf(e.value) - 9).toFixed(1)}" text-anchor="middle" font-size="9" font-family="Arial,sans-serif" fill="${fg}">${format(e.value)}</text>` : '') +
-        (lbl ? `<text x="${cx}" y="${(padTop + plotH + 16).toFixed(1)}" text-anchor="${anchor}" font-size="8" font-family="Arial,sans-serif" fill="${fi}">${fmtD(e.weekStart)}</text>` : '');
+      return `<circle cx="${cx}" cy="${cy}" r="${i === n - 1 ? 3 : 2}" fill="${a}"/>` +
+        (showLbl(i) ? `<text x="${cx}" y="${(padTop + plotH + 16).toFixed(1)}" text-anchor="${anchor}" font-size="8" font-family="Arial,sans-serif" fill="${fi}">${fmtD(e.weekStart)}</text>` : '');
     }).join('');
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${chartH}">` +
+      grid +
       `<polygon points="${xOf(0).toFixed(1)},${base} ${pts} ${xOf(n-1).toFixed(1)},${base}" fill="rgba(${aRgb},0.15)"/>` +
       `<polyline points="${pts}" fill="none" stroke="${a}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` +
       nodes + `</svg>`;

@@ -844,6 +844,7 @@ function ProgressChart({ points }) {
   const max = Math.max(...points.map(p => p.est));
   const min = Math.min(...points.map(p => p.est));
   const dom = UI.chartDomain(min, max);
+  const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const yOf = v => padT + (1 - (v - dom.min) / dom.range) * (h - padT - padB);
   const xy = points.map((p, i) => {
     const x = padL + (i / Math.max(1, points.length - 1)) * (w - padL - padR);
@@ -856,10 +857,14 @@ function ProgressChart({ points }) {
     <div style={{ padding: '10px 0', maxWidth: 380 }}>
       <div className="micro" style={{ marginBottom: 8, color: UI.inkFaint }}>EST. 1RM · HISTORY</div>
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
+        {gridVals.map((v, i) => (
+          <g key={`g${i}`}>
+            {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={w - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
+            <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontNum}>{i === 3 ? `${Math.round(v)} ${unit}` : Math.round(v)}</text>
+          </g>
+        ))}
         <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
         <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
-        <text x={padL - 5} y={(yOf(max) + 3).toFixed(1)} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{Math.round(max)} {unit}</text>
-        {max > min && <text x={padL - 5} y={(yOf(min) + 3).toFixed(1)} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{Math.round(min)} {unit}</text>}
         <path d={path} fill="none" stroke={UI.gold} strokeWidth="1" opacity="0.6" />
         {xy.map(([x,y], i) => (
           <circle key={i} cx={x} cy={y} r="2" fill={UI.gold} />
@@ -898,6 +903,8 @@ function CardioLineChart({ points, label, formatVal, yMin, yMax }) {
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
         <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
         <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
+        <line x1={padL} y1={yOf(max).toFixed(1)} x2={w - padR} y2={yOf(max).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="2 2" />
+        {max > min && <line x1={padL} y1={yOf(min).toFixed(1)} x2={w - padR} y2={yOf(min).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="2 2" />}
         <text x={padL - 4} y={(yOf(max) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
         {max > min && <text x={padL - 4} y={(yOf(min) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
         <path d={pathD} fill="none" stroke={UI.gold} strokeWidth="1.2" opacity="0.7" />
@@ -968,12 +975,12 @@ function WorkoutEffortSheet({ dayId, dayName, sessions, onClose }) {
     .map(s => ({ date: s.date.slice(0, 10), value: FEEL_NUM[s.feel] }))
     .filter(p => p.value);
   const n = points.length;
-  const W = 300, padX = 20, padTop = 36, padBottom = 26, plotH = 110;
+  const W = 300, padL = 52, padR = 16, padTop = 36, padBottom = 26, plotH = 110;
   const H = padTop + plotH + padBottom;
-  const plotW = W - 2 * padX;
+  const plotW = W - padL - padR;
   const dom = UI.chartDomain(0, Math.max(...points.map(p => p.value), 5), { zeroFloor: true });
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
-  const xOf = i => padX + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+  const xOf = i => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
   const pts = points.map((p, i) => `${xOf(i).toFixed(1)},${yOf(p.value).toFixed(1)}`).join(' ');
   const base = (padTop + plotH).toFixed(1);
   const labelStep = Math.max(1, Math.round(n / 5));
@@ -992,20 +999,24 @@ function WorkoutEffortSheet({ dayId, dayName, sessions, onClose }) {
           </button>
         </div>
         <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
-          <line x1={padX} y1={padTop} x2={padX} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
-          <line x1={padX} y1={padTop + plotH} x2={W - padX} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+          {[1, 2, 3, 4, 5].map(lvl => (
+            <g key={`g${lvl}`}>
+              <line x1={padL} y1={yOf(lvl).toFixed(1)} x2={W - padR} y2={yOf(lvl).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
+              <text x={padL - 6} y={(yOf(lvl) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{FEEL_LBL[lvl]}</text>
+            </g>
+          ))}
+          <line x1={padL} y1={padTop} x2={padL} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+          <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
           <polygon points={`${xOf(0).toFixed(1)},${base} ${pts} ${xOf(n - 1).toFixed(1)},${base}`} fill={`rgba(var(--accent-rgb),0.12)`} />
           <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
           {points.map((p, i) => {
             const cx = xOf(i).toFixed(1);
             const cy = yOf(p.value).toFixed(1);
             const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
-            const lbl = showLbl(i);
             return (
               <g key={i}>
-                <circle cx={cx} cy={cy} r={lbl ? '4' : '2.5'} fill="var(--accent)" />
-                {lbl && <text x={cx} y={(yOf(p.value) - 9).toFixed(1)} textAnchor="middle" fontSize="9" fontFamily={UI.fontUi} fill={UI.ink}>{FEEL_LBL[p.value]}</text>}
-                {lbl && <text x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtDate(p.date)}</text>}
+                <circle cx={cx} cy={cy} r={i === n - 1 ? '3.5' : '2.5'} fill="var(--accent)" />
+                {showLbl(i) && <text x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtDate(p.date)}</text>}
               </g>
             );
           })}
