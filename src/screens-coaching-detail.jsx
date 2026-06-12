@@ -412,8 +412,50 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
   const [fieldDraft, setFieldDraft] = useStateC(null);
   const [sectionDraft, setSectionDraft] = useStateC(null);
   const [saving, setSaving] = useStateC(false);
+  const [helpTip, setHelpTip] = useStateC(null);
 
-  const backToList = () => { setView('list'); setFieldDraft(null); setSectionDraft(null); setEditCtx(null); };
+  const HELP = {
+    key:           'Unique database key — lowercase letters, numbers and underscores only. Cannot be changed once the field is created.',
+    label:         'The display name shown to clients in the check-in form.',
+    type:          'How the client fills in this field. Text = free-form notes. Int/Dec = number input. Stepper = tap buttons on a 1–N scale. Choice = pick one from a fixed list.',
+    width:         'Full = the field takes the whole row. Half = two fields sit side by side in one row.',
+    required:      'When on, the client must fill in this field before they can submit the check-in.',
+    direction:     '"Higher better" → green arrow when the value goes up (e.g. steps, training days). "Lower better" → green when it drops (e.g. stress, fatigue).',
+    icon:          'Small icon shown next to the field label. Tap to pick from fitness-relevant icons.',
+    min:           'Lowest selectable value on the stepper scale.',
+    max:           'Highest selectable value on the stepper scale.',
+    rows:          'How many lines tall the text area appears in the form (1–8). More rows = more vertical space.',
+    options:       'The value is stored in the database; the label is shown on the button. Order determines layout.',
+    labeled:       'When on, each button shows its number above and the label text below — like the Pace feeling field in the default form.',
+    unit:          'Text appended after the value in trend charts. Use "weight" to auto-switch between kg and lbs based on the client\'s setting.',
+    hint:          'Small helper text shown below the input to guide the client (e.g. "1 = easy, 10 = max").',
+    section_label: 'The heading shown above this group of fields in the check-in form.',
+    section_hint:  'Optional grey subtitle below the heading (e.g. "1 = good / low, 10 = bad / high").',
+  };
+
+  const ICON_GROUPS = [
+    { label: 'Body & Weight',     icons: ['fa-weight-scale', 'fa-dumbbell', 'fa-person', 'fa-ruler', 'fa-percent'] },
+    { label: 'Cardio & Training', icons: ['fa-person-running', 'fa-person-walking', 'fa-shoe-prints', 'fa-bicycle', 'fa-stopwatch', 'fa-gauge', 'fa-heart-pulse', 'fa-fire', 'fa-bolt'] },
+    { label: 'Nutrition & Water', icons: ['fa-bowl-food', 'fa-utensils', 'fa-droplet', 'fa-glass-water'] },
+    { label: 'Wellness & Sleep',  icons: ['fa-brain', 'fa-moon', 'fa-bed', 'fa-battery-half', 'fa-heart', 'fa-sun', 'fa-face-smile'] },
+    { label: 'Performance',       icons: ['fa-chart-line', 'fa-chart-bar', 'fa-trophy', 'fa-medal', 'fa-star', 'fa-flag'] },
+    { label: 'Stress & Work',     icons: ['fa-briefcase', 'fa-clock', 'fa-hourglass-half', 'fa-building'] },
+    { label: 'Notes & General',   icons: ['fa-clipboard-list', 'fa-circle-check', 'fa-circle-dot', 'fa-pen', 'fa-list-check', 'fa-file-lines'] },
+  ];
+
+  const renderHelpBtn = (key) => (
+    <button onClick={() => setHelpTip(t => t === key ? null : key)}
+      style={{ background: 'none', border: 'none', padding: '0 0 0 5px', cursor: 'pointer', color: helpTip === key ? 'var(--accent)' : UI.inkGhost, fontSize: 12, lineHeight: 1, flexShrink: 0 }}>
+      <i className="fa-solid fa-circle-question" />
+    </button>
+  );
+  const renderHelp = (key) => helpTip === key ? (
+    <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, padding: '7px 10px', background: 'rgba(var(--accent-rgb),0.08)', borderRadius: 6, marginTop: 4, marginBottom: 4 }}>
+      {HELP[key]}
+    </div>
+  ) : null;
+
+  const backToList = () => { setView('list'); setFieldDraft(null); setSectionDraft(null); setEditCtx(null); setHelpTip(null); };
 
   const openEditField = (sIdx, fIdx) => {
     const f = draft[sIdx].fields[fIdx];
@@ -425,12 +467,14 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
       options: f.options ? JSON.parse(JSON.stringify(f.options)) : [], labeled: !!f.labeled, isNew: false,
     });
     setEditCtx({ sectionIdx: sIdx, fieldIdx: fIdx });
+    setHelpTip(null);
     setView('edit-field');
   };
 
   const openAddField = (sIdx) => {
     setFieldDraft({ key: '', label: '', type: 'integer', width: 'full', required: false, direction: null, icon: '', unit: '', hint: '', min: '1', max: '10', rows: '2', options: [], labeled: false, isNew: true });
     setEditCtx({ sectionIdx: sIdx, fieldIdx: null });
+    setHelpTip(null);
     setView('edit-field');
   };
 
@@ -438,12 +482,14 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
     const s = draft[sIdx];
     setSectionDraft({ label: s.label || '', hint: s.sectionHint || '' });
     setEditCtx({ sectionIdx: sIdx, isNew: false });
+    setHelpTip(null);
     setView('edit-section');
   };
 
   const openAddSection = () => {
     setSectionDraft({ label: '', hint: '' });
     setEditCtx({ isNew: true });
+    setHelpTip(null);
     setView('edit-section');
   };
 
@@ -505,7 +551,13 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
   const TYPE_LABEL = { text: 'Text', integer: 'Int', decimal: 'Dec', stepper: 'Steps', choice: 'Choice' };
   const TYPE_COLOR = { text: UI.inkSoft, integer: 'var(--accent)', decimal: 'var(--accent)', stepper: UI.gold, choice: '#7b8cde' };
   const inp = { width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '9px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', boxSizing: 'border-box' };
-  const lbl = { display: 'block', fontSize: 10, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 };
+  const lbl = { fontSize: 10, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' };
+  const fieldHeader = (text, helpKey) => (
+    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+      <span style={lbl}>{text}</span>
+      {renderHelpBtn(helpKey)}
+    </div>
+  );
   const segBtn = (active) => ({ flex: 1, padding: '7px 4px', borderRadius: 6, border: `0.5px solid ${active ? 'var(--accent)' : UI.hairStrong}`, background: active ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: active ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', fontWeight: active ? 700 : 400 });
   const renderToggle = (on, onToggle) => (
     <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
@@ -527,6 +579,43 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
     </button>
   );
 
+  // ── ICON PICKER ───────────────────────────────────────────────────────────
+  if (view === 'icon-picker' && fieldDraft) {
+    return (
+      <div style={overlayStyle}>
+        <div style={headerStyle}>
+          {backBtn(() => { setView('edit-field'); setHelpTip(null); })}
+          <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink, flex: 1 }}>Choose Icon</span>
+          {fieldDraft.icon && (
+            <button onClick={() => { setFieldDraft(f => ({ ...f, icon: '' })); setView('edit-field'); }}
+              style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11 }}>
+              Clear
+            </button>
+          )}
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px 40px' }}>
+          {ICON_GROUPS.map(group => (
+            <div key={group.label} style={{ marginBottom: 20 }}>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>{group.label}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+                {group.icons.map(icon => {
+                  const sel = fieldDraft.icon === icon;
+                  return (
+                    <div key={icon} onClick={() => { setFieldDraft(f => ({ ...f, icon })); setView('edit-field'); }}
+                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, padding: '12px 4px 8px', borderRadius: 6, cursor: 'pointer', background: sel ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset, border: `0.5px solid ${sel ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`, WebkitTapHighlightColor: 'transparent' }}>
+                      <i className={`fa-solid ${icon}`} style={{ fontSize: 22, color: sel ? 'var(--accent)' : UI.inkSoft }} />
+                      <span style={{ fontSize: 9, color: sel ? 'var(--accent)' : UI.inkGhost, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.2, wordBreak: 'break-word' }}>{icon.replace('fa-', '')}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   // ── FIELD EDITOR ──────────────────────────────────────────────────────────
   if (view === 'edit-field' && fieldDraft) {
     const fd = fieldDraft;
@@ -543,7 +632,8 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 40px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <label style={lbl}>Field key <span style={{ textTransform: 'none', fontWeight: 400, fontSize: 9 }}>(no spaces, used as response key)</span></label>
+            {fieldHeader('Field key', 'key')}
+            {renderHelp('key')}
             <input value={fd.key}
               onChange={e => set('key', e.target.value.replace(/[^a-z0-9_]/g, '').toLowerCase())}
               disabled={!fd.isNew} placeholder="e.g. muscle_soreness"
@@ -552,12 +642,14 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
           </div>
 
           <div>
-            <label style={lbl}>Label</label>
+            {fieldHeader('Label', 'label')}
+            {renderHelp('label')}
             <input value={fd.label} onChange={e => set('label', e.target.value)} placeholder="e.g. Muscle Soreness" style={inp} />
           </div>
 
           <div>
-            <label style={lbl}>Type</label>
+            {fieldHeader('Type', 'type')}
+            {renderHelp('type')}
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {['text','integer','decimal','stepper','choice'].map(t => (
                 <button key={t} onClick={() => set('type', t)} style={segBtn(fd.type === t)}>{TYPE_LABEL[t]}</button>
@@ -566,20 +658,28 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
           </div>
 
           <div>
-            <label style={lbl}>Width</label>
+            {fieldHeader('Width', 'width')}
+            {renderHelp('width')}
             <div style={{ display: 'flex', gap: 6 }}>
               <button onClick={() => set('width', 'full')} style={segBtn(fd.width === 'full')}>Full width</button>
               <button onClick={() => set('width', 'half')} style={segBtn(fd.width === 'half')}>Half width</button>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 13, fontFamily: UI.fontUi, color: UI.ink }}>Required</span>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+                <span style={lbl}>Required</span>
+                {renderHelpBtn('required')}
+              </div>
+              {renderHelp('required')}
+            </div>
             {renderToggle(fd.required, () => set('required', !fd.required))}
           </div>
 
           <div>
-            <label style={lbl}>Trend direction</label>
+            {fieldHeader('Trend direction', 'direction')}
+            {renderHelp('direction')}
             <div style={{ display: 'flex', gap: 6 }}>
               {[{ v: null, l: 'None' }, { v: 'higher_better', l: '↑ Higher' }, { v: 'lower_better', l: '↓ Lower' }].map(({ v, l }) => (
                 <button key={String(v)} onClick={() => set('direction', v)} style={segBtn(fd.direction === v)}>{l}</button>
@@ -588,37 +688,68 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
           </div>
 
           <div>
-            <label style={lbl}>Icon <span style={{ textTransform: 'none', fontWeight: 400, fontSize: 9 }}>(Font Awesome solid name)</span></label>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+              <span style={lbl}>Icon</span>
+              {renderHelpBtn('icon')}
+            </div>
+            {renderHelp('icon')}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              {fd.icon && <i className={`fa-solid ${fd.icon}`} style={{ fontSize: 16, color: 'var(--accent)', width: 22, textAlign: 'center', flexShrink: 0 }} />}
-              <input value={fd.icon} onChange={e => set('icon', e.target.value)} placeholder="fa-dumbbell" style={{ ...inp, flex: 1, width: 'auto' }} />
+              <div onClick={() => setView('icon-picker')}
+                style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '9px 12px', cursor: 'pointer', minWidth: 0 }}>
+                {fd.icon ? (
+                  <>
+                    <i className={`fa-solid ${fd.icon}`} style={{ fontSize: 18, color: 'var(--accent)', width: 22, textAlign: 'center', flexShrink: 0 }} />
+                    <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, flex: 1 }}>{fd.icon}</span>
+                  </>
+                ) : (
+                  <span style={{ fontSize: 13, color: UI.inkGhost, fontFamily: UI.fontUi }}>Tap to choose…</span>
+                )}
+                <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkGhost, marginLeft: 'auto', flexShrink: 0 }} />
+              </div>
+              {fd.icon && (
+                <button onClick={() => set('icon', '')}
+                  style={{ background: 'none', border: 'none', padding: 6, cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 16, lineHeight: 1, flexShrink: 0 }}>
+                  <i className="fa-solid fa-xmark" />
+                </button>
+              )}
             </div>
           </div>
 
           {fd.type === 'stepper' && (
-            <div style={{ display: 'flex', gap: 10 }}>
-              <div style={{ flex: 1 }}>
-                <label style={lbl}>Min</label>
-                <input type="number" value={fd.min} onChange={e => set('min', e.target.value)} style={inp} />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+                <span style={lbl}>Scale</span>
+                {renderHelpBtn('min')}
               </div>
-              <div style={{ flex: 1 }}>
-                <label style={lbl}>Max</label>
-                <input type="number" value={fd.max} onChange={e => set('max', e.target.value)} style={inp} />
+              {renderHelp('min')}
+              <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginBottom: 3 }}>MIN</div>
+                  <input type="number" value={fd.min} onChange={e => set('min', e.target.value)} style={inp} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginBottom: 3 }}>MAX</div>
+                  <input type="number" value={fd.max} onChange={e => set('max', e.target.value)} style={inp} />
+                </div>
               </div>
             </div>
           )}
 
           {fd.type === 'text' && (
             <div>
-              <label style={lbl}>Rows (textarea height)</label>
+              {fieldHeader('Rows', 'rows')}
+              {renderHelp('rows')}
               <input type="number" min="1" max="8" value={fd.rows} onChange={e => set('rows', e.target.value)} style={inp} />
             </div>
           )}
 
           {fd.type === 'choice' && (
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <label style={{ ...lbl, marginBottom: 0 }}>Options</label>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <span style={lbl}>Options</span>
+                  {renderHelpBtn('options')}
+                </div>
                 <button onClick={() => {
                   const nv = numericChoice ? (fd.options.length ? Math.max(...fd.options.map(o => Number(o.value))) + 1 : 1) : '';
                   set('options', [...fd.options, { value: nv, label: '' }]);
@@ -626,6 +757,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
                   + ADD
                 </button>
               </div>
+              {renderHelp('options')}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {fd.options.map((o, i) => (
                   <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -642,10 +774,13 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
                 {!fd.options.length && <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>No options yet — tap + ADD</div>}
               </div>
               {numericChoice && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontFamily: UI.fontUi, color: UI.ink }}>Show labels under numbers</div>
-                    <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>Displays num + text label on each button</div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginTop: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 2 }}>
+                      <span style={{ fontSize: 13, fontFamily: UI.fontUi, color: UI.ink }}>Show labels under numbers</span>
+                      {renderHelpBtn('labeled')}
+                    </div>
+                    {renderHelp('labeled')}
                   </div>
                   {renderToggle(fd.labeled, () => set('labeled', !fd.labeled))}
                 </div>
@@ -655,14 +790,16 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
 
           {(fd.type === 'integer' || fd.type === 'decimal') && (
             <div>
-              <label style={lbl}>Unit suffix <span style={{ textTransform: 'none', fontWeight: 400, fontSize: 9 }}>(appended to value; "weight" for kg/lbs)</span></label>
-              <input value={fd.unit} onChange={e => set('unit', e.target.value)} placeholder='ml, steps — or "weight"' style={inp} />
+              {fieldHeader('Unit suffix', 'unit')}
+              {renderHelp('unit')}
+              <input value={fd.unit} onChange={e => set('unit', e.target.value)} placeholder='e.g. ml, kcal — or "weight"' style={inp} />
             </div>
           )}
 
           {fd.type !== 'text' && fd.type !== 'choice' && (
             <div>
-              <label style={lbl}>Hint <span style={{ fontWeight: 400 }}>(shown below field)</span></label>
+              {fieldHeader('Hint', 'hint')}
+              {renderHelp('hint')}
               <input value={fd.hint} onChange={e => set('hint', e.target.value)} placeholder="e.g. 1 = easy, 10 = max" style={inp} />
             </div>
           )}
@@ -684,11 +821,13 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onClose }) {
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 40px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <label style={lbl}>Section label</label>
+            {fieldHeader('Section label', 'section_label')}
+            {renderHelp('section_label')}
             <input value={sd.label} onChange={e => set('label', e.target.value)} placeholder="e.g. Wellness" style={inp} />
           </div>
           <div>
-            <label style={lbl}>Hint <span style={{ fontWeight: 400 }}>(optional, shown below section title)</span></label>
+            {fieldHeader('Hint (optional, shown below section title)', 'section_hint')}
+            {renderHelp('section_hint')}
             <input value={sd.hint} onChange={e => set('hint', e.target.value)} placeholder="e.g. 1 = good, 10 = bad" style={inp} />
           </div>
         </div>
