@@ -906,7 +906,7 @@ function CardioLineChart({ points, label, formatVal, yMin, yMax }) {
         <line x1={padL} y1={yOf(max).toFixed(1)} x2={w - padR} y2={yOf(max).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="2 2" />
         {max > min && <line x1={padL} y1={yOf(min).toFixed(1)} x2={w - padR} y2={yOf(min).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="2 2" />}
         <text x={padL - 4} y={(yOf(max) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
-        {max > min && <text x={padL - 4} y={(yOf(min) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
+        {max > min && (yOf(min) - yOf(max)) >= 10 && <text x={padL - 4} y={(yOf(min) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
         <path d={pathD} fill="none" stroke={UI.gold} strokeWidth="1.2" opacity="0.7" />
         {xy.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={xy.length > 60 ? 0 : 1.5} fill={UI.gold} />)}
         <text x={padL} y={h - 4} textAnchor="start" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
