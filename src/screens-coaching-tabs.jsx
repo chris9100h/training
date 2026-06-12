@@ -717,12 +717,12 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
             Prefilled from {prefill.count} cardio log{prefill.count !== 1 ? 's' : ''} this week
           </div>
         )}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-          <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'stretch' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>Cardio (min)</div>
             <input type="number" inputMode="numeric" placeholder="–" value={form.cardioMinutes} onChange={e => set('cardioMinutes', e.target.value)} style={inputStyle} />
           </div>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
               <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>Distance</span>
               <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
