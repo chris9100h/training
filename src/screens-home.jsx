@@ -447,7 +447,7 @@ function CardioPROverlay({ pr, onDone }) {
     if (secs === 60) { mins += 1; secs = 0; }
     return `${mins}:${String(secs).padStart(2, '0')} /${du}`;
   };
-  const fmtDist = (m) => du === 'mi' ? `${(m / MI_TO_M).toFixed(1)} mi` : `${(m / 1000).toFixed(1)} km`;
+  const fmtDist = (m) => du === 'mi' ? `${(m / MI_TO_M).toFixed(2)} mi` : `${(m / 1000).toFixed(2)} km`;
   const META = {
     pace:     { label: 'Fastest Pace',     fmt: fmtPace },
     distance: { label: 'Longest Distance', fmt: fmtDist },
