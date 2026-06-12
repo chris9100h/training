@@ -1742,7 +1742,7 @@ function checkinWeekStart() {
 
 // responses = plain object with snake_case keys matching the form schema fields.
 // Writes both the responses jsonb column and backward-compat fixed columns.
-async function submitCheckin(coachingId, clientId, responses, userId, weekStartArg = null, isEdit = false) {
+async function submitCheckin(coachingId, clientId, responses, userId, weekStartArg = null, isEdit = false, schema = null) {
   const weekStart = weekStartArg || checkinWeekStart();
   const id = 'ci_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   const row = {
@@ -1786,47 +1786,34 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
     const weekLabel = `${isEdit ? '✏️ EDITED · ' : ''}Week of ${fmt(d)} – ${fmt(endDate)}`;
     const lines = [weekLabel, '------------'];
     const wUnit = (typeof window !== 'undefined' && window.__UNIT) || 'kg';
-    // Weight
-    const wLines = [];
-    if (responses.weight_today != null) wLines.push(`Weight: ${responses.weight_today} ${wUnit}`);
-    if (responses.weight_avg_last_week != null) wLines.push(`Avg last week: ${responses.weight_avg_last_week} ${wUnit}`);
-    if (wLines.length) lines.push('', ...wLines);
-    // Training
-    const tLines = [];
-    if (responses.days_trained != null) tLines.push(`Training: ${responses.days_trained} days`);
-    if (responses.performance_vs_last_week) tLines.push(`Performance: ${responses.performance_vs_last_week}`);
-    if (tLines.length) lines.push('', ...tLines);
-    // Cardio
-    const cLines = [];
-    if (responses.steps != null) cLines.push(`Steps: ${Number(responses.steps).toLocaleString()}`);
-    if (responses.cardio_minutes != null) {
-      const dist = responses.cardio_distance_m != null ? ` · ${(responses.cardio_distance_m / 1000).toFixed(1)} km` : '';
-      cLines.push(`Cardio: ${responses.cardio_minutes} min${dist}`);
-    }
-    if (responses.cardio_pace_feeling != null) cLines.push(`Pace: ${responses.cardio_pace_feeling}/6`);
-    if (responses.cardio_effort != null) cLines.push(`Effort: ${responses.cardio_effort}/10`);
-    if (cLines.length) lines.push('', ...cLines);
-    // Markers
-    const mLines = [];
-    if (responses.hunger != null) mLines.push(`  Hunger: ${responses.hunger}/10`);
-    if (responses.sleep_quality != null) mLines.push(`  Sleep: ${responses.sleep_quality}/10`);
-    if (responses.life_stress != null) mLines.push(`  Life stress: ${responses.life_stress}/10`);
-    if (responses.work_stress != null) mLines.push(`  Work stress: ${responses.work_stress}/10`);
-    if (responses.tiredness != null) mLines.push(`  Tiredness: ${responses.tiredness}/10`);
-    if (mLines.length) lines.push('', 'Markers:', ...mLines);
-    // Standard bottom block
-    const bLines = [];
-    if (responses.hydration_ml != null) bLines.push(`Hydration: ${(responses.hydration_ml / 1000).toFixed(1)} L/day`);
-    if (responses.off_plan_days != null) bLines.push(`Off-plan days: ${responses.off_plan_days}`);
-    if (responses.off_plan_notes) bLines.push(`Off-plan notes: ${responses.off_plan_notes}`);
-    if (responses.goal_note) bLines.push(`Goal: ${responses.goal_note}`);
-    if (responses.issues_notes) bLines.push(`Issues: ${responses.issues_notes}`);
-    if (responses.general_note) bLines.push(`General: ${responses.general_note}`);
-    if (bLines.length) lines.push('', ...bLines);
-    // Custom fields (keys outside the default set)
-    const defaultKeys = new Set(['weight_today','weight_avg_last_week','off_plan_days','off_plan_notes','hydration_ml','days_trained','performance_vs_last_week','steps','cardio_minutes','cardio_distance_m','cardio_pace_feeling','cardio_effort','goal_note','hunger','sleep_quality','life_stress','work_stress','tiredness','issues_notes','general_note']);
-    const customLines = Object.entries(responses).filter(([k, v]) => !defaultKeys.has(k) && v != null).map(([k, v]) => `  ${k.replace(/_/g, ' ')}: ${v}`);
-    if (customLines.length) lines.push('', 'Custom fields:', ...customLines);
+    // Format a stored value for the text note (mirrors the card's display).
+    const fmtVal = (f, v) => {
+      if (f.unit === 'weight') return `${v} ${wUnit}`;
+      if (f._distanceField) return `${(v / 1000).toFixed(1)} km`;
+      if (f.key === 'hydration_ml') return `${(v / 1000).toFixed(1)} L/day`;
+      if (f.key === 'steps') return Number(v).toLocaleString();
+      if (f.type === 'choice') { const o = (f.options || []).find(o => String(o.value) === String(v)); return o ? o.label : String(v); }
+      if (f.type === 'stepper') return `${v}/${f.max || 10}`;
+      if (f.unit) return `${v} ${f.unit}`;
+      return String(v);
+    };
+    // Build the note from the schema: section headings, real labels, in order —
+    // renamed/custom fields read exactly as the coach defined them.
+    const seen = new Set();
+    (schema || []).forEach(section => {
+      const secLines = [];
+      (section.fields || []).forEach(f => {
+        const v = responses[f.key];
+        if (v == null || v === '') return;
+        seen.add(f.key);
+        secLines.push(`  ${f.label}: ${fmtVal(f, v)}`);
+      });
+      if (secLines.length) lines.push('', section.label.toUpperCase(), ...secLines);
+    });
+    // Any submitted keys not covered by the schema (e.g. a removed field) —
+    // kept so nothing the client entered is ever silently dropped.
+    const leftover = Object.entries(responses).filter(([k, v]) => !seen.has(k) && v != null && v !== '');
+    if (leftover.length) lines.push('', 'OTHER', ...leftover.map(([k, v]) => `  ${k.replace(/_/g, ' ')}: ${v}`));
     const threadId = await getOrCreateCoachingThread(coachingId, 'Weekly Check-in', userId);
     await addCoachingNote(coachingId, 'general', null, null, lines.filter((_, i) => !(i === 1 && lines[2] === undefined)).join('\n'), userId, threadId);
   } catch (e) { console.error('Failed to send check-in note', e); }

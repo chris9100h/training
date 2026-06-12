@@ -797,7 +797,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
         const val = toResponse(field, form[field.key], distUnit);
         if (val != null) responses[field.key] = val;
       });
-      await LB.submitCheckin(coachingId, clientId, responses, userId, weekStart, !!existing);
+      await LB.submitCheckin(coachingId, clientId, responses, userId, weekStart, !!existing, sections);
       onSaved();
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
