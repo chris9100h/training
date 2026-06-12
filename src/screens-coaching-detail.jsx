@@ -425,7 +425,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     min:           'Lowest selectable value on the stepper scale.',
     max:           'Highest selectable value on the stepper scale.',
     rows:          'How many lines tall the text area appears in the form (1–8). More rows = more vertical space.',
-    options:       'The value is stored in the database; the label is shown on the button. Order determines layout.',
+    options:       'Each option is numbered automatically by its order (1, 2, 3 …) — you only write the label shown on the button. Order them to match your trend direction (e.g. with "Lower better", put the best option first).',
     labeled:       'When on, each button shows its number above and the label text below — like the Pace feeling field in the default form.',
     unit:          'Text appended after the value in trend charts. Use "weight" to auto-switch between kg and lbs based on the client\'s setting.',
     hint:          'Small helper text shown below the input to guide the client (e.g. "1 = easy, 10 = max").',
@@ -515,7 +515,13 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     if (fd.type === 'stepper') { f.min = parseInt(fd.min) || 1; f.max = parseInt(fd.max) || 10; }
     if (fd.type === 'text') f.rows = parseInt(fd.rows) || 2;
     if (fd.type === 'choice') {
-      f.options = fd.options.map(o => ({ ...o, value: (o.value !== '' && !isNaN(Number(o.value))) ? Number(o.value) : o.value }));
+      // Numeric choices get values auto-assigned by position (1, 2, 3 …).
+      // Legacy string-valued choices (e.g. the built-in Performance field)
+      // keep their stored values untouched.
+      const isStringChoice = fd.options.some(o => o.value !== '' && o.value != null && isNaN(Number(o.value)));
+      f.options = fd.options.map((o, i) => isStringChoice
+        ? { ...o, value: (o.value !== '' && !isNaN(Number(o.value))) ? Number(o.value) : o.value }
+        : { ...o, value: i + 1 });
       if (fd.labeled) f.labeled = true;
     }
     setDraft(d => {
@@ -639,7 +645,8 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     const fd = fieldDraft;
     const set = (k, v) => setFieldDraft(f => ({ ...f, [k]: v }));
     const canSave = fd.label.trim().length > 0;
-    const numericChoice = fd.type === 'choice' && fd.options.length > 0 && fd.options.every(o => o.value !== '' && !isNaN(Number(o.value)));
+    const stringChoice = fd.type === 'choice' && fd.options.some(o => o.value !== '' && o.value != null && isNaN(Number(o.value)));
+    const numericChoice = fd.type === 'choice' && fd.options.length > 0 && !stringChoice;
 
     return (
       <div style={overlayStyle}>
@@ -758,10 +765,8 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
                   <span style={lbl}>Options</span>
                   {renderHelpBtn('options')}
                 </div>
-                <button onClick={() => {
-                  const nv = numericChoice ? (fd.options.length ? Math.max(...fd.options.map(o => Number(o.value))) + 1 : 1) : '';
-                  set('options', [...fd.options, { value: nv, label: '' }]);
-                }} style={{ background: 'var(--accent)', border: 'none', borderRadius: 4, padding: '4px 10px', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: '#0a0805', cursor: 'pointer' }}>
+                <button onClick={() => set('options', [...fd.options, { value: stringChoice ? '' : fd.options.length + 1, label: '' }])}
+                  style={{ background: 'var(--accent)', border: 'none', borderRadius: 4, padding: '4px 10px', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: '#0a0805', cursor: 'pointer' }}>
                   + ADD
                 </button>
               </div>
@@ -769,8 +774,12 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {fd.options.map((o, i) => (
                   <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input value={o.value} onChange={e => set('options', fd.options.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
-                      placeholder="val" style={{ ...inp, width: 58, flex: '0 0 58px', fontSize: 13 }} />
+                    {stringChoice ? (
+                      <input value={o.value} onChange={e => set('options', fd.options.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
+                        placeholder="val" style={{ ...inp, width: 58, flex: '0 0 58px', fontSize: 13 }} />
+                    ) : (
+                      <div style={{ ...inp, width: 44, flex: '0 0 44px', fontSize: 13, textAlign: 'center', color: UI.inkFaint, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</div>
+                    )}
                     <input value={o.label} onChange={e => set('options', fd.options.map((x, j) => j === i ? { ...x, label: e.target.value } : x))}
                       placeholder="label" style={{ ...inp, flex: 1, fontSize: 13 }} />
                     <button onClick={() => set('options', fd.options.filter((_, j) => j !== i))}
