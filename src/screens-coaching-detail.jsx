@@ -384,6 +384,67 @@ function CheckInTrendCards({ recent, schema }) {
   );
 }
 
+// ─── Preview data generator ──────────────────────────────────────────────────
+// Generates 20 weeks of synthetic check-in data for the schema preview.
+// Fixed seed (xorshift32) → same schema always produces the same chart.
+
+function generatePreviewData(schema) {
+  let s = 0xdeadbeef;
+  const rand = () => { s ^= s << 13; s ^= s >> 17; s ^= s << 5; return (s >>> 0) / 0xffffffff; };
+
+  const now = new Date();
+  const dow = now.getDay() || 7;
+  const mon = new Date(now); mon.setDate(now.getDate() - dow + 1); mon.setHours(0, 0, 0, 0);
+
+  const allFields = (schema || []).flatMap(sec => sec.fields || []).filter(f => f.type !== 'text');
+
+  const baseOf = f => {
+    if (f.type === 'stepper') return { base: (f.min + f.max) * 0.6, range: (f.max - f.min) * 0.25 };
+    if (f.type === 'choice')  return { base: 0, range: (f.options || []).length };
+    const k = f.key || '';
+    if (f.unit === 'weight')                         return { base: 82.5, range: 1.5 };
+    if (k.includes('step'))                          return { base: 7500, range: 2500 };
+    if (k.includes('hydration'))                     return { base: 2200, range: 400 };
+    if ((k.includes('days') || k.includes('trained')) && !k.includes('off')) return { base: 4, range: 2 };
+    if (k.includes('cardio') && k.includes('min'))   return { base: 45, range: 20 };
+    if (k.includes('calorie'))                       return { base: 2000, range: 300 };
+    if (k.includes('protein'))                       return { base: 160, range: 20 };
+    return { base: 50, range: 20 };
+  };
+
+  const W = 20;
+  return Array.from({ length: W }, (_, wk) => {
+    const t = wk / (W - 1);
+    const d = new Date(mon); d.setDate(mon.getDate() - (W - 1 - wk) * 7);
+    const weekStart = d.toISOString().slice(0, 10);
+    const responses = {};
+
+    allFields.forEach(f => {
+      const { base, range } = baseOf(f);
+      const noise  = (rand() - 0.5) * 2 * range;
+      const slope  = f.direction === 'higher_better' ?  range * 0.4 * t
+                   : f.direction === 'lower_better'  ? -range * 0.4 * t : 0;
+
+      if (f.type === 'stepper') {
+        responses[f.key] = Math.max(f.min, Math.min(f.max, Math.round(base + slope + noise)));
+      } else if (f.type === 'choice' && (f.options || []).length) {
+        const n = f.options.length;
+        const ideal = f.direction === 'higher_better' ? Math.round(t * (n - 1))
+                    : f.direction === 'lower_better'  ? Math.round((1 - t) * (n - 1))
+                    : Math.floor(n / 2);
+        const idx = Math.max(0, Math.min(n - 1, ideal + Math.round((rand() - 0.5) * 1.2)));
+        responses[f.key] = f.options[idx].value;
+      } else if (f.type === 'integer') {
+        responses[f.key] = Math.max(0, Math.round(base + slope + noise));
+      } else if (f.type === 'decimal') {
+        responses[f.key] = Math.max(0, Math.round((base + slope + noise) * 10) / 10);
+      }
+    });
+
+    return { weekStart, responses };
+  });
+}
+
 // ─── CheckInSchemaBuilder ──────────────────────────────────────────────────────
 
 function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClose }) {
@@ -395,6 +456,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
   const [saving, setSaving] = useStateC(false);
   const [helpTip, setHelpTip] = useStateC(null);
   const [savePicker, setSavePicker] = useStateC(false);
+  const previewData = useMemoC(() => generatePreviewData(draft), [draft]);
 
   const HELP = {
     label:         'The display name shown to clients in the check-in form.',
@@ -818,6 +880,31 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     );
   }
 
+  // ── PREVIEW VIEW ─────────────────────────────────────────────────────────
+  if (view === 'preview') {
+    const hasChartableFields = (draft || []).flatMap(s => s.fields || []).some(f => f.type !== 'text');
+    return (
+      <div style={overlayStyle}>
+        <div style={headerStyle}>
+          {backBtn(() => setView('list'))}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink }}>Preview</span>
+            <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 1 }}>20 weeks of sample data</div>
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '12px 14px 40px' }}>
+          {hasChartableFields ? (
+            <CheckInTrendCards recent={previewData} schema={draft} />
+          ) : (
+            <div style={{ textAlign: 'center', padding: '60px 20px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
+              Add fields to see a preview.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // ── LIST VIEW ─────────────────────────────────────────────────────────────
   return (
     <div style={overlayStyle}>
@@ -847,6 +934,10 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
           <i className="fa-solid fa-xmark" />
         </button>
         <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink, flex: 1 }}>Customize Check-in</span>
+        <button onClick={() => setView('preview')}
+          style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }} title="Preview">
+          <i className="fa-solid fa-eye" />
+        </button>
         <button onClick={handleReset}
           style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11 }}>
           Reset
