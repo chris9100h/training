@@ -833,7 +833,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
 
 // ─── ClientCheckInTab ─────────────────────────────────────────────────────────
 
-function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true, store }) {
+function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true, store, isSelf = false }) {
   const weekStart = LB.checkinWeekStart();
   const [checkins, setCheckins] = useStateC(null);
   const [schema, setSchema] = useStateC(null); // null = loading, then resolved or CHECKIN_DEFAULT_SCHEMA
@@ -841,6 +841,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   const [confirmDelete, setConfirmDelete] = useStateC(null); // id of check-in awaiting delete confirm
   const [deleting, setDeleting] = useStateC(false);
   const [pastOpen, setPastOpen] = useStateC(false);
+  const [builderOpen, setBuilderOpen] = useStateC(false);
 
   const load = () => LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
   useEffectC(() => {
@@ -897,20 +898,35 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
 
   // ── Overview: every check-in is editable/deletable (edit/delete live inside each card) ──
   const recent = [...checkins].reverse();
+  const resolvedSchema = schema || CHECKIN_DEFAULT_SCHEMA;
 
   return (
-    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+    <>
+      {builderOpen && isSelf && (
+        <CheckInSchemaBuilder coachingId={coachingId} initial={resolvedSchema}
+          onSave={s => { setSchema(s); setBuilderOpen(false); }}
+          onClose={() => setBuilderOpen(false)} />
+      )}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {!thisWeek && checkinEnabled && (
-          <button onClick={() => setEditTarget('new')}
-            style={{ background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
-            Submit this week's check-in
-          </button>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {!thisWeek && checkinEnabled && (
+            <button onClick={() => setEditTarget('new')}
+              style={{ flex: 1, background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+              Submit this week's check-in
+            </button>
+          )}
+          {isSelf && (
+            <button onClick={() => setBuilderOpen(true)}
+              style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '11px 13px', cursor: 'pointer', color: UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
+              <i className="fa-solid fa-sliders" />
+            </button>
+          )}
+        </div>
 
         {checkins.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <CheckInTrendCards recent={recent} schema={schema || CHECKIN_DEFAULT_SCHEMA} />
+            <CheckInTrendCards recent={recent} schema={resolvedSchema} />
           </div>
         )}
         {checkins.length > 0 && <div className="knurl" style={{ margin: '4px 0' }} />}
@@ -951,6 +967,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
         )}
       </div>
     </div>
+    </>
   );
 }
 
