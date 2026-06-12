@@ -273,6 +273,7 @@ function CheckInTrendCards({ recent, schema }) {
           )}
         </div>
         {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, textAlign: 'center' }}>{sub}</div>}
+        <div style={{ flex: 1 }} />
         <Sparkline vals={valid} />
       </div>
     );
@@ -351,6 +352,7 @@ function CheckInTrendCards({ recent, schema }) {
             )}
           </div>
           {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, textAlign: 'center' }}>{sub}</div>}
+          <div style={{ flex: 1 }} />
           <Sparkline vals={validItems.map(c => c.responses.cardio_minutes)} />
         </div>
       );
