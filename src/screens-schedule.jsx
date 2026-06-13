@@ -2,24 +2,6 @@
 
 const { useState: useStateS, useMemo: useMemoS, useEffect: useEffectS } = React;
 
-// Grip affordance that replaces the up/down arrows on reorderable rows. The
-// whole row is draggable (see UI.useDragReorder) — this is the visual cue.
-function DragHandle() {
-  return (
-    <div aria-hidden="true" style={{
-      flexShrink: 0, width: 22, height: 30,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      color: UI.inkFaint, cursor: 'grab',
-    }}>
-      <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
-        <circle cx="2" cy="3" r="1.3" /><circle cx="8" cy="3" r="1.3" />
-        <circle cx="2" cy="8" r="1.3" /><circle cx="8" cy="8" r="1.3" />
-        <circle cx="2" cy="13" r="1.3" /><circle cx="8" cy="13" r="1.3" />
-      </svg>
-    </div>
-  );
-}
-
 function useIsPadS() {
   const [isPad, setIsPad] = useStateS(() => window.innerWidth >= 768);
   useEffectS(() => {

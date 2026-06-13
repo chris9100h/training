@@ -1078,10 +1078,36 @@ UI.useDragReorder = function (options) {
   return setRef;
 };
 
+// Grip affordance for a reorderable row — replaces up/down arrows. The whole
+// row is draggable; this is the visual cue. Pass `style` to tweak per use.
+function DragHandle({ style } = {}) {
+  return (
+    <div aria-hidden="true" style={{
+      flexShrink: 0, width: 22, height: 30,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      color: UI.inkFaint, cursor: 'grab', ...style,
+    }}>
+      <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
+        <circle cx="2" cy="3" r="1.3" /><circle cx="8" cy="3" r="1.3" />
+        <circle cx="2" cy="8" r="1.3" /><circle cx="8" cy="8" r="1.3" />
+        <circle cx="2" cy="13" r="1.3" /><circle cx="8" cy="13" r="1.3" />
+      </svg>
+    </div>
+  );
+}
+
+// Container component that wires UI.useDragReorder to a list in one shot. Use
+// when the list count is dynamic (one per .map iteration) so each instance owns
+// its own hook. Mark children rows with data-reorder-item="true".
+function ReorderList({ onReorder, longPressMs, moveTolerance, style, className, children }) {
+  const ref = UI.useDragReorder({ onReorder, longPressMs, moveTolerance });
+  return <div ref={ref} data-reorder-list="true" style={style} className={className}>{children}</div>;
+}
+
 Object.assign(window, {
   UI, Screen, TopBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty,
   ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
-  btnPrimary, btnGhost, useConfirm,
+  btnPrimary, btnGhost, useConfirm, DragHandle, ReorderList,
   MUSCLES, WEEKDAYS, WEEKDAYS_FULL,
   // primitives
   Hairline, BracketFrame, Frame, SubDial, Bezel, ScreenHead, NumInput, Field, TextInput,

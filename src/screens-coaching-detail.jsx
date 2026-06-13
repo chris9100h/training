@@ -624,9 +624,9 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     backToList();
   };
 
-  const moveSection = (i, dir) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); const j = i + dir; if (j < 0 || j >= n.length) return n; [n[i], n[j]] = [n[j], n[i]]; return n; });
+  const reorderSections = (from, to) => { if (from === to) return; setDraft(s => { const n = JSON.parse(JSON.stringify(s)); const [m] = n.splice(from, 1); n.splice(to, 0, m); return n; }); };
   const removeSection = (i) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); n.splice(i, 1); return n; });
-  const moveField = (si, fi, dir) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); const flds = n[si].fields; const j = fi + dir; if (j < 0 || j >= flds.length) return n; [flds[fi], flds[j]] = [flds[j], flds[fi]]; return n; });
+  const reorderFields = (si, from, to) => { if (from === to) return; setDraft(s => { const n = JSON.parse(JSON.stringify(s)); const flds = n[si].fields; const [m] = flds.splice(from, 1); flds.splice(to, 0, m); return n; }); };
   const removeField = (si, fi) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); n[si].fields.splice(fi, 1); return n; });
 
   const handleSave = async () => {
@@ -995,66 +995,54 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
           {saving ? 'Saving…' : 'Save'}
         </button>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 12px 40px' }}>
+      <ReorderList onReorder={reorderSections} style={{ flex: 1, overflowY: 'auto', padding: '12px 12px 40px' }}>
         {draft.map((sec, sIdx) => (
-          <div key={sec.id || sIdx} style={{ marginBottom: 12, background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', background: UI.bgRaised, borderBottom: `0.5px solid ${UI.hair}` }}>
+          <div key={sec.id || sIdx} data-reorder-item="true" style={{ marginBottom: 12, background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '8px 6px 8px 8px', background: UI.bgRaised, borderBottom: `0.5px solid ${UI.hair}` }}>
+              <DragHandle style={{ height: 22, width: 18 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{sec.label}</span>
                 {sec.sectionHint && <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginLeft: 8 }}>{sec.sectionHint}</span>}
               </div>
               <div style={{ display: 'flex', alignItems: 'center' }}>
-                <button onClick={() => moveSection(sIdx, -1)} disabled={sIdx === 0}
-                  style={{ background: 'none', border: 'none', padding: '5px 7px', cursor: 'pointer', color: sIdx === 0 ? UI.inkGhost : UI.inkFaint, fontSize: 11 }}>
-                  <i className="fa-solid fa-chevron-up" />
-                </button>
-                <button onClick={() => moveSection(sIdx, 1)} disabled={sIdx === draft.length - 1}
-                  style={{ background: 'none', border: 'none', padding: '5px 7px', cursor: 'pointer', color: sIdx === draft.length - 1 ? UI.inkGhost : UI.inkFaint, fontSize: 11 }}>
-                  <i className="fa-solid fa-chevron-down" />
-                </button>
-                <button onClick={() => openEditSection(sIdx)}
+                <button data-reorder-ignore="true" onClick={() => openEditSection(sIdx)}
                   style={{ background: 'none', border: 'none', padding: '5px 7px', cursor: 'pointer', color: UI.inkFaint, fontSize: 11 }}>
                   <i className="fa-solid fa-pen" />
                 </button>
-                <button onClick={() => { if (confirm('Remove section "' + sec.label + '" and all its fields?')) removeSection(sIdx); }}
+                <button data-reorder-ignore="true" onClick={() => { if (confirm('Remove section "' + sec.label + '" and all its fields?')) removeSection(sIdx); }}
                   style={{ background: 'none', border: 'none', padding: '5px 7px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 11 }}>
                   <i className="fa-solid fa-trash" />
                 </button>
               </div>
             </div>
-            {(sec.fields || []).map((f, fIdx) => (
-              <div key={f.key || fIdx} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: `0.5px solid ${UI.hair}` }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                    {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 11, color: UI.inkGhost, flexShrink: 0 }} />}
-                    <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{f.label}</span>
-                    <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkGhost, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
-                    {f.width === 'half' && <span style={{ fontSize: 9, color: UI.inkGhost, fontFamily: UI.fontUi, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}` }}>½</span>}
-                    {f.required && <span style={{ fontSize: 11, color: 'var(--accent)', lineHeight: 1 }}>*</span>}
+            <ReorderList onReorder={(from, to) => reorderFields(sIdx, from, to)}>
+              {(sec.fields || []).map((f, fIdx) => (
+                <div key={f.key || fIdx} data-reorder-item="true" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 8px 6px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                  <DragHandle style={{ height: 22, width: 18 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                      {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 11, color: UI.inkGhost, flexShrink: 0 }} />}
+                      <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{f.label}</span>
+                      <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkGhost, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
+                      {f.width === 'half' && <span style={{ fontSize: 9, color: UI.inkGhost, fontFamily: UI.fontUi, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}` }}>½</span>}
+                      {f.required && <span style={{ fontSize: 11, color: 'var(--accent)', lineHeight: 1 }}>*</span>}
+                    </div>
+                    <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>{f.key}</div>
                   </div>
-                  <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>{f.key}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                    <button data-reorder-ignore="true" onClick={() => openEditField(sIdx, fIdx)}
+                      style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: UI.inkFaint, fontSize: 10 }}>
+                      <i className="fa-solid fa-pen" />
+                    </button>
+                    <button data-reorder-ignore="true" onClick={() => { if (confirm('Remove "' + f.label + '"?')) removeField(sIdx, fIdx); }}
+                      style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 10 }}>
+                      <i className="fa-solid fa-xmark" />
+                    </button>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                  <button onClick={() => moveField(sIdx, fIdx, -1)} disabled={fIdx === 0}
-                    style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: fIdx === 0 ? UI.inkGhost : UI.inkFaint, fontSize: 10 }}>
-                    <i className="fa-solid fa-chevron-up" />
-                  </button>
-                  <button onClick={() => moveField(sIdx, fIdx, 1)} disabled={fIdx === (sec.fields?.length ?? 1) - 1}
-                    style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: fIdx === (sec.fields?.length ?? 1) - 1 ? UI.inkGhost : UI.inkFaint, fontSize: 10 }}>
-                    <i className="fa-solid fa-chevron-down" />
-                  </button>
-                  <button onClick={() => openEditField(sIdx, fIdx)}
-                    style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: UI.inkFaint, fontSize: 10 }}>
-                    <i className="fa-solid fa-pen" />
-                  </button>
-                  <button onClick={() => { if (confirm('Remove "' + f.label + '"?')) removeField(sIdx, fIdx); }}
-                    style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 10 }}>
-                    <i className="fa-solid fa-xmark" />
-                  </button>
-                </div>
-              </div>
-            ))}
-            <button onClick={() => openAddField(sIdx)}
+              ))}
+            </ReorderList>
+            <button data-reorder-ignore="true" onClick={() => openAddField(sIdx)}
               style={{ width: '100%', padding: '9px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12 }}>
               <i className="fa-solid fa-plus" style={{ fontSize: 10 }} />
               Add field
@@ -1066,7 +1054,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
           <i className="fa-solid fa-plus" />
           Add section
         </button>
-      </div>
+      </ReorderList>
     </div>
   );
 }
