@@ -480,18 +480,35 @@ function generatePreviewData(schema) {
   });
 }
 
+// ─── PreviewSection ───────────────────────────────────────────────────────────
+function PreviewSection({ title, subtitle, children }) {
+  const [open, setOpen] = useStateC(false);
+  return (
+    <div style={{ background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+      <button onClick={() => setOpen(o => !o)} style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '12px 14px', background: 'none', border: 'none', cursor: 'pointer', gap: 10, WebkitTapHighlightColor: 'transparent' }}>
+        <div style={{ flex: 1, textAlign: 'left' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{title}</div>
+          <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 1 }}>{subtitle}</div>
+        </div>
+        <i className={`fa-solid fa-chevron-${open ? 'up' : 'down'}`} style={{ fontSize: 11, color: UI.inkFaint }} />
+      </button>
+      {open && <div style={{ padding: '0 14px 14px' }}>{children}</div>}
+    </div>
+  );
+}
+
 // ─── CheckInFormPreview ────────────────────────────────────────────────────────
-// Read-only replica of CheckInForm's visual layout — no state, no submit.
-// Used in the schema builder preview so coaches see exactly what clients fill in.
+// Renders the exact same layout as CheckInForm but with no state or network calls.
+// Uses the real FieldWidget + layoutRows so the coach sees a pixel-perfect preview.
 function CheckInFormPreview({ schema }) {
   const sections = schema || CHECKIN_DEFAULT_SCHEMA;
-  const inputStyle = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', opacity: 0.7 };
+  const inputStyle = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' };
   const renderRow = (row, key) => {
     if (row.length === 2) {
       return (
         <div key={key} style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'stretch' }}>
           {row.map(f => (
-            <div key={f.key} style={{ flex: 1 }}>
+            <div key={f.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
               <FieldWidget field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} />
             </div>
           ))}
@@ -499,6 +516,12 @@ function CheckInFormPreview({ schema }) {
       );
     }
     const f = row[0];
+    if (f.type === 'stepper' || (f.type === 'choice' && !f.labeled)) {
+      return <div key={key} style={{ marginBottom: 14 }}><FieldWidget field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} /></div>;
+    }
+    if (f.type === 'choice' && f.labeled) {
+      return <FieldWidget key={key} field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} />;
+    }
     return <div key={key} style={{ marginBottom: 14 }}><FieldWidget field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} /></div>;
   };
   return (
@@ -514,7 +537,7 @@ function CheckInFormPreview({ schema }) {
           </div>
         );
       })}
-      <div style={{ padding: '12px 0', opacity: 0.4, textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft }}>Submit Check-in</div>
+      <Btn style={{ opacity: 0.5, marginTop: 4 }}>Submit Check-in</Btn>
     </div>
   );
 }
@@ -966,28 +989,24 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
           {backBtn(() => setView('list'))}
           <div style={{ flex: 1, minWidth: 0 }}>
             <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink }}>Preview</span>
-            <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 1 }}>Sample weekly check-in + 20-week trends</div>
+            <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 1 }}>Tap a section to expand</div>
           </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '12px 14px 40px' }}>
           {allFields.length ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-              <div>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>CLIENT FORM (what the client fills in)</div>
-                <div style={{ background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, padding: '16px 14px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <PreviewSection title="Client form" subtitle="what the client fills in">
+                <div style={{ background: UI.bg, borderRadius: 8, border: `0.5px solid ${UI.hair}`, padding: '16px 14px' }}>
                   <CheckInFormPreview schema={draft} />
                 </div>
-              </div>
-              <div className="knurl" style={{ margin: '2px 0' }} />
-              <div>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>WEEKLY CHECK-IN (what the coach receives)</div>
-                <CheckInCard ci={sample} schema={draft} defaultOpen />
-              </div>
+              </PreviewSection>
+              <PreviewSection title="Weekly check-in" subtitle="what the coach receives">
+                <CheckInCard ci={sample} schema={draft} defaultOpen embedded />
+              </PreviewSection>
               {hasChartableFields && (
-                <>
-                  <div className="knurl" style={{ margin: '2px 0' }} />
+                <PreviewSection title="Trends" subtitle="20-week charts">
                   <CheckInTrendCards recent={previewData} schema={draft} />
-                </>
+                </PreviewSection>
               )}
             </div>
           ) : (
