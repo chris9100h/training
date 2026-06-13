@@ -895,7 +895,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const newBestShownRef = useRefT({}); // exIdx → true once a NEW BEST flashed (max once per exercise)
   const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
   const [screenFlash, setScreenFlash] = useStateT(false);
-  const [restModalOpen, setRestModalOpen] = useStateT(false);
+  const [restModalOpen, setRestModalOpen] = useStateT(() => {
+    const rs = session.restStart ?? null;
+    const rd = session.restDuration ?? null;
+    return !!(rs && rd && Date.now() >= rs + rd * 1000);
+  });
   const [confirmEl, confirm] = useConfirm();
   const [finishOpen, setFinishOpen] = useStateT(false);
   const [finishStep, setFinishStep] = useStateT('confirm');
