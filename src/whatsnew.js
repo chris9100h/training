@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.235',
+    title: 'Live cardio',
+    items: [
+      'Time your cardio as you go. Tap CARDIO on the home screen, choose Start live, and a stopwatch counts your session up — no need to remember the minutes afterwards.',
+      'Lock your phone, switch apps, keep moving. The timer keeps running in the background and even survives an app restart, so your time is never lost.',
+      'A guided finish. When you\'re done you get a quick Well done, then you fill in the details one step at a time — type, distance, pace and effort — instead of one big form.',
+      'Prefer the old way? Log manually is still right there for entering a session by hand.',
+    ],
+  },
+  {
     id: 'v2.220',
     title: 'Settings Redesign, Training Tools & No Interruptions',
     items: [
