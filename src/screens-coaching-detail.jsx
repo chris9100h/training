@@ -480,6 +480,45 @@ function generatePreviewData(schema) {
   });
 }
 
+// ─── CheckInFormPreview ────────────────────────────────────────────────────────
+// Read-only replica of CheckInForm's visual layout — no state, no submit.
+// Used in the schema builder preview so coaches see exactly what clients fill in.
+function CheckInFormPreview({ schema }) {
+  const sections = schema || CHECKIN_DEFAULT_SCHEMA;
+  const inputStyle = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', opacity: 0.7 };
+  const renderRow = (row, key) => {
+    if (row.length === 2) {
+      return (
+        <div key={key} style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'stretch' }}>
+          {row.map(f => (
+            <div key={f.key} style={{ flex: 1 }}>
+              <FieldWidget field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} />
+            </div>
+          ))}
+        </div>
+      );
+    }
+    const f = row[0];
+    return <div key={key} style={{ marginBottom: 14 }}><FieldWidget field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} /></div>;
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, pointerEvents: 'none', userSelect: 'none' }}>
+      {sections.map(section => {
+        const rows = layoutRows(section.fields || []);
+        if (!rows.length) return null;
+        const headLabel = section.label.toUpperCase() + (section.sectionHint ? ` (${section.sectionHint})` : '');
+        return (
+          <div key={section.id}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10, marginTop: 4 }}>{headLabel}</div>
+            {rows.map((row, ri) => renderRow(row, ri))}
+          </div>
+        );
+      })}
+      <div style={{ padding: '12px 0', opacity: 0.4, textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft }}>Submit Check-in</div>
+    </div>
+  );
+}
+
 // ─── CheckInSchemaBuilder ──────────────────────────────────────────────────────
 
 function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClose }) {
@@ -933,6 +972,13 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
         <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '12px 14px 40px' }}>
           {allFields.length ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <div>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>CLIENT FORM (what the client fills in)</div>
+                <div style={{ background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, padding: '16px 14px' }}>
+                  <CheckInFormPreview schema={draft} />
+                </div>
+              </div>
+              <div className="knurl" style={{ margin: '2px 0' }} />
               <div>
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>WEEKLY CHECK-IN (what the coach receives)</div>
                 <CheckInCard ci={sample} schema={draft} defaultOpen />
