@@ -26,15 +26,15 @@ function Row({ label, children, first = false }) {
   );
 }
 
-function NavRow({ label, hint, onTap, first = false }) {
+function NavRow({ label, hint, onTap, first = false, accent = false }) {
   return (
     <>
       {!first && <div className="knurl" />}
       <button onClick={onTap} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', WebkitTapHighlightColor: 'transparent' }}>
-        <span style={{ fontSize: 16, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
+        <span style={{ fontSize: 16, color: accent ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontWeight: accent ? 600 : 400 }}>{label}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {hint != null && <span style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi }}>{hint}</span>}
-          <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
+          {hint != null && <span style={{ fontSize: 13, color: accent ? 'var(--accent)' : UI.inkFaint, fontFamily: UI.fontUi }}>{hint}</span>}
+          <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={accent ? 'var(--accent)' : UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
         </div>
       </button>
     </>
@@ -353,15 +353,15 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
         {/* ─── Category navigation ─── */}
         <Frame style={{ padding: '0 14px' }}>
+          <NavRow label="Changelog" hint={(window.WHATS_NEW || [])[0]?.id} onTap={() => setChangelogSheet(true)} first accent />
           {hasActiveUsersAccess && (
-            <NavRow label="Active users" hint={activeCount > 0 ? `${activeCount} active` : null} onTap={() => setActiveUsersSheet(true)} first />
+            <NavRow label="Active users" hint={activeCount > 0 ? `${activeCount} active` : null} onTap={() => setActiveUsersSheet(true)} />
           )}
-          <NavRow label="Coaching" onTap={() => setCoachingSheet(true)} first={!hasActiveUsersAccess} />
+          <NavRow label="Coaching" onTap={() => setCoachingSheet(true)} />
           <NavRow label="Account" onTap={() => setAccountSheet(true)} />
           <NavRow label="Training" onTap={() => setTrainingSheet(true)} />
           <NavRow label="Appearance" onTap={() => setAppearanceSheet(true)} />
           <NavRow label="Data" onTap={() => setDataSheet(true)} />
-          <NavRow label="Changelog" onTap={() => setChangelogSheet(true)} />
         </Frame>
 
         {/* ─── Admin: pending registrations ─── */}
