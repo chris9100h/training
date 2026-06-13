@@ -480,6 +480,70 @@ function generatePreviewData(schema) {
   });
 }
 
+// ─── PreviewSection ───────────────────────────────────────────────────────────
+function PreviewSection({ title, subtitle, children }) {
+  const [open, setOpen] = useStateC(false);
+  return (
+    <div style={{ background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+      <button onClick={() => setOpen(o => !o)} style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '12px 14px', background: 'none', border: 'none', cursor: 'pointer', gap: 10, WebkitTapHighlightColor: 'transparent' }}>
+        <div style={{ flex: 1, textAlign: 'left' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{title}</div>
+          <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 1 }}>{subtitle}</div>
+        </div>
+        <i className={`fa-solid fa-chevron-${open ? 'up' : 'down'}`} style={{ fontSize: 11, color: UI.inkFaint }} />
+      </button>
+      {open && <div style={{ padding: '0 14px 14px' }}>{children}</div>}
+    </div>
+  );
+}
+
+// ─── CheckInFormPreview ────────────────────────────────────────────────────────
+// Renders the exact same layout as CheckInForm but with no state or network calls.
+// Uses the real FieldWidget + layoutRows so the coach sees a pixel-perfect preview.
+function CheckInFormPreview({ schema }) {
+  const sections = schema || CHECKIN_DEFAULT_SCHEMA;
+  const inputStyle = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' };
+  const renderRow = (row, key) => {
+    if (row.length === 2) {
+      return (
+        <div key={key} style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'stretch' }}>
+          {row.map(f => (
+            <div key={f.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <FieldWidget field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} />
+            </div>
+          ))}
+        </div>
+      );
+    }
+    const f = row[0];
+    if (f.type === 'stepper' || (f.type === 'choice' && !f.labeled)) {
+      return <div key={key} style={{ marginBottom: 14 }}><FieldWidget field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} /></div>;
+    }
+    if (f.type === 'choice' && f.labeled) {
+      return <FieldWidget key={key} field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} />;
+    }
+    return <div key={key} style={{ marginBottom: 14 }}><FieldWidget field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} /></div>;
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, pointerEvents: 'none', userSelect: 'none' }}>
+      {sections.map(section => {
+        const rows = layoutRows(section.fields || []);
+        if (!rows.length) return null;
+        const headLabel = section.label.toUpperCase() + (section.sectionHint ? ` (${section.sectionHint})` : '');
+        return (
+          <div key={section.id}>
+            <div className="knurl" style={{ margin: '0 0 6px' }} />
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{headLabel}</div>
+            <div className="knurl" style={{ margin: '0 0 10px' }} />
+            {rows.map((row, ri) => renderRow(row, ri))}
+          </div>
+        );
+      })}
+      <Btn style={{ opacity: 0.5, marginTop: 4 }}>Submit Check-in</Btn>
+    </div>
+  );
+}
+
 // ─── CheckInSchemaBuilder ──────────────────────────────────────────────────────
 
 function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClose }) {
@@ -492,6 +556,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
   const [helpTip, setHelpTip] = useStateC(null);
   const [savePicker, setSavePicker] = useStateC(false);
   const previewData = useMemoC(() => generatePreviewData(draft), [draft]);
+  const [confirmEl, confirm] = useConfirm();
 
   const HELP = {
     label:         'The display name shown to clients in the check-in form.',
@@ -624,9 +689,9 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     backToList();
   };
 
-  const moveSection = (i, dir) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); const j = i + dir; if (j < 0 || j >= n.length) return n; [n[i], n[j]] = [n[j], n[i]]; return n; });
+  const reorderSections = (from, to) => { if (from === to) return; setDraft(s => { const n = JSON.parse(JSON.stringify(s)); const [m] = n.splice(from, 1); n.splice(to, 0, m); return n; }); };
   const removeSection = (i) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); n.splice(i, 1); return n; });
-  const moveField = (si, fi, dir) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); const flds = n[si].fields; const j = fi + dir; if (j < 0 || j >= flds.length) return n; [flds[fi], flds[j]] = [flds[j], flds[fi]]; return n; });
+  const reorderFields = (si, from, to) => { if (from === to) return; setDraft(s => { const n = JSON.parse(JSON.stringify(s)); const flds = n[si].fields; const [m] = flds.splice(from, 1); flds.splice(to, 0, m); return n; }); };
   const removeField = (si, fi) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); n[si].fields.splice(fi, 1); return n; });
 
   const handleSave = async () => {
@@ -641,9 +706,33 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     catch (e) { alert(e.message); setSaving(false); }
   };
 
-  const handleReset = () => {
-    if (confirm('Reset to the default check-in form? All customizations will be lost.'))
+  const handleReset = async () => {
+    if (await confirm('Reset to the default check-in form? All customizations will be lost.', { ok: 'Reset', danger: true }))
       setDraft(JSON.parse(JSON.stringify(CHECKIN_DEFAULT_SCHEMA)));
+  };
+
+  // Default fields the coach has removed, grouped by their original section —
+  // lets them add individual defaults back (e.g. the cardio fields the prefill
+  // depends on) without a full reset that wipes their customizations.
+  const missingDefaultsBySection = () => {
+    const keys = new Set(draft.flatMap(s => (s.fields || []).map(f => f.key)));
+    return CHECKIN_DEFAULT_SCHEMA
+      .map(sec => ({ section: sec, fields: (sec.fields || []).filter(f => !keys.has(f.key)) }))
+      .filter(g => g.fields.length);
+  };
+
+  const addDefaultField = (defSection, defField) => {
+    setDraft(d => {
+      const n = JSON.parse(JSON.stringify(d));
+      let target = n.find(s => s.id === defSection.id)
+        || n.find(s => (s.label || '').toLowerCase() === (defSection.label || '').toLowerCase());
+      if (!target) {
+        target = { id: defSection.id, label: defSection.label, ...(defSection.sectionHint ? { sectionHint: defSection.sectionHint } : {}), fields: [] };
+        n.push(target);
+      }
+      target.fields.push(JSON.parse(JSON.stringify(defField)));
+      return n;
+    });
   };
 
   const TYPE_LABEL = { text: 'Text', integer: 'Int', decimal: 'Dec', stepper: 'Steps', choice: 'Choice' };
@@ -926,21 +1015,24 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
           {backBtn(() => setView('list'))}
           <div style={{ flex: 1, minWidth: 0 }}>
             <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink }}>Preview</span>
-            <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 1 }}>Sample weekly check-in + 20-week trends</div>
+            <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 1 }}>Tap a section to expand</div>
           </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '12px 14px 40px' }}>
           {allFields.length ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-              <div>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>WEEKLY CHECK-IN (what the coach receives)</div>
-                <CheckInCard ci={sample} schema={draft} defaultOpen />
-              </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <PreviewSection title="Client form" subtitle="what the client fills in">
+                <div style={{ background: UI.bg, borderRadius: 8, border: `0.5px solid ${UI.hair}`, padding: '16px 14px' }}>
+                  <CheckInFormPreview schema={draft} />
+                </div>
+              </PreviewSection>
+              <PreviewSection title="Weekly check-in" subtitle="what the coach receives">
+                <CheckInCard ci={sample} schema={draft} defaultOpen embedded />
+              </PreviewSection>
               {hasChartableFields && (
-                <>
-                  <div className="knurl" style={{ margin: '2px 0' }} />
+                <PreviewSection title="Trends" subtitle="20-week charts">
                   <CheckInTrendCards recent={previewData} schema={draft} />
-                </>
+                </PreviewSection>
               )}
             </div>
           ) : (
@@ -953,7 +1045,46 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     );
   }
 
+  // ── ADD DEFAULT FIELDS VIEW ───────────────────────────────────────────────
+  if (view === 'add-defaults') {
+    const groups = missingDefaultsBySection();
+    return (
+      <div style={overlayStyle}>
+        <div style={headerStyle}>
+          {backBtn(() => setView('list'))}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink }}>Add Default Fields</span>
+            <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 1 }}>Tap to add a removed field back</div>
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '12px 14px 40px' }}>
+          {groups.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '48px 24px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
+              All default fields are already in your form.
+            </div>
+          ) : groups.map(({ section, fields }) => (
+            <div key={section.id} style={{ marginBottom: 18 }}>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{section.label}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {fields.map(f => (
+                  <button key={f.key} onClick={() => addDefaultField(section, f)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}>
+                    {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 13, color: UI.inkGhost, flexShrink: 0, width: 16, textAlign: 'center' }} />}
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{f.label}</span>
+                    <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkGhost, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
+                    <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   // ── LIST VIEW ─────────────────────────────────────────────────────────────
+  const hasMissingDefaults = missingDefaultsBySection().length > 0;
   return (
     <div style={overlayStyle}>
       {savePicker && (
@@ -986,6 +1117,13 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
           style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }} title="Preview">
           <i className="fa-solid fa-eye" />
         </button>
+        {hasMissingDefaults && (
+          <button onClick={() => setView('add-defaults')}
+            style={{ background: 'none', border: 'none', padding: '4px 6px', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }} title="Add default fields">
+            <i className="fa-solid fa-plus" style={{ fontSize: 10 }} />
+            Defaults
+          </button>
+        )}
         <button onClick={handleReset}
           style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11 }}>
           Reset
@@ -995,66 +1133,54 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
           {saving ? 'Saving…' : 'Save'}
         </button>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 12px 40px' }}>
+      <ReorderList onReorder={reorderSections} style={{ flex: 1, overflowY: 'auto', padding: '12px 12px 40px' }}>
         {draft.map((sec, sIdx) => (
-          <div key={sec.id || sIdx} style={{ marginBottom: 12, background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', background: UI.bgRaised, borderBottom: `0.5px solid ${UI.hair}` }}>
+          <div key={sec.id || sIdx} data-reorder-item="true" style={{ marginBottom: 12, background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '8px 6px 8px 8px', background: UI.bgRaised, borderBottom: `0.5px solid ${UI.hair}` }}>
+              <DragHandle style={{ height: 22, width: 18, marginRight: 4 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{sec.label}</span>
                 {sec.sectionHint && <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginLeft: 8 }}>{sec.sectionHint}</span>}
               </div>
               <div style={{ display: 'flex', alignItems: 'center' }}>
-                <button onClick={() => moveSection(sIdx, -1)} disabled={sIdx === 0}
-                  style={{ background: 'none', border: 'none', padding: '5px 7px', cursor: 'pointer', color: sIdx === 0 ? UI.inkGhost : UI.inkFaint, fontSize: 11 }}>
-                  <i className="fa-solid fa-chevron-up" />
-                </button>
-                <button onClick={() => moveSection(sIdx, 1)} disabled={sIdx === draft.length - 1}
-                  style={{ background: 'none', border: 'none', padding: '5px 7px', cursor: 'pointer', color: sIdx === draft.length - 1 ? UI.inkGhost : UI.inkFaint, fontSize: 11 }}>
-                  <i className="fa-solid fa-chevron-down" />
-                </button>
-                <button onClick={() => openEditSection(sIdx)}
+                <button data-reorder-ignore="true" onClick={() => openEditSection(sIdx)}
                   style={{ background: 'none', border: 'none', padding: '5px 7px', cursor: 'pointer', color: UI.inkFaint, fontSize: 11 }}>
                   <i className="fa-solid fa-pen" />
                 </button>
-                <button onClick={() => { if (confirm('Remove section "' + sec.label + '" and all its fields?')) removeSection(sIdx); }}
+                <button data-reorder-ignore="true" onClick={async () => { if (await confirm('Remove section "' + sec.label + '" and all its fields?', { ok: 'Remove', danger: true })) removeSection(sIdx); }}
                   style={{ background: 'none', border: 'none', padding: '5px 7px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 11 }}>
                   <i className="fa-solid fa-trash" />
                 </button>
               </div>
             </div>
-            {(sec.fields || []).map((f, fIdx) => (
-              <div key={f.key || fIdx} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: `0.5px solid ${UI.hair}` }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                    {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 11, color: UI.inkGhost, flexShrink: 0 }} />}
-                    <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{f.label}</span>
-                    <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkGhost, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
-                    {f.width === 'half' && <span style={{ fontSize: 9, color: UI.inkGhost, fontFamily: UI.fontUi, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}` }}>½</span>}
-                    {f.required && <span style={{ fontSize: 11, color: 'var(--accent)', lineHeight: 1 }}>*</span>}
+            <ReorderList onReorder={(from, to) => reorderFields(sIdx, from, to)}>
+              {(sec.fields || []).map((f, fIdx) => (
+                <div key={f.key || fIdx} data-reorder-item="true" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 8px 6px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                  <DragHandle style={{ height: 22, width: 18, marginRight: 4 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                      {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 11, color: UI.inkGhost, flexShrink: 0 }} />}
+                      <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{f.label}</span>
+                      <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkGhost, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
+                      {f.width === 'half' && <span style={{ fontSize: 9, color: UI.inkGhost, fontFamily: UI.fontUi, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}` }}>½</span>}
+                      {f.required && <span style={{ fontSize: 11, color: 'var(--accent)', lineHeight: 1 }}>*</span>}
+                    </div>
+                    <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>{f.key}</div>
                   </div>
-                  <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>{f.key}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                    <button data-reorder-ignore="true" onClick={() => openEditField(sIdx, fIdx)}
+                      style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: UI.inkFaint, fontSize: 10 }}>
+                      <i className="fa-solid fa-pen" />
+                    </button>
+                    <button data-reorder-ignore="true" onClick={async () => { if (await confirm('Remove "' + f.label + '"?', { ok: 'Remove', danger: true })) removeField(sIdx, fIdx); }}
+                      style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 10 }}>
+                      <i className="fa-solid fa-xmark" />
+                    </button>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                  <button onClick={() => moveField(sIdx, fIdx, -1)} disabled={fIdx === 0}
-                    style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: fIdx === 0 ? UI.inkGhost : UI.inkFaint, fontSize: 10 }}>
-                    <i className="fa-solid fa-chevron-up" />
-                  </button>
-                  <button onClick={() => moveField(sIdx, fIdx, 1)} disabled={fIdx === (sec.fields?.length ?? 1) - 1}
-                    style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: fIdx === (sec.fields?.length ?? 1) - 1 ? UI.inkGhost : UI.inkFaint, fontSize: 10 }}>
-                    <i className="fa-solid fa-chevron-down" />
-                  </button>
-                  <button onClick={() => openEditField(sIdx, fIdx)}
-                    style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: UI.inkFaint, fontSize: 10 }}>
-                    <i className="fa-solid fa-pen" />
-                  </button>
-                  <button onClick={() => { if (confirm('Remove "' + f.label + '"?')) removeField(sIdx, fIdx); }}
-                    style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 10 }}>
-                    <i className="fa-solid fa-xmark" />
-                  </button>
-                </div>
-              </div>
-            ))}
-            <button onClick={() => openAddField(sIdx)}
+              ))}
+            </ReorderList>
+            <button data-reorder-ignore="true" onClick={() => openAddField(sIdx)}
               style={{ width: '100%', padding: '9px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12 }}>
               <i className="fa-solid fa-plus" style={{ fontSize: 10 }} />
               Add field
@@ -1066,7 +1192,8 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
           <i className="fa-solid fa-plus" />
           Add section
         </button>
-      </div>
+      </ReorderList>
+      {confirmEl}
     </div>
   );
 }

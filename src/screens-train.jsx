@@ -804,6 +804,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const newDur = val !== null ? (dur ?? null) : null;
     setRestDuration(newDur);
     updateSession(sess => ({ ...sess, restStart: val, restDuration: newDur }));
+    // Schedule the "rest over" push right here — the single place a rest timer
+    // is started or adjusted. Scheduling it in a mount effect instead re-fired
+    // every time the Train screen was re-entered (e.g. Home → back), queuing a
+    // second server-side relay chain under the same nonce; both chains
+    // delivered, so the push arrived twice. The nonce only dedups a *newer*
+    // timer, never a re-send of the same one.
+    if (val !== null && store.settings?.pushEnabled) {
+      const def = newDur ?? restDef;
+      const delaySeconds = Math.round(Math.max(0, val + def * 1000 - Date.now()) / 1000);
+      // Authenticated as the user; the server derives the target key from the DB.
+      LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds, nonce: String(val), priority: 1 });
+    }
   };
   const [now, setNow] = useStateT(Date.now());
   useEffectT(() => {
@@ -829,14 +841,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const restElapsed = restStart ? Math.floor((now - restStart) / 1000) : null;
   const restRemaining = restElapsed != null ? Math.max(0, activeRestDef - restElapsed) : null;
   const restPct = restElapsed != null ? Math.max(0, Math.min(100, (restElapsed / activeRestDef) * 100)) : 0;
-
-  useEffectT(() => {
-    if (!restStart) return;
-    if (!store.settings?.pushEnabled) return;
-    const delaySeconds = Math.round(Math.max(0, restStart + activeRestDef * 1000 - Date.now()) / 1000);
-    // Authenticated as the user; the server derives the target key from the DB.
-    LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds, nonce: String(restStart), priority: 1 });
-  }, [restStart]);
 
   // beep + auto-open modal when rest timer hits zero
   const prevRestRemaining = useRefT(null);
@@ -891,7 +895,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const newBestShownRef = useRefT({}); // exIdx → true once a NEW BEST flashed (max once per exercise)
   const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
   const [screenFlash, setScreenFlash] = useStateT(false);
-  const [restModalOpen, setRestModalOpen] = useStateT(false);
+  const [restModalOpen, setRestModalOpen] = useStateT(() => {
+    const rs = session.restStart ?? null;
+    const rd = session.restDuration ?? null;
+    return !!(rs && rd && Date.now() >= rs + rd * 1000);
+  });
   const [confirmEl, confirm] = useConfirm();
   const [finishOpen, setFinishOpen] = useStateT(false);
   const [finishStep, setFinishStep] = useStateT('confirm');
@@ -2066,7 +2074,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             const hasVal = pending && (pending.kg != null || pending.reps != null || pending.repsL != null || pending.repsR != null);
             return <Btn onClick={checkSet} disabled={!hasVal} style={{ flex: 2, minHeight: 44, padding: '10px 16px' }}>Check set</Btn>;
           })()}
-          <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '6px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+          <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '6px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
             <span>Skip</span>
             <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.6, textTransform: 'none', letterSpacing: 0 }}>remaining sets</span>
           </Btn>

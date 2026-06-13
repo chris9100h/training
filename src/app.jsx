@@ -333,6 +333,9 @@ function App() {
   const pendingStore              = useRefA(null);  // latest state awaiting sync
   const syncing                   = useRefA(false); // true while a sync is in flight
   const localDirty                = useRefA(false); // true if user changed store after cache load
+  const userIdRef                 = useRefA(null);  // current userId for stale-closure contexts
+
+  useEffectA(() => { userIdRef.current = userId; }, [userId]);
 
   useEffectA(() => {
     if (store?.user?.email && store?.user?.name) {
@@ -593,7 +596,7 @@ function App() {
         // An offline SIGNED_OUT is almost always a failed token refresh, not a
         // real sign-out — never wipe the cache or drop to the login screen.
         if (!navigator.onLine) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
-        LB.clearLocal(userId);
+        LB.clearLocal(userIdRef.current);
         setStore(null);
         setUserId(null);
         prevStore.current = null;
@@ -784,7 +787,7 @@ function App() {
             if (!s) return s;
             const asCoach = s.coaching?.asCoach || [];
             const pendingCheckinsCount = checkinData.filter(r => {
-              if (r.hasCheckin) return false;
+              if (r.checkedInAt !== null) return false;
               const client = asCoach.find(c => c.id === r.coachingId);
               return client?.checkinEnabled ?? true;
             }).length;
@@ -851,7 +854,7 @@ function App() {
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
     case 'coaching':            screen = <window.Screens.CoachingTabScreen {...props} />; break;
     case 'coaching-dashboard':  screen = <window.Screens.CoachingDashboard {...props} />; break;
-    case 'coaching-client':     screen = <window.Screens.CoachClientScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} initialTab={route.initialTab} backRoute={route.backRoute || 'settings'} />; break;
+    case 'coaching-client':     screen = <window.Screens.CoachClientScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} checkinAt={route.checkinAt} initialTab={route.initialTab} backRoute={route.backRoute || 'settings'} />; break;
     case 'coaching-edit-plan':  screen = <window.Screens.CoachPlanEditorScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} scheduleId={route.scheduleId} />; break;
     case 'coaching-new-plan':   screen = <window.Screens.CoachNewPlanScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} />; break;
     default:                  screen = <window.Screens.HomeScreen {...props} />; break;

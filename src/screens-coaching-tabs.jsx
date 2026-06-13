@@ -117,7 +117,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           statusData.forEach(r => { lm[r.clientId] = r.inProgressSessionId; });
           setLiveMap(lm);
           const cm = {};
-          checkinData.forEach(r => { cm[r.coachingId] = r.hasCheckin; });
+          checkinData.forEach(r => { cm[r.coachingId] = r.checkedInAt; });
           setCheckinMap(cm);
         })
         .catch(() => {});
@@ -279,10 +279,10 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           {allClients.map(c => {
             const inProgress = liveMap[c.clientId];
             const clientUnread = unreadNotes.filter(n => n.authorId === c.clientId).length;
-            const checkinDue = c.status === 'active' && (c.checkinEnabled ?? true) && checkinMap[c.id] === false;
-            const weekStart = LB.checkinWeekStart();
-            const checkinNew = c.status === 'active' && checkinMap[c.id] === true && (() => {
-              try { return localStorage.getItem(`logbook-coach-ci-seen-${c.id}`) !== weekStart; } catch (_) { return false; }
+            const checkinAt = c.id in checkinMap ? checkinMap[c.id] : undefined;
+            const checkinDue = c.status === 'active' && (c.checkinEnabled ?? true) && checkinAt === null;
+            const checkinNew = c.status === 'active' && typeof checkinAt === 'string' && (() => {
+              try { return localStorage.getItem(`logbook-coach-ci-seen-${c.id}`) !== checkinAt; } catch (_) { return false; }
             })();
             return (
               <CoachingTabClientCard
@@ -292,6 +292,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
                 unreadCount={clientUnread}
                 checkinDue={checkinDue}
                 checkinNew={checkinNew}
+                checkinAt={checkinAt}
                 onRequestCheckin={() => handleRequestCheckin(c.id)}
                 go={go}
               />
@@ -303,13 +304,14 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
   );
 }
 
-function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, checkinNew, onRequestCheckin, go }) {
+function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, checkinNew, checkinAt, onRequestCheckin, go }) {
   const isPending = client.status === 'pending';
   const [requested, setRequested] = useStateC(false);
+  const [checkinDismissed, setCheckinDismissed] = useStateC(false);
 
   const handleCardClick = () => {
     if (isPending) return;
-    go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName, backRoute: 'coaching' });
+    go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName, checkinAt, backRoute: 'coaching' });
   };
 
   const handleRequest = (e) => {
@@ -320,7 +322,15 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
     setTimeout(() => setRequested(false), 4000);
   };
 
-  const borderColor = inProgress ? 'rgba(var(--accent-rgb),0.4)' : (checkinNew || checkinDue) ? 'rgba(var(--accent-rgb),0.2)' : UI.hair;
+  const handleDismissCheckin = (e) => {
+    e.stopPropagation();
+    if (checkinAt) { try { localStorage.setItem(`logbook-coach-ci-seen-${client.id}`, checkinAt); } catch (_) {} }
+    setCheckinDismissed(true);
+  };
+
+  const showCheckinNew = checkinNew && !checkinDismissed;
+
+  const borderColor = inProgress ? 'rgba(var(--accent-rgb),0.4)' : (showCheckinNew || checkinDue) ? 'rgba(var(--accent-rgb),0.2)' : UI.hair;
 
   return (
     <div
@@ -335,7 +345,7 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
         {inProgress && (
           <div style={{ position: 'absolute', top: 0, right: 0, width: 12, height: 12, borderRadius: 6, background: 'var(--accent)', border: '2px solid var(--bg)', animation: 'pulseDot 1.5s ease-in-out infinite' }} />
         )}
-        {checkinNew && !inProgress && (
+        {showCheckinNew && !inProgress && (
           <div style={{ position: 'absolute', bottom: 0, right: 0, width: 12, height: 12, borderRadius: 6, background: 'var(--accent)', border: '2px solid var(--bg)' }} />
         )}
       </div>
@@ -345,7 +355,7 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.05em' }}>INVITE PENDING</div>
         ) : inProgress ? (
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>TRAINING NOW</div>
-        ) : checkinNew ? (
+        ) : showCheckinNew ? (
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>CHECK-IN SUBMITTED</div>
         ) : checkinDue ? (
           <div style={{ fontSize: 11, color: `rgba(var(--accent-rgb),0.7)`, fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>CHECK-IN DUE</div>
@@ -360,10 +370,14 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
           <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.06em', color: requested ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase' }}>{requested ? 'Sent' : 'Remind'}</span>
         </button>
       )}
-      {checkinNew && !isPending && (
-        <div style={{ width: 28, height: 28, borderRadius: 14, background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.35)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <i className="fa-solid fa-clipboard-check" style={{ fontSize: 11, color: 'var(--accent)' }} />
-        </div>
+      {showCheckinNew && !isPending && (
+        <button
+          onClick={handleDismissCheckin}
+          style={{ background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 8px', cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, WebkitTapHighlightColor: 'transparent' }}
+        >
+          <i className="fa-solid fa-check" style={{ fontSize: 10, color: UI.inkFaint }} />
+          <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.06em', color: UI.inkFaint, textTransform: 'uppercase' }}>Dismiss</span>
+        </button>
       )}
       {!isPending && unreadCount > 0 && (
         <div style={{ minWidth: 20, height: 20, borderRadius: 10, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -519,7 +533,9 @@ function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit
             flush();
             return (
               <div key={section.id}>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{headLabel}</div>
+                <div className="knurl" style={{ margin: '0 0 6px' }} />
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{headLabel}</div>
+                <div className="knurl" style={{ margin: '0 0 10px' }} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{blocks}</div>
               </div>
             );
@@ -683,7 +699,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
     const btnColor = (n) => {
       if (value === n) return '#0a0805';
       if (dir === 'lower_better') return n <= min + Math.floor((max - min) * 0.3) ? 'var(--accent)' : n >= min + Math.ceil((max - min) * 0.7) ? 'rgba(var(--danger-rgb),0.7)' : UI.inkSoft;
-      if (dir === 'higher_better') return n >= min + Math.ceil((max - min) * 0.7) ? 'var(--accent)' : UI.inkFaint;
+      if (dir === 'higher_better') return n >= min + Math.ceil((max - min) * 0.7) ? 'var(--accent)' : n <= min + Math.floor((max - min) * 0.3) ? 'rgba(var(--danger-rgb),0.7)' : UI.inkSoft;
       return n <= min + Math.floor((max - min) * 0.3) ? 'var(--accent)' : n <= min + Math.floor((max - min) * 0.6) ? UI.inkSoft : UI.inkFaint;
     };
     return (
@@ -840,7 +856,9 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
         const headLabel = section.label.toUpperCase() + (section.sectionHint ? ` (${section.sectionHint})` : '');
         return (
           <div key={section.id}>
-            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10, marginTop: 4 }}>{headLabel}</div>
+            <div className="knurl" style={{ margin: '0 0 6px' }} />
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{headLabel}</div>
+            <div className="knurl" style={{ margin: '0 0 10px' }} />
             {rows.map((row, ri) => renderRow(row, ri))}
           </div>
         );
@@ -1140,7 +1158,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
       {tab === 'nutrition' && <ClientNutritionReadView coachingId={coaching.id} />}
       {tab === 'checkin' && (
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <ClientCheckInTab coachingId={coaching.id} clientId={userId} userId={userId} checkinEnabled={coaching.checkinEnabled ?? true} />
+          <ClientCheckInTab coachingId={coaching.id} clientId={userId} userId={userId} checkinEnabled={coaching.checkinEnabled ?? true} store={store} />
         </div>
       )}
     </Screen>
