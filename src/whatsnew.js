@@ -15,6 +15,25 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.181',
+    title: 'Your cardio bests, celebrated',
+    items: [
+      'Log a cardio session that beats your history and the app marks the moment — a full-screen ★ NEW BEST for a new fastest pace, longest distance or longest session.',
+      'Bests are tracked per activity type, so your runs are measured against runs and your rides against rides — never mixed.',
+      'Didn\'t break a record? You\'ll still get an ↑ IMPROVEMENT flash when you beat your most recent session of the same type.',
+    ],
+  },
+  {
+    id: 'v2.180',
+    title: 'Custom check-ins — now with preview',
+    items: [
+      'Build a fully custom weekly check-in form: add your own fields, group them into sections, pick scales, icons and exactly what your clients report.',
+      'New: preview your form before anyone fills it in — a sample weekly check-in and 20 weeks of trend charts populate live as you edit.',
+      'Everything your client submits now follows your form end to end — the weekly summary, the trend charts and the shared progress image all reflect your custom fields.',
+      'Apply one form to all clients with a tap, or override it per client. "Be your own coach" users get the full builder too.',
+    ],
+  },
+  {
     id: 'v2.161',
     title: 'Your Coaching, Your Rules',
     items: [
