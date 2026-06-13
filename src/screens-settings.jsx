@@ -496,14 +496,14 @@ function SettingsScreen({ store, setStore, go, userId }) {
             Pin the coaching tab to the nav bar. Shows automatically when a coaching relationship is active.
           </div>
           {coachingTabOn && (
-            <>
+            <div style={{ marginTop: 12 }}>
               <Row label="Be your own coach">
                 <Toggle on={selfOn} onToggle={toggleSelf} />
               </Row>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
                 Track your own training like a coach would — stats, nutrition, check-ins & notes, just for you.
               </div>
-            </>
+            </div>
           )}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setCoachingSheet(false)}>Done</Btn>
