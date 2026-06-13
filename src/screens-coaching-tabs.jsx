@@ -685,7 +685,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
     const btnColor = (n) => {
       if (value === n) return '#0a0805';
       if (dir === 'lower_better') return n <= min + Math.floor((max - min) * 0.3) ? 'var(--accent)' : n >= min + Math.ceil((max - min) * 0.7) ? 'rgba(var(--danger-rgb),0.7)' : UI.inkSoft;
-      if (dir === 'higher_better') return n >= min + Math.ceil((max - min) * 0.7) ? 'var(--accent)' : UI.inkFaint;
+      if (dir === 'higher_better') return n >= min + Math.ceil((max - min) * 0.7) ? 'var(--accent)' : n <= min + Math.floor((max - min) * 0.3) ? 'rgba(var(--danger-rgb),0.7)' : UI.inkSoft;
       return n <= min + Math.floor((max - min) * 0.3) ? 'var(--accent)' : n <= min + Math.floor((max - min) * 0.6) ? UI.inkSoft : UI.inkFaint;
     };
     return (
