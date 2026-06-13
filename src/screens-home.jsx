@@ -488,7 +488,7 @@ function CardioPROverlay({ pr, onDone }) {
   );
 }
 
-function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, prefillDuration, onPR }) {
+function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, onPR }) {
   const getDistUnit = () => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } };
   const [distUnit, setDistUnitState] = useState(getDistUnit);
   const setDistUnit = (u) => { try { localStorage.setItem(CARDIO_DIST_KEY, u); } catch (_) {} setDistUnitState(u); };
@@ -512,13 +512,9 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
         note: editLog.note || '',
       });
     } else {
-      // Coming out of a live session pre-fills the timed duration; everything
-      // else is still up to the user to fill in.
-      const base = empty();
-      if (prefillDuration != null) base.duration = String(prefillDuration);
-      setForm(base);
+      setForm(empty());
     }
-  }, [open, editLog?.id, prefillDuration]);
+  }, [open, editLog?.id]);
 
   // Unique types from history, most-recently-used first
   const typeChips = useMemo(() => {
@@ -730,6 +726,168 @@ function CardioLiveSheet({ open, onFinish, onCancel }) {
   );
 }
 
+// Guided post-live flow: a "well done" moment, then one metric per step.
+// Saves the same shape as the manual log, so cardio PR detection still fires.
+function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR }) {
+  const getDistUnit = () => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } };
+  const [distUnit, setDistUnitState] = useState(getDistUnit);
+  const setDistUnit = (u) => { try { localStorage.setItem(CARDIO_DIST_KEY, u); } catch (_) {} setDistUnitState(u); };
+  const [step, setStep] = useState(0);
+  const [form, setForm] = useState({ type: '', distance: '', paceFeeling: null, effort: null, note: '' });
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    if (!open) return;
+    setStep(0);
+    setForm({ type: '', distance: '', paceFeeling: null, effort: null, note: '' });
+    setDistUnitState(getDistUnit());
+  }, [open]);
+
+  const typeChips = useMemo(() => {
+    const seen = new Set(); const result = [];
+    for (const l of (store.cardioLogs || [])) {
+      if (l.type && !seen.has(l.type)) { seen.add(l.type); result.push(l.type); }
+      if (result.length >= 6) break;
+    }
+    return result;
+  }, [store.cardioLogs]);
+
+  const METRICS = 5;
+  const next = () => setStep(s => s + 1);
+  const back = () => setStep(s => Math.max(0, s - 1));
+  const pick = (k, v) => { set(k, v); setTimeout(() => setStep(s => s + 1), 200); };
+
+  const save = () => {
+    const log = {
+      id: LB.uid(),
+      date: LB.todayISO(),
+      type: form.type.trim() || null,
+      durationMinutes: durationMin,
+      distanceM: form.distance ? distToM(form.distance, distUnit) : null,
+      paceFeeling: form.paceFeeling,
+      effort: form.effort,
+      note: form.note.trim() || null,
+      createdAt: new Date().toISOString(),
+    };
+    setStore(s => ({ ...s, cardioLogs: [log, ...(s.cardioLogs || [])] }));
+    const pr = LB.detectCardioPRs(log, store.cardioLogs);
+    onClose();
+    if (pr && onPR) onPR(pr);
+  };
+
+  const inputStyle = {
+    width: '100%', boxSizing: 'border-box', background: UI.bgInset,
+    border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+    padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none',
+  };
+
+  const titles = { 1: 'What did you do?', 2: 'How far did you go?', 3: 'How did the pace feel?', 4: 'How hard was it?', 5: 'Any notes?' };
+  const hasValue = step === 1 ? !!form.type.trim() : step === 2 ? !!form.distance
+    : step === 3 ? form.paceFeeling != null : step === 4 ? form.effort != null : true;
+
+  const stepInput = () => {
+    if (step === 1) return (
+      <>
+        <input type="text" placeholder="e.g. Running, Cycling…" value={form.type} onChange={e => set('type', e.target.value)} style={inputStyle} />
+        {typeChips.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+            {typeChips.map(t => (
+              <button key={t} onClick={() => set('type', t)} style={{
+                padding: '4px 10px', borderRadius: 4, cursor: 'pointer',
+                border: `1px solid ${form.type === t ? 'var(--accent)' : UI.hairStrong}`,
+                background: form.type === t ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                color: form.type === t ? 'var(--accent)' : UI.inkFaint,
+                fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent',
+              }}>{t}</button>
+            ))}
+          </div>
+        )}
+      </>
+    );
+    if (step === 2) return (
+      <>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+            {['km', 'mi'].map(u => (
+              <button key={u} onClick={() => setDistUnit(u)} style={{
+                padding: '2px 9px', cursor: 'pointer', border: 'none',
+                background: distUnit === u ? 'var(--accent)' : 'transparent',
+                color: distUnit === u ? UI.bg : UI.inkFaint,
+                fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent',
+              }}>{u}</button>
+            ))}
+          </div>
+        </div>
+        <input type="number" inputMode="decimal" placeholder="—" value={form.distance} onChange={e => set('distance', e.target.value)} style={inputStyle} />
+      </>
+    );
+    if (step === 3) return (
+      <div style={{ display: 'flex', gap: 6 }}>
+        {[['1', 'Easy'], ['2', 'Light'], ['3', 'Steady'], ['4', 'Solid'], ['5', 'Hard'], ['6', 'Max']].map(([n, lbl]) => (
+          <button key={n} onClick={() => pick('paceFeeling', Number(n))} style={{
+            flex: 1, padding: '10px 2px', borderRadius: 8, cursor: 'pointer',
+            border: `0.5px solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
+            background: form.paceFeeling === Number(n) ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, WebkitTapHighlightColor: 'transparent',
+          }}>
+            <span className="num" style={{ fontSize: 14, color: form.paceFeeling === Number(n) ? 'var(--accent)' : UI.inkSoft }}>{n}</span>
+            <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.04em' }}>{lbl}</span>
+          </button>
+        ))}
+      </div>
+    );
+    if (step === 4) return (
+      <div style={{ display: 'flex', gap: 6 }}>
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
+          <button key={n} onClick={() => pick('effort', n)} style={{
+            flex: 1, padding: '10px 0', borderRadius: 6, cursor: 'pointer',
+            border: `0.5px solid ${form.effort === n ? 'var(--accent)' : UI.hairStrong}`,
+            background: form.effort === n ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset, WebkitTapHighlightColor: 'transparent',
+          }}>
+            <span className="num" style={{ fontSize: 12, color: form.effort === n ? 'var(--accent)' : UI.inkSoft }}>{n}</span>
+          </button>
+        ))}
+      </div>
+    );
+    return <textarea rows={3} placeholder="…" value={form.note} onChange={e => set('note', e.target.value)} style={{ ...inputStyle, resize: 'none' }} />;
+  };
+
+  return (
+    <Sheet open={open} onClose={() => {}}>
+      {step === 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 8, padding: '4px 0 4px' }}>
+          <i className="fa-solid fa-circle-check" style={{ fontSize: 40, color: 'var(--accent)' }} />
+          <div className="display" style={{ fontSize: 34, color: UI.ink, letterSpacing: '0.04em' }}>WELL DONE</div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft }}>You moved for</div>
+          <div className="num" style={{ fontSize: 48, color: 'var(--accent)', lineHeight: 1 }}>{durationMin}<span style={{ fontSize: 16, color: UI.inkFaint }}> min</span></div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', marginTop: 18 }}>
+            <Btn onClick={next} style={{ width: '100%' }}>Add details</Btn>
+            <Btn kind="ghost" onClick={save} style={{ width: '100%' }}>Save now</Btn>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, padding: 6, WebkitTapHighlightColor: 'transparent' }}>Discard</button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+            <button onClick={back} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint, display: 'flex', alignItems: 'center', WebkitTapHighlightColor: 'transparent' }}>
+              <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 1L1 6l5 5" /></svg>
+            </button>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {Array.from({ length: METRICS }).map((_, i) => (
+                <div key={i} style={{ width: i === step - 1 ? 18 : 6, height: 6, borderRadius: 3, transition: 'all 0.2s', background: i === step - 1 ? 'var(--accent)' : i < step - 1 ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong }} />
+              ))}
+            </div>
+            <button onClick={save} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' }}>Save</button>
+          </div>
+          <div className="display" style={{ fontSize: 24, color: UI.ink, textAlign: 'center', marginBottom: 18, letterSpacing: '0.02em' }}>{titles[step]}</div>
+          <div style={{ marginBottom: 22 }}>{stepInput()}</div>
+          <Btn onClick={step < METRICS ? next : save} style={{ width: '100%' }}>{step < METRICS ? (hasValue ? 'Next' : 'Skip') : 'Finish'}</Btn>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
 // ─── HOME ─────────────────────────────────────────────────────────────
 function HomeScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
@@ -781,7 +939,8 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [cardioLiveOpen, setCardioLiveOpen] = useState(() => {
     try { return !!localStorage.getItem(CARDIO_LIVE_KEY); } catch (_) { return false; }
   });
-  const [cardioPrefillDuration, setCardioPrefillDuration] = useState(null);
+  const [cardioFinishOpen, setCardioFinishOpen] = useState(false);
+  const [cardioFinishDuration, setCardioFinishDuration] = useState(null);
   const isPad = useIsPad();
   // The not-logged Log handler awaits a seed fetch — guard against a double
   // tap creating two sessions inside that window.
@@ -1709,7 +1868,7 @@ function HomeScreen({ store, setStore, go, userId }) {
               <Btn onClick={() => { setCardioPopoverOpen(false); setCardioLiveOpen(true); }} style={{ width: '100%' }}>
                 <i className="fa-solid fa-stopwatch" style={{ marginRight: 8, fontSize: 12 }} />Start live
               </Btn>
-              <Btn kind="ghost" onClick={() => { setCardioPopoverOpen(false); setCardioPrefillDuration(null); setCardioLogOpen(true); }} style={{ width: '100%' }}>Log manually</Btn>
+              <Btn kind="ghost" onClick={() => { setCardioPopoverOpen(false); setCardioLogOpen(true); }} style={{ width: '100%' }}>Log manually</Btn>
             </div>
           </Sheet>
         );
@@ -1717,11 +1876,13 @@ function HomeScreen({ store, setStore, go, userId }) {
 
       <CardioLiveSheet
         open={cardioLiveOpen}
-        onFinish={(min) => { setCardioLiveOpen(false); setEditingCardioLog(null); setCardioPrefillDuration(min); setCardioLogOpen(true); }}
+        onFinish={(min) => { setCardioLiveOpen(false); setCardioFinishDuration(min); setCardioFinishOpen(true); }}
         onCancel={() => setCardioLiveOpen(false)}
       />
 
-      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); setCardioPrefillDuration(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} prefillDuration={cardioPrefillDuration} onPR={setCardioPR} />
+      <CardioFinishFlow open={cardioFinishOpen} durationMin={cardioFinishDuration} store={store} setStore={setStore} onClose={() => setCardioFinishOpen(false)} onPR={setCardioPR} />
+
+      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} onPR={setCardioPR} />
       <CardioPROverlay pr={cardioPR} onDone={() => setCardioPR(null)} />
 
       {/* Coach message banner */}
