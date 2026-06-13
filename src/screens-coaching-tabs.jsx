@@ -519,6 +519,7 @@ function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit
             flush();
             return (
               <div key={section.id}>
+                <div className="knurl" style={{ margin: '0 0 6px' }} />
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{headLabel}</div>
                 <div className="knurl" style={{ margin: '0 0 10px' }} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{blocks}</div>
