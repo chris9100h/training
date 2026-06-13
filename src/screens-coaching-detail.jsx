@@ -492,6 +492,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
   const [helpTip, setHelpTip] = useStateC(null);
   const [savePicker, setSavePicker] = useStateC(false);
   const previewData = useMemoC(() => generatePreviewData(draft), [draft]);
+  const [confirmEl, confirm] = useConfirm();
 
   const HELP = {
     label:         'The display name shown to clients in the check-in form.',
@@ -642,7 +643,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
   };
 
   const handleReset = async () => {
-    if (await UI.confirm('Reset to the default check-in form? All customizations will be lost.', { ok: 'Reset', danger: true }))
+    if (await confirm('Reset to the default check-in form? All customizations will be lost.', { ok: 'Reset', danger: true }))
       setDraft(JSON.parse(JSON.stringify(CHECKIN_DEFAULT_SCHEMA)));
   };
 
@@ -1009,7 +1010,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
                   style={{ background: 'none', border: 'none', padding: '5px 7px', cursor: 'pointer', color: UI.inkFaint, fontSize: 11 }}>
                   <i className="fa-solid fa-pen" />
                 </button>
-                <button data-reorder-ignore="true" onClick={async () => { if (await UI.confirm('Remove section "' + sec.label + '" and all its fields?', { ok: 'Remove', danger: true })) removeSection(sIdx); }}
+                <button data-reorder-ignore="true" onClick={async () => { if (await confirm('Remove section "' + sec.label + '" and all its fields?', { ok: 'Remove', danger: true })) removeSection(sIdx); }}
                   style={{ background: 'none', border: 'none', padding: '5px 7px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 11 }}>
                   <i className="fa-solid fa-trash" />
                 </button>
@@ -1034,7 +1035,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
                       style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: UI.inkFaint, fontSize: 10 }}>
                       <i className="fa-solid fa-pen" />
                     </button>
-                    <button data-reorder-ignore="true" onClick={async () => { if (await UI.confirm('Remove "' + f.label + '"?', { ok: 'Remove', danger: true })) removeField(sIdx, fIdx); }}
+                    <button data-reorder-ignore="true" onClick={async () => { if (await confirm('Remove "' + f.label + '"?', { ok: 'Remove', danger: true })) removeField(sIdx, fIdx); }}
                       style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 10 }}>
                       <i className="fa-solid fa-xmark" />
                     </button>
@@ -1055,6 +1056,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
           Add section
         </button>
       </ReorderList>
+      {confirmEl}
     </div>
   );
 }
