@@ -2342,6 +2342,9 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
 function ComparisonScreen({ session, onDismiss, go, userName }) {
   const entries     = session.entries || [];
   const lastEntries = session.last_session_entries || [];
+  // Label weights in the trainee's own unit (stored numbers aren't converted),
+  // so a coach watching an lbs client never sees their lifts marked "kg".
+  const unit        = session.unit || 'kg';
   const duration    = session.ended && session.started_at
     ? Math.round((new Date(session.ended) - new Date(session.started_at)) / 60000)
     : null;
@@ -2370,7 +2373,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
             const repsStr = (s.repsL != null || s.repsR != null)
               ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
               : (s.reps ?? '—');
-            return `${s.kg != null ? s.kg + UI.unit() : '—'} × ${repsStr}`;
+            return `${s.kg != null ? s.kg + unit : '—'} × ${repsStr}`;
           };
           return (
             <div key={ei} style={{ marginBottom: 20 }}>
@@ -2520,6 +2523,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
   );
 
   const entries = session.entries || [];
+  // Label weights in the trainee's own unit (stored numbers aren't converted).
+  const unit = session.unit || 'kg';
   const liveIdx = LB.inferCurrentExIdx(entries);
   const entry = entries[exIdx];
   const goLive = () => { setFollowLive(true); setExIdx(liveIdx); };
@@ -2633,7 +2638,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                     <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>
                       {s.kg != null ? s.kg : '—'}
                     </span>
-                    {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em' }}>{UI.unit()}</span>}
+                    {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em' }}>{unit}</span>}
                   </div>
                   <div style={{ textAlign: 'center' }}>
                     {unilateral ? (
@@ -2696,7 +2701,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                           {s.skipped
                             ? <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>skipped</span>
                             : <><span className="num" style={{ fontSize: 16, color: UI.inkSoft }}>{s.kg != null ? s.kg : '—'}</span>
-                               {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{UI.unit()}</span>}</>
+                               {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{unit}</span>}</>
                           }
                         </div>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, justifyContent: 'center' }}>
