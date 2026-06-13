@@ -1,3 +1,5 @@
+DROP FUNCTION IF EXISTS public.get_coach_checkin_status();
+
 -- get_coach_checkin_status: return checked_in_at timestamp instead of a
 -- boolean so the client can detect delete-and-resubmit within the same week.
 -- A null means no check-in for the current week; a timestamp means one exists
