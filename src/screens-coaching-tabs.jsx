@@ -708,10 +708,10 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
           <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>{stepLabel}</span>
           {value != null && <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{value}/{max}</span>}
         </div>
-        <div style={{ display: 'flex', gap: 4 }}>
+        <div style={{ display: 'flex', gap: 6 }}>
           {nums.map(n => (
             <button key={n} onClick={() => onChange(value === n ? null : n)}
-              style={{ flex: 1, padding: '6px 0', borderRadius: 5, border: 'none', cursor: 'pointer',
+              style={{ flex: 1, padding: '8px 0', borderRadius: 5, border: 'none', cursor: 'pointer',
                 background: value === n ? 'var(--accent)' : value != null && n <= value ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
                 color: btnColor(n),
                 fontSize: 10, fontFamily: UI.fontUi, fontWeight: value === n ? 700 : 400, transition: 'background 0.1s' }}>
@@ -750,7 +750,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
     return (
       <>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>{lbl}</div>
-        <div style={{ display: 'flex', gap: 5 }}>
+        <div style={{ display: 'flex', gap: 6 }}>
           {options.map(opt => {
             const sel = value === opt.value;
             const bg = sel ? opt.color === 'accent' ? `rgba(var(--accent-rgb),0.2)` : opt.color === 'danger' ? `rgba(var(--danger-rgb),0.15)` : UI.bgRaised : UI.bgInset;
