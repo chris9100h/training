@@ -784,8 +784,43 @@ function SettingsScreen({ store, setStore, go, userId }) {
             );
           })}
         </div>
-        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 16 }}>Set equipment categories on exercises in the Library. Individual overrides can be set per exercise.</div>
-        <Btn onClick={() => setProgConfigOpen(false)}>Done</Btn>
+        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 20 }}>Set equipment categories on exercises in the Library. Individual overrides can be set per exercise.</div>
+
+        <div className="knurl" style={{ marginBottom: 16 }} />
+        <div className="micro" style={{ marginBottom: 8 }}>PLATE INVENTORY</div>
+        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.5 }}>
+          Mark the plates you own. The plate calculator only suggests plates you have available.
+        </div>
+        {(() => {
+          const isLbs = UI.unit() === 'lbs';
+          const invKey = isLbs ? 'plateInventoryLbs' : 'plateInventoryKg';
+          const allPlates = isLbs ? PLATES_LBS : PLATES_KG;
+          const current = store.settings?.equipmentConfig?.[invKey] ?? allPlates;
+          return allPlates.map((p, i) => {
+            const has = current.includes(p);
+            const toggle = () => {
+              const newInv = has ? current.filter(x => x !== p) : [...current, p].sort((a, b) => b - a);
+              setStore(s => ({ ...s, settings: { ...s.settings, equipmentConfig: { ...s.settings?.equipmentConfig, [invKey]: newInv } } }));
+            };
+            return (
+              <div key={p} onClick={toggle} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                <div style={{
+                  width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                  border: `1.5px solid ${has ? 'var(--accent)' : UI.hairStrong}`,
+                  background: has ? 'var(--accent)' : 'transparent',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  {has && <i className="fa-solid fa-check" style={{ fontSize: 10, color: '#0a0805' }} />}
+                </div>
+                <span className="num" style={{ fontSize: 14, color: UI.ink }}>{p}</span>
+                <span className="micro" style={{ color: UI.inkFaint }}>{UI.unit()}</span>
+              </div>
+            );
+          });
+        })()}
+        <div style={{ marginTop: 20 }}>
+          <Btn onClick={() => setProgConfigOpen(false)}>Done</Btn>
+        </div>
       </Sheet>
 
       {/* ══ Progression disclaimer sheet ══ */}
