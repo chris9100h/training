@@ -788,7 +788,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           })}
         </div>
         <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 16 }}>Set equipment categories on exercises in the Library. Individual overrides can be set per exercise.</div>
-        <Btn onClick={() => setProgConfigOpen(false)}>Done</Btn>
+        <Btn style={{ width: '100%' }} onClick={() => setProgConfigOpen(false)}>Done</Btn>
       </Sheet>
 
       {/* ══ Plate inventory sheet ══ */}
@@ -853,7 +853,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.6, marginBottom: 20 }}>
           Tap a plate to toggle. Dimmed plates are not in your inventory and won't be suggested by the plate calculator.
         </div>
-        <Btn onClick={() => setPlateInventoryOpen(false)}>Done</Btn>
+        <Btn style={{ width: '100%' }} onClick={() => setPlateInventoryOpen(false)}>Done</Btn>
       </Sheet>
 
       {/* ══ Progression disclaimer sheet ══ */}
