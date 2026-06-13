@@ -824,12 +824,10 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
   const renderRow = (row, key) => {
     if (row.length === 1) {
       const f = row[0];
-      // Every single-field row gets the same bottom margin — the labeled
-      // choice (e.g. pace feeling) used to skip it and stuck to the next field.
-      return <div key={f.key} style={{ marginBottom: 14 }}><FieldWidget field={f} value={form[f.key]} onChange={v => set(f.key, v)} distUnit={distUnit} setDistUnit={setDistUnit} inputStyle={inputStyle} /></div>;
+      return <div key={f.key}><FieldWidget field={f} value={form[f.key]} onChange={v => set(f.key, v)} distUnit={distUnit} setDistUnit={setDistUnit} inputStyle={inputStyle} /></div>;
     }
     return (
-      <div key={key} style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'stretch' }}>
+      <div key={key} style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
         {row.map(f => (
           <div key={f.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
             <FieldWidget field={f} value={form[f.key]} onChange={v => set(f.key, v)} distUnit={distUnit} setDistUnit={setDistUnit} inputStyle={inputStyle} />
@@ -855,7 +853,9 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
             <div className="knurl" style={{ margin: '0 0 6px' }} />
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{headLabel}</div>
             <div className="knurl" style={{ margin: '0 0 10px' }} />
-            {rows.map((row, ri) => renderRow(row, ri))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {rows.map((row, ri) => renderRow(row, ri))}
+            </div>
           </div>
         );
       })}
