@@ -15,6 +15,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.186',
+    title: 'Drag to reorder',
+    items: [
+      'Cycle days, exercises in a day, and check-in form fields can now be reordered by dragging — no more tiny arrow buttons.',
+      'On touch: hold briefly, then drag. On desktop: click and drag. A drop line shows exactly where the item will land.',
+      'Check-in form builder: drag sections and individual fields independently of each other.',
+      'Dev note: those little up/down arrows cost me my last nerve, so they had to go.',
+    ],
+  },
+  {
     id: 'v2.181',
     title: 'Your cardio bests, celebrated',
     items: [
