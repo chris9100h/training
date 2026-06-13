@@ -537,7 +537,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
             <button style={accentBtn} onClick={() => setPushSheet(true)}>Configure</button>
           </Row>
           <Hairline style={{ margin: '14px 0' }} />
-          <div className="micro" style={{ marginBottom: 10 }}>Training reminder</div>
           <Row label="Remind on training days" first>
             {reminderEnabled
               ? <button style={accentBtn} onClick={() => setReminderSheet(true)}>{store.settings?.reminderTime || 'Change'}</button>
