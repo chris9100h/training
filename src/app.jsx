@@ -333,6 +333,9 @@ function App() {
   const pendingStore              = useRefA(null);  // latest state awaiting sync
   const syncing                   = useRefA(false); // true while a sync is in flight
   const localDirty                = useRefA(false); // true if user changed store after cache load
+  const userIdRef                 = useRefA(null);  // current userId for stale-closure contexts
+
+  useEffectA(() => { userIdRef.current = userId; }, [userId]);
 
   useEffectA(() => {
     if (store?.user?.email && store?.user?.name) {
@@ -593,7 +596,7 @@ function App() {
         // An offline SIGNED_OUT is almost always a failed token refresh, not a
         // real sign-out — never wipe the cache or drop to the login screen.
         if (!navigator.onLine) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
-        LB.clearLocal(userId);
+        LB.clearLocal(userIdRef.current);
         setStore(null);
         setUserId(null);
         prevStore.current = null;
