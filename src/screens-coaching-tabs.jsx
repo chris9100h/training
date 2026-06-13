@@ -1158,7 +1158,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
       {tab === 'nutrition' && <ClientNutritionReadView coachingId={coaching.id} />}
       {tab === 'checkin' && (
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <ClientCheckInTab coachingId={coaching.id} clientId={userId} userId={userId} checkinEnabled={coaching.checkinEnabled ?? true} />
+          <ClientCheckInTab coachingId={coaching.id} clientId={userId} userId={userId} checkinEnabled={coaching.checkinEnabled ?? true} store={store} />
         </div>
       )}
     </Screen>
