@@ -129,13 +129,18 @@ function DebugPanel({ onClose }) {
   );
 }
 
+// Every settings sheet renders its title in the accent color.
+function SettingsSheet(props) {
+  return <Sheet titleColor="var(--accent)" {...props} />;
+}
+
 // ─── CHANGELOG SHEET ─────────────────────────────────────────────────
 function ChangelogSheet({ open, onClose }) {
   const [selected, setSelected] = useStateSet(null);
   const handleClose = () => { onClose(); setSelected(null); };
   return (
     <>
-      <Sheet open={open} onClose={handleClose} title="Changelog">
+      <SettingsSheet open={open} onClose={handleClose} title="Changelog">
         <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
           {(window.WHATS_NEW || []).map((entry, i) => (
             <div key={entry.id}>
@@ -150,8 +155,8 @@ function ChangelogSheet({ open, onClose }) {
             </div>
           ))}
         </div>
-      </Sheet>
-      <Sheet open={!!selected} onClose={() => setSelected(null)} title={selected?.title || ''} titleColor="var(--accent)">
+      </SettingsSheet>
+      <SettingsSheet open={!!selected} onClose={() => setSelected(null)} title={selected?.title || ''}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 8 }}>
           {(selected?.items || []).map((item, j) => (
             <div key={j} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -160,7 +165,7 @@ function ChangelogSheet({ open, onClose }) {
             </div>
           ))}
         </div>
-      </Sheet>
+      </SettingsSheet>
     </>
   );
 }
@@ -453,7 +458,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
       {debugPanelOpen && <DebugPanel onClose={() => setDebugPanelOpen(false)} />}
 
       {/* ══ Active Users Sheet ══ */}
-      <Sheet open={activeUsersSheet} onClose={() => setActiveUsersSheet(false)} title="Active users">
+      <SettingsSheet open={activeUsersSheet} onClose={() => setActiveUsersSheet(false)} title="Active users">
         {(() => {
           const dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
           const visibleSessions = activeSessions.filter(s => !s.is_finished || !dismissed.includes(s.session_id));
@@ -522,10 +527,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
             </div>
           );
         })()}
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Coaching Sheet ══ */}
-      <Sheet open={coachingSheet} onClose={() => setCoachingSheet(false)} title="Coaching">
+      <SettingsSheet open={coachingSheet} onClose={() => setCoachingSheet(false)} title="Coaching">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <Row label="Coaching tab" first>
             <Toggle on={coachingTabOn} onToggle={toggleTab} />
@@ -547,10 +552,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
             <Btn style={{ width: '100%' }} onClick={() => setCoachingSheet(false)}>Done</Btn>
           </div>
         </div>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Account Sheet ══ */}
-      <Sheet open={accountSheet} onClose={() => setAccountSheet(false)} title="Account">
+      <SettingsSheet open={accountSheet} onClose={() => setAccountSheet(false)} title="Account">
         <div>
           {isQsUser && (
             <>
@@ -585,10 +590,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
             <Btn style={{ width: '100%' }} onClick={() => setAccountSheet(false)}>Done</Btn>
           </div>
         </div>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Training Sheet ══ */}
-      <Sheet open={trainingSheet} onClose={() => setTrainingSheet(false)} title="Training">
+      <SettingsSheet open={trainingSheet} onClose={() => setTrainingSheet(false)} title="Training">
         <div>
           <Row label="Rest timers" first>
             <button style={accentBtn} onClick={() => setRestSheet(true)}>Change</button>
@@ -629,10 +634,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
             <Btn style={{ width: '100%' }} onClick={() => setTrainingSheet(false)}>Done</Btn>
           </div>
         </div>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Appearance Sheet ══ */}
-      <Sheet open={appearanceSheet} onClose={() => setAppearanceSheet(false)} title="Appearance">
+      <SettingsSheet open={appearanceSheet} onClose={() => setAppearanceSheet(false)} title="Appearance">
         <div>
           <div className="micro" style={{ marginBottom: 10 }}>Accent color</div>
           <div style={{ display: 'flex', gap: 10, marginBottom: 14, alignItems: 'flex-end' }}>
@@ -657,10 +662,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
             <Btn style={{ width: '100%' }} onClick={() => setAppearanceSheet(false)}>Done</Btn>
           </div>
         </div>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Data Sheet ══ */}
-      <Sheet open={dataSheet} onClose={() => setDataSheet(false)} title="Data">
+      <SettingsSheet open={dataSheet} onClose={() => setDataSheet(false)} title="Data">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
@@ -668,13 +673,13 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </div>
           <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Delete all data</Btn>
         </div>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Changelog Sheet ══ */}
       <ChangelogSheet open={changelogSheet} onClose={() => setChangelogSheet(false)} />
 
       {/* ══ Auto-end session sheet ══ */}
-      <Sheet open={timeoutSheet} onClose={() => setTimeoutSheet(false)} title="Auto-end session">
+      <SettingsSheet open={timeoutSheet} onClose={() => setTimeoutSheet(false)} title="Auto-end session">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginBottom: 8 }}>
           <div>
             <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>INACTIVITY TIMEOUT</div>
@@ -686,10 +691,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </div>
           <Btn onClick={() => setTimeoutSheet(false)}>Done</Btn>
         </div>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Rest timers sheet ══ */}
-      <Sheet open={restSheet} onClose={() => setRestSheet(false)} title="Rest timers">
+      <SettingsSheet open={restSheet} onClose={() => setRestSheet(false)} title="Rest timers">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginBottom: 8 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
             {[['Default', 'restDefault', 120], ['Big', 'restBig', 180], ['Medium', 'restMedium', 120], ['Small', 'restSmall', 90]].map(([label, key, def]) => (
@@ -715,10 +720,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </div>
           <Btn onClick={() => setRestSheet(false)}>Done</Btn>
         </div>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Paceguard sheet ══ */}
-      <Sheet open={paceguardSheet} onClose={() => setPaceguardSheet(false)} title="Paceguard">
+      <SettingsSheet open={paceguardSheet} onClose={() => setPaceguardSheet(false)} title="Paceguard">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
           <Row label="Enabled" first>
             <Toggle on={!!store.settings?.tempoEnabled} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, tempoEnabled: !s.settings?.tempoEnabled } }))} />
@@ -738,10 +743,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>Beeps subdivide each phase evenly · count increases each beat</div>
           <Btn onClick={() => setPaceguardSheet(false)}>Done</Btn>
         </div>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Smart progression sheet ══ */}
-      <Sheet open={progressionSheet} onClose={() => setProgressionSheet(false)} title="Smart progression">
+      <SettingsSheet open={progressionSheet} onClose={() => setProgressionSheet(false)} title="Smart progression">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
           <Row label="Enabled" first>
             <Toggle on={!!store.settings?.smartProgression} onToggle={() => { const t = !store.settings?.smartProgression; setStore(s => ({ ...s, settings: { ...s.settings, smartProgression: t } })); if (t) setProgDisclaimer(true); }} />
@@ -757,10 +762,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
           )}
           <Btn onClick={() => setProgressionSheet(false)}>Done</Btn>
         </div>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Equipment config sheet ══ */}
-      <Sheet open={progConfigOpen} onClose={() => setProgConfigOpen(false)} title="Equipment setup">
+      <SettingsSheet open={progConfigOpen} onClose={() => setProgConfigOpen(false)} title="Equipment setup">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 20 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, padding: '0 4px 8px', borderBottom: `0.5px solid ${UI.hair}` }}>
             <span className="micro">Equipment</span>
@@ -787,10 +792,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
         </div>
         <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 16 }}>Set equipment categories on exercises in the Library. Individual overrides can be set per exercise.</div>
         <Btn style={{ width: '100%' }} onClick={() => setProgConfigOpen(false)}>Done</Btn>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Plate inventory sheet ══ */}
-      <Sheet open={plateInventoryOpen} onClose={() => setPlateInventoryOpen(false)} title="Plate inventory">
+      <SettingsSheet open={plateInventoryOpen} onClose={() => setPlateInventoryOpen(false)} title="Plate inventory">
         <div style={{ display: 'flex', gap: 3, marginBottom: 28, background: UI.bgInset, borderRadius: 4, padding: 3 }}>
           {['kg', 'lbs'].map((u, i) => (
             <button key={u} onClick={() => setPlateInvTab(i)} style={{
@@ -852,19 +857,19 @@ function SettingsScreen({ store, setStore, go, userId }) {
           Tap a plate to toggle. Dimmed plates are not in your inventory and won't be suggested by the plate calculator.
         </div>
         <Btn style={{ width: '100%' }} onClick={() => setPlateInventoryOpen(false)}>Done</Btn>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Progression disclaimer sheet ══ */}
-      <Sheet open={progDisclaimer} onClose={() => setProgDisclaimer(false)} title="Smart Progression">
+      <SettingsSheet open={progDisclaimer} onClose={() => setProgDisclaimer(false)} title="Smart Progression">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
           <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6 }}>The reps shown in your sets are <span style={{ color: UI.gold }}>minimum reps</span> — the floor the algorithm needs to track progression.</div>
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>Always train past that number. Push to failure or near-failure on each set. The algo only bumps weight when <em>all</em> sets hit the top of the range — so getting extra reps is how you earn the next weight.</div>
         </div>
         <Btn onClick={() => setProgDisclaimer(false)}>Got it</Btn>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Push notifications sheet ══ */}
-      <Sheet open={pushSheet} onClose={() => setPushSheet(false)} title="Push notifications">
+      <SettingsSheet open={pushSheet} onClose={() => setPushSheet(false)} title="Push notifications">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
           <Row label="Enabled" first>
             <Toggle on={pushEnabled} onToggle={togglePush} />
@@ -882,10 +887,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
           {pushStatus && <div className="micro" style={{ color: pushStatus.startsWith('✓') ? 'var(--accent)' : UI.inkSoft, textAlign: 'center', padding: '6px 0' }}>{pushStatus}</div>}
           <Btn onClick={() => setPushSheet(false)}>Done</Btn>
         </div>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Reminder sheet ══ */}
-      <Sheet open={reminderSheet} onClose={() => setReminderSheet(false)} title="Training reminder">
+      <SettingsSheet open={reminderSheet} onClose={() => setReminderSheet(false)} title="Training reminder">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
           <Row label="Enabled" first>
             <Toggle on={reminderEnabled} onToggle={() => { toggleReminder(); if (reminderEnabled) setReminderSheet(false); }} />
@@ -907,19 +912,19 @@ function SettingsScreen({ store, setStore, go, userId }) {
           })()}
           <Btn onClick={() => setReminderSheet(false)}>Done</Btn>
         </div>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Test picker sheet ══ */}
-      <Sheet open={testPickerOpen} onClose={() => setTestPickerOpen(false)} title="Send test notification">
+      <SettingsSheet open={testPickerOpen} onClose={() => setTestPickerOpen(false)} title="Send test notification">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
           <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(0); }}>Now</Btn>
           <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(10); }}>In 10 seconds</Btn>
           <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(30); }}>In 30 seconds</Btn>
         </div>
-      </Sheet>
+      </SettingsSheet>
 
       {/* ══ Pushover key sheet ══ */}
-      <Sheet open={pushKeyModalOpen} onClose={() => setPushKeyModalOpen(false)} title="Pushover User Key">
+      <SettingsSheet open={pushKeyModalOpen} onClose={() => setPushKeyModalOpen(false)} title="Pushover User Key">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.5 }}>Enter your Pushover user key. Find it at pushover.net after logging in.</div>
           <input value={pushKeyDraft} onChange={e => setPushKeyDraft(e.target.value)} placeholder="uXXXXXXXXXXXXXXXXXXXX"
@@ -928,7 +933,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           {pushKeyDraft && !pushKeyValid && <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.85)' }}>Invalid key — must be 30 alphanumeric characters</div>}
           <Btn onClick={confirmPushKey} disabled={!pushKeyValid}>Enable notifications</Btn>
         </div>
-      </Sheet>
+      </SettingsSheet>
 
     </Screen>
   );
