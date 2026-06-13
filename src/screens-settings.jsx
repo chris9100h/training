@@ -145,8 +145,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
   // Training sub-sheets
   const [restSheet, setRestSheet] = useStateSet(false);
   const [timeoutSheet, setTimeoutSheet] = useStateSet(false);
-  const [paceguardSheet, setPaceguardSheet] = useStateSet(false);
-  const [progressionSheet, setProgressionSheet] = useStateSet(false);
   const [progConfigOpen, setProgConfigOpen] = useStateSet(false);
   const [plateInventoryOpen, setPlateInventoryOpen] = useStateSet(false);
   const [plateInvTab, setPlateInvTab] = useStateSet(() => UI.unit() === 'lbs' ? 1 : 0);
@@ -337,8 +335,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const activeCount = activeSessions.filter(s => !s.is_finished).length;
   const coachingHint = selfOn ? 'Self-coaching' : coachingTabOn ? 'On' : 'Off';
   const restHint = fmtSec(store.settings?.restDefault ?? 120);
-  const paceguardHint = store.settings?.tempoEnabled ? 'On' : 'Off';
-  const progressionHint = store.settings?.smartProgression ? 'On' : 'Off';
   const appearanceHint = window.ACCENT_PALETTE?.[store.settings?.accentColor ?? 'copper']?.label ?? null;
 
   return (
@@ -582,11 +578,35 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
       {/* ══ Training Sheet ══ */}
       <Sheet open={trainingSheet} onClose={() => setTrainingSheet(false)} title="Training">
-        <div style={{ paddingTop: 4 }}>
+        <div>
           <NavRow label="Rest timers" hint={restHint} onTap={() => setRestSheet(true)} first />
           <NavRow label="Auto-end session" hint={`${store.settings?.sessionTimeoutMinutes ?? 90} min`} onTap={() => setTimeoutSheet(true)} />
-          <NavRow label="Paceguard" hint={paceguardHint} onTap={() => setPaceguardSheet(true)} />
-          <NavRow label="Smart progression" hint={progressionHint} onTap={() => setProgressionSheet(true)} />
+          <Row label="Paceguard">
+            <Toggle on={!!store.settings?.tempoEnabled} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, tempoEnabled: !s.settings?.tempoEnabled } }))} />
+          </Row>
+          {store.settings?.tempoEnabled && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, padding: '12px 0 8px' }}>
+              <div>
+                <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>ECCENTRIC (DOWN)</div>
+                <Stepper value={store.settings?.tempoEccentric ?? 4} step={0.5} min={0.5} max={10} suffix="s" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoEccentric: v } }))} />
+              </div>
+              <div>
+                <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>CONCENTRIC (UP)</div>
+                <Stepper value={store.settings?.tempoConcentric ?? 1} step={0.5} min={0.5} max={10} suffix="s" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoConcentric: v } }))} />
+              </div>
+            </div>
+          )}
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginBottom: 4 }}>Beeps subdivide each phase evenly · count increases each beat</div>
+          <Row label="Smart progression">
+            <Toggle on={!!store.settings?.smartProgression} onToggle={() => { const t = !store.settings?.smartProgression; setStore(s => ({ ...s, settings: { ...s.settings, smartProgression: t } })); if (t) setProgDisclaimer(true); }} />
+          </Row>
+          {store.settings?.smartProgression && (
+            <div style={{ padding: '12px 0 8px' }}>
+              <div className="micro" style={{ marginBottom: 8 }}>REP RANGE TOP (+reps above target)</div>
+              <Stepper value={store.settings?.progressionRangeTop ?? 4} step={1} min={1} max={10} suffix=" reps" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, progressionRangeTop: v } }))} />
+              <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 8 }}>If target is 8 reps and range top is +4, weight increases only when all sets reach 12 reps.</div>
+            </div>
+          )}
           <NavRow label="Equipment setup" hint="Increments & max weights" onTap={() => setProgConfigOpen(true)} />
           <NavRow label="Plate inventory" hint={(() => { const isLbs = UI.unit() === 'lbs'; const allP = isLbs ? PLATES_LBS : PLATES_KG; const cur = store.settings?.equipmentConfig?.[isLbs ? 'plateInventoryLbs' : 'plateInventoryKg'] ?? allP; return cur.length === allP.length ? `All ${allP.length} ${UI.unit()}` : `${cur.length} of ${allP.length} ${UI.unit()}`; })()} onTap={() => setPlateInventoryOpen(true)} />
           <Row label="Warmup sets in summary">
@@ -684,48 +704,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
             </div>
           </div>
           <Btn onClick={() => setRestSheet(false)}>Done</Btn>
-        </div>
-      </Sheet>
-
-      {/* ══ Paceguard sheet ══ */}
-      <Sheet open={paceguardSheet} onClose={() => setPaceguardSheet(false)} title="Paceguard">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
-          <Row label="Enabled" first>
-            <Toggle on={!!store.settings?.tempoEnabled} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, tempoEnabled: !s.settings?.tempoEnabled } }))} />
-          </Row>
-          {store.settings?.tempoEnabled && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, paddingTop: 4 }}>
-              <div>
-                <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>ECCENTRIC (DOWN)</div>
-                <Stepper value={store.settings?.tempoEccentric ?? 4} step={0.5} min={0.5} max={10} suffix="s" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoEccentric: v } }))} />
-              </div>
-              <div>
-                <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>CONCENTRIC (UP)</div>
-                <Stepper value={store.settings?.tempoConcentric ?? 1} step={0.5} min={0.5} max={10} suffix="s" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, tempoConcentric: v } }))} />
-              </div>
-            </div>
-          )}
-          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>Beeps subdivide each phase evenly · count increases each beat</div>
-          <Btn onClick={() => setPaceguardSheet(false)}>Done</Btn>
-        </div>
-      </Sheet>
-
-      {/* ══ Smart progression sheet ══ */}
-      <Sheet open={progressionSheet} onClose={() => setProgressionSheet(false)} title="Smart progression">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
-          <Row label="Enabled" first>
-            <Toggle on={!!store.settings?.smartProgression} onToggle={() => { const t = !store.settings?.smartProgression; setStore(s => ({ ...s, settings: { ...s.settings, smartProgression: t } })); if (t) setProgDisclaimer(true); }} />
-          </Row>
-          {store.settings?.smartProgression && (
-            <>
-              <div>
-                <div className="micro" style={{ marginBottom: 8 }}>REP RANGE TOP (+reps above target)</div>
-                <Stepper value={store.settings?.progressionRangeTop ?? 4} step={1} min={1} max={10} suffix=" reps" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, progressionRangeTop: v } }))} />
-              </div>
-              <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>If target is 8 reps and range top is +4, weight increases only when all sets reach 12 reps.</div>
-            </>
-          )}
-          <Btn onClick={() => setProgressionSheet(false)}>Done</Btn>
         </div>
       </Sheet>
 
