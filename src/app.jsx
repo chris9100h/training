@@ -824,7 +824,7 @@ function App() {
   // and suppress the global overlay there.
   const syncPillInline = <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} inline />;
   const props = { store, setStore, go, userId, syncPill: syncPillInline };
-  const tabRoutes = ['home', 'plan', 'lib', 'hist', 'coaching'];
+  const tabRoutes = ['home', 'plan', 'lib', 'hist', 'health', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
 
   const showCoaching = !!(
@@ -833,6 +833,7 @@ function App() {
     (store?.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0 ||
     store?.coaching?.asClient?.status === 'active'
   );
+  const showHealth = !!store?.settings?.showHealthTab;
   const coachingUnread = (store?.coaching?.unreadNotes || []).length;
   const pendingCheckinsCount = store?.coaching?.pendingCheckinsCount || 0;
   const coachingBadge = showCoaching ? { count: coachingUnread + pendingCheckinsCount, live: !!store?.coaching?.anyClientLive } : null;
@@ -848,6 +849,7 @@ function App() {
     case 'lib':           screen = <window.Screens.LibraryScreen {...props} />; break;
     case 'exercise':      screen = <window.Screens.ExerciseDetailScreen key={route.exId} {...props} exId={route.exId} back={route.back} editQueue={route.editQueue || []} editQueueTotal={route.editQueueTotal || 0} autoEdit={!!route.autoEdit} />; break;
     case 'hist':          screen = <window.Screens.HistoryScreen {...props} initialTab={route.initialTab} />; break;
+    case 'health':        screen = <window.Screens.HealthScreen {...props} />; break;
     case 'session':          screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'exerciseHistory':  screen = <window.Screens.ExerciseHistoryScreen {...props} exId={route.exId} dayId={route.dayId} exName={route.exName} back={route.back} />; break;
     case 'settings':          screen = <window.Screens.SettingsScreen {...props} />; break;
@@ -863,7 +865,7 @@ function App() {
   if (isPad && showTab) {
     return (
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <TabBar active={route.name} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} showCoaching={showCoaching} coachingBadge={coachingBadge} />
+        <TabBar active={route.name} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
             {screen}
@@ -893,7 +895,7 @@ function App() {
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {route.name !== 'train' && <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} />}
-      {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} />}
+      {showTab && <TabBar active={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
     </>
   );

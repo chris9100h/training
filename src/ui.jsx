@@ -111,14 +111,20 @@ const TAB_ICONS = {
       <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2.5"/>
     </svg>
   ),
+  health: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12h3l2-5 3 10 2.5-7L18 12h3"/>
+    </svg>
+  ),
 };
 
-function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoaching = false, coachingBadge = null }) {
+function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoaching = false, coachingBadge = null, showHealth = false }) {
   const tabs = [
     { id: 'home', label: 'Today' },
     { id: 'plan', label: 'Plan' },
     { id: 'lib',  label: 'Library' },
     { id: 'hist', label: 'History' },
+    ...(showHealth ? [{ id: 'health', label: 'Health' }] : []),
     ...(showCoaching ? [{ id: 'coaching', label: 'Coaching' }] : []),
   ];
   const idx = tabs.findIndex(t => t.id === active);

@@ -104,6 +104,7 @@ function checkinChoiceRank(field, resp) {
 function checkinFieldYRange(field) {
   if (field.type === 'stepper') return { yMin: field.min ?? 1, yMax: field.max || 10 };
   if (field.type === 'choice' && field.options?.length) return { yMin: 1, yMax: field.options.length };
+  if (field.type === 'percent') return { yMin: 0, yMax: 100 };
   return {};
 }
 
@@ -114,6 +115,7 @@ function checkinFieldFormat(field, distUnit) {
   if (field.key === 'days_trained') return v => `${v}d`;
   if (field.key === 'cardio_minutes') return v => `${v} min`;
   if (field._distanceField) return v => distUnit === 'mi' ? `${(v / 1609.344).toFixed(1)} mi` : `${(v / 1000).toFixed(1)} km`;
+  if (field.type === 'percent') return v => `${Math.round(v)}%`;
   if (field.type === 'stepper') return v => `${v}/${field.max || 10}`;
   if (field.type === 'choice' && field.options?.length)
     return v => { const opt = field.options[Math.round(v) - 1]; return opt ? opt.label : `${v}/${field.options.length}`; };
@@ -433,6 +435,7 @@ function generatePreviewData(schema) {
   const baseOf = f => {
     if (f.type === 'stepper') return { base: (f.min + f.max) * 0.6, range: (f.max - f.min) * 0.25 };
     if (f.type === 'choice')  return { base: 0, range: (f.options || []).length };
+    if (f.type === 'percent') return { base: 85, range: 10 };
     const k = f.key || '';
     if (f.unit === 'weight')                         return { base: 82.5, range: 1.5 };
     if (k.includes('step'))                          return { base: 7500, range: 2500 };
@@ -466,6 +469,8 @@ function generatePreviewData(schema) {
                     : Math.floor(n / 2);
         const idx = Math.max(0, Math.min(n - 1, ideal + Math.round((rand() - 0.5) * 1.2)));
         responses[f.key] = f.options[idx].value;
+      } else if (f.type === 'percent') {
+        responses[f.key] = Math.max(0, Math.min(100, Math.round(base + slope + noise)));
       } else if (f.type === 'integer') {
         responses[f.key] = Math.max(0, Math.round(base + slope + noise));
       } else if (f.type === 'decimal') {
