@@ -151,7 +151,7 @@ function ChangelogSheet({ open, onClose }) {
           ))}
         </div>
       </Sheet>
-      <Sheet open={!!selected} onClose={() => setSelected(null)} title={selected?.title || ''}>
+      <Sheet open={!!selected} onClose={() => setSelected(null)} title={selected?.title || ''} titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 8 }}>
           {(selected?.items || []).map((item, j) => (
             <div key={j} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>

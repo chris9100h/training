@@ -513,7 +513,7 @@ function Pill({ children, gold = false, style = {}, ...rest }) {
 }
 
 // ─── Sheet ──────────────────────────────────────────────────────────
-function Sheet({ open, onClose, title, children }) {
+function Sheet({ open, onClose, title, titleColor, children }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
   React.useEffect(() => {
@@ -550,7 +550,7 @@ function Sheet({ open, onClose, title, children }) {
       }}>
         <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 2, margin: '0 auto 16px' }} />
         {title && (
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.ink, marginBottom: 16 }}>
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
             {title}
           </div>
         )}
