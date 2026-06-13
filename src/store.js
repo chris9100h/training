@@ -141,6 +141,7 @@ async function deleteAllData(userId) {
     unwrap(_supabase.from('zane_user_settings').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_profiles').delete().eq('id', userId)),
     unwrap(_supabase.from('zane_skips').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_cardio_logs').delete().eq('user_id', userId)),
   ]);
 }
 
@@ -212,10 +213,38 @@ async function importFromBackup(backup, userId) {
       custom_day_types: backup.customDayTypes ?? [],
       reminder_enabled: sett.reminderEnabled ?? false,
       reminder_time: sett.reminderTime ?? '07:00',
+      tempo_enabled: sett.tempoEnabled ?? false,
+      tempo_eccentric: sett.tempoEccentric ?? null,
+      tempo_concentric: sett.tempoConcentric ?? null,
+      smart_progression: sett.smartProgression ?? false,
+      progression_range_top: sett.progressionRangeTop ?? null,
+      equipment_config: sett.equipmentConfig ?? null,
+      show_warmup_in_summary: sett.showWarmupInSummary ?? false,
+      show_coaching_tab: sett.showCoachingTab ?? false,
+      be_your_own_coach: sett.beYourOwnCoach ?? false,
+      session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
     })),
   ].filter(Boolean));
   // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
   if (importSessions.length) await _syncEntryRelational(importSessions, userId, null);
+  if (backup.skips?.length) {
+    await unwrap(_supabase.from('zane_skips').upsert(
+      backup.skips.map(s => ({
+        id: s.id, user_id: userId, date: s.date, day_id: s.dayId,
+        day_name: s.dayName, skip_reason: s.skipReason, skipped_at: s.skippedAt ?? null,
+      }))
+    ));
+  }
+  if (backup.cardioLogs?.length) {
+    await unwrap(_supabase.from('zane_cardio_logs').upsert(
+      backup.cardioLogs.map(l => ({
+        id: l.id, user_id: userId, date: l.date, type: l.type ?? null,
+        duration_minutes: l.durationMinutes, distance_m: l.distanceM ?? null,
+        pace_feeling: l.paceFeeling ?? null, effort: l.effort ?? null,
+        note: l.note ?? null, session_id: l.sessionId ?? null,
+      }))
+    ));
+  }
 }
 
 // ─── SETUP NEW USER ──────────────────────────────────────────────────────

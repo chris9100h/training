@@ -311,6 +311,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
   const ended = sessions.filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   const [chartOpen, setChartOpen] = useStateC(null);
   const [planOpen, setPlanOpen] = useStateC(false);
+  const unit = clientStore.settings?.unit || 'kg';
 
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   const trainingDayCount = activeSch ? (activeSch.days || []).filter(d => d.items?.length > 0).length : 0;
@@ -371,7 +372,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       {/* Top stats */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, padding: '0 4px' }}>
         <StatBox label={adherenceLabel} value={overallAdherence != null ? `${overallAdherence}%` : '—'} gold={overallAdherence >= 80} onClick={() => setChartOpen('adherence')} />
-        <StatBox label="Avg Vol / Cycle" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}${UI.unit()}` : '—'} onClick={() => setChartOpen('volume')} />
+        <StatBox label="Avg Vol / Cycle" value={avgVol != null ? `${avgVol.toLocaleString('en-US')}${unit}` : '—'} onClick={() => setChartOpen('volume')} />
         <StatBox label="Sessions" value={planSessions.length} onClick={() => setChartOpen('sessions')} />
       </div>
 
@@ -413,7 +414,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
             {trainedToday && todaySession ? (
               <div>
                 <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-                  <StatBox label="Volume" value={`${Math.round(LB.totalVolume(todaySession, clientStore.exercises)).toLocaleString('en-US')}${UI.unit()}`} />
+                  <StatBox label="Volume" value={`${Math.round(LB.totalVolume(todaySession, clientStore.exercises)).toLocaleString('en-US')}${unit}`} />
                   <StatBox label="Sets" value={LB.doneSetCount(todaySession)} />
                   <StatBox label="Duration" value={todaySession.durationMinutes ? `${todaySession.durationMinutes}m` : '—'} />
                 </div>
@@ -439,7 +440,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                                 borderRadius: 4, padding: '2px 8px',
                                 border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
                               }}>
-                                {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
+                                {s.kg ?? '—'}{unit} × {s.reps ?? s.repsL ?? '—'}
                               </span>
                             );
                           })}
@@ -449,7 +450,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                             <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
                             {lastSets.map((s, j) => (
                               <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `0.5px solid ${UI.hair}` }}>
-                                {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
+                                {s.kg ?? '—'}{unit} × {s.reps ?? s.repsL ?? '—'}
                               </span>
                             ))}
                             <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
@@ -479,7 +480,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                         {hasWeight ? seeds.map((s, j) => (
                           <span key={j} className="num" style={{ fontSize: 12, color: UI.ink, background: UI.bgInset, borderRadius: 4, padding: '3px 8px', border: `0.5px solid ${UI.hairStrong}` }}>
-                            {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
+                            {s.kg ?? '—'}{unit} × {s.reps ?? s.repsL ?? '—'}
                           </span>
                         )) : (
                           <span style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi }}>First time — no weight data yet</span>
@@ -550,7 +551,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
               <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{fmtDate(s.date)}</div>
             </div>
-            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(LB.totalVolume(s, clientStore.exercises)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span></span>
+            <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(LB.totalVolume(s, clientStore.exercises)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{unit}</span></span>
             <ChevronRight />
           </div>
         ))
@@ -657,7 +658,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(p.avg).toFixed(1)}`).join(' ');
   const areaPath = `${linePath} L${px(n-1).toFixed(1)},${PAD_T + plotH} L${px(0).toFixed(1)},${PAD_T + plotH} Z`;
   const trend = allGroups[allGroups.length - 1].avg - allGroups[0].avg;
-  const unit = UI.unit();
+  const unit = clientStore?.settings?.unit || 'kg';
   const periodLabel = isWd ? 'WEEK' : `CYCLE (${cycleLen}d)`;
   const fmtY = v => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`;
   const gridVals = [dom.min, dom.min + dom.range / 2, dom.max];
@@ -944,7 +945,7 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
 // ─── InlineExHistory ──────────────────────────────────────────────────────────
 // Standalone component so hooks are never called conditionally.
 
-function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack }) {
+function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, unit = 'kg' }) {
   const ex = (exercises || []).find(e => e.id === exId);
   const isUni = !!ex?.unilateral;
   const [metric, setMetric] = useStateC('kg');
@@ -1008,7 +1009,7 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack }) {
               color: metric === m ? UI.gold : UI.inkFaint,
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
               WebkitTapHighlightColor: 'transparent',
-            }}>{m === 'kg' ? UI.unit().toUpperCase() : 'REPS'}</button>
+            }}>{m === 'kg' ? unit.toUpperCase() : 'REPS'}</button>
           ))}
         </div>
       </div>
@@ -1045,7 +1046,7 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack }) {
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {sess.sets.map((st, si) => (
                     <span key={si} style={{ border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '2px 7px', fontFamily: UI.fontNum, fontSize: 11, color: UI.ink }}>
-                      {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span>
+                      {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{unit}</span>
                       <span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>
                       {isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
                     </span>
@@ -1070,6 +1071,7 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack }) {
 
 function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initialSelected, onClearSelected }) {
   const [selected, setSelected] = useStateC(initialSelected || null);
+  const unit = clientStore.settings?.unit || 'kg';
   const [noteOpen, setNoteOpen] = useStateC(false);
   const [noteBody, setNoteBody] = useStateC('');
   const [noteSaving, setNoteSaving] = useStateC(false);
@@ -1122,6 +1124,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
         sessions={sessions}
         exercises={clientStore.exercises || []}
         onBack={() => setHistEx(null)}
+        unit={unit}
       />
     );
   }
@@ -1144,7 +1147,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
         </div>
         <div style={{ padding: '12px 12px 32px' }}>
           <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-            <StatBox label="Volume" value={`${Math.round(vol).toLocaleString('en-US')}${UI.unit()}`} />
+            <StatBox label="Volume" value={`${Math.round(vol).toLocaleString('en-US')}${unit}`} />
             <StatBox label="Sets" value={LB.doneSetCount(selected)} />
             <StatBox label="Duration" value={selected.durationMinutes ? `${selected.durationMinutes}m` : '—'} />
           </div>
@@ -1173,7 +1176,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                         borderRadius: 4, padding: '2px 8px',
                         border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
                       }}>
-                        {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
+                        {s.kg ?? '—'}{unit} × {s.reps ?? s.repsL ?? '—'}
                       </span>
                     );
                   })}
@@ -1183,7 +1186,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                     <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
                     {lastSets.map((s, j) => (
                       <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `0.5px solid ${UI.hair}` }}>
-                        {s.kg ?? '—'}{UI.unit()} × {s.reps ?? s.repsL ?? '—'}
+                        {s.kg ?? '—'}{unit} × {s.reps ?? s.repsL ?? '—'}
                       </span>
                     ))}
                     <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
@@ -1237,7 +1240,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                 <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
                 <div style={{ fontSize: 11, color: UI.inkFaint }}>{fmtDate(s.date)} · {LB.doneSetCount(s)} sets</div>
               </div>
-              <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(vol).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span></span>
+              <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(vol).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{unit}</span></span>
               <ChevronRight />
             </div>
           );

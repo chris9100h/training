@@ -7,7 +7,8 @@
    To announce something (ONLY on the user's request):
      1. Add a new entry to the TOP of the array with a fresh, unique `id`.
      2. Bump the sw.js cache version so the update ships.
-   Never remove old entries — they are the history returning users catch up on.
+   Never remove entries that cover unique features — they are the history returning users catch up on.
+   Redundant entries (fully subsumed by a newer one) may be removed to keep the changelog clean.
    Write the texts well: what's new, what it does for the user, how to use it —
    crisp bullet points, no tech jargon, no internal names. Leave the array
    empty ([]) to show nothing.
@@ -15,13 +16,27 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
-    id: 'v2.186',
-    title: 'Drag to reorder',
+    id: 'v2.235',
+    title: 'Live cardio',
     items: [
-      'Cycle days, exercises in a day, and check-in form fields can now be reordered by dragging — no more tiny arrow buttons.',
-      'On touch: hold briefly, then drag. On desktop: click and drag. A drop line shows exactly where the item will land.',
-      'Check-in form builder: drag sections and individual fields independently of each other.',
-      'Dev note: those little up/down arrows cost me my last nerve, so they had to go.',
+      'Time your cardio as you go. Tap CARDIO on the home screen, choose Start live, and a stopwatch counts your session up — no need to remember the minutes afterwards.',
+      'Lock your phone, switch apps, keep moving. The timer keeps running in the background and even survives an app restart, so your time is never lost.',
+      'A guided finish. When you\'re done you get a quick Well done, then you fill in the details one step at a time — type, distance, pace and effort — instead of one big form.',
+      'Prefer the old way? Log manually is still right there for entering a session by hand.',
+    ],
+  },
+  {
+    id: 'v2.220',
+    title: 'Settings Redesign, Training Tools & No Interruptions',
+    items: [
+      'Sorry — that won\'t happen again. 😄 Update banners now wait until your session is done — your workout will never be interrupted again.',
+      'The update still installs silently in the background. The banner reappears the moment you finish or cancel your session.',
+      'Settings reorganised — Coaching, Account, Training, Appearance and Data each open their own screen. Much cleaner to navigate.',
+      'Drag to reorder — cycle days, exercises within a day, and check-in form fields can all be reordered by dragging. Hold briefly on touch, click and drag on desktop. No more tiny arrow buttons.',
+      'Plate inventory — tell the app which plates your gym has under Settings → Training → Plate inventory. The plate calculator only suggests plates you actually own, and it works in kg and lbs.',
+      'Plate calculator — tap the dumbbell icon on the weight keyboard while entering a set weight to see exactly which plates go on the bar.',
+      'Equipment setup — increments and max weights per equipment type now live at Settings → Training → Equipment setup, accessible without enabling Smart Progression.',
+      'Rest timer expired — returning to the Train screen after the rest period already ran out now shows a clear alert instead of silent confusion.',
     ],
   },
   {
@@ -41,16 +56,6 @@ window.WHATS_NEW = [
       'New: preview your form before anyone fills it in — a sample weekly check-in and 20 weeks of trend charts populate live as you edit.',
       'Everything your client submits now follows your form end to end — the weekly summary, the trend charts and the shared progress image all reflect your custom fields.',
       'Apply one form to all clients with a tap, or override it per client. "Be your own coach" users get the full builder too.',
-    ],
-  },
-  {
-    id: 'v2.161',
-    title: 'Your Coaching, Your Rules',
-    items: [
-      'Build a fully custom weekly check-in form: add your own fields, group them into sections, set scales, choose icons and control exactly what your clients report each week.',
-      'Design your form once and apply it to all clients with one tap — or override it individually for clients who need a different setup.',
-      'The form builder guides you through every option with inline explanations and a visual icon picker with 50+ fitness icons, so there\'s no guesswork.',
-      '"Be your own coach" users can now customise their personal check-in form too — the full builder is available right from the check-in tab.',
     ],
   },
   {

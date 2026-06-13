@@ -506,7 +506,7 @@ function CheckInFormPreview({ schema }) {
   const renderRow = (row, key) => {
     if (row.length === 2) {
       return (
-        <div key={key} style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'stretch' }}>
+        <div key={key} style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
           {row.map(f => (
             <div key={f.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
               <FieldWidget field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} />
@@ -516,13 +516,7 @@ function CheckInFormPreview({ schema }) {
       );
     }
     const f = row[0];
-    if (f.type === 'stepper' || (f.type === 'choice' && !f.labeled)) {
-      return <div key={key} style={{ marginBottom: 14 }}><FieldWidget field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} /></div>;
-    }
-    if (f.type === 'choice' && f.labeled) {
-      return <FieldWidget key={key} field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} />;
-    }
-    return <div key={key} style={{ marginBottom: 14 }}><FieldWidget field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} /></div>;
+    return <div key={key}><FieldWidget field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} /></div>;
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20, pointerEvents: 'none', userSelect: 'none' }}>
@@ -535,7 +529,9 @@ function CheckInFormPreview({ schema }) {
             <div className="knurl" style={{ margin: '0 0 6px' }} />
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{headLabel}</div>
             <div className="knurl" style={{ margin: '0 0 10px' }} />
-            {rows.map((row, ri) => renderRow(row, ri))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {rows.map((row, ri) => renderRow(row, ri))}
+            </div>
           </div>
         );
       })}

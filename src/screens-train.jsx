@@ -118,22 +118,26 @@ function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }
 }
 
 // ─── Plate Calculator ────────────────────────────────────────────────
-const PLATES_KG = [20, 10, 5, 2.5, 1.25, 0.75, 0.5, 0.25];
-const PLATE_COLORS = { 20:'#2471a3', 10:'#1a1a1a', 5:'#1e8449', 2.5:'#ca6f1e', 1.25:'#148f77', 0.75:'#808b96', 0.5:'#808b96', 0.25:'#808b96' };
-const PLATE_TEXT   = { 20:'#fff',    10:'#ccc',  5:'#fff',    2.5:'#fff',    1.25:'#fff',   0.75:'#fff',   0.5:'#fff',   0.25:'#fff'  };
-const PLATE_SIZE   = { 20: 64,       10: 56,     5: 48,       2.5: 42,       1.25: 36,      0.75: 30,      0.5: 30,      0.25: 30     };
+const PLATES_KG  = [25, 20, 15, 10, 5, 2.5, 1.25, 0.75, 0.5, 0.25];
+const PLATES_LBS = [55, 45, 35, 25, 10, 5, 2.5, 1.25];
 
-function calcPlates(weight) {
+const PLATE_COLORS_KG  = { 25:'#c0392b', 20:'#2471a3', 15:'#d4ac0d', 10:'#1a1a1a', 5:'#1e8449', 2.5:'#ca6f1e', 1.25:'#148f77', 0.75:'#808b96', 0.5:'#808b96', 0.25:'#808b96' };
+const PLATE_SIZE_KG    = { 25: 70,       20: 64,       15: 60,       10: 56,       5: 48,       2.5: 42,       1.25: 36,      0.75: 30,      0.5: 30,      0.25: 30      };
+
+const PLATE_COLORS_LBS = { 55:'#c0392b', 45:'#2471a3', 35:'#b7950b', 25:'#1e8449', 10:'#808b96', 5:'#1a1a1a', 2.5:'#ca6f1e', 1.25:'#808b96' };
+const PLATE_SIZE_LBS   = { 55: 70,       45: 64,       35: 56,       25: 48,       10: 42,       5: 36,        2.5: 30,       1.25: 28      };
+
+function calcPlates(weight, plateSet) {
   const result = [];
   let rem = Math.round(weight * 1000) / 1000;
-  for (const p of PLATES_KG) {
+  for (const p of plateSet) {
     const n = Math.floor(rem / p + 1e-9);
     if (n > 0) { result.push({ p, n }); rem = Math.round((rem - p * n) * 1000) / 1000; }
   }
   return { plates: result, remainder: rem };
 }
 
-function PlateCalcSheet({ open, onClose, initialWeight }) {
+function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
   const [tab, setTab] = useStateT(0);
   const [raw, setRaw] = useStateT('');
   const [fresh, setFresh] = useStateT(false);
@@ -146,14 +150,19 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
     prevOpen.current = open;
   }, [open, initialWeight]);
 
+  const isLbs = UI.unit() === 'lbs';
+  const plateColors = isLbs ? PLATE_COLORS_LBS : PLATE_COLORS_KG;
+  const plateSizes  = isLbs ? PLATE_SIZE_LBS   : PLATE_SIZE_KG;
+  const plateSet = availablePlates ?? (isLbs ? PLATES_LBS : PLATES_KG);
+
   const target = parseFloat(raw.replace(',', '.')) || 0;
   const perSide = tab === 0 ? target / 2 : target;
-  const { plates, remainder } = calcPlates(perSide);
+  const { plates, remainder } = calcPlates(perSide, plateSet);
 
   // round up per-side to next achievable multiple of smallest plate
   const sides = tab === 0 ? 2 : 1;
   const correctedTotal = remainder > 0.01 ? (() => {
-    const smallest = PLATES_KG[PLATES_KG.length - 1]; // 0.25
+    const smallest = plateSet[plateSet.length - 1];
     const units = Math.round(smallest * 1000);
     const newPerSide = Math.ceil(Math.round(perSide * 1000) / units) * units / 1000;
     return Math.round(newPerSide * sides * 1000) / 1000;
@@ -216,13 +225,13 @@ function PlateCalcSheet({ open, onClose, initialWeight }) {
         plates.length > 0 ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, justifyContent: 'center', alignItems: 'flex-end', paddingBottom: 4 }}>
             {plates.map(({ p, n }) => {
-              const size = PLATE_SIZE[p] || 32;
+              const size = plateSizes[p] || 32;
               const hole = Math.round(size * 0.3);
               return (
                 <div key={p} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, width: 72 }}>
                   <div style={{
                     width: size, height: size, borderRadius: '50%', flexShrink: 0,
-                    background: PLATE_COLORS[p] || UI.bgInset,
+                    background: plateColors[p] || UI.bgInset,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     position: 'relative',
                     boxShadow: `0 4px 16px rgba(0,0,0,0.5), 0 0 0 1.5px rgba(255,255,255,0.18)`,
@@ -2450,6 +2459,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         initialWeight={kbField?.field === 'kg'
           ? (parseFloat(kbRaw.replace(',', '.')) || null)
           : (session.entries[exIdx]?.sets[kbField?.setIdx]?.kg ?? null)}
+        availablePlates={UI.unit() === 'lbs'
+          ? (store.settings?.equipmentConfig?.plateInventoryLbs ?? PLATES_LBS)
+          : (store.settings?.equipmentConfig?.plateInventoryKg ?? PLATES_KG)}
       />
 
     </Screen>

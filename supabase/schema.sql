@@ -848,7 +848,7 @@ END;
 $function$;
 
 CREATE OR REPLACE FUNCTION public.get_active_session_detail(p_user_id uuid, p_session_id text DEFAULT NULL::text)
- RETURNS TABLE(user_name text, day_name text, started_at timestamp with time zone, ended timestamp with time zone, entries jsonb, avg_duration_seconds double precision, avg_sets_total double precision, last_session_entries jsonb, last_session_duration_seconds double precision)
+ RETURNS TABLE(user_name text, day_name text, started_at timestamp with time zone, ended timestamp with time zone, entries jsonb, avg_duration_seconds double precision, avg_sets_total double precision, last_session_entries jsonb, last_session_duration_seconds double precision, unit text)
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
@@ -895,7 +895,8 @@ BEGIN
       WHERE s2.user_id = p_user_id AND s2.day_id = s.day_id AND s2.ended IS NOT NULL AND s2.id != s.id
         AND (s2.duration_minutes IS NOT NULL OR (s2.started_at IS NOT NULL AND s2.ended > s2.started_at))
       ORDER BY s2.ended DESC LIMIT 1
-    )::float AS last_session_duration_seconds
+    )::float AS last_session_duration_seconds,
+    COALESCE((SELECT us.unit FROM zane_user_settings us WHERE us.user_id = p_user_id), 'kg')::text AS unit
   FROM zane_sessions s
   LEFT JOIN zane_profiles p ON p.id = s.user_id
   WHERE s.user_id = p_user_id
