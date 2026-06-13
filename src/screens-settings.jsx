@@ -160,6 +160,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [paceguardSheet, setPaceguardSheet] = useStateSet(false);
   const [progressionSheet, setProgressionSheet] = useStateSet(false);
   const [progConfigOpen, setProgConfigOpen] = useStateSet(false);
+  const [plateInventoryOpen, setPlateInventoryOpen] = useStateSet(false);
+  const [plateInvTab, setPlateInvTab] = useStateSet(() => UI.unit() === 'lbs' ? 1 : 0);
   const [progDisclaimer, setProgDisclaimer] = useStateSet(false);
   const [activeSessions, setActiveSessions] = useStateSet([]);
   const [qsSwitching, setQsSwitching] = useStateSet(false);
@@ -564,7 +566,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <NavRow label="Auto-end session" hint={`${store.settings?.sessionTimeoutMinutes ?? 90} min`} onTap={() => setTimeoutSheet(true)} />
               <NavRow label="Paceguard" hint={paceguardHint} onTap={() => setPaceguardSheet(true)} />
               <NavRow label="Smart progression" hint={progressionHint} onTap={() => setProgressionSheet(true)} />
-              <NavRow label="Equipment setup" hint="Increments, max weights & plates" onTap={() => setProgConfigOpen(true)} />
+              <NavRow label="Equipment setup" hint="Increments & max weights" onTap={() => setProgConfigOpen(true)} />
+              <NavRow label="Plate inventory" hint={(() => { const isLbs = UI.unit() === 'lbs'; const allP = isLbs ? PLATES_LBS : PLATES_KG; const cur = store.settings?.equipmentConfig?.[isLbs ? 'plateInventoryLbs' : 'plateInventoryKg'] ?? allP; return cur.length === allP.length ? `All ${allP.length} ${UI.unit()}` : `${cur.length} of ${allP.length} ${UI.unit()}`; })()} onTap={() => setPlateInventoryOpen(true)} />
               <Row label="Warmup sets in summary">
                 <Toggle on={showWarmupInSummary} onToggle={() => { const n = !showWarmupInSummary; setShowWarmupInSummary(n); setStore(s => ({ ...s, settings: { ...s.settings, showWarmupInSummary: n } })); }} />
               </Row>
@@ -784,43 +787,73 @@ function SettingsScreen({ store, setStore, go, userId }) {
             );
           })}
         </div>
-        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 20 }}>Set equipment categories on exercises in the Library. Individual overrides can be set per exercise.</div>
+        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 16 }}>Set equipment categories on exercises in the Library. Individual overrides can be set per exercise.</div>
+        <Btn onClick={() => setProgConfigOpen(false)}>Done</Btn>
+      </Sheet>
 
-        <div className="knurl" style={{ marginBottom: 16 }} />
-        <div className="micro" style={{ marginBottom: 8 }}>PLATE INVENTORY</div>
-        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.5 }}>
-          Mark the plates you own. The plate calculator only suggests plates you have available.
+      {/* ══ Plate inventory sheet ══ */}
+      <Sheet open={plateInventoryOpen} onClose={() => setPlateInventoryOpen(false)} title="Plate inventory">
+        <div style={{ display: 'flex', gap: 3, marginBottom: 28, background: UI.bgInset, borderRadius: 4, padding: 3 }}>
+          {['kg', 'lbs'].map((u, i) => (
+            <button key={u} onClick={() => setPlateInvTab(i)} style={{
+              flex: 1, padding: '8px 0', borderRadius: 4, border: 'none', cursor: 'pointer',
+              background: plateInvTab === i ? 'var(--accent)' : 'transparent',
+              color: plateInvTab === i ? '#0a0805' : UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.06em',
+              fontWeight: plateInvTab === i ? 600 : 400, transition: 'all 0.15s',
+            }}>{u.toUpperCase()}</button>
+          ))}
         </div>
         {(() => {
-          const isLbs = UI.unit() === 'lbs';
+          const isLbs = plateInvTab === 1;
           const invKey = isLbs ? 'plateInventoryLbs' : 'plateInventoryKg';
           const allPlates = isLbs ? PLATES_LBS : PLATES_KG;
+          const plateColors = isLbs ? PLATE_COLORS_LBS : PLATE_COLORS_KG;
+          const plateSizes  = isLbs ? PLATE_SIZE_LBS   : PLATE_SIZE_KG;
           const current = store.settings?.equipmentConfig?.[invKey] ?? allPlates;
-          return allPlates.map((p, i) => {
-            const has = current.includes(p);
-            const toggle = () => {
-              const newInv = has ? current.filter(x => x !== p) : [...current, p].sort((a, b) => b - a);
-              setStore(s => ({ ...s, settings: { ...s.settings, equipmentConfig: { ...s.settings?.equipmentConfig, [invKey]: newInv } } }));
-            };
-            return (
-              <div key={p} onClick={toggle} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                <div style={{
-                  width: 18, height: 18, borderRadius: 4, flexShrink: 0,
-                  border: `1.5px solid ${has ? 'var(--accent)' : UI.hairStrong}`,
-                  background: has ? 'var(--accent)' : 'transparent',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  {has && <i className="fa-solid fa-check" style={{ fontSize: 10, color: '#0a0805' }} />}
-                </div>
-                <span className="num" style={{ fontSize: 14, color: UI.ink }}>{p}</span>
-                <span className="micro" style={{ color: UI.inkFaint }}>{UI.unit()}</span>
-              </div>
-            );
-          });
+          const toggle = (p) => {
+            const newInv = current.includes(p)
+              ? current.filter(x => x !== p)
+              : [...current, p].sort((a, b) => b - a);
+            setStore(s => ({ ...s, settings: { ...s.settings, equipmentConfig: { ...s.settings?.equipmentConfig, [invKey]: newInv } } }));
+          };
+          return (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, justifyContent: 'center', alignItems: 'flex-end', padding: '4px 0 24px' }}>
+              {allPlates.map(p => {
+                const has = current.includes(p);
+                const size = Math.round((plateSizes[p] || 32) * 0.75);
+                const hole = Math.round(size * 0.3);
+                const color = plateColors[p] || '#808b96';
+                return (
+                  <div key={p} onClick={() => toggle(p)} style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+                    cursor: 'pointer', opacity: has ? 1 : 0.22, transition: 'opacity 0.18s',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>
+                    <div style={{
+                      width: size, height: size, borderRadius: '50%',
+                      background: color,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      position: 'relative',
+                      boxShadow: has ? `0 4px 14px rgba(0,0,0,0.45), 0 0 0 1.5px rgba(255,255,255,0.15)` : 'none',
+                    }}>
+                      <div style={{
+                        position: 'absolute',
+                        width: hole, height: hole, borderRadius: '50%',
+                        background: 'var(--bg)',
+                      }} />
+                    </div>
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft, letterSpacing: '0.02em' }}>{p}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
         })()}
-        <div style={{ marginTop: 20 }}>
-          <Btn onClick={() => setProgConfigOpen(false)}>Done</Btn>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.6, marginBottom: 20 }}>
+          Tap a plate to toggle. Dimmed plates are not in your inventory and won't be suggested by the plate calculator.
         </div>
+        <Btn onClick={() => setPlateInventoryOpen(false)}>Done</Btn>
       </Sheet>
 
       {/* ══ Progression disclaimer sheet ══ */}
