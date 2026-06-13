@@ -856,7 +856,9 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
         const headLabel = section.label.toUpperCase() + (section.sectionHint ? ` (${section.sectionHint})` : '');
         return (
           <div key={section.id}>
-            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10, marginTop: 4 }}>{headLabel}</div>
+            <div className="knurl" style={{ margin: '0 0 6px' }} />
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{headLabel}</div>
+            <div className="knurl" style={{ margin: '0 0 10px' }} />
             {rows.map((row, ri) => renderRow(row, ri))}
           </div>
         );
