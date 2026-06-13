@@ -711,6 +711,30 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
       setDraft(JSON.parse(JSON.stringify(CHECKIN_DEFAULT_SCHEMA)));
   };
 
+  // Default fields the coach has removed, grouped by their original section —
+  // lets them add individual defaults back (e.g. the cardio fields the prefill
+  // depends on) without a full reset that wipes their customizations.
+  const missingDefaultsBySection = () => {
+    const keys = new Set(draft.flatMap(s => (s.fields || []).map(f => f.key)));
+    return CHECKIN_DEFAULT_SCHEMA
+      .map(sec => ({ section: sec, fields: (sec.fields || []).filter(f => !keys.has(f.key)) }))
+      .filter(g => g.fields.length);
+  };
+
+  const addDefaultField = (defSection, defField) => {
+    setDraft(d => {
+      const n = JSON.parse(JSON.stringify(d));
+      let target = n.find(s => s.id === defSection.id)
+        || n.find(s => (s.label || '').toLowerCase() === (defSection.label || '').toLowerCase());
+      if (!target) {
+        target = { id: defSection.id, label: defSection.label, ...(defSection.sectionHint ? { sectionHint: defSection.sectionHint } : {}), fields: [] };
+        n.push(target);
+      }
+      target.fields.push(JSON.parse(JSON.stringify(defField)));
+      return n;
+    });
+  };
+
   const TYPE_LABEL = { text: 'Text', integer: 'Int', decimal: 'Dec', stepper: 'Steps', choice: 'Choice' };
   const TYPE_COLOR = { text: UI.inkSoft, integer: 'var(--accent)', decimal: 'var(--accent)', stepper: UI.gold, choice: '#7b8cde' };
   const inp = { width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '9px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', boxSizing: 'border-box' };
@@ -1021,7 +1045,46 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     );
   }
 
+  // ── ADD DEFAULT FIELDS VIEW ───────────────────────────────────────────────
+  if (view === 'add-defaults') {
+    const groups = missingDefaultsBySection();
+    return (
+      <div style={overlayStyle}>
+        <div style={headerStyle}>
+          {backBtn(() => setView('list'))}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink }}>Add Default Fields</span>
+            <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 1 }}>Tap to add a removed field back</div>
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '12px 14px 40px' }}>
+          {groups.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '48px 24px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
+              All default fields are already in your form.
+            </div>
+          ) : groups.map(({ section, fields }) => (
+            <div key={section.id} style={{ marginBottom: 18 }}>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{section.label}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {fields.map(f => (
+                  <button key={f.key} onClick={() => addDefaultField(section, f)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}>
+                    {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 13, color: UI.inkGhost, flexShrink: 0, width: 16, textAlign: 'center' }} />}
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{f.label}</span>
+                    <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkGhost, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
+                    <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   // ── LIST VIEW ─────────────────────────────────────────────────────────────
+  const hasMissingDefaults = missingDefaultsBySection().length > 0;
   return (
     <div style={overlayStyle}>
       {savePicker && (
@@ -1054,6 +1117,13 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
           style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }} title="Preview">
           <i className="fa-solid fa-eye" />
         </button>
+        {hasMissingDefaults && (
+          <button onClick={() => setView('add-defaults')}
+            style={{ background: 'none', border: 'none', padding: '4px 6px', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }} title="Add default fields">
+            <i className="fa-solid fa-plus" style={{ fontSize: 10 }} />
+            Defaults
+          </button>
+        )}
         <button onClick={handleReset}
           style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11 }}>
           Reset
