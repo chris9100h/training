@@ -804,6 +804,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const newDur = val !== null ? (dur ?? null) : null;
     setRestDuration(newDur);
     updateSession(sess => ({ ...sess, restStart: val, restDuration: newDur }));
+    // Schedule the "rest over" push right here — the single place a rest timer
+    // is started or adjusted. Scheduling it in a mount effect instead re-fired
+    // every time the Train screen was re-entered (e.g. Home → back), queuing a
+    // second server-side relay chain under the same nonce; both chains
+    // delivered, so the push arrived twice. The nonce only dedups a *newer*
+    // timer, never a re-send of the same one.
+    if (val !== null && store.settings?.pushEnabled) {
+      const def = newDur ?? restDef;
+      const delaySeconds = Math.round(Math.max(0, val + def * 1000 - Date.now()) / 1000);
+      // Authenticated as the user; the server derives the target key from the DB.
+      LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds, nonce: String(val), priority: 1 });
+    }
   };
   const [now, setNow] = useStateT(Date.now());
   useEffectT(() => {
@@ -829,14 +841,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const restElapsed = restStart ? Math.floor((now - restStart) / 1000) : null;
   const restRemaining = restElapsed != null ? Math.max(0, activeRestDef - restElapsed) : null;
   const restPct = restElapsed != null ? Math.max(0, Math.min(100, (restElapsed / activeRestDef) * 100)) : 0;
-
-  useEffectT(() => {
-    if (!restStart) return;
-    if (!store.settings?.pushEnabled) return;
-    const delaySeconds = Math.round(Math.max(0, restStart + activeRestDef * 1000 - Date.now()) / 1000);
-    // Authenticated as the user; the server derives the target key from the DB.
-    LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds, nonce: String(restStart), priority: 1 });
-  }, [restStart]);
 
   // beep + auto-open modal when rest timer hits zero
   const prevRestRemaining = useRefT(null);
