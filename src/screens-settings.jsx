@@ -598,6 +598,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             Show weights in lbs instead of kg. Display label only — enter values directly in lbs (no conversion of existing numbers).
           </div>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setTrainingSheet(false)}>Done</Btn>
+          </div>
         </div>
       </Sheet>
 
