@@ -169,6 +169,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [pushKeyDraft, setPushKeyDraft] = useStateSet('');
   const [pushKeyModalOpen, setPushKeyModalOpen] = useStateSet(false);
   const [testPickerOpen, setTestPickerOpen] = useStateSet(false);
+  const [pushSheet, setPushSheet] = useStateSet(false);
   const [reminderSheet, setReminderSheet] = useStateSet(false);
   const [reminderEnabled, setReminderEnabled] = useStateSet(() => store.settings?.reminderEnabled ?? false);
   const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
@@ -532,21 +533,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <Hairline style={{ marginBottom: 14 }} />
             </>
           )}
-          <div className="micro" style={{ marginBottom: 10 }}>Push notifications</div>
-          <Row label="Enabled" first>
-            <Toggle on={pushEnabled} onToggle={togglePush} />
+          <Row label="Push notifications" first>
+            <button style={accentBtn} onClick={() => setPushSheet(true)}>Configure</button>
           </Row>
-          {store.settings?.pushoverUserKey && (
-            <Row label="User key">
-              <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={accentBtn}>Change</button>
-            </Row>
-          )}
-          {pushEnabled && (
-            <Row label="Test notification">
-              <button onClick={() => setTestPickerOpen(true)} style={accentBtn}>Send</button>
-            </Row>
-          )}
-          {pushStatus && <div className="micro" style={{ color: pushStatus.startsWith('✓') ? 'var(--accent)' : UI.inkSoft, textAlign: 'center', padding: '6px 0' }}>{pushStatus}</div>}
           <Hairline style={{ margin: '14px 0' }} />
           <div className="micro" style={{ marginBottom: 10 }}>Training reminder</div>
           <Row label="Remind on training days" first>
@@ -832,6 +821,27 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>Always train past that number. Push to failure or near-failure on each set. The algo only bumps weight when <em>all</em> sets hit the top of the range — so getting extra reps is how you earn the next weight.</div>
         </div>
         <Btn onClick={() => setProgDisclaimer(false)}>Got it</Btn>
+      </Sheet>
+
+      {/* ══ Push notifications sheet ══ */}
+      <Sheet open={pushSheet} onClose={() => setPushSheet(false)} title="Push notifications">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+          <Row label="Enabled" first>
+            <Toggle on={pushEnabled} onToggle={togglePush} />
+          </Row>
+          {store.settings?.pushoverUserKey && (
+            <Row label="User key">
+              <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={accentBtn}>Change</button>
+            </Row>
+          )}
+          {pushEnabled && (
+            <Row label="Test notification">
+              <button onClick={() => setTestPickerOpen(true)} style={accentBtn}>Send</button>
+            </Row>
+          )}
+          {pushStatus && <div className="micro" style={{ color: pushStatus.startsWith('✓') ? 'var(--accent)' : UI.inkSoft, textAlign: 'center', padding: '6px 0' }}>{pushStatus}</div>}
+          <Btn onClick={() => setPushSheet(false)}>Done</Btn>
+        </div>
       </Sheet>
 
       {/* ══ Reminder sheet ══ */}
