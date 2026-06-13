@@ -564,6 +564,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <NavRow label="Auto-end session" hint={`${store.settings?.sessionTimeoutMinutes ?? 90} min`} onTap={() => setTimeoutSheet(true)} />
               <NavRow label="Paceguard" hint={paceguardHint} onTap={() => setPaceguardSheet(true)} />
               <NavRow label="Smart progression" hint={progressionHint} onTap={() => setProgressionSheet(true)} />
+              <NavRow label="Equipment setup" hint="Increments, max weights & plates" onTap={() => setProgConfigOpen(true)} />
               <Row label="Warmup sets in summary">
                 <Toggle on={showWarmupInSummary} onToggle={() => { const n = !showWarmupInSummary; setShowWarmupInSummary(n); setStore(s => ({ ...s, settings: { ...s.settings, showWarmupInSummary: n } })); }} />
               </Row>
@@ -751,7 +752,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 <Stepper value={store.settings?.progressionRangeTop ?? 4} step={1} min={1} max={10} suffix=" reps" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, progressionRangeTop: v } }))} />
               </div>
               <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>If target is 8 reps and range top is +4, weight increases only when all sets reach 12 reps.</div>
-              <Btn onClick={() => { setProgressionSheet(false); setTimeout(() => setProgConfigOpen(true), 300); }}>Configure exercises</Btn>
             </>
           )}
           <Btn onClick={() => setProgressionSheet(false)}>Done</Btn>
@@ -759,7 +759,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
       </Sheet>
 
       {/* ══ Equipment config sheet ══ */}
-      <Sheet open={progConfigOpen} onClose={() => setProgConfigOpen(false)} title="Equipment increments">
+      <Sheet open={progConfigOpen} onClose={() => setProgConfigOpen(false)} title="Equipment setup">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 20 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, padding: '0 4px 8px', borderBottom: `0.5px solid ${UI.hair}` }}>
             <span className="micro">Equipment</span>
