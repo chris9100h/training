@@ -212,10 +212,29 @@ async function importFromBackup(backup, userId) {
       custom_day_types: backup.customDayTypes ?? [],
       reminder_enabled: sett.reminderEnabled ?? false,
       reminder_time: sett.reminderTime ?? '07:00',
+      tempo_enabled: sett.tempoEnabled ?? false,
+      tempo_eccentric: sett.tempoEccentric ?? null,
+      tempo_concentric: sett.tempoConcentric ?? null,
+      smart_progression: sett.smartProgression ?? false,
+      progression_range_top: sett.progressionRangeTop ?? null,
+      equipment_config: sett.equipmentConfig ?? null,
+      show_warmup_in_summary: sett.showWarmupInSummary ?? false,
+      show_coaching_tab: sett.showCoachingTab ?? false,
+      be_your_own_coach: sett.beYourOwnCoach ?? false,
+      session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
     })),
   ].filter(Boolean));
   // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
   if (importSessions.length) await _syncEntryRelational(importSessions, userId, null);
+  // Skips were exported in the store but previously not re-imported — restore them now
+  if (backup.skips?.length) {
+    await unwrap(_supabase.from('zane_skips').upsert(
+      backup.skips.map(s => ({
+        id: s.id, user_id: userId, date: s.date, day_id: s.dayId,
+        day_name: s.dayName, skip_reason: s.skipReason, skipped_at: s.skippedAt ?? null,
+      }))
+    ));
+  }
 }
 
 // ─── SETUP NEW USER ──────────────────────────────────────────────────────

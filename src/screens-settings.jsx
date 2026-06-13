@@ -140,6 +140,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [trainingSheet, setTrainingSheet] = useStateSet(false);
   const [appearanceSheet, setAppearanceSheet] = useStateSet(false);
   const [dataSheet, setDataSheet] = useStateSet(false);
+  const [changelogSheet, setChangelogSheet] = useStateSet(false);
   const [activeUsersSheet, setActiveUsersSheet] = useStateSet(false);
 
   // Training sub-sheets
@@ -360,6 +361,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <NavRow label="Training" onTap={() => setTrainingSheet(true)} />
           <NavRow label="Appearance" onTap={() => setAppearanceSheet(true)} />
           <NavRow label="Data" onTap={() => setDataSheet(true)} />
+          <NavRow label="Changelog" onTap={() => setChangelogSheet(true)} />
         </Frame>
 
         {/* ─── Admin: pending registrations ─── */}
@@ -629,6 +631,31 @@ function SettingsScreen({ store, setStore, go, userId }) {
             <Btn kind="ghost" onClick={importData} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
           </div>
           <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Delete all data</Btn>
+        </div>
+      </Sheet>
+
+      {/* ══ Changelog Sheet ══ */}
+      <Sheet open={changelogSheet} onClose={() => setChangelogSheet(false)} title="Changelog">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 28, paddingBottom: 8 }}>
+          {(window.WHATS_NEW || []).map((entry, i) => (
+            <div key={entry.id}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
+                <span style={{ fontSize: 15, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{entry.title}</span>
+                <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>{entry.id}</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {entry.items.map((item, j) => (
+                  <div key={j} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <span style={{ color: 'var(--accent)', fontSize: 11, marginTop: 3, flexShrink: 0 }}>•</span>
+                    <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>{item}</span>
+                  </div>
+                ))}
+              </div>
+              {i < (window.WHATS_NEW || []).length - 1 && (
+                <div style={{ marginTop: 24, borderBottom: `0.5px solid ${UI.hair}` }} />
+              )}
+            </div>
+          ))}
         </div>
       </Sheet>
 
