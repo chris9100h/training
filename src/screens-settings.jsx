@@ -129,6 +129,43 @@ function DebugPanel({ onClose }) {
   );
 }
 
+// ─── CHANGELOG SHEET ─────────────────────────────────────────────────
+function ChangelogSheet({ open, onClose }) {
+  const [expanded, setExpanded] = useStateSet(null);
+  const handleClose = () => { onClose(); setExpanded(null); };
+  return (
+    <Sheet open={open} onClose={handleClose} title="Changelog">
+      <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+        {(window.WHATS_NEW || []).map((entry, i) => {
+          const isOpen = expanded === entry.id;
+          return (
+            <div key={entry.id}>
+              <button onClick={() => setExpanded(isOpen ? null : entry.id)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 0', WebkitTapHighlightColor: 'transparent' }}>
+                <span style={{ fontSize: 15, fontWeight: 500, color: isOpen ? 'var(--accent)' : UI.ink, fontFamily: UI.fontUi, textAlign: 'left' }}>{entry.title}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                  <span className="micro" style={{ color: UI.inkFaint }}>{entry.id}</span>
+                  <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={isOpen ? 'var(--accent)' : UI.inkFaint} strokeWidth="1.3" strokeLinecap="round" style={{ transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}><path d="M1 1l4 4-4 4" /></svg>
+                </div>
+              </button>
+              {isOpen && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 14 }}>
+                  {entry.items.map((item, j) => (
+                    <div key={j} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                      <span style={{ color: 'var(--accent)', fontSize: 11, marginTop: 3, flexShrink: 0 }}>•</span>
+                      <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>{item}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {i < (window.WHATS_NEW || []).length - 1 && <div className="knurl" />}
+            </div>
+          );
+        })}
+      </div>
+    </Sheet>
+  );
+}
+
 // ─── SETTINGS ────────────────────────────────────────────────────────
 function SettingsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
@@ -635,40 +672,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
       </Sheet>
 
       {/* ══ Changelog Sheet ══ */}
-      {changelogSheet && (() => {
-        const [expanded, setExpanded] = useStateSet(null);
-        return (
-          <Sheet open={changelogSheet} onClose={() => { setChangelogSheet(false); setExpanded(null); }} title="Changelog">
-            <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
-              {(window.WHATS_NEW || []).map((entry, i) => {
-                const open = expanded === entry.id;
-                return (
-                  <div key={entry.id}>
-                    <button onClick={() => setExpanded(open ? null : entry.id)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 0', WebkitTapHighlightColor: 'transparent' }}>
-                      <span style={{ fontSize: 15, fontWeight: 500, color: open ? 'var(--accent)' : UI.ink, fontFamily: UI.fontUi, textAlign: 'left' }}>{entry.title}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                        <span className="micro" style={{ color: UI.inkFaint }}>{entry.id}</span>
-                        <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={open ? 'var(--accent)' : UI.inkFaint} strokeWidth="1.3" strokeLinecap="round" style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}><path d="M1 1l4 4-4 4" /></svg>
-                      </div>
-                    </button>
-                    {open && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 14 }}>
-                        {entry.items.map((item, j) => (
-                          <div key={j} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                            <span style={{ color: 'var(--accent)', fontSize: 11, marginTop: 3, flexShrink: 0 }}>•</span>
-                            <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>{item}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {i < (window.WHATS_NEW || []).length - 1 && <div className="knurl" />}
-                  </div>
-                );
-              })}
-            </div>
-          </Sheet>
-        );
-      })()}
+      <ChangelogSheet open={changelogSheet} onClose={() => setChangelogSheet(false)} />
 
       {/* ══ Auto-end session sheet ══ */}
       <Sheet open={timeoutSheet} onClose={() => setTimeoutSheet(false)} title="Auto-end session">
