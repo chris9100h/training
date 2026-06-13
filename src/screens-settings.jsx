@@ -333,11 +333,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
     }
   };
 
-  // Hints for category nav rows
   const activeCount = activeSessions.filter(s => !s.is_finished).length;
-  const coachingHint = selfOn ? 'Self-coaching' : coachingTabOn ? 'On' : 'Off';
-  const restHint = fmtSec(store.settings?.restDefault ?? 120);
-  const appearanceHint = window.ACCENT_PALETTE?.[store.settings?.accentColor ?? 'copper']?.label ?? null;
 
   return (
     <Screen>
@@ -357,10 +353,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
           {hasActiveUsersAccess && (
             <NavRow label="Active users" hint={activeCount > 0 ? `${activeCount} active` : null} onTap={() => setActiveUsersSheet(true)} first />
           )}
-          <NavRow label="Coaching" hint={coachingHint} onTap={() => setCoachingSheet(true)} first={!hasActiveUsersAccess} />
+          <NavRow label="Coaching" onTap={() => setCoachingSheet(true)} first={!hasActiveUsersAccess} />
           <NavRow label="Account" onTap={() => setAccountSheet(true)} />
-          <NavRow label="Training" hint={restHint} onTap={() => setTrainingSheet(true)} />
-          <NavRow label="Appearance" hint={appearanceHint} onTap={() => setAppearanceSheet(true)} />
+          <NavRow label="Training" onTap={() => setTrainingSheet(true)} />
+          <NavRow label="Appearance" onTap={() => setAppearanceSheet(true)} />
           <NavRow label="Data" onTap={() => setDataSheet(true)} />
         </Frame>
 
