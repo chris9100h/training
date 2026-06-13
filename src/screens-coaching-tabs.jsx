@@ -117,7 +117,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           statusData.forEach(r => { lm[r.clientId] = r.inProgressSessionId; });
           setLiveMap(lm);
           const cm = {};
-          checkinData.forEach(r => { cm[r.coachingId] = r.hasCheckin; });
+          checkinData.forEach(r => { cm[r.coachingId] = r.checkedInAt; });
           setCheckinMap(cm);
         })
         .catch(() => {});
@@ -279,10 +279,10 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           {allClients.map(c => {
             const inProgress = liveMap[c.clientId];
             const clientUnread = unreadNotes.filter(n => n.authorId === c.clientId).length;
-            const checkinDue = c.status === 'active' && (c.checkinEnabled ?? true) && checkinMap[c.id] === false;
-            const weekStart = LB.checkinWeekStart();
-            const checkinNew = c.status === 'active' && checkinMap[c.id] === true && (() => {
-              try { return localStorage.getItem(`logbook-coach-ci-seen-${c.id}`) !== weekStart; } catch (_) { return false; }
+            const checkinAt = c.id in checkinMap ? checkinMap[c.id] : undefined;
+            const checkinDue = c.status === 'active' && (c.checkinEnabled ?? true) && checkinAt === null;
+            const checkinNew = c.status === 'active' && typeof checkinAt === 'string' && (() => {
+              try { return localStorage.getItem(`logbook-coach-ci-seen-${c.id}`) !== checkinAt; } catch (_) { return false; }
             })();
             return (
               <CoachingTabClientCard
@@ -292,6 +292,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
                 unreadCount={clientUnread}
                 checkinDue={checkinDue}
                 checkinNew={checkinNew}
+                checkinAt={checkinAt}
                 onRequestCheckin={() => handleRequestCheckin(c.id)}
                 go={go}
               />
@@ -303,14 +304,14 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
   );
 }
 
-function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, checkinNew, onRequestCheckin, go }) {
+function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, checkinNew, checkinAt, onRequestCheckin, go }) {
   const isPending = client.status === 'pending';
   const [requested, setRequested] = useStateC(false);
   const [checkinDismissed, setCheckinDismissed] = useStateC(false);
 
   const handleCardClick = () => {
     if (isPending) return;
-    go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName, backRoute: 'coaching' });
+    go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName, checkinAt, backRoute: 'coaching' });
   };
 
   const handleRequest = (e) => {
@@ -323,7 +324,7 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
 
   const handleDismissCheckin = (e) => {
     e.stopPropagation();
-    try { localStorage.setItem(`logbook-coach-ci-seen-${client.id}`, LB.checkinWeekStart()); } catch (_) {}
+    if (checkinAt) { try { localStorage.setItem(`logbook-coach-ci-seen-${client.id}`, checkinAt); } catch (_) {} }
     setCheckinDismissed(true);
   };
 

@@ -1714,7 +1714,7 @@ async function addCoachingMacros(coachingId, macros, userId) {
 async function loadCoachCheckinStatus() {
   const { data, error } = await _supabase.rpc('get_coach_checkin_status');
   if (error) throw error;
-  return (data || []).map(r => ({ coachingId: r.coaching_id, hasCheckin: r.has_checkin }));
+  return (data || []).map(r => ({ coachingId: r.coaching_id, checkedInAt: r.checked_in_at ?? null }));
 }
 
 async function setCheckinEnabled(coachingId, enabled) {

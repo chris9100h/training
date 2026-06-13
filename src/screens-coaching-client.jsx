@@ -2,15 +2,15 @@
    tabs + charts). Shares globals (React aliases, helpers, isImprovement/
    isDecline) with screens-coaching-core.jsx, loaded first. */
 
-function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName, initialTab, backRoute = 'settings', hideTopBar = false, isSelf = false }) {
+function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName, checkinAt, initialTab, backRoute = 'settings', hideTopBar = false, isSelf = false }) {
   const [tab, setTab] = useStateC(initialTab || 'overview');
   const [selectedSession, setSelectedSession] = useStateC(null);
 
   const openSession = (session) => { setSelectedSession(session); setTab('sessions'); };
 
   const handleTabChange = (id) => {
-    if (id === 'checkins') {
-      try { localStorage.setItem(`logbook-coach-ci-seen-${coachingId}`, LB.checkinWeekStart()); } catch (_) {}
+    if (id === 'checkins' && checkinAt) {
+      try { localStorage.setItem(`logbook-coach-ci-seen-${coachingId}`, checkinAt); } catch (_) {}
     }
     setTab(id);
   };

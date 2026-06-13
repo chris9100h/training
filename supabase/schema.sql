@@ -661,7 +661,7 @@ AS $function$
 $function$;
 
 CREATE OR REPLACE FUNCTION public.get_coach_checkin_status()
- RETURNS TABLE(coaching_id text, has_checkin boolean)
+ RETURNS TABLE(coaching_id text, checked_in_at timestamptz)
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
@@ -676,11 +676,12 @@ begin
   return query
   select
     c.id as coaching_id,
-    exists (
-      select 1 from zane_checkins ci
+    (
+      select ci.checked_in_at from zane_checkins ci
       where ci.coaching_id = c.id
         and ci.week_start = v_week_start
-    ) as has_checkin
+      limit 1
+    ) as checked_in_at
   from zane_coaching c
   where c.coach_id = auth.uid()
     and c.coach_id <> c.client_id
