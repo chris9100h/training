@@ -846,6 +846,238 @@ UI.chartDomain = (dataMin, dataMax, opts) => {
   return { min: bottom, max: top, range: (top - bottom) || 1 };
 };
 
+// ─── Drag-to-reorder ────────────────────────────────────────────────
+// Pointer-based reordering for vertical lists, tuned to feel like the
+// fddb_dash drag: long-press to pick up on touch, a small move-threshold
+// on mouse, a floating ghost that tracks the finger, and an accent
+// drop-line showing where the row will land. Built for the no-build React
+// setup — it drives the DOM imperatively for the duration of the drag (no
+// state churn) and only commits the new order via onReorder on drop.
+//
+// Usage:
+//   const listRef = UI.useDragReorder({ onReorder: (from, to) => {...} });
+//   <div ref={listRef} data-reorder-list="true">
+//     {rows.map(... <div data-reorder-item="true">…<DragHandle/>…</div>)}
+//   </div>
+// from/to are indices into the data-reorder-item set (DOM order). Mark any
+// descendant that must NOT start a drag (e.g. a delete button) with
+// data-reorder-ignore="true". The callback is a no-op when from === to.
+function attachDragReorder(container, getCb, options) {
+  const opts = options || {};
+  const LONG_PRESS_MS = opts.longPressMs != null ? opts.longPressMs : 220;
+  const MOVE_TOLERANCE = opts.moveTolerance != null ? opts.moveTolerance : 8;
+  const SCROLL_EDGE = 64;
+  let state = null;
+  let rafId = null;
+
+  // Reorderable rows that belong to THIS list (closest list ancestor is us —
+  // guards against any nested reorder list inside a row).
+  const items = () => Array.prototype.slice
+    .call(container.querySelectorAll('[data-reorder-item]'))
+    .filter(el => el.closest('[data-reorder-list]') === container);
+
+  function scrollParent() {
+    let n = container;
+    while (n && n !== document.body && n !== document.documentElement) {
+      const s = getComputedStyle(n);
+      if (/(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 1) return n;
+      n = n.parentElement;
+    }
+    return null; // fall back to the window
+  }
+
+  function placeDropLine(y) {
+    if (!state.dropLine) {
+      state.dropLine = document.createElement('div');
+      state.dropLine.className = 'reorder-drop-line';
+      document.body.appendChild(state.dropLine);
+    }
+    const r = container.getBoundingClientRect();
+    state.dropLine.style.left = r.left + 'px';
+    state.dropLine.style.width = r.width + 'px';
+    state.dropLine.style.top = (y - 1) + 'px';
+  }
+
+  function updateTarget(y) {
+    const list = items();
+    let insertIdx = list.length;
+    let lineY = null;
+    for (let k = 0; k < list.length; k++) {
+      const r = list[k].getBoundingClientRect();
+      if (y < r.top + r.height / 2) { insertIdx = k; lineY = r.top - 3; break; }
+    }
+    if (lineY === null) {
+      const last = list[list.length - 1];
+      lineY = last ? last.getBoundingClientRect().bottom + 3 : container.getBoundingClientRect().top;
+    }
+    state.insertIdx = insertIdx;
+    placeDropLine(lineY);
+  }
+
+  function moveGhost(x, y) {
+    if (!state || !state.ghost) return;
+    state.ghost.style.transform =
+      'translate(' + (x - state.offsetX - state.baseLeft) + 'px,' +
+      (y - state.offsetY - state.baseTop) + 'px) scale(1.02)';
+  }
+
+  // Edge auto-scroll: nudge the nearest scroll container (or window) when the
+  // pointer hovers near its top/bottom edge, so long lists stay reachable.
+  function tickScroll() {
+    if (!state || !state.started) { rafId = null; return; }
+    const y = state.lastY || 0;
+    const sp = state.scrollParent;
+    const el = sp || document.scrollingElement || document.documentElement;
+    const top = sp ? sp.getBoundingClientRect().top : 0;
+    const bottom = sp ? sp.getBoundingClientRect().bottom : window.innerHeight;
+    const max = el.scrollHeight - el.clientHeight;
+    let moved = false;
+    if (y < top + SCROLL_EDGE && el.scrollTop > 0) {
+      const t = Math.min(1, (top + SCROLL_EDGE - y) / SCROLL_EDGE);
+      el.scrollTop = Math.max(0, el.scrollTop - Math.round(2 + t * 18));
+      moved = true;
+    } else if (y > bottom - SCROLL_EDGE && el.scrollTop < max) {
+      const t = Math.min(1, (y - (bottom - SCROLL_EDGE)) / SCROLL_EDGE);
+      el.scrollTop = Math.min(max, el.scrollTop + Math.round(2 + t * 18));
+      moved = true;
+    }
+    if (moved) updateTarget(y);
+    rafId = requestAnimationFrame(tickScroll);
+  }
+
+  function beginDrag(x, y) {
+    const src = state.src;
+    const rect = src.getBoundingClientRect();
+    const ghost = src.cloneNode(true);
+    ghost.classList.add('reorder-ghost');
+    ghost.style.width = rect.width + 'px';
+    ghost.style.height = rect.height + 'px';
+    ghost.style.left = rect.left + 'px';
+    ghost.style.top = rect.top + 'px';
+    document.body.appendChild(ghost);
+    src.classList.add('reorder-source');
+    state.ghost = ghost;
+    state.baseLeft = rect.left;
+    state.baseTop = rect.top;
+    state.offsetX = x - rect.left;
+    state.offsetY = y - rect.top;
+    state.started = true;
+    document.body.classList.add('reorder-dragging');
+    moveGhost(x, y);
+    updateTarget(y);
+    rafId = requestAnimationFrame(tickScroll);
+  }
+
+  function teardown() {
+    if (!state) return;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    document.removeEventListener('pointermove', onMove, { passive: false });
+    document.removeEventListener('pointerup', onUp);
+    document.removeEventListener('pointercancel', onUp);
+    clearTimeout(state.pressTimer);
+    if (state.dropLine) state.dropLine.remove();
+    if (state.src) state.src.classList.remove('reorder-source');
+    const ghost = state.ghost;
+    document.body.classList.remove('reorder-dragging');
+    state = null;
+    if (ghost) { ghost.style.opacity = '0'; setTimeout(() => ghost.remove(), 160); }
+  }
+
+  function onDown(ev) {
+    if (state) return;
+    if (ev.button != null && ev.button !== 0) return;
+    if (!ev.target || !ev.target.closest) return;
+    if (ev.target.closest('[data-reorder-ignore]')) return;
+    const src = ev.target.closest('[data-reorder-item]');
+    if (!src) return;
+    const fromIdx = items().indexOf(src);
+    if (fromIdx === -1) return;
+    state = {
+      src, fromIdx, insertIdx: fromIdx,
+      startX: ev.clientX, startY: ev.clientY,
+      lastX: ev.clientX, lastY: ev.clientY,
+      pointerType: ev.pointerType || 'mouse',
+      started: false, pressTimer: null, ghost: null, dropLine: null,
+      scrollParent: scrollParent(),
+    };
+    document.addEventListener('pointermove', onMove, { passive: false });
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+    if (state.pointerType !== 'mouse') {
+      state.pressTimer = setTimeout(() => {
+        if (state && !state.started) beginDrag(state.startX, state.startY);
+      }, LONG_PRESS_MS);
+    }
+  }
+
+  function onMove(ev) {
+    if (!state) return;
+    const dist = Math.hypot(ev.clientX - state.startX, ev.clientY - state.startY);
+    if (!state.started) {
+      if (state.pointerType === 'mouse') {
+        if (dist > MOVE_TOLERANCE) beginDrag(state.startX, state.startY);
+      } else if (dist > 12) {
+        // Moved before the long-press fired → treat as a scroll, bail out.
+        clearTimeout(state.pressTimer);
+        teardown();
+        return;
+      }
+    }
+    if (!state || !state.started) return;
+    ev.preventDefault();
+    state.lastX = ev.clientX;
+    state.lastY = ev.clientY;
+    moveGhost(ev.clientX, ev.clientY);
+    updateTarget(ev.clientY);
+  }
+
+  function onUp() {
+    if (!state) return;
+    if (!state.started) { teardown(); return; }
+    const from = state.fromIdx;
+    let to = state.insertIdx;
+    if (to > from) to -= 1;
+    // Swallow the click the pointerup synthesizes, so a drag doesn't also fire
+    // the row's tap handler (open editor).
+    const swallow = e => { e.stopPropagation(); e.preventDefault(); };
+    document.addEventListener('click', swallow, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener('click', swallow, { capture: true }), 120);
+    teardown();
+    if (to !== from && to >= 0) {
+      const cb = getCb();
+      if (cb) cb(from, to);
+    }
+  }
+
+  function touchBlocker(ev) { if (state && state.started) ev.preventDefault(); }
+
+  container.addEventListener('pointerdown', onDown);
+  document.addEventListener('touchmove', touchBlocker, { passive: false });
+
+  return function cleanup() {
+    container.removeEventListener('pointerdown', onDown);
+    document.removeEventListener('touchmove', touchBlocker, { passive: false });
+    teardown();
+  };
+}
+
+// Hook wrapper: returns a callback ref to attach to the list container. Re-binds
+// cleanly when the container mounts/unmounts (handles conditional lists), and
+// always commits with the latest onReorder.
+UI.useDragReorder = function (options) {
+  const cbRef = React.useRef(null);
+  cbRef.current = options && options.onReorder;
+  const cleanupRef = React.useRef(null);
+  const setRef = React.useCallback((node) => {
+    if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
+    if (node) cleanupRef.current = attachDragReorder(node, () => cbRef.current, options);
+  }, []);
+  React.useEffect(() => () => {
+    if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
+  }, []);
+  return setRef;
+};
+
 Object.assign(window, {
   UI, Screen, TopBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty,
   ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,

@@ -2,6 +2,24 @@
 
 const { useState: useStateS, useMemo: useMemoS, useEffect: useEffectS } = React;
 
+// Grip affordance that replaces the up/down arrows on reorderable rows. The
+// whole row is draggable (see UI.useDragReorder) — this is the visual cue.
+function DragHandle() {
+  return (
+    <div aria-hidden="true" style={{
+      flexShrink: 0, width: 22, height: 30,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      color: UI.inkFaint, cursor: 'grab',
+    }}>
+      <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
+        <circle cx="2" cy="3" r="1.3" /><circle cx="8" cy="3" r="1.3" />
+        <circle cx="2" cy="8" r="1.3" /><circle cx="8" cy="8" r="1.3" />
+        <circle cx="2" cy="13" r="1.3" /><circle cx="8" cy="13" r="1.3" />
+      </svg>
+    </div>
+  );
+}
+
 function useIsPadS() {
   const [isPad, setIsPad] = useStateS(() => window.innerWidth >= 768);
   useEffectS(() => {
@@ -614,6 +632,18 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const [applyFromSheet, setApplyFromSheet] = useStateS(false);
   const [applyFromDate, setApplyFromDate] = useStateS('');
   const [editingDay, setEditingDay] = useStateS(null);
+
+  const reorderDays = (from, to) => {
+    if (from === to) return;
+    setDraft(d => {
+      const days = [...d.days];
+      const [moved] = days.splice(from, 1);
+      days.splice(to, 0, moved);
+      return { ...d, days };
+    });
+  };
+  const daysListRef = UI.useDragReorder({ onReorder: reorderDays });
+
   if (!draft) return null;
 
   const isActive = draft.id === store.activeScheduleId;
@@ -626,15 +656,6 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     });
   };
 
-  const moveDay = (idx, dir) => {
-    const j = idx + dir;
-    if (j < 0 || j >= draft.days.length) return;
-    setDraft(d => {
-      const days = [...d.days];
-      [days[idx], days[j]] = [days[j], days[idx]];
-      return { ...d, days };
-    });
-  };
   const removeDay = async (idx) => {
     if (!await confirm(`Remove "${draft.days[idx].name}" from the cycle?`, { ok: 'Remove', danger: true })) return;
     setDraft(d => ({ ...d, days: d.days.filter((_, i) => i !== idx) }));
@@ -902,19 +923,16 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         ) : (
           <div>
             <span className="label">Cycle · {draft.days.length} days</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+            <div ref={daysListRef} data-reorder-list="true" style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
               {draft.days.map((day, i) => {
                 const isRest = day.name === 'REST' || !day.items.length;
                 return (
-                  <div key={day.id} style={{
+                  <div key={day.id} data-reorder-item="true" style={{
                     display: 'flex', alignItems: 'center', gap: 8,
                     background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
                     padding: '8px 12px', borderRadius: 4,
                   }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <button onClick={() => moveDay(i, -1)} disabled={i === 0} style={{ ...dayEditIconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
-                      <button onClick={() => moveDay(i, 1)} disabled={i === draft.days.length - 1} style={{ ...dayEditIconBtn, opacity: i === draft.days.length - 1 ? 0.3 : 1 }}>▼</button>
-                    </div>
+                    <DragHandle />
                     <div className="num" style={{ width: 26, textAlign: 'center', color: UI.inkFaint, fontSize: 11 }}>{i+1}</div>
                     <button onClick={() => setEditingDay(day.id)} style={{
                       flex: 1, background: 'transparent', border: 'none', cursor: 'pointer',
@@ -922,7 +940,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                       color: isRest ? UI.inkFaint : UI.ink, fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi,
                     }}><span>{day.name}</span><span className="micro" style={{ fontStyle: 'normal' }}>{dayActionLabel(day)}</span></button>
-                    <button onClick={() => removeDay(i)} style={{ ...dayEditIconBtn, color: UI.danger, fontSize: 18 }}>×</button>
+                    <button data-reorder-ignore="true" onClick={() => removeDay(i)} style={{ ...dayEditIconBtn, color: UI.danger, fontSize: 18 }}>×</button>
                   </div>
                 );
               })}
@@ -1426,6 +1444,25 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const [editingItem, setEditingItem] = useStateS(null);
   const [pickingType, setPickingType] = useStateS(false);
 
+  // A superset group is only meaningful as a contiguous run of >= 2 adjacent
+  // items. After a move/remove, drop the group id from any item no longer next
+  // to a same-group partner so distant rows can't stay silently coupled.
+  const normalizeSupersets = (items) => items.map((it, i) => {
+    if (!it.supersetGroup) return it;
+    const linked = items[i - 1]?.supersetGroup === it.supersetGroup || items[i + 1]?.supersetGroup === it.supersetGroup;
+    return linked ? it : { ...it, supersetGroup: null };
+  });
+  const reorderItems = (from, to) => {
+    if (from === to) return;
+    setDraft(d => {
+      const items = [...d.items];
+      const [moved] = items.splice(from, 1);
+      items.splice(to, 0, moved);
+      return { ...d, items: normalizeSupersets(items) };
+    });
+  };
+  const itemsListRef = UI.useDragReorder({ onReorder: reorderItems });
+
   if (!draft) return null;
 
   const updateItem = (idx, patch) => setDraft(d => {
@@ -1437,14 +1474,6 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
       return it;
     })};
   });
-  // A superset group is only meaningful as a contiguous run of >= 2 adjacent
-  // items. After a move/remove, drop the group id from any item no longer next
-  // to a same-group partner so distant rows can't stay silently coupled.
-  const normalizeSupersets = (items) => items.map((it, i) => {
-    if (!it.supersetGroup) return it;
-    const linked = items[i - 1]?.supersetGroup === it.supersetGroup || items[i + 1]?.supersetGroup === it.supersetGroup;
-    return linked ? it : { ...it, supersetGroup: null };
-  });
   const removeItem = (idx) => setDraft(d => ({ ...d, items: normalizeSupersets(d.items.filter((_, i) => i !== idx)) }));
   const addExercise = (exId) => {
     const ex = LB.findExercise(store, exId);
@@ -1452,15 +1481,6 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     const defaultReps = ex?.progression_reps ?? 8;
     setDraft(d => ({ ...d, items: [...d.items, { exId, sets: isCardioEx ? 0 : 3, reps: isCardioEx ? 0 : defaultReps }] }));
     setAddingEx(false);
-  };
-  const moveItem = (idx, dir) => {
-    const j = idx + dir;
-    setDraft(d => {
-      if (j < 0 || j >= d.items.length) return d;
-      const items = [...d.items];
-      [items[idx], items[j]] = [items[j], items[idx]];
-      return { ...d, items: normalizeSupersets(items) };
-    });
   };
   const copyItemsFromDay = (sourceDay, migrateId) => {
     // Deep-copy each item and remap superset group ids — a shallow spread
@@ -1531,7 +1551,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
               }}>Import from plan</button>
             )}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <div ref={itemsListRef} data-reorder-list="true" style={{ display: 'flex', flexDirection: 'column' }}>
             {draft.items.flatMap((it, i) => {
               const ex = LB.findExercise(store, it.exId);
               const nextIt = draft.items[i + 1];
@@ -1541,17 +1561,14 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
               const inGroup = linkedToNext || linkedToPrev;
               const els = [];
               els.push(
-                <div key={`item-${i}`} onClick={() => setEditingItem(i)} style={{
+                <div key={`item-${i}`} data-reorder-item="true" onClick={() => setEditingItem(i)} style={{
                   display: 'flex', gap: 8, alignItems: 'center',
                   background: inGroup ? UI.goldFaint : UI.bgInset,
                   border: `1px solid ${inGroup ? UI.goldSoft : UI.hairStrong}`,
                   borderRadius: linkedToPrev && linkedToNext ? 0 : linkedToPrev ? '0 0 4px 4px' : linkedToNext ? '4px 4px 0 0' : 4,
                   padding: '10px 12px', cursor: 'pointer', marginBottom: linkedToNext ? 0 : 6,
                 }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <button onClick={e => { e.stopPropagation(); moveItem(i, -1); }} disabled={i === 0} style={{ ...dayEditIconBtn, opacity: i === 0 ? 0.3 : 1 }}>▲</button>
-                    <button onClick={e => { e.stopPropagation(); moveItem(i, 1); }} disabled={i === draft.items.length - 1} style={{ ...dayEditIconBtn, opacity: i === draft.items.length - 1 ? 0.3 : 1 }}>▼</button>
-                  </div>
+                  <DragHandle />
                   <div style={{ flex: 1 }}>
                     <div className="display" style={{ fontSize: 15, color: UI.ink, lineHeight: 1.1 }}>{ex?.name || '—'}</div>
                     {it.note ? <div className="micro" style={{ color: UI.inkFaint, marginTop: 2, fontStyle: 'italic' }}>{it.note}</div> : null}
@@ -1561,7 +1578,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                     border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
                     padding: '3px 8px', whiteSpace: 'nowrap',
                   }}>{it.repsPerSet && it.repsPerSet.length > 1 ? it.repsPerSet.join('/') : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`}</div>
-                  <button onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...dayEditIconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
+                  <button data-reorder-ignore="true" onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...dayEditIconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
                 </div>
               );
               if (i < draft.items.length - 1) {
