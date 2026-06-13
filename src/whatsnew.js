@@ -15,6 +15,18 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.212',
+    title: 'Settings Redesign & Training Tools',
+    items: [
+      'Settings reorganised — Coaching, Account, Training, Appearance and Data each open their own screen. Much cleaner to navigate.',
+      'Drag to reorder — cycle days, exercises within a day, and check-in form fields can all be reordered by dragging. Hold briefly on touch, click and drag on desktop. No more tiny arrow buttons.',
+      'Plate inventory — tell the app which plates your gym has under Settings → Training → Plate inventory. The plate calculator only suggests plates you actually own, and it works in kg and lbs.',
+      'Plate calculator — tap the dumbbell icon on the weight keyboard while entering a set weight to see exactly which plates go on the bar.',
+      'Equipment setup — increments and max weights per equipment type now live at Settings → Training → Equipment setup, accessible without enabling Smart Progression.',
+      'Rest timer expired — returning to the Train screen after the rest period already ran out now shows a clear alert instead of silent confusion.',
+    ],
+  },
+  {
     id: 'v2.186',
     title: 'Drag to reorder',
     items: [
