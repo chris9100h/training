@@ -999,7 +999,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
         {draft.map((sec, sIdx) => (
           <div key={sec.id || sIdx} data-reorder-item="true" style={{ marginBottom: 12, background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', padding: '8px 6px 8px 8px', background: UI.bgRaised, borderBottom: `0.5px solid ${UI.hair}` }}>
-              <DragHandle style={{ height: 22, width: 18 }} />
+              <DragHandle style={{ height: 22, width: 18, marginRight: 4 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{sec.label}</span>
                 {sec.sectionHint && <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginLeft: 8 }}>{sec.sectionHint}</span>}
@@ -1018,7 +1018,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
             <ReorderList onReorder={(from, to) => reorderFields(sIdx, from, to)}>
               {(sec.fields || []).map((f, fIdx) => (
                 <div key={f.key || fIdx} data-reorder-item="true" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 8px 6px', borderBottom: `0.5px solid ${UI.hair}` }}>
-                  <DragHandle style={{ height: 22, width: 18 }} />
+                  <DragHandle style={{ height: 22, width: 18, marginRight: 4 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                       {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 11, color: UI.inkGhost, flexShrink: 0 }} />}
