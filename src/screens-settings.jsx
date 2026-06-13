@@ -2,23 +2,9 @@
 
 const { useState: useStateSet, useEffect: useEffectSet, useRef: useRefSet } = React;
 
-// ─── Shared helpers (module-level for stable refs) ────────────────────
+// ─── Shared helpers ────────────────────────────────────────────────────
 
 const fmtSec = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-
-function SecHead({ label, open, onToggle }) {
-  return (
-    <button onClick={onToggle} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <div style={{ width: 2.5, height: 12, borderRadius: 999, flexShrink: 0, background: open ? 'var(--accent)' : UI.hairStrong, transition: 'background 0.18s' }} />
-        <span style={{ fontSize: 11, letterSpacing: '0.13em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 600, color: open ? 'var(--accent)' : UI.inkSoft, transition: 'color 0.18s' }}>{label}</span>
-      </div>
-      <svg width="7" height="11" viewBox="0 0 8 12" fill="none" stroke={open ? 'var(--accent)' : UI.inkFaint} strokeWidth="1.3" strokeLinecap="round" style={{ transition: 'transform 0.18s, stroke 0.18s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', flexShrink: 0 }}>
-        <path d="M2 1l5 5-5 5" />
-      </svg>
-    </button>
-  );
-}
 
 function Toggle({ on, onToggle }) {
   return (
@@ -147,12 +133,14 @@ function DebugPanel({ onClose }) {
 function SettingsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
-  const [appearanceOpen, setAppearanceOpen] = useStateSet(false);
-  const [dataOpen, setDataOpen] = useStateSet(false);
-  const [activeUsersOpen, setActiveUsersOpen] = useStateSet(false);
-  const [accountOpen, setAccountOpen] = useStateSet(false);
-  const [trainingOpen, setTrainingOpen] = useStateSet(false);
-  const [coachingOpen, setCoachingOpen] = useStateSet(false);
+
+  // Category sheets
+  const [coachingSheet, setCoachingSheet] = useStateSet(false);
+  const [accountSheet, setAccountSheet] = useStateSet(false);
+  const [trainingSheet, setTrainingSheet] = useStateSet(false);
+  const [appearanceSheet, setAppearanceSheet] = useStateSet(false);
+  const [dataSheet, setDataSheet] = useStateSet(false);
+  const [activeUsersSheet, setActiveUsersSheet] = useStateSet(false);
 
   // Training sub-sheets
   const [restSheet, setRestSheet] = useStateSet(false);
@@ -213,25 +201,23 @@ function SettingsScreen({ store, setStore, go, userId }) {
     caches.keys().then(keys => { const name = keys.find(k => k.startsWith('zane-')); if (name) setSwVersion(name.replace('zane-', '')); });
   }, []);
 
-  const approveUser = async (userId) => {
-    setApprovingId(userId);
+  const approveUser = async (uid) => {
+    setApprovingId(uid);
     try {
-      // The RPC resolves with { error } rather than throwing — check it, or a
-      // failed approval would still drop the user from the list (false success).
-      const { error } = await LB.supabase.rpc('approve_user', { p_user_id: userId });
+      const { error } = await LB.supabase.rpc('approve_user', { p_user_id: uid });
       if (error) { await confirm(error.message || 'Could not approve this user.', { title: 'Approve failed', ok: 'OK' }); return; }
-      setPendingUsers(u => u.filter(x => x.user_id !== userId));
+      setPendingUsers(u => u.filter(x => x.user_id !== uid));
     } finally {
       setApprovingId(null);
     }
   };
 
-  const declineUser = async (userId) => {
-    setDecliningId(userId);
+  const declineUser = async (uid) => {
+    setDecliningId(uid);
     try {
-      const { error } = await LB.supabase.rpc('decline_user', { p_user_id: userId });
+      const { error } = await LB.supabase.rpc('decline_user', { p_user_id: uid });
       if (error) { await confirm(error.message || 'Could not decline this user.', { title: 'Decline failed', ok: 'OK' }); return; }
-      setPendingUsers(u => u.filter(x => x.user_id !== userId));
+      setPendingUsers(u => u.filter(x => x.user_id !== uid));
     } finally {
       setDecliningId(null);
     }
@@ -270,8 +256,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
     clearTimeout(pushStatusTimer.current);
     setPushStatus(delaySeconds > 0 ? 'Sending… Lock screen now!' : 'Sending…');
     try {
-      // The server derives the target key from the signed-in user's settings —
-      // a freshly typed key needs a moment to sync before the test can reach it.
       const res = await LB.fnFetch(LB.PUSHOVER_URL, { message: 'Rest done — keep going! 💪', title: 'Zane Test', delaySeconds, nonce: String(Date.now()), ttl: 10 });
       if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
       else if (res.status === 202) { setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
@@ -315,10 +299,47 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const currentName = store.user?.name || currentEmail.split('@')[0];
   const otherName = isQsUser ? (LB.getQsName(otherQsEmail) || otherQsEmail.split('@')[0]) : '';
 
-  // Training hints
+  // Coaching derived values
+  const hasCoaching = !!((store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0 || store.coaching?.asClient?.status === 'active');
+  const selfOn = !!store.settings?.beYourOwnCoach;
+  const coachingTabOn = !!(store.settings?.showCoachingTab || hasCoaching || selfOn);
+
+  const toggleTab = () => {
+    const turningOff = coachingTabOn;
+    setStore(s => ({ ...s, settings: { ...s.settings, showCoachingTab: !coachingTabOn, ...(turningOff ? { beYourOwnCoach: false } : {}) } }));
+  };
+  const toggleSelf = async () => {
+    const next = !selfOn;
+    setStore(s => ({ ...s, settings: { ...s.settings, beYourOwnCoach: next } }));
+    if (next) {
+      try {
+        await LB.enableSelfCoaching();
+        const cs = await LB.reloadCoachingState(userId);
+        setStore(s => s ? { ...s, coaching: cs } : s);
+      } catch (e) {
+        setStore(s => ({ ...s, settings: { ...s.settings, beYourOwnCoach: false } }));
+      }
+    } else {
+      const selfId = store.coaching?.asSelf?.id;
+      if (selfId) {
+        try {
+          await LB.endCoaching(selfId);
+          const cs = await LB.reloadCoachingState(userId);
+          setStore(s => s ? { ...s, coaching: cs } : s);
+        } catch (e) {
+          setStore(s => ({ ...s, settings: { ...s.settings, beYourOwnCoach: true } }));
+        }
+      }
+    }
+  };
+
+  // Hints for category nav rows
+  const activeCount = activeSessions.filter(s => !s.is_finished).length;
+  const coachingHint = selfOn ? 'Self-coaching' : coachingTabOn ? 'On' : 'Off';
   const restHint = fmtSec(store.settings?.restDefault ?? 120);
   const paceguardHint = store.settings?.tempoEnabled ? 'On' : 'Off';
   const progressionHint = store.settings?.smartProgression ? 'On' : 'Off';
+  const appearanceHint = window.ACCENT_PALETTE?.[store.settings?.accentColor ?? 'copper']?.label ?? null;
 
   return (
     <Screen>
@@ -333,297 +354,19 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <div className="micro" style={{ marginTop: 4 }}>{store.user?.email || userId}</div>
         </Frame>
 
-        {/* ─── Active users ─── */}
-        {hasActiveUsersAccess && (
-          <Frame style={{ padding: '12px 14px' }}>
-            {(() => {
-              const dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
-              const activeCount = activeSessions.filter(s => !s.is_finished).length;
-              const visibleSessions = activeSessions.filter(s => !s.is_finished || !dismissed.includes(s.session_id));
-              return (
-                <>
-                  <button onClick={() => setActiveUsersOpen(v => !v)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                      <div style={{ width: 2.5, height: 12, borderRadius: 999, flexShrink: 0, background: activeUsersOpen ? 'var(--accent)' : UI.hairStrong, transition: 'background 0.18s' }} />
-                      <span style={{ fontSize: 11, letterSpacing: '0.13em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 600, color: activeUsersOpen ? 'var(--accent)' : UI.inkSoft, transition: 'color 0.18s' }}>Active users</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {activeCount > 0 && <div style={{ background: 'var(--accent)', color: '#0a0805', borderRadius: 999, minWidth: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, fontFamily: UI.fontUi, padding: '0 5px' }}>{activeCount}</div>}
-                      <svg width="7" height="11" viewBox="0 0 8 12" fill="none" stroke={activeUsersOpen ? 'var(--accent)' : UI.inkFaint} strokeWidth="1.3" strokeLinecap="round" style={{ transition: 'transform 0.18s', transform: activeUsersOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}><path d="M2 1l5 5-5 5" /></svg>
-                    </div>
-                  </button>
-                  {activeUsersOpen && (
-                    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column' }}>
-                      {visibleSessions.length === 0
-                        ? <div className="micro" style={{ color: UI.inkFaint, padding: '4px 0' }}>Nobody training right now.</div>
-                        : visibleSessions.map((s, i) => {
-                          const isFinished = s.is_finished;
-                          if (isFinished) {
-                            const finishedMin = s.ended ? Math.round((nowS - new Date(s.ended).getTime()) / 60000) : null;
-                            const finishedStr = finishedMin != null ? (finishedMin < 60 ? `${finishedMin}m ago` : `${Math.round(finishedMin / 60)}h ago`) : 'done';
-                            return (
-                              <div key={s.session_id} onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name, sessionId: s.session_id })}
-                                style={{ display: 'grid', gridTemplateColumns: '12px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                                <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.inkFaint }} />
-                                <span style={{ fontSize: 13, color: UI.inkSoft, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
-                                <span className="display-it" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'center' }}>{s.day_name}</span>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                                  <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{finishedStr}</span>
-                                  <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
-                                </div>
-                              </div>
-                            );
-                          }
-                          const blended = LB.calcBlended(s.started_at, s.avg_duration_seconds, s.avg_sets_total, s.sets_done, s.sets_total, nowS);
-                          const remMin = blended?.remainingMin ?? null; const ratio = blended?.progress ?? null; const finishing = remMin === 0;
-                          return (
-                            <div key={s.session_id || i} onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name })}
-                              style={{ display: 'grid', gridTemplateColumns: '12px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                              <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', animation: 'pulseDot 1.4s ease-in-out infinite' }} />
-                              <span style={{ fontSize: 13, color: UI.ink, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
-                              <span className="display-it" style={{ fontSize: 13, color: UI.inkSoft, textAlign: 'center' }}>{s.day_name}</span>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                                {ratio !== null ? (
-                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
-                                    <span className="num" style={{ fontSize: 11, color: finishing ? 'var(--accent-light)' : 'var(--accent)' }}>{finishing ? 'soon' : `~${remMin}m`}</span>
-                                    <div style={{ width: 40, height: 2, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
-                                      <div style={{ height: '100%', width: `${ratio * 100}%`, background: 'var(--accent)', borderRadius: 999 }} />
-                                    </div>
-                                  </div>
-                                ) : <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{s.sets_done}/{s.sets_total}</span>}
-                                <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
-                              </div>
-                            </div>
-                          );
-                        })
-                      }
-                      {isAdmin && (
-                        <div style={{ marginTop: 12, paddingTop: 12, borderTop: `0.5px solid ${UI.hair}` }}>
-                          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ACCESS</div>
-                          {activeGrants.length === 0 && <div className="micro" style={{ color: UI.inkGhost, marginBottom: 8 }}>No other users have access yet.</div>}
-                          {activeGrants.map(email => (
-                            <div key={email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
-                              <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi }}>{email}</span>
-                              <button onClick={() => removeGrant(email)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.danger, fontSize: 18, lineHeight: 1, padding: '0 2px' }}>×</button>
-                            </div>
-                          ))}
-                          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                            <input value={newGrantEmail} onChange={e => setNewGrantEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && addGrant()} placeholder="email@example.com"
-                              style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }} />
-                            <button onClick={addGrant} disabled={!newGrantEmail.includes('@')} style={{ padding: '7px 14px', borderRadius: 4, border: 'none', cursor: 'pointer', background: newGrantEmail.includes('@') ? UI.gold : UI.bgInset, color: newGrantEmail.includes('@') ? '#0a0805' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>Add</button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-          </Frame>
-        )}
-
-        {/* ─── Coaching ─── */}
-        {(() => {
-          const hasCoaching = !!((store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0 || store.coaching?.asClient?.status === 'active');
-          const selfOn = !!store.settings?.beYourOwnCoach;
-          // Self implies the tab is pinned — keep the toggle (and the self toggle below) in sync even if show_coaching_tab drifted out of sync across devices.
-          const coachingTabOn = !!(store.settings?.showCoachingTab || hasCoaching || selfOn);
-
-          // Tab off ⇒ self off (coupled). Turning the tab off also disables self-coaching.
-          const toggleTab = () => {
-            const turningOff = coachingTabOn;
-            setStore(s => ({ ...s, settings: { ...s.settings, showCoachingTab: !coachingTabOn, ...(turningOff ? { beYourOwnCoach: false } : {}) } }));
-          };
-
-          // Be your own coach: create the self-coaching row on first enable, then
-          // refresh coaching state so the "Myself" view appears in the coaching tab.
-          const toggleSelf = async () => {
-            const next = !selfOn;
-            setStore(s => ({ ...s, settings: { ...s.settings, beYourOwnCoach: next } }));
-            if (next) {
-              try {
-                await LB.enableSelfCoaching();
-                const cs = await LB.reloadCoachingState(userId);
-                setStore(s => s ? { ...s, coaching: cs } : s);
-              } catch (e) {
-                setStore(s => ({ ...s, settings: { ...s.settings, beYourOwnCoach: false } }));
-              }
-            } else {
-              const selfId = store.coaching?.asSelf?.id;
-              if (selfId) {
-                try {
-                  await LB.endCoaching(selfId);
-                  const cs = await LB.reloadCoachingState(userId);
-                  setStore(s => s ? { ...s, coaching: cs } : s);
-                } catch (e) {
-                  setStore(s => ({ ...s, settings: { ...s.settings, beYourOwnCoach: true } }));
-                }
-              }
-            }
-          };
-
-          return (
-            <Frame style={{ padding: '12px 14px' }}>
-              <SecHead label="Coaching" open={coachingOpen} onToggle={() => setCoachingOpen(v => !v)} />
-              {coachingOpen && (
-                <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 0 }}>
-                  <Row label="Coaching tab">
-                    <Toggle on={coachingTabOn} onToggle={toggleTab} />
-                  </Row>
-                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-                    Pin the coaching tab to the nav bar. Shows automatically when a coaching relationship is active.
-                  </div>
-                  {coachingTabOn && (
-                    <>
-                      <Row label="Be your own coach">
-                        <Toggle on={selfOn} onToggle={toggleSelf} />
-                      </Row>
-                      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-                        Track your own training like a coach would — stats, nutrition, check-ins & notes, just for you.
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-            </Frame>
-          );
-        })()}
-
-        {/* ─── Account ─── */}
-        <Frame style={{ padding: '12px 14px' }}>
-          <SecHead label="Account" open={accountOpen} onToggle={() => setAccountOpen(v => !v)} />
-          {accountOpen && (
-            <div style={{ marginTop: 14 }}>
-              {isQsUser && (
-                <>
-                  <div className="micro" style={{ marginBottom: 10 }}>Quick switch</div>
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-                    <div style={{ flex: 1, background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.10), rgba(var(--accent-rgb),0.03))`, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 6, padding: '10px 12px' }}>
-                      <div className="micro-gold" style={{ marginBottom: 4 }}>Active</div>
-                      <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: UI.ink, lineHeight: 1.1 }}>{currentName}</div>
-                    </div>
-                    <button disabled={qsSwitching} onClick={async () => {
-                      if (hasQsSession) { setQsSwitching(true); try { await LB.quickSwitch(otherQsEmail); window.location.reload(); } catch (e) { setQsSwitching(false); } }
-                      else { const ok = await confirm(`You'll be signed out so ${otherName} can log in.`, { title: 'Set up quick switch?', ok: 'Sign out' }); if (ok) await LB.signOut(); }
-                    }} style={{ flex: 1, background: 'transparent', border: `0.5px solid ${hasQsSession ? UI.hair : UI.hairStrong}`, borderRadius: 6, padding: '10px 12px', textAlign: 'left', cursor: qsSwitching ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent', opacity: qsSwitching ? 0.5 : 1 }}>
-                      <div className="micro" style={{ marginBottom: 4, color: hasQsSession ? UI.inkFaint : 'rgba(var(--danger-rgb),0.7)' }}>{qsSwitching ? 'Switching…' : hasQsSession ? 'Tap to switch' : 'Log in first'}</div>
-                      <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: hasQsSession ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1 }}>{otherName}</div>
-                    </button>
-                  </div>
-                  <Hairline style={{ marginBottom: 14 }} />
-                </>
-              )}
-
-              <div className="micro" style={{ marginBottom: 10 }}>Push notifications</div>
-              <Row label="Enabled" first>
-                <Toggle on={pushEnabled} onToggle={togglePush} />
-              </Row>
-              {store.settings?.pushoverUserKey && (
-                <Row label="User key">
-                  <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={accentBtn}>Change</button>
-                </Row>
-              )}
-              {pushEnabled && (
-                <Row label="Test notification">
-                  <button onClick={() => setTestPickerOpen(true)} style={accentBtn}>Send</button>
-                </Row>
-              )}
-              {pushStatus && <div className="micro" style={{ color: pushStatus.startsWith('✓') ? 'var(--accent)' : UI.inkSoft, textAlign: 'center', padding: '6px 0' }}>{pushStatus}</div>}
-
-              <Hairline style={{ margin: '14px 0' }} />
-
-              <div className="micro" style={{ marginBottom: 10 }}>Training reminder</div>
-              <Row label="Remind on training days" first>
-                <Toggle on={reminderEnabled} onToggle={toggleReminder} />
-              </Row>
-              {reminderEnabled && (
-                <>
-                  <Row label="Notify at">
-                    <input type="time" value={reminderTime} onChange={e => updateReminderTime(e.target.value)}
-                      style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: 'dark' }} />
-                  </Row>
-                  {store.nextReminderAt && (() => {
-                    const dt = new Date(store.nextReminderAt);
-                    const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
-                    const tomorrowMid = new Date(todayMid); tomorrowMid.setDate(todayMid.getDate() + 1);
-                    const remMid = new Date(dt); remMid.setHours(0, 0, 0, 0);
-                    const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-                    const dateStr = remMid.getTime() === todayMid.getTime() ? 'Today' : remMid.getTime() === tomorrowMid.getTime() ? 'Tomorrow' : dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-                    return <div className="micro" style={{ color: UI.inkFaint, textAlign: 'right', paddingTop: 6 }}>Next · {dateStr} · {timeStr}</div>;
-                  })()}
-                </>
-              )}
-            </div>
+        {/* ─── Category navigation ─── */}
+        <Frame style={{ padding: '0 14px' }}>
+          {hasActiveUsersAccess && (
+            <NavRow label="Active users" hint={activeCount > 0 ? `${activeCount} active` : null} onTap={() => setActiveUsersSheet(true)} first />
           )}
+          <NavRow label="Coaching" hint={coachingHint} onTap={() => setCoachingSheet(true)} first={!hasActiveUsersAccess} />
+          <NavRow label="Account" onTap={() => setAccountSheet(true)} />
+          <NavRow label="Training" hint={restHint} onTap={() => setTrainingSheet(true)} />
+          <NavRow label="Appearance" hint={appearanceHint} onTap={() => setAppearanceSheet(true)} />
+          <NavRow label="Data" onTap={() => setDataSheet(true)} />
         </Frame>
 
-        {/* ─── Training ─── */}
-        <Frame style={{ padding: '12px 14px' }}>
-          <SecHead label="Training" open={trainingOpen} onToggle={() => setTrainingOpen(v => !v)} />
-          {trainingOpen && (
-            <div style={{ marginTop: 4 }}>
-              <NavRow label="Rest timers" hint={restHint} onTap={() => setRestSheet(true)} first />
-              <NavRow label="Auto-end session" hint={`${store.settings?.sessionTimeoutMinutes ?? 90} min`} onTap={() => setTimeoutSheet(true)} />
-              <NavRow label="Paceguard" hint={paceguardHint} onTap={() => setPaceguardSheet(true)} />
-              <NavRow label="Smart progression" hint={progressionHint} onTap={() => setProgressionSheet(true)} />
-              <NavRow label="Equipment setup" hint="Increments & max weights" onTap={() => setProgConfigOpen(true)} />
-              <NavRow label="Plate inventory" hint={(() => { const isLbs = UI.unit() === 'lbs'; const allP = isLbs ? PLATES_LBS : PLATES_KG; const cur = store.settings?.equipmentConfig?.[isLbs ? 'plateInventoryLbs' : 'plateInventoryKg'] ?? allP; return cur.length === allP.length ? `All ${allP.length} ${UI.unit()}` : `${cur.length} of ${allP.length} ${UI.unit()}`; })()} onTap={() => setPlateInventoryOpen(true)} />
-              <Row label="Warmup sets in summary">
-                <Toggle on={showWarmupInSummary} onToggle={() => { const n = !showWarmupInSummary; setShowWarmupInSummary(n); setStore(s => ({ ...s, settings: { ...s.settings, showWarmupInSummary: n } })); }} />
-              </Row>
-              <Row label="Use lbs (pounds)">
-                <Toggle on={store.settings?.unit === 'lbs'} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, unit: s.settings?.unit === 'lbs' ? 'kg' : 'lbs' } }))} />
-              </Row>
-              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-                Show weights in lbs instead of kg. Display label only — enter values directly in lbs (no conversion of existing numbers).
-              </div>
-            </div>
-          )}
-        </Frame>
-
-        {/* ─── Appearance ─── */}
-        <Frame style={{ padding: '12px 14px' }}>
-          <SecHead label="Appearance" open={appearanceOpen} onToggle={() => setAppearanceOpen(v => !v)} />
-          {appearanceOpen && (
-            <div style={{ marginTop: 14 }}>
-              <div className="micro" style={{ marginBottom: 10 }}>Accent color</div>
-              <div style={{ display: 'flex', gap: 10, marginBottom: 14, alignItems: 'flex-end' }}>
-                {Object.entries(window.ACCENT_PALETTE).map(([key, c]) => {
-                  const active = (store.settings?.accentColor ?? 'copper') === key;
-                  return (
-                    <button key={key} onClick={() => { window.applyAccentColor(key); localStorage.setItem('logbook-accent-color', key); setStore(s => ({ ...s, settings: { ...s.settings, accentColor: key } })); }}
-                      title={c.label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
-                      <div style={{ width: active ? 32 : 26, height: active ? 32 : 26, borderRadius: '50%', background: c.hex, border: active ? `2.5px solid ${UI.ink}` : '2px solid transparent', boxShadow: active ? `0 0 0 1.5px ${c.hex}` : 'none', transition: 'all 0.18s' }} />
-                      {active && <span style={{ fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 600, color: 'var(--accent)' }}>{c.label}</span>}
-                    </button>
-                  );
-                })}
-              </div>
-              <Row label="Week view in cycle mode" first>
-                <Toggle on={cycleWeekView} onToggle={() => { const n = !cycleWeekView; setCycleWeekView(n); localStorage.setItem('logbook-cycle-week-view', String(n)); setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: n } })); }} />
-              </Row>
-              <Row label="OLED black background">
-                <Toggle on={darkMode === 'black'} onToggle={() => { const n = darkMode === 'black' ? 'dark' : 'black'; setDarkMode(n); localStorage.setItem('logbook-dark-mode', n); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: n } })); }} />
-              </Row>
-            </div>
-          )}
-        </Frame>
-
-        {/* ─── Data ─── */}
-        <Frame style={{ padding: '12px 14px' }}>
-          <SecHead label="Data" open={dataOpen} onToggle={() => setDataOpen(v => !v)} />
-          {dataOpen && (
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
-                <Btn kind="ghost" onClick={importData} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
-              </div>
-              <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Delete all data</Btn>
-            </div>
-          )}
-        </Frame>
-
-        {/* ─── Admin ─── */}
+        {/* ─── Admin: pending registrations ─── */}
         {isAdmin && pendingUsers.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
             <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>Pending registrations</div>
@@ -674,6 +417,228 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
       {confirmEl}
       {debugPanelOpen && <DebugPanel onClose={() => setDebugPanelOpen(false)} />}
+
+      {/* ══ Active Users Sheet ══ */}
+      <Sheet open={activeUsersSheet} onClose={() => setActiveUsersSheet(false)} title="Active users">
+        {(() => {
+          const dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
+          const visibleSessions = activeSessions.filter(s => !s.is_finished || !dismissed.includes(s.session_id));
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {visibleSessions.length === 0
+                ? <div className="micro" style={{ color: UI.inkFaint, padding: '4px 0' }}>Nobody training right now.</div>
+                : visibleSessions.map((s, i) => {
+                  const isFinished = s.is_finished;
+                  if (isFinished) {
+                    const finishedMin = s.ended ? Math.round((nowS - new Date(s.ended).getTime()) / 60000) : null;
+                    const finishedStr = finishedMin != null ? (finishedMin < 60 ? `${finishedMin}m ago` : `${Math.round(finishedMin / 60)}h ago`) : 'done';
+                    return (
+                      <div key={s.session_id} onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name, sessionId: s.session_id })}
+                        style={{ display: 'grid', gridTemplateColumns: '12px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                        <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.inkFaint }} />
+                        <span style={{ fontSize: 13, color: UI.inkSoft, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
+                        <span className="display-it" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'center' }}>{s.day_name}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                          <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{finishedStr}</span>
+                          <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
+                        </div>
+                      </div>
+                    );
+                  }
+                  const blended = LB.calcBlended(s.started_at, s.avg_duration_seconds, s.avg_sets_total, s.sets_done, s.sets_total, nowS);
+                  const remMin = blended?.remainingMin ?? null; const ratio = blended?.progress ?? null; const finishing = remMin === 0;
+                  return (
+                    <div key={s.session_id || i} onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name })}
+                      style={{ display: 'grid', gridTemplateColumns: '12px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                      <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', animation: 'pulseDot 1.4s ease-in-out infinite' }} />
+                      <span style={{ fontSize: 13, color: UI.ink, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
+                      <span className="display-it" style={{ fontSize: 13, color: UI.inkSoft, textAlign: 'center' }}>{s.day_name}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                        {ratio !== null ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+                            <span className="num" style={{ fontSize: 11, color: finishing ? 'var(--accent-light)' : 'var(--accent)' }}>{finishing ? 'soon' : `~${remMin}m`}</span>
+                            <div style={{ width: 40, height: 2, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${ratio * 100}%`, background: 'var(--accent)', borderRadius: 999 }} />
+                            </div>
+                          </div>
+                        ) : <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{s.sets_done}/{s.sets_total}</span>}
+                        <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.2" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
+                      </div>
+                    </div>
+                  );
+                })
+              }
+              {isAdmin && (
+                <div style={{ marginTop: 16, paddingTop: 16, borderTop: `0.5px solid ${UI.hair}` }}>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ACCESS</div>
+                  {activeGrants.length === 0 && <div className="micro" style={{ color: UI.inkGhost, marginBottom: 8 }}>No other users have access yet.</div>}
+                  {activeGrants.map(email => (
+                    <div key={email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+                      <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi }}>{email}</span>
+                      <button onClick={() => removeGrant(email)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.danger, fontSize: 18, lineHeight: 1, padding: '0 2px' }}>×</button>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <input value={newGrantEmail} onChange={e => setNewGrantEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && addGrant()} placeholder="email@example.com"
+                      style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }} />
+                    <button onClick={addGrant} disabled={!newGrantEmail.includes('@')} style={{ padding: '7px 14px', borderRadius: 4, border: 'none', cursor: 'pointer', background: newGrantEmail.includes('@') ? UI.gold : UI.bgInset, color: newGrantEmail.includes('@') ? '#0a0805' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>Add</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </Sheet>
+
+      {/* ══ Coaching Sheet ══ */}
+      <Sheet open={coachingSheet} onClose={() => setCoachingSheet(false)} title="Coaching">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <Row label="Coaching tab" first>
+            <Toggle on={coachingTabOn} onToggle={toggleTab} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Pin the coaching tab to the nav bar. Shows automatically when a coaching relationship is active.
+          </div>
+          {coachingTabOn && (
+            <>
+              <Row label="Be your own coach">
+                <Toggle on={selfOn} onToggle={toggleSelf} />
+              </Row>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+                Track your own training like a coach would — stats, nutrition, check-ins & notes, just for you.
+              </div>
+            </>
+          )}
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setCoachingSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </Sheet>
+
+      {/* ══ Account Sheet ══ */}
+      <Sheet open={accountSheet} onClose={() => setAccountSheet(false)} title="Account">
+        <div>
+          {isQsUser && (
+            <>
+              <div className="micro" style={{ marginBottom: 10 }}>Quick switch</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                <div style={{ flex: 1, background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.10), rgba(var(--accent-rgb),0.03))`, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 6, padding: '10px 12px' }}>
+                  <div className="micro-gold" style={{ marginBottom: 4 }}>Active</div>
+                  <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: UI.ink, lineHeight: 1.1 }}>{currentName}</div>
+                </div>
+                <button disabled={qsSwitching} onClick={async () => {
+                  if (hasQsSession) { setQsSwitching(true); try { await LB.quickSwitch(otherQsEmail); window.location.reload(); } catch (e) { setQsSwitching(false); } }
+                  else { const ok = await confirm(`You'll be signed out so ${otherName} can log in.`, { title: 'Set up quick switch?', ok: 'Sign out' }); if (ok) await LB.signOut(); }
+                }} style={{ flex: 1, background: 'transparent', border: `0.5px solid ${hasQsSession ? UI.hair : UI.hairStrong}`, borderRadius: 6, padding: '10px 12px', textAlign: 'left', cursor: qsSwitching ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent', opacity: qsSwitching ? 0.5 : 1 }}>
+                  <div className="micro" style={{ marginBottom: 4, color: hasQsSession ? UI.inkFaint : 'rgba(var(--danger-rgb),0.7)' }}>{qsSwitching ? 'Switching…' : hasQsSession ? 'Tap to switch' : 'Log in first'}</div>
+                  <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: hasQsSession ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1 }}>{otherName}</div>
+                </button>
+              </div>
+              <Hairline style={{ marginBottom: 14 }} />
+            </>
+          )}
+          <div className="micro" style={{ marginBottom: 10 }}>Push notifications</div>
+          <Row label="Enabled" first>
+            <Toggle on={pushEnabled} onToggle={togglePush} />
+          </Row>
+          {store.settings?.pushoverUserKey && (
+            <Row label="User key">
+              <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={accentBtn}>Change</button>
+            </Row>
+          )}
+          {pushEnabled && (
+            <Row label="Test notification">
+              <button onClick={() => setTestPickerOpen(true)} style={accentBtn}>Send</button>
+            </Row>
+          )}
+          {pushStatus && <div className="micro" style={{ color: pushStatus.startsWith('✓') ? 'var(--accent)' : UI.inkSoft, textAlign: 'center', padding: '6px 0' }}>{pushStatus}</div>}
+          <Hairline style={{ margin: '14px 0' }} />
+          <div className="micro" style={{ marginBottom: 10 }}>Training reminder</div>
+          <Row label="Remind on training days" first>
+            <Toggle on={reminderEnabled} onToggle={toggleReminder} />
+          </Row>
+          {reminderEnabled && (
+            <>
+              <Row label="Notify at">
+                <input type="time" value={reminderTime} onChange={e => updateReminderTime(e.target.value)}
+                  style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: 'dark' }} />
+              </Row>
+              {store.nextReminderAt && (() => {
+                const dt = new Date(store.nextReminderAt);
+                const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
+                const tomorrowMid = new Date(todayMid); tomorrowMid.setDate(todayMid.getDate() + 1);
+                const remMid = new Date(dt); remMid.setHours(0, 0, 0, 0);
+                const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                const dateStr = remMid.getTime() === todayMid.getTime() ? 'Today' : remMid.getTime() === tomorrowMid.getTime() ? 'Tomorrow' : dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+                return <div className="micro" style={{ color: UI.inkFaint, textAlign: 'right', paddingTop: 6 }}>Next · {dateStr} · {timeStr}</div>;
+              })()}
+            </>
+          )}
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setAccountSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </Sheet>
+
+      {/* ══ Training Sheet ══ */}
+      <Sheet open={trainingSheet} onClose={() => setTrainingSheet(false)} title="Training">
+        <div style={{ paddingTop: 4 }}>
+          <NavRow label="Rest timers" hint={restHint} onTap={() => setRestSheet(true)} first />
+          <NavRow label="Auto-end session" hint={`${store.settings?.sessionTimeoutMinutes ?? 90} min`} onTap={() => setTimeoutSheet(true)} />
+          <NavRow label="Paceguard" hint={paceguardHint} onTap={() => setPaceguardSheet(true)} />
+          <NavRow label="Smart progression" hint={progressionHint} onTap={() => setProgressionSheet(true)} />
+          <NavRow label="Equipment setup" hint="Increments & max weights" onTap={() => setProgConfigOpen(true)} />
+          <NavRow label="Plate inventory" hint={(() => { const isLbs = UI.unit() === 'lbs'; const allP = isLbs ? PLATES_LBS : PLATES_KG; const cur = store.settings?.equipmentConfig?.[isLbs ? 'plateInventoryLbs' : 'plateInventoryKg'] ?? allP; return cur.length === allP.length ? `All ${allP.length} ${UI.unit()}` : `${cur.length} of ${allP.length} ${UI.unit()}`; })()} onTap={() => setPlateInventoryOpen(true)} />
+          <Row label="Warmup sets in summary">
+            <Toggle on={showWarmupInSummary} onToggle={() => { const n = !showWarmupInSummary; setShowWarmupInSummary(n); setStore(s => ({ ...s, settings: { ...s.settings, showWarmupInSummary: n } })); }} />
+          </Row>
+          <Row label="Use lbs (pounds)">
+            <Toggle on={store.settings?.unit === 'lbs'} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, unit: s.settings?.unit === 'lbs' ? 'kg' : 'lbs' } }))} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Show weights in lbs instead of kg. Display label only — enter values directly in lbs (no conversion of existing numbers).
+          </div>
+        </div>
+      </Sheet>
+
+      {/* ══ Appearance Sheet ══ */}
+      <Sheet open={appearanceSheet} onClose={() => setAppearanceSheet(false)} title="Appearance">
+        <div>
+          <div className="micro" style={{ marginBottom: 10 }}>Accent color</div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 14, alignItems: 'flex-end' }}>
+            {Object.entries(window.ACCENT_PALETTE).map(([key, c]) => {
+              const active = (store.settings?.accentColor ?? 'copper') === key;
+              return (
+                <button key={key} onClick={() => { window.applyAccentColor(key); localStorage.setItem('logbook-accent-color', key); setStore(s => ({ ...s, settings: { ...s.settings, accentColor: key } })); }}
+                  title={c.label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
+                  <div style={{ width: active ? 32 : 26, height: active ? 32 : 26, borderRadius: '50%', background: c.hex, border: active ? `2.5px solid ${UI.ink}` : '2px solid transparent', boxShadow: active ? `0 0 0 1.5px ${c.hex}` : 'none', transition: 'all 0.18s' }} />
+                  {active && <span style={{ fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 600, color: 'var(--accent)' }}>{c.label}</span>}
+                </button>
+              );
+            })}
+          </div>
+          <Row label="Week view in cycle mode" first>
+            <Toggle on={cycleWeekView} onToggle={() => { const n = !cycleWeekView; setCycleWeekView(n); localStorage.setItem('logbook-cycle-week-view', String(n)); setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: n } })); }} />
+          </Row>
+          <Row label="OLED black background">
+            <Toggle on={darkMode === 'black'} onToggle={() => { const n = darkMode === 'black' ? 'dark' : 'black'; setDarkMode(n); localStorage.setItem('logbook-dark-mode', n); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: n } })); }} />
+          </Row>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setAppearanceSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </Sheet>
+
+      {/* ══ Data Sheet ══ */}
+      <Sheet open={dataSheet} onClose={() => setDataSheet(false)} title="Data">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
+            <Btn kind="ghost" onClick={importData} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
+          </div>
+          <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Delete all data</Btn>
+        </div>
+      </Sheet>
 
       {/* ══ Auto-end session sheet ══ */}
       <Sheet open={timeoutSheet} onClose={() => setTimeoutSheet(false)} title="Auto-end session">
