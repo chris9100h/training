@@ -824,12 +824,8 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
   const renderRow = (row, key) => {
     if (row.length === 1) {
       const f = row[0];
-      if (f.type === 'stepper' || (f.type === 'choice' && !f.labeled)) {
-        return <div key={f.key} style={{ marginBottom: 14 }}><FieldWidget field={f} value={form[f.key]} onChange={v => set(f.key, v)} distUnit={distUnit} setDistUnit={setDistUnit} inputStyle={inputStyle} /></div>;
-      }
-      if (f.type === 'choice' && f.labeled) {
-        return <FieldWidget key={f.key} field={f} value={form[f.key]} onChange={v => set(f.key, v)} distUnit={distUnit} setDistUnit={setDistUnit} inputStyle={inputStyle} />;
-      }
+      // Every single-field row gets the same bottom margin — the labeled
+      // choice (e.g. pace feeling) used to skip it and stuck to the next field.
       return <div key={f.key} style={{ marginBottom: 14 }}><FieldWidget field={f} value={form[f.key]} onChange={v => set(f.key, v)} distUnit={distUnit} setDistUnit={setDistUnit} inputStyle={inputStyle} /></div>;
     }
     return (

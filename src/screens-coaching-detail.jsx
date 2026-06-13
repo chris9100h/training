@@ -516,12 +516,8 @@ function CheckInFormPreview({ schema }) {
       );
     }
     const f = row[0];
-    if (f.type === 'stepper' || (f.type === 'choice' && !f.labeled)) {
-      return <div key={key} style={{ marginBottom: 14 }}><FieldWidget field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} /></div>;
-    }
-    if (f.type === 'choice' && f.labeled) {
-      return <FieldWidget key={key} field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} />;
-    }
+    // Match the client form: every single-field row carries the same bottom
+    // margin so the labeled choice (pace feeling) no longer sticks to the next.
     return <div key={key} style={{ marginBottom: 14 }}><FieldWidget field={f} value={null} onChange={() => {}} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} /></div>;
   };
   return (
