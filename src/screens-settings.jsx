@@ -169,6 +169,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [pushKeyDraft, setPushKeyDraft] = useStateSet('');
   const [pushKeyModalOpen, setPushKeyModalOpen] = useStateSet(false);
   const [testPickerOpen, setTestPickerOpen] = useStateSet(false);
+  const [reminderSheet, setReminderSheet] = useStateSet(false);
   const [reminderEnabled, setReminderEnabled] = useStateSet(() => store.settings?.reminderEnabled ?? false);
   const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
@@ -549,25 +550,11 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <Hairline style={{ margin: '14px 0' }} />
           <div className="micro" style={{ marginBottom: 10 }}>Training reminder</div>
           <Row label="Remind on training days" first>
-            <Toggle on={reminderEnabled} onToggle={toggleReminder} />
+            {reminderEnabled
+              ? <button style={accentBtn} onClick={() => setReminderSheet(true)}>{store.settings?.reminderTime || 'Change'}</button>
+              : <Toggle on={false} onToggle={toggleReminder} />
+            }
           </Row>
-          {reminderEnabled && (
-            <>
-              <Row label="Notify at">
-                <input type="time" value={reminderTime} onChange={e => updateReminderTime(e.target.value)}
-                  style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: 'dark' }} />
-              </Row>
-              {store.nextReminderAt && (() => {
-                const dt = new Date(store.nextReminderAt);
-                const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
-                const tomorrowMid = new Date(todayMid); tomorrowMid.setDate(todayMid.getDate() + 1);
-                const remMid = new Date(dt); remMid.setHours(0, 0, 0, 0);
-                const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-                const dateStr = remMid.getTime() === todayMid.getTime() ? 'Today' : remMid.getTime() === tomorrowMid.getTime() ? 'Tomorrow' : dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-                return <div className="micro" style={{ color: UI.inkFaint, textAlign: 'right', paddingTop: 6 }}>Next · {dateStr} · {timeStr}</div>;
-              })()}
-            </>
-          )}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setAccountSheet(false)}>Done</Btn>
           </div>
@@ -845,6 +832,31 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>Always train past that number. Push to failure or near-failure on each set. The algo only bumps weight when <em>all</em> sets hit the top of the range — so getting extra reps is how you earn the next weight.</div>
         </div>
         <Btn onClick={() => setProgDisclaimer(false)}>Got it</Btn>
+      </Sheet>
+
+      {/* ══ Reminder sheet ══ */}
+      <Sheet open={reminderSheet} onClose={() => setReminderSheet(false)} title="Training reminder">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+          <Row label="Enabled" first>
+            <Toggle on={reminderEnabled} onToggle={() => { toggleReminder(); if (reminderEnabled) setReminderSheet(false); }} />
+          </Row>
+          {reminderEnabled && (
+            <Row label="Notify at">
+              <input type="time" value={reminderTime} onChange={e => updateReminderTime(e.target.value)}
+                style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: 'dark' }} />
+            </Row>
+          )}
+          {reminderEnabled && store.nextReminderAt && (() => {
+            const dt = new Date(store.nextReminderAt);
+            const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
+            const tomorrowMid = new Date(todayMid); tomorrowMid.setDate(todayMid.getDate() + 1);
+            const remMid = new Date(dt); remMid.setHours(0, 0, 0, 0);
+            const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+            const dateStr = remMid.getTime() === todayMid.getTime() ? 'Today' : remMid.getTime() === tomorrowMid.getTime() ? 'Tomorrow' : dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+            return <div className="micro" style={{ color: UI.inkFaint, textAlign: 'right', paddingTop: 6 }}>Next · {dateStr} · {timeStr}</div>;
+          })()}
+          <Btn onClick={() => setReminderSheet(false)}>Done</Btn>
+        </div>
       </Sheet>
 
       {/* ══ Test picker sheet ══ */}
