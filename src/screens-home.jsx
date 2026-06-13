@@ -415,6 +415,7 @@ function RecentBannerDay({ banner, store, setStore, go, sch, userId, onOpenSkipS
 // ─── CARDIO QUICK-LOG ─────────────────────────────────────────────────
 
 const CARDIO_DIST_KEY = 'logbook-cardio-dist-unit'; // 'km' | 'mi'
+const CARDIO_LIVE_KEY = 'logbook-cardio-live-start'; // epoch ms of a running live cardio, else absent
 const MI_TO_M = 1609.344;
 
 function distToM(val, unit) {
@@ -487,7 +488,7 @@ function CardioPROverlay({ pr, onDone }) {
   );
 }
 
-function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, onPR }) {
+function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, prefillDuration, onPR }) {
   const getDistUnit = () => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } };
   const [distUnit, setDistUnitState] = useState(getDistUnit);
   const setDistUnit = (u) => { try { localStorage.setItem(CARDIO_DIST_KEY, u); } catch (_) {} setDistUnitState(u); };
@@ -511,9 +512,13 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
         note: editLog.note || '',
       });
     } else {
-      setForm(empty());
+      // Coming out of a live session pre-fills the timed duration; everything
+      // else is still up to the user to fill in.
+      const base = empty();
+      if (prefillDuration != null) base.duration = String(prefillDuration);
+      setForm(base);
     }
-  }, [open, editLog?.id]);
+  }, [open, editLog?.id, prefillDuration]);
 
   // Unique types from history, most-recently-used first
   const typeChips = useMemo(() => {
@@ -680,6 +685,51 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
   );
 }
 
+// ─── LIVE CARDIO ──────────────────────────────────────────────────────
+
+function fmtCardioClock(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const ss = String(sec % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
+// Live cardio stopwatch. The start time lives in localStorage so the count
+// survives a phone lock, a reload, or navigating away — elapsed is always
+// derived from (now − start), never an incrementing counter.
+function CardioLiveSheet({ open, onFinish, onCancel }) {
+  const [now, setNow] = useState(Date.now());
+  const startRef = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    let start;
+    try { start = Number(localStorage.getItem(CARDIO_LIVE_KEY)); } catch (_) { start = 0; }
+    if (!start) { start = Date.now(); try { localStorage.setItem(CARDIO_LIVE_KEY, String(start)); } catch (_) {} }
+    startRef.current = start;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [open]);
+
+  if (!open) return null;
+  const elapsedSec = Math.max(0, Math.floor((now - (startRef.current || now)) / 1000));
+  const clearStart = () => { try { localStorage.removeItem(CARDIO_LIVE_KEY); } catch (_) {} };
+  const finish = () => { clearStart(); onFinish(Math.max(1, Math.round(elapsedSec / 60))); };
+  const cancel = () => { clearStart(); onCancel(); };
+
+  return (
+    <Sheet open={open} onClose={() => {}} title="LIVE CARDIO" titleColor="var(--accent)">
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '8px 0 28px' }}>
+        <i className="fa-solid fa-person-running" style={{ fontSize: 22, color: UI.inkFaint }} />
+        <div className="num" style={{ fontSize: 56, color: 'var(--accent)', lineHeight: 1.1, fontVariantNumeric: 'tabular-nums' }}>{fmtCardioClock(elapsedSec)}</div>
+        <div className="micro" style={{ color: UI.inkFaint }}>Recording…</div>
+      </div>
+      <Btn onClick={finish} style={{ width: '100%', marginBottom: 8 }}>Finish &amp; log</Btn>
+      <Btn kind="ghost" onClick={cancel} style={{ width: '100%', color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Cancel</Btn>
+    </Sheet>
+  );
+}
+
 // ─── HOME ─────────────────────────────────────────────────────────────
 function HomeScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
@@ -727,6 +777,11 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [cardioPopoverOpen, setCardioPopoverOpen] = useState(false);
   const [editingCardioLog, setEditingCardioLog] = useState(null);
   const [cardioPR, setCardioPR] = useState(null);
+  // Resume a live cardio that was running before a reload / app restart.
+  const [cardioLiveOpen, setCardioLiveOpen] = useState(() => {
+    try { return !!localStorage.getItem(CARDIO_LIVE_KEY); } catch (_) { return false; }
+  });
+  const [cardioPrefillDuration, setCardioPrefillDuration] = useState(null);
   const isPad = useIsPad();
   // The not-logged Log handler awaits a seed fetch — guard against a double
   // tap creating two sessions inside that window.
@@ -1650,14 +1705,23 @@ function HomeScreen({ store, setStore, go, userId }) {
                 ))}
               </div>
             )}
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <Btn onClick={() => { setCardioPopoverOpen(false); setCardioLogOpen(true); }} style={{ minWidth: 200 }}>+ LOG CARDIO</Btn>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <Btn onClick={() => { setCardioPopoverOpen(false); setCardioLiveOpen(true); }} style={{ width: '100%' }}>
+                <i className="fa-solid fa-stopwatch" style={{ marginRight: 8, fontSize: 12 }} />Start live
+              </Btn>
+              <Btn kind="ghost" onClick={() => { setCardioPopoverOpen(false); setCardioPrefillDuration(null); setCardioLogOpen(true); }} style={{ width: '100%' }}>Log manually</Btn>
             </div>
           </Sheet>
         );
       })()}
 
-      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} onPR={setCardioPR} />
+      <CardioLiveSheet
+        open={cardioLiveOpen}
+        onFinish={(min) => { setCardioLiveOpen(false); setEditingCardioLog(null); setCardioPrefillDuration(min); setCardioLogOpen(true); }}
+        onCancel={() => setCardioLiveOpen(false)}
+      />
+
+      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); setCardioPrefillDuration(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} prefillDuration={cardioPrefillDuration} onPR={setCardioPR} />
       <CardioPROverlay pr={cardioPR} onDone={() => setCardioPR(null)} />
 
       {/* Coach message banner */}
