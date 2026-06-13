@@ -306,6 +306,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
 function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, checkinNew, onRequestCheckin, go }) {
   const isPending = client.status === 'pending';
   const [requested, setRequested] = useStateC(false);
+  const [checkinDismissed, setCheckinDismissed] = useStateC(false);
 
   const handleCardClick = () => {
     if (isPending) return;
@@ -320,7 +321,15 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
     setTimeout(() => setRequested(false), 4000);
   };
 
-  const borderColor = inProgress ? 'rgba(var(--accent-rgb),0.4)' : (checkinNew || checkinDue) ? 'rgba(var(--accent-rgb),0.2)' : UI.hair;
+  const handleDismissCheckin = (e) => {
+    e.stopPropagation();
+    try { localStorage.setItem(`logbook-coach-ci-seen-${client.id}`, LB.checkinWeekStart()); } catch (_) {}
+    setCheckinDismissed(true);
+  };
+
+  const showCheckinNew = checkinNew && !checkinDismissed;
+
+  const borderColor = inProgress ? 'rgba(var(--accent-rgb),0.4)' : (showCheckinNew || checkinDue) ? 'rgba(var(--accent-rgb),0.2)' : UI.hair;
 
   return (
     <div
@@ -335,7 +344,7 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
         {inProgress && (
           <div style={{ position: 'absolute', top: 0, right: 0, width: 12, height: 12, borderRadius: 6, background: 'var(--accent)', border: '2px solid var(--bg)', animation: 'pulseDot 1.5s ease-in-out infinite' }} />
         )}
-        {checkinNew && !inProgress && (
+        {showCheckinNew && !inProgress && (
           <div style={{ position: 'absolute', bottom: 0, right: 0, width: 12, height: 12, borderRadius: 6, background: 'var(--accent)', border: '2px solid var(--bg)' }} />
         )}
       </div>
@@ -345,7 +354,7 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.05em' }}>INVITE PENDING</div>
         ) : inProgress ? (
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>TRAINING NOW</div>
-        ) : checkinNew ? (
+        ) : showCheckinNew ? (
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>CHECK-IN SUBMITTED</div>
         ) : checkinDue ? (
           <div style={{ fontSize: 11, color: `rgba(var(--accent-rgb),0.7)`, fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>CHECK-IN DUE</div>
@@ -360,10 +369,14 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
           <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.06em', color: requested ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase' }}>{requested ? 'Sent' : 'Remind'}</span>
         </button>
       )}
-      {checkinNew && !isPending && (
-        <div style={{ width: 28, height: 28, borderRadius: 14, background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.35)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <i className="fa-solid fa-clipboard-check" style={{ fontSize: 11, color: 'var(--accent)' }} />
-        </div>
+      {showCheckinNew && !isPending && (
+        <button
+          onClick={handleDismissCheckin}
+          style={{ background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 8px', cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, WebkitTapHighlightColor: 'transparent' }}
+        >
+          <i className="fa-solid fa-check" style={{ fontSize: 10, color: UI.inkFaint }} />
+          <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.06em', color: UI.inkFaint, textTransform: 'uppercase' }}>Dismiss</span>
+        </button>
       )}
       {!isPending && unreadCount > 0 && (
         <div style={{ minWidth: 20, height: 20, borderRadius: 10, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
