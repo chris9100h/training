@@ -1045,21 +1045,43 @@ function HealthScreen({ store, setStore, go, userId }) {
 
 function HealthClientLogs({ clientStore }) {
   const logs = clientStore?.dailyLogs || [];
-  const [weightTf, setWeightTf] = useStateH('3M');
-  const [adhTf, setAdhTf] = useStateH('3M');
+  const cardioLogs = clientStore?.cardioLogs || [];
+  const [tf, setTf] = useStateH('1M');
 
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[1]).days;
+  const windowDays = tfDays(tf);
+
   const seriesFor = (days, pick) => {
     const { start, end } = healthWindow(days);
-    const data = logs.filter(l => l.date >= start && l.date <= end).map(l => ({ date: l.date, value: pick(l) }));
+    const data = logs.filter(l => l.date >= start && l.date <= end).map(l => ({ date: l.date, ...pick(l) }));
     const dates = data.map(d => d.date);
     let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
     let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
     if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
     return { from, to, data };
   };
-  const weightSeries = seriesFor(tfDays(weightTf), l => l.weight);
-  const adhSeries = seriesFor(tfDays(adhTf), l => l.adherence);
+
+  const weightSeries = useMemoH(() => seriesFor(windowDays, l => ({ value: l.weight })), [logs, tf]);
+  const stepsSeries  = useMemoH(() => seriesFor(windowDays, l => ({ value: l.steps })), [logs, tf]);
+  const macroSeries  = useMemoH(() => seriesFor(windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null })), [logs, tf]);
+  const adhSeries    = useMemoH(() => seriesFor(windowDays, l => ({ value: l.adherence })), [logs, tf]);
+  const cardioSeries = useMemoH(() => {
+    const { start, end } = healthWindow(windowDays);
+    const byDay = {};
+    cardioLogs.forEach(l => { if (l.date >= start && l.date <= end) byDay[l.date] = (byDay[l.date] || 0) + (l.durationMinutes || 0); });
+    const data = Object.keys(byDay).map(date => ({ date, value: byDay[date] }));
+    const dates = data.map(d => d.date);
+    let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
+    let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
+    if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
+    return { from, to, data };
+  }, [cardioLogs, tf]);
+
+  const stepsAvg = useMemoH(() => { const vs = stepsSeries.data.map(d => d.value).filter(v => v != null); return vs.length ? Math.round(vs.reduce((s, v) => s + v, 0) / vs.length) : null; }, [stepsSeries]);
+  const adhAvg   = useMemoH(() => { const vs = adhSeries.data.map(d => d.value).filter(v => v != null); return vs.length ? Math.round(vs.reduce((s, v) => s + v, 0) / vs.length) : null; }, [adhSeries]);
+  const cardioTotal = cardioSeries.data.reduce((s, d) => s + (d.value || 0), 0);
+  const wVals = weightSeries.data.map(d => d.value).filter(v => v != null);
+  const weightHeadline = wVals.length ? `${wVals[wVals.length - 1]}` : null;
 
   // Weekly summary (Mon-anchored) for the last 8 weeks with any data.
   const weeks = useMemoH(() => {
@@ -1078,7 +1100,7 @@ function HealthClientLogs({ clientStore }) {
     }));
   }, [logs]);
 
-  if (!logs.length) {
+  if (!logs.length && !cardioLogs.length) {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
         <i className="fa-solid fa-heart-pulse" style={{ fontSize: 28, color: UI.inkGhost }} />
@@ -1089,16 +1111,30 @@ function HealthClientLogs({ clientStore }) {
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 32px', display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
-      <HealthChartCard title="Weight" icon="fa-weight-scale" tf={weightTf} setTf={setWeightTf}>
+      <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf}
+        headline={weightHeadline} sub={weightHeadline ? 'latest' : null}>
         <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}`} />
       </HealthChartCard>
-      <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={adhTf} setTf={setAdhTf}>
+      <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={tf} setTf={setTf}
+        headline={stepsAvg != null ? stepsAvg.toLocaleString() : null} sub={stepsAvg != null ? 'avg / day' : null}>
+        <HealthBarChart series={stepsSeries.data} from={stepsSeries.from} to={stepsSeries.to} format={v => v >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`} />
+      </HealthChartCard>
+      <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf}>
+        <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
+        <MacroLegend />
+      </HealthChartCard>
+      <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf}
+        headline={cardioTotal || null} sub={cardioTotal ? 'min total' : null}>
+        <HealthBarChart series={cardioSeries.data} from={cardioSeries.from} to={cardioSeries.to} format={v => `${Math.round(v)}`} />
+      </HealthChartCard>
+      <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={tf} setTf={setTf}
+        headline={adhAvg != null ? `${adhAvg}%` : null} sub={adhAvg != null ? 'avg' : null}>
         <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
       </HealthChartCard>
 
       <div>
         <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>WEEKLY AVERAGES</div>
-        <div style={{ background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+        <div style={{ background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
           {weeks.map((w, i) => (
             <div key={w.ws} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderTop: i ? `0.5px solid ${UI.hair}` : 'none' }}>
               <div style={{ width: 58, flexShrink: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{healthFmtDate(w.ws, { day: 'numeric', month: 'short' })}</div>
