@@ -1046,7 +1046,7 @@ function HealthScreen({ store, setStore, go, userId }) {
 function HealthClientLogs({ clientStore }) {
   const logs = clientStore?.dailyLogs || [];
   const cardioLogs = clientStore?.cardioLogs || [];
-  const [tf, setTf] = useStateH('1M');
+  const [tf, setTf] = useStateH('1W');
 
   const COACH_ORDER_KEY = 'logbook-coach-health-card-order';
   const DEFAULT_COACH_ORDER = ['week', 'today', 'weight', 'steps', 'macros', 'cardio', 'adherence', 'weekly'];
