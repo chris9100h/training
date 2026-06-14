@@ -491,7 +491,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
 
 // ─── This-week overview card (Mon–Sun averages + verdict) ─────────────────────
 
-function HealthWeekCard({ stats, dragHandle }) {
+function HealthWeekCard({ stats, dragHandle, targets }) {
   const { from, to, daysLogged, trainingsDone, trainingsPlanned, cardioMinutes, cardioSessions,
     weight, stepsSum, calories, protein, carbs, fat, water, adherence } = stats;
   const r = v => v == null ? null : Math.round(v);
@@ -499,11 +499,22 @@ function HealthWeekCard({ stats, dragHandle }) {
   const verdict = adherence == null ? null : adherence >= 90 ? 'Strong week' : adherence >= 75 ? 'On track' : 'Off track';
   const trainingPct = trainingsPlanned > 0 ? Math.min(100, (trainingsDone / trainingsPlanned) * 100) : (trainingsDone > 0 ? 100 : 0);
 
-  const cell = (label, value, unit) => (
+  // Weighted daily target averages: (training targets × n + rest targets × (7−n)) / 7
+  const tDays = trainingsPlanned || 0, rDays = 7 - tDays;
+  const tgt = (tk, rk) => targets ? Math.round(((targets[tk] || 0) * tDays + (targets[rk] || 0) * rDays) / 7) : null;
+  const tgtCal  = tgt('caloriesTraining', 'caloriesRest');
+  const tgtProt = tgt('proteinTraining',  'proteinRest');
+  const tgtCarb = tgt('carbsTraining',    'carbsRest');
+  const tgtFat  = tgt('fatTraining',      'fatRest');
+
+  const cell = (label, value, unit, target) => (
     <div style={{ minWidth: 0, textAlign: 'center' }}>
       <div className="num" style={{ fontSize: 16, color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300, whiteSpace: 'nowrap' }}>
         {value != null ? value : '—'}{value != null && unit ? <span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>{unit}</span> : ''}
       </div>
+      {target != null && (
+        <div className="num" style={{ fontSize: 8, color: UI.inkGhost, marginTop: 1 }}>/ {target}{unit && <span style={{ fontSize: 7 }}>{unit}</span>}</div>
+      )}
       <div style={{ fontSize: 8.5, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase', marginTop: 2 }}>{label}</div>
     </div>
   );
@@ -563,10 +574,10 @@ function HealthWeekCard({ stats, dragHandle }) {
         {cell('Steps (sum)', stepsSum != null ? r(stepsSum).toLocaleString() : null)}
         {cell(cardioSessions ? `Cardio (${cardioSessions}×)` : 'Cardio', cardioMinutes ? cardioMinutes : null, 'min')}
         {cell('Water', water != null ? (Math.round(water / 100) / 10) : null, 'L')}
-        {cell('Calories', r(calories), 'kcal')}
-        {cell('Protein', r(protein), 'g')}
-        {cell('Carbs', r(carbs), 'g')}
-        {cell('Fat', r(fat), 'g')}
+        {cell('Calories', r(calories), 'kcal', tgtCal)}
+        {cell('Protein', r(protein), 'g', tgtProt)}
+        {cell('Carbs', r(carbs), 'g', tgtCarb)}
+        {cell('Fat', r(fat), 'g', tgtFat)}
       </div>
     </Card>
   );
@@ -836,7 +847,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   const trainedSelected = LB.isLoggedTrainingDay(store.sessions, selectedDate);
   const cardioSelected = (store.cardioLogs || []).some(l => l.date === selectedDate);
   const cardEls = {
-    week: <HealthWeekCard stats={weekStats} dragHandle={handle} />,
+    week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={targets} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} hasTargets={!!targets} />,
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
