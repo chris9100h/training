@@ -507,14 +507,11 @@ function HealthWeekCard({ stats, dragHandle, targets }) {
   const tgtCarb = tgt('carbsTraining',    'carbsRest');
   const tgtFat  = tgt('fatTraining',      'fatRest');
 
-  const cell = (label, value, unit, target) => (
+  const cell = (label, value, unit) => (
     <div style={{ minWidth: 0, textAlign: 'center' }}>
       <div className="num" style={{ fontSize: 16, color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300, whiteSpace: 'nowrap' }}>
         {value != null ? value : '—'}{value != null && unit ? <span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>{unit}</span> : ''}
       </div>
-      {target != null && (
-        <div className="num" style={{ fontSize: 8, color: UI.inkGhost, marginTop: 1 }}>/ {target}{unit && <span style={{ fontSize: 7 }}>{unit}</span>}</div>
-      )}
       <div style={{ fontSize: 8.5, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase', marginTop: 2 }}>{label}</div>
     </div>
   );
@@ -574,11 +571,22 @@ function HealthWeekCard({ stats, dragHandle, targets }) {
         {cell('Steps (sum)', stepsSum != null ? r(stepsSum).toLocaleString() : null)}
         {cell(cardioSessions ? `Cardio (${cardioSessions}×)` : 'Cardio', cardioMinutes ? cardioMinutes : null, 'min')}
         {cell('Water', water != null ? (Math.round(water / 100) / 10) : null, 'L')}
-        {cell('Calories', r(calories), 'kcal', tgtCal)}
-        {cell('Protein', r(protein), 'g', tgtProt)}
-        {cell('Carbs', r(carbs), 'g', tgtCarb)}
-        {cell('Fat', r(fat), 'g', tgtFat)}
+        {cell('Calories', r(calories), 'kcal')}
+        {cell('Protein', r(protein), 'g')}
+        {cell('Carbs', r(carbs), 'g')}
+        {cell('Fat', r(fat), 'g')}
       </div>
+      {tgtCal != null && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 8px', marginTop: 6, paddingTop: 6, borderTop: `0.5px solid ${UI.hair}` }}>
+          {[{v: tgtCal, u: 'kcal'}, {v: tgtProt, u: 'g'}, {v: tgtCarb, u: 'g'}, {v: tgtFat, u: 'g'}].map(({v, u}, i) => (
+            <div key={i} style={{ textAlign: 'center' }}>
+              <span className="num" style={{ fontSize: 10, color: UI.inkGhost }}>
+                {v != null ? v : '—'}<span style={{ fontSize: 8 }}>{u}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }
