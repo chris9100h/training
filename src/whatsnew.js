@@ -16,6 +16,23 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.256',
+    title: 'A Healthy Update',
+    items: [
+      'Plan and Library are now one tab with a built-in switcher — one fewer tab in the bar.',
+      'The home tab is now called Train.',
+      'New Health Tab — enable it under Settings → Show Health Tab.',
+      'Log weight, steps, macros and water per day. Calories auto-calculate from your macros.',
+      'Today card shows training and cardio status with your macro adherence bar up top.',
+      'Period overview with adherence rating (Off Track → On Track → Strong Week → Perfect Week), trainings planned vs done, and macro averages with targets.',
+      'Switchable between this week, last 30 and last 90 days — shared toggle with the charts.',
+      'Five charts: weight, steps, macros, cardio and adherence — each with 1W / 1M / 3M.',
+      'Macro targets in the chart and overview reflect what was set at the time, not your current goals.',
+      'Your health data pre-fills the weekly coach check-in automatically.',
+      'All cards are drag-to-reorder, saved per device.',
+    ],
+  },
+  {
     id: 'v2.235',
     title: 'Live cardio',
     items: [
