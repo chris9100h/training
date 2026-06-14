@@ -2164,7 +2164,7 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart) {
   const out = {};
   const weightLogs = week.filter(l => l.weight != null).sort((a, b) => a.date.localeCompare(b.date));
   if (weightLogs.length) out.weight_today = r1(weightLogs[weightLogs.length - 1].weight);
-  const prevW = avg(prevWeek, 'weight'); if (prevW != null) out.weight_avg_last_week = r1(prevW);
+  const weekW = avg(week, 'weight'); if (weekW != null) out.weight_avg_last_week = r1(weekW);
   const steps = avg(week, 'steps'); if (steps != null) out.steps = Math.round(steps);
   const cal = avg(week, 'calories'); if (cal != null) out.calories_avg = Math.round(cal);
   const p = avg(week, 'protein'); if (p != null) out.protein_avg = Math.round(p);

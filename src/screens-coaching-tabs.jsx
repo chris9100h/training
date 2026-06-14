@@ -887,6 +887,9 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
 
 function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true, store, isSelf = false }) {
   const weekStart = LB.checkinWeekStart();
+  // Check-ins cover Mon–Sun. On Sunday the current week isn't over yet — only
+  // allow submission from Monday onwards (day 1; Sunday = 0 in JS getDay()).
+  const canSubmitToday = new Date().getDay() !== 0;
   const [checkins, setCheckins] = useStateC(null);
   const [schema, setSchema] = useStateC(null); // null = loading, then resolved or CHECKIN_DEFAULT_SCHEMA
   const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
@@ -964,7 +967,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {!thisWeek && checkinEnabled && (
+          {!thisWeek && checkinEnabled && canSubmitToday && (
             <button onClick={() => setEditTarget('new')}
               style={{ flex: 1, background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
               Submit this week's check-in
