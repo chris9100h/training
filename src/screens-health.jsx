@@ -39,7 +39,7 @@ function caloriesFromMacros(p, c, f) {
 
 function healthFmtDate(iso, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
   if (!iso) return '';
-  return new Date(iso + 'T12:00:00').toLocaleDateString(undefined, opts);
+  return new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', opts);
 }
 
 // Adherence → traffic-light colour (green ≥90, amber 75–89, red <75).
@@ -623,7 +623,7 @@ function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
   const loggedSet = new Set((store.dailyLogs || []).map(l => l.date));
   const sunday = days[6];
   // Month label for the week — spans two months at a boundary (e.g. "MAY – JUN").
-  const mLabel = iso => new Date(iso + 'T12:00:00').toLocaleDateString(undefined, { month: 'short' }).toUpperCase();
+  const mLabel = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', { month: 'short' }).toUpperCase();
   const monthLabel = mLabel(monday) === mLabel(sunday)
     ? `${mLabel(monday)} ${new Date(sunday + 'T12:00:00').getFullYear()}`
     : `${mLabel(monday)} – ${mLabel(sunday)}`;
