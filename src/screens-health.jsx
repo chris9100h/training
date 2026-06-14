@@ -430,7 +430,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 
 function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle }) {
   const stat = (label, value, unit) => (
-    <div style={{ flex: 1, minWidth: 0 }}>
+    <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
       <div className="num" style={{ fontSize: 22, color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300 }}>
         {value != null ? value : '—'}{value != null && unit ? <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 3 }}>{unit}</span> : ''}
       </div>
@@ -486,7 +486,7 @@ function HealthWeekCard({ stats, dragHandle }) {
   const trainingPct = trainingsPlanned > 0 ? Math.min(100, (trainingsDone / trainingsPlanned) * 100) : (trainingsDone > 0 ? 100 : 0);
 
   const cell = (label, value, unit) => (
-    <div style={{ minWidth: 0 }}>
+    <div style={{ minWidth: 0, textAlign: 'center' }}>
       <div className="num" style={{ fontSize: 16, color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300, whiteSpace: 'nowrap' }}>
         {value != null ? value : '—'}{value != null && unit ? <span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>{unit}</span> : ''}
       </div>
