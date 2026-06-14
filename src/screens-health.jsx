@@ -715,7 +715,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   const [logOpen, setLogOpen] = useStateH(false);
   const [targetOpen, setTargetOpen] = useStateH(false);
   const [coachingMacros, setCoachingMacros] = useStateH(null);
-  const [tf, setTf] = useStateH('1M');
+  const [tf, setTf] = useStateH('1W');
 
   // Load coach-assigned macros (used to prefill targets + power adherence when
   // the user hasn't set personal targets). asClient or self-coaching row.
