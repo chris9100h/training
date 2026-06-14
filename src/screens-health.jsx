@@ -239,7 +239,7 @@ function MacroLegend() {
 
 function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
-  const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', calories: '', water: '', note: '' };
+  const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', water: '', note: '' };
   const [form, setForm] = useStateH(empty);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -252,7 +252,6 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
         protein: existing.protein != null ? String(existing.protein) : '',
         carbs: existing.carbs != null ? String(existing.carbs) : '',
         fat: existing.fat != null ? String(existing.fat) : '',
-        calories: existing.calories != null ? String(existing.calories) : '',
         water: existing.waterMl != null ? String(existing.waterMl) : '',
         note: existing.note || '',
       });
@@ -269,7 +268,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
   const save = () => {
     if (!canSave) return;
     const protein = healthInt(form.protein), carbs = healthInt(form.carbs), fat = healthInt(form.fat);
-    const calories = form.calories !== '' ? healthInt(form.calories) : caloriesFromMacros(protein, carbs, fat);
+    const calories = caloriesFromMacros(protein, carbs, fat);
     const isTraining = LB.isLoggedTrainingDay(store.sessions, date);
     const { adherence, targetsSnap } = LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
     const log = {
@@ -331,8 +330,10 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
         {numField('fat', 'Fat', 'g')}
       </div>
       <div style={{ marginBottom: 16 }}>
-        <div style={labelStyle}>Calories (kcal)</div>
-        <input type="number" inputMode="numeric" placeholder={autoCals != null ? `${autoCals} (from macros)` : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
+        <div style={labelStyle}>Calories (kcal) · from macros</div>
+        <div style={{ ...inputStyle, color: autoCals != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
+          {autoCals != null ? autoCals : '—'}
+        </div>
       </div>
 
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>HYDRATION</div>
@@ -457,23 +458,13 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
         )}
       </div>
       {(trained || hasCardio) && (
-        <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
           {trained && badge('fa-dumbbell', 'TRAINED', 0.12)}
           {hasCardio && badge('fa-person-running', 'CARDIO', 0.08)}
         </div>
       )}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
-        {stat('Weight', log?.weight != null ? log.weight : null, UI.unit())}
-        {stat('Steps', log?.steps != null ? log.steps.toLocaleString() : null)}
-        {stat('Calories', log?.calories != null ? log.calories : null, 'kcal')}
-      </div>
-      <div style={{ display: 'flex', gap: 12, marginBottom: showAdh ? 14 : 0 }}>
-        {stat('Protein', log?.protein != null ? log.protein : null, 'g')}
-        {stat('Carbs', log?.carbs != null ? log.carbs : null, 'g')}
-        {stat('Fat', log?.fat != null ? log.fat : null, 'g')}
-      </div>
       {showAdh && (
-        <div>
+        <div style={{ marginBottom: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
             <span className="micro" style={{ color: UI.inkFaint }}>MACRO ADHERENCE</span>
             <span className="num" style={{ fontSize: 13, color: adh != null ? adherenceColor(adh) : UI.inkGhost }}>{adh != null ? `${adh}%` : '—'}</span>
@@ -483,6 +474,16 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
           </div>
         </div>
       )}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
+        {stat('Weight', log?.weight != null ? log.weight : null, UI.unit())}
+        {stat('Steps', log?.steps != null ? log.steps.toLocaleString() : null)}
+        {stat('Calories', log?.calories != null ? log.calories : null, 'kcal')}
+      </div>
+      <div style={{ display: 'flex', gap: 12 }}>
+        {stat('Protein', log?.protein != null ? log.protein : null, 'g')}
+        {stat('Carbs', log?.carbs != null ? log.carbs : null, 'g')}
+        {stat('Fat', log?.fat != null ? log.fat : null, 'g')}
+      </div>
     </Card>
   );
 }
