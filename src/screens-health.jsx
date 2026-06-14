@@ -1048,6 +1048,26 @@ function HealthClientLogs({ clientStore }) {
   const cardioLogs = clientStore?.cardioLogs || [];
   const [tf, setTf] = useStateH('1M');
 
+  const COACH_ORDER_KEY = 'logbook-coach-health-card-order';
+  const DEFAULT_COACH_ORDER = ['week', 'weight', 'steps', 'macros', 'cardio', 'adherence', 'weekly'];
+  const [cardOrder, setCardOrder] = useStateH(() => {
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem(COACH_ORDER_KEY) || '[]'); } catch (_) {}
+    const result = (Array.isArray(saved) ? saved : []).filter(id => DEFAULT_COACH_ORDER.includes(id));
+    DEFAULT_COACH_ORDER.forEach((id, i) => { if (!result.includes(id)) result.splice(Math.min(i, result.length), 0, id); });
+    return result;
+  });
+  const reorderCards = (from, to) => {
+    if (from === to) return;
+    setCardOrder(prev => {
+      const moved = [...prev];
+      const [m] = moved.splice(from, 1);
+      moved.splice(to, 0, m);
+      try { localStorage.setItem(COACH_ORDER_KEY, JSON.stringify(moved)); } catch (_) {}
+      return moved;
+    });
+  };
+
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[1]).days;
   const windowDays = tfDays(tf);
 
@@ -1077,11 +1097,11 @@ function HealthClientLogs({ clientStore }) {
     return { from, to, data };
   }, [cardioLogs, tf]);
 
-  const stepsAvg = useMemoH(() => { const vs = stepsSeries.data.map(d => d.value).filter(v => v != null); return vs.length ? Math.round(vs.reduce((s, v) => s + v, 0) / vs.length) : null; }, [stepsSeries]);
-  const adhAvg   = useMemoH(() => { const vs = adhSeries.data.map(d => d.value).filter(v => v != null); return vs.length ? Math.round(vs.reduce((s, v) => s + v, 0) / vs.length) : null; }, [adhSeries]);
+  const numAvg = series => { const vs = series.data.map(d => d.value).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
+  const weightAvg = useMemoH(() => { const a = numAvg(weightSeries); return a != null ? Math.round(a * 10) / 10 : null; }, [weightSeries]);
+  const stepsAvg  = useMemoH(() => { const a = numAvg(stepsSeries);  return a != null ? Math.round(a) : null; }, [stepsSeries]);
+  const adhAvg    = useMemoH(() => { const a = numAvg(adhSeries);    return a != null ? Math.round(a) : null; }, [adhSeries]);
   const cardioTotal = cardioSeries.data.reduce((s, d) => s + (d.value || 0), 0);
-  const wVals = weightSeries.data.map(d => d.value).filter(v => v != null);
-  const weightHeadline = wVals.length ? `${wVals[wVals.length - 1]}` : null;
 
   // Weekly summary (Mon-anchored) for the last 8 weeks with any data.
   const weeks = useMemoH(() => {
@@ -1092,13 +1112,54 @@ function HealthClientLogs({ clientStore }) {
       const ws = mon.toISOString().slice(0, 10);
       (byWeek[ws] = byWeek[ws] || []).push(l);
     }
-    const avg = (arr, k) => { const vs = arr.map(x => x[k]).filter(v => v != null); return vs.length ? Math.round(vs.reduce((s, v) => s + v, 0) / vs.length) : null; };
+    const avg = (arr, k) => { const vs = arr.map(x => x[k]).filter(v => v != null); return vs.length ? Math.round(vs.reduce((s, v) => s + v, 0) / vs.length * 10) / 10 : null; };
     return Object.keys(byWeek).sort((a, b) => b.localeCompare(a)).slice(0, 8).map(ws => ({
-      ws, steps: avg(byWeek[ws], 'steps'), calories: avg(byWeek[ws], 'calories'),
-      protein: avg(byWeek[ws], 'protein'), carbs: avg(byWeek[ws], 'carbs'), fat: avg(byWeek[ws], 'fat'),
+      ws,
+      weight: avg(byWeek[ws], 'weight'),
+      steps: avg(byWeek[ws], 'steps'),
+      calories: avg(byWeek[ws], 'calories'),
+      protein: avg(byWeek[ws], 'protein'),
+      carbs: avg(byWeek[ws], 'carbs'),
+      fat: avg(byWeek[ws], 'fat'),
       adherence: avg(byWeek[ws], 'adherence'),
     }));
   }, [logs]);
+
+  const today = LB.todayISO();
+
+  const weekStats = useMemoH(() => {
+    const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
+    let from, to, periodDays;
+    if (tf === '1W') {
+      const jsDow = new Date(today + 'T12:00:00').getDay();
+      const monday = healthShiftISO(today, -((jsDow === 0 ? 7 : jsDow) - 1));
+      from = monday; to = healthShiftISO(monday, 6); periodDays = 7;
+    } else {
+      const days = tfDays(tf);
+      to = today; from = healthShiftISO(today, -(days - 1)); periodDays = days;
+    }
+    const allDays = Array.from({ length: periodDays }, (_, i) => healthShiftISO(from, i));
+    const inPeriod = logs.filter(l => l.date >= from && l.date <= to);
+    const avgK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
+    const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
+    const trainingsDone = (clientStore?.sessions || []).filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= from && d <= to; }).length;
+    const trainingsPlanned = allDays.filter(d => d <= today && LB.plannedTrainingDay(clientStore || {}, d)).length;
+    const periodCardio = (clientStore?.cardioLogs || []).filter(l => l.date >= from && l.date <= to);
+    const withSnap = tf !== '1W' ? inPeriod.filter(l => l.targetsSnap) : [];
+    const avgSnap = k => withSnap.length ? Math.round(withSnap.reduce((s, l) => s + (l.targetsSnap[k] || 0), 0) / withSnap.length) : null;
+    return {
+      from, to, periodDays, daysLogged: inPeriod.length,
+      trainingsDone, trainingsPlanned,
+      cardioMinutes: periodCardio.reduce((s, l) => s + (l.durationMinutes || 0), 0),
+      cardioSessions: periodCardio.length,
+      weight: avgK('weight'), steps: avgK('steps'),
+      stepsSum: tf === '1W' ? sumK('steps') : null,
+      calories: avgK('calories'), protein: avgK('protein'), carbs: avgK('carbs'),
+      fat: avgK('fat'), water: avgK('waterMl'), adherence: avgK('adherence'),
+      snapTgtCal: avgSnap('calories'), snapTgtProt: avgSnap('protein'),
+      snapTgtCarb: avgSnap('carbs'), snapTgtFat: avgSnap('fat'),
+    };
+  }, [logs, clientStore?.sessions, clientStore?.cardioLogs, clientStore?.schedules, clientStore?.activeScheduleId, clientStore?.cycleStartDate, clientStore?.weekPlanStartDate, today, tf]);
 
   if (!logs.length && !cardioLogs.length) {
     return (
@@ -1109,49 +1170,74 @@ function HealthClientLogs({ clientStore }) {
     );
   }
 
-  return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 32px', display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
-      <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf}
-        headline={weightHeadline} sub={weightHeadline ? 'latest' : null}>
+  const handle = <DragHandle style={{ width: 20, height: 22, marginLeft: -4, cursor: 'grab' }} />;
+  const cardEls = {
+    week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={null} tf={tf} setTf={setTf} />,
+    weight: (
+      <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
+        headline={weightAvg != null ? `${weightAvg}` : null} sub={weightAvg != null ? 'avg' : null}>
         <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}`} />
       </HealthChartCard>
-      <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={tf} setTf={setTf}
+    ),
+    steps: (
+      <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={tf} setTf={setTf} dragHandle={handle}
         headline={stepsAvg != null ? stepsAvg.toLocaleString() : null} sub={stepsAvg != null ? 'avg / day' : null}>
         <HealthBarChart series={stepsSeries.data} from={stepsSeries.from} to={stepsSeries.to} format={v => v >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`} />
       </HealthChartCard>
-      <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf}>
+    ),
+    macros: (
+      <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf} dragHandle={handle}>
         <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
         <MacroLegend />
       </HealthChartCard>
-      <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf}
+    ),
+    cardio: (
+      <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle}
         headline={cardioTotal || null} sub={cardioTotal ? 'min total' : null}>
         <HealthBarChart series={cardioSeries.data} from={cardioSeries.from} to={cardioSeries.to} format={v => `${Math.round(v)}`} />
       </HealthChartCard>
-      <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={tf} setTf={setTf}
+    ),
+    adherence: (
+      <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={tf} setTf={setTf} dragHandle={handle}
         headline={adhAvg != null ? `${adhAvg}%` : null} sub={adhAvg != null ? 'avg' : null}>
         <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
       </HealthChartCard>
-
-      <div>
-        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>WEEKLY AVERAGES</div>
+    ),
+    weekly: weeks.length ? (
+      <Card style={{ padding: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          {handle}
+          <span className="micro" style={{ color: UI.inkFaint }}>WEEKLY AVERAGES</span>
+        </div>
         <div style={{ background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
           {weeks.map((w, i) => (
             <div key={w.ws} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderTop: i ? `0.5px solid ${UI.hair}` : 'none' }}>
               <div style={{ width: 58, flexShrink: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{healthFmtDate(w.ws, { day: 'numeric', month: 'short' })}</div>
               <div style={{ flex: 1, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                {w.steps != null && <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{w.steps.toLocaleString()} st</span>}
-                {w.calories != null && <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{w.calories} kcal</span>}
+                {w.weight != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{w.weight} {UI.unit()}</span>}
+                {w.steps != null && <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{Math.round(w.steps).toLocaleString()} st</span>}
+                {w.calories != null && <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{Math.round(w.calories)} kcal</span>}
                 {(w.protein != null || w.carbs != null || w.fat != null) && (
                   <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>
-                    {[w.protein != null && `P${w.protein}`, w.carbs != null && `C${w.carbs}`, w.fat != null && `F${w.fat}`].filter(Boolean).join(' ')}
+                    {[w.protein != null && `P${Math.round(w.protein)}`, w.carbs != null && `C${Math.round(w.carbs)}`, w.fat != null && `F${Math.round(w.fat)}`].filter(Boolean).join(' ')}
                   </span>
                 )}
               </div>
-              {w.adherence != null && <span className="num" style={{ fontSize: 13, color: adherenceColor(w.adherence), flexShrink: 0 }}>{w.adherence}%</span>}
+              {w.adherence != null && <span className="num" style={{ fontSize: 13, color: adherenceColor(w.adherence), flexShrink: 0 }}>{Math.round(w.adherence)}%</span>}
             </div>
           ))}
         </div>
-      </div>
+      </Card>
+    ) : null,
+  };
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 32px', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
+      <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {cardOrder.map(id => cardEls[id] ? (
+          <div key={id} data-reorder-item="true">{cardEls[id]}</div>
+        ) : null)}
+      </ReorderList>
     </div>
   );
 }
