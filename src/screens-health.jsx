@@ -46,7 +46,7 @@ function healthFmtDate(iso, opts = { weekday: 'short', day: 'numeric', month: 's
 function adherenceColor(a) {
   if (a == null) return UI.inkFaint;
   if (a >= 90) return 'var(--ok)';
-  if (a >= 75) return 'var(--accent)';
+  if (a >= 75) return '#d97706';
   return 'var(--danger)';
 }
 
@@ -553,10 +553,10 @@ function HealthWeekCard({ stats, dragHandle, targets }) {
 
       {adherence != null && miniBar('adherence',
         <>
-          <span className="num" style={{ fontSize: 30, color: isPerfect ? UI.gold : adherenceColor(adherence), fontWeight: 300, lineHeight: 1 }}>{r(adherence)}%</span>
-          <span className={isPerfect ? 'perfect-week-pulse' : ''} style={{ fontSize: 12, color: isPerfect ? UI.gold : adherenceColor(adherence), fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.04em' }}>{verdict}</span>
+          <span className={isPerfect ? 'perfect-week-pulse num' : 'num'} style={{ fontSize: 30, color: adherenceColor(adherence), fontWeight: 300, lineHeight: 1 }}>{r(adherence)}%</span>
+          <span className={isPerfect ? 'perfect-week-pulse' : ''} style={{ fontSize: 12, color: adherenceColor(adherence), fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.04em' }}>{verdict}</span>
         </>,
-        Math.min(100, adherence), isPerfect ? UI.gold : adherenceColor(adherence), 'avg adherence')}
+        Math.min(100, adherence), adherenceColor(adherence), 'avg adherence')}
 
       {(trainingsPlanned > 0 || trainingsDone > 0) && miniBar('trainings',
         <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
