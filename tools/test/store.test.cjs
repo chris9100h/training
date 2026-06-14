@@ -404,7 +404,7 @@ async function testAsync(name, fn) {
     ];
     const p = LB.dailyLogsWeekPrefill(logs, '2026-06-08');
     assert.strictEqual(p.weight_today, 83.6);      // latest weight in the week
-    assert.strictEqual(p.weight_avg_last_week, 85.2);
+    assert.strictEqual(p.weight_avg_last_week, 83.8); // avg of the reported week (Jun 8–14)
     assert.strictEqual(p.steps, 9000);
     assert.strictEqual(p.calories_avg, 2100);
     assert.strictEqual(p.protein_avg, 190);
