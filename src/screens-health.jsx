@@ -493,7 +493,8 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
 
 function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
   const { from, to, periodDays, daysLogged, trainingsDone, trainingsPlanned, cardioMinutes, cardioSessions,
-    weight, steps, stepsSum, calories, protein, carbs, fat, water, adherence } = stats;
+    weight, steps, stepsSum, calories, protein, carbs, fat, water, adherence,
+    snapTgtCal, snapTgtProt, snapTgtCarb, snapTgtFat } = stats;
   const r = v => v == null ? null : Math.round(v);
   const range = `${healthFmtDate(from, { day: 'numeric', month: 'short' })} – ${healthFmtDate(to, { day: 'numeric', month: 'short' })}`;
   const periodLabel = tf === '1W' ? 'THIS WEEK' : tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS';
@@ -501,14 +502,14 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
   const isPerfect = adherence != null && adherence >= 97;
   const trainingPct = trainingsPlanned > 0 ? Math.min(100, (trainingsDone / trainingsPlanned) * 100) : (trainingsDone > 0 ? 100 : 0);
 
-  // Weighted daily target averages over the period
+  // 1W: plan-weighted current targets. 1M/3M: persisted targetsSnap avg (historically correct).
   const totalDays = periodDays || 7;
   const tDays = trainingsPlanned || 0, rDays = totalDays - tDays;
-  const tgt = (tk, rk) => targets ? Math.round(((targets[tk] || 0) * tDays + (targets[rk] || 0) * rDays) / totalDays) : null;
-  const tgtCal  = tgt('caloriesTraining', 'caloriesRest');
-  const tgtProt = tgt('proteinTraining',  'proteinRest');
-  const tgtCarb = tgt('carbsTraining',    'carbsRest');
-  const tgtFat  = tgt('fatTraining',      'fatRest');
+  const planTgt = (tk, rk) => targets ? Math.round(((targets[tk] || 0) * tDays + (targets[rk] || 0) * rDays) / totalDays) : null;
+  const tgtCal  = tf !== '1W' ? snapTgtCal  : planTgt('caloriesTraining', 'caloriesRest');
+  const tgtProt = tf !== '1W' ? snapTgtProt : planTgt('proteinTraining',  'proteinRest');
+  const tgtCarb = tf !== '1W' ? snapTgtCarb : planTgt('carbsTraining',    'carbsRest');
+  const tgtFat  = tf !== '1W' ? snapTgtFat  : planTgt('fatTraining',      'fatRest');
 
   const cell = (label, value, unit) => (
     <div style={{ minWidth: 0, textAlign: 'center' }}>
@@ -552,7 +553,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           {dragHandle}
           <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{periodLabel}</span>
-          {tfToggle}
+          {tfToggle}  {/* toggle on right even in empty state */}
         </div>
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>Nothing logged yet.</div>
       </Card>
@@ -564,8 +565,8 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         {dragHandle}
         <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{periodLabel}</span>
-        {tfToggle}
         <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{range}</span>
+        {tfToggle}
       </div>
 
       {adherence != null && miniBar('adherence',
@@ -764,6 +765,17 @@ function HealthScreen({ store, setStore, go, userId }) {
     return { from, to, data };
   }, [store.cardioLogs, tf]);
 
+  // Historical avg macro target for the chart window (from persisted targetsSnap).
+  // For 1M/3M this replaces the current training/rest split in the Macro card target row.
+  const macroTargetAvg = useMemoH(() => {
+    if (tf === '1W') return null;
+    const { start, end } = healthWindow(windowDays);
+    const withSnap = dailyLogs.filter(l => l.date >= start && l.date <= end && l.targetsSnap);
+    if (!withSnap.length) return null;
+    const avg = k => Math.round(withSnap.reduce((s, l) => s + (l.targetsSnap[k] || 0), 0) / withSnap.length);
+    return { calories: avg('calories'), protein: avg('protein'), carbs: avg('carbs'), fat: avg('fat') };
+  }, [dailyLogs, tf]);
+
   const avg = (arr, key) => { const vs = arr.map(d => d[key]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const wVals = weightSeries.data.map(d => d.value).filter(v => v != null);
   const weightHeadline = wVals.length ? `${(wVals[wVals.length - 1])}${UI.unit()}` : null;
@@ -814,6 +826,10 @@ function HealthScreen({ store, setStore, go, userId }) {
     const trainingsDone = (store.sessions || []).filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= from && d <= to; }).length;
     const trainingsPlanned = allDays.filter(d => d <= today && LB.plannedTrainingDay(store, d)).length;
     const periodCardio = (store.cardioLogs || []).filter(l => l.date >= from && l.date <= to);
+    // Historical target avg from persisted targetsSnap (correct even after target changes).
+    // Only used for 1M/3M; 1W falls back to plan-weighted current targets in the card.
+    const withSnap = tf !== '1W' ? inPeriod.filter(l => l.targetsSnap) : [];
+    const avgSnap = k => withSnap.length ? Math.round(withSnap.reduce((s, l) => s + (l.targetsSnap[k] || 0), 0) / withSnap.length) : null;
     return {
       from, to, periodDays, daysLogged: inPeriod.length,
       trainingsDone, trainingsPlanned,
@@ -823,17 +839,14 @@ function HealthScreen({ store, setStore, go, userId }) {
       stepsSum: tf === '1W' ? sumK('steps') : null,
       calories: avgK('calories'), protein: avgK('protein'), carbs: avgK('carbs'),
       fat: avgK('fat'), water: avgK('waterMl'), adherence: avgK('adherence'),
+      snapTgtCal: avgSnap('calories'), snapTgtProt: avgSnap('protein'),
+      snapTgtCarb: avgSnap('carbs'), snapTgtFat: avgSnap('fat'),
     };
   }, [dailyLogs, store.sessions, store.cardioLogs, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate, today, tf]);
 
   const targetDayRow = (label, suffix) => {
     const p = targets[`protein${suffix}`], c = targets[`carbs${suffix}`], f = targets[`fat${suffix}`], cal = targets[`calories${suffix}`];
     if (p == null && c == null && f == null) return null;
-    const chip = (k, v) => (
-      <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}>
-        <span style={{ color: UI.inkGhost, fontSize: 9 }}>{k}</span> {v}
-      </span>
-    );
     return (
       <div key={suffix} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0' }}>
         <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>{label}</span>
@@ -852,10 +865,18 @@ function HealthScreen({ store, setStore, go, userId }) {
     );
   };
 
+  const chip = (k, v) => (
+    <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}>
+      <span style={{ color: UI.inkGhost, fontSize: 9 }}>{k}</span> {v}
+    </span>
+  );
+  const targetLabel = macroTargetAvg
+    ? `AVG TARGET · ${tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS'}`
+    : `DAILY TARGETS${fromCoach ? ' · FROM COACH' : ''}`;
   const targetRow = (
     <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: targets ? 2 : 0 }}>
-        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>DAILY TARGETS{fromCoach ? ' · FROM COACH' : ''}</span>
+        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{targetLabel}</span>
         <button data-reorder-ignore="true" onClick={() => setTargetOpen(true)} style={{
           background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`,
           borderRadius: 4, padding: '3px 12px', color: 'var(--accent)',
@@ -864,11 +885,25 @@ function HealthScreen({ store, setStore, go, userId }) {
         }}>{targets ? 'EDIT' : 'SET'}</button>
       </div>
       {targets ? (
-        <>
-          {targetDayRow('Training', 'Training')}
-          <div style={{ height: 0.5, background: UI.hair }} />
-          {targetDayRow('Rest', 'Rest')}
-        </>
+        macroTargetAvg ? (
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0' }}>
+            <span className="num" style={{ fontSize: 16, color: 'var(--accent)', fontWeight: 400 }}>
+              {macroTargetAvg.calories}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
+            </span>
+            <span style={{ flex: 1 }} />
+            <span style={{ display: 'flex', gap: 9 }}>
+              {chip('P', macroTargetAvg.protein)}
+              {chip('C', macroTargetAvg.carbs)}
+              {chip('F', macroTargetAvg.fat)}
+            </span>
+          </div>
+        ) : (
+          <>
+            {targetDayRow('Training', 'Training')}
+            <div style={{ height: 0.5, background: UI.hair }} />
+            {targetDayRow('Rest', 'Rest')}
+          </>
+        )
       ) : (
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4 }}>
           Set protein / carbs / fat goals to track macro adherence.
