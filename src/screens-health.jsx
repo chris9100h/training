@@ -547,7 +547,7 @@ function HealthWeekCard({ stats, dragHandle }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 8px', marginTop: 4 }}>
         {cell('Weight', weight != null ? Math.round(weight * 10) / 10 : null, UI.unit())}
         {cell('Steps (sum)', stepsSum != null ? r(stepsSum).toLocaleString() : null)}
-        {cell('Cardio', cardioMinutes ? cardioMinutes : null, cardioMinutes ? (cardioSessions > 1 ? `min · ${cardioSessions}×` : 'min') : '')}
+        {cell(cardioSessions ? `Cardio (${cardioSessions}×)` : 'Cardio', cardioMinutes ? cardioMinutes : null, 'min')}
         {cell('Water', water != null ? (Math.round(water / 100) / 10) : null, 'L')}
         {cell('Calories', r(calories), 'kcal')}
         {cell('Protein', r(protein), 'g')}
