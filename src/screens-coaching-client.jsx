@@ -794,23 +794,8 @@ function ClientSetupTab(props) {
   const [sub, setSub] = useStateC('plan');
   return (
     <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ flexShrink: 0, padding: '10px 16px 0' }}>
-        <div style={{ display: 'inline-flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
-          {[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }].map(s => (
-            <button key={s.id} onClick={() => setSub(s.id)} style={{
-              padding: '6px 18px', cursor: 'pointer', border: 'none',
-              background: sub === s.id ? 'var(--accent)' : 'transparent',
-              color: sub === s.id ? '#0a0805' : UI.inkFaint,
-              fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em',
-              display: 'flex', alignItems: 'center', gap: 6,
-              WebkitTapHighlightColor: 'transparent',
-            }}>
-              <i className={`fa-solid ${s.icon}`} style={{ fontSize: 10 }} />
-              {s.label.toUpperCase()}
-            </button>
-          ))}
-        </div>
-      </div>
+      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }]}
+        active={sub} onChange={setSub} />
       {sub === 'plan'      && <ClientPlanTab {...props} />}
       {sub === 'nutrition' && <ClientNutritionTab coachingId={props.coachingId} userId={props.userId} />}
     </div>
