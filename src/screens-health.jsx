@@ -479,7 +479,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle })
 
 function HealthWeekCard({ stats, dragHandle }) {
   const { from, to, daysLogged, trainingsDone, trainingsPlanned, cardioMinutes, cardioSessions,
-    weight, steps, calories, protein, carbs, fat, water, adherence } = stats;
+    weight, stepsSum, calories, protein, carbs, fat, water, adherence } = stats;
   const r = v => v == null ? null : Math.round(v);
   const range = `${healthFmtDate(from, { day: 'numeric', month: 'short' })} – ${healthFmtDate(to, { day: 'numeric', month: 'short' })}`;
   const verdict = adherence == null ? null : adherence >= 90 ? 'Strong week' : adherence >= 75 ? 'On track' : 'Off track';
@@ -546,13 +546,13 @@ function HealthWeekCard({ stats, dragHandle }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 8px', marginTop: 4 }}>
         {cell('Weight', weight != null ? Math.round(weight * 10) / 10 : null, UI.unit())}
-        {cell('Steps', steps != null ? r(steps).toLocaleString() : null)}
-        {cell('Calories', r(calories), 'kcal')}
+        {cell('Steps (sum)', stepsSum != null ? r(stepsSum).toLocaleString() : null)}
         {cell('Cardio', cardioMinutes ? cardioMinutes : null, cardioMinutes ? (cardioSessions > 1 ? `min · ${cardioSessions}×` : 'min') : '')}
+        {cell('Water', water != null ? (Math.round(water / 100) / 10) : null, 'L')}
+        {cell('Calories', r(calories), 'kcal')}
         {cell('Protein', r(protein), 'g')}
         {cell('Carbs', r(carbs), 'g')}
         {cell('Fat', r(fat), 'g')}
-        {cell('Water', water != null ? (Math.round(water / 100) / 10) : null, 'L')}
       </div>
     </Card>
   );
@@ -751,6 +751,7 @@ function HealthScreen({ store, setStore, go, userId }) {
     const weekDays = Array.from({ length: 7 }, (_, i) => healthShiftISO(monday, i));
     const inWeek = dailyLogs.filter(l => l.date >= monday && l.date <= sunday);
     const avgK = k => { const vs = inWeek.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
+    const sumK = k => { const vs = inWeek.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
     const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
     const trainingsDone = (store.sessions || []).filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= monday && d <= sunday; }).length;
     const trainingsPlanned = weekDays.filter(d => LB.plannedTrainingDay(store, d)).length;
@@ -759,7 +760,7 @@ function HealthScreen({ store, setStore, go, userId }) {
     return {
       from: monday, to: sunday, daysLogged: inWeek.length,
       trainingsDone, trainingsPlanned, cardioMinutes, cardioSessions: weekCardio.length,
-      weight: avgK('weight'), steps: avgK('steps'), calories: avgK('calories'),
+      weight: avgK('weight'), steps: avgK('steps'), stepsSum: sumK('steps'), calories: avgK('calories'),
       protein: avgK('protein'), carbs: avgK('carbs'), fat: avgK('fat'), water: avgK('waterMl'),
       adherence: avgK('adherence'),
     };
