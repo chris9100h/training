@@ -57,9 +57,9 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
 
   const TABS = [
     { id: 'overview',   icon: 'fa-chart-bar',         label: 'Overview' },
-    { id: 'nutrition',  icon: 'fa-utensils',           label: 'Nutrition' },
+    { id: 'daily',      icon: 'fa-heart-pulse',        label: 'Daily' },
     { id: 'sessions',   icon: 'fa-dumbbell',           label: 'Sessions' },
-    { id: 'plan',       icon: 'fa-calendar-days',      label: 'Plan' },
+    { id: 'setup',      icon: 'fa-sliders',            label: 'Setup' },
     { id: 'notes',      icon: 'fa-comment',            label: 'Notes' },
     { id: 'checkins',   icon: 'fa-clipboard-list',     label: 'Check-ins' },
   ];
@@ -110,12 +110,12 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
             </div>
           )}
           {tab === 'overview'   && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} onSelectSession={openSession} />}
-          {tab === 'plan'       && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
           {tab === 'sessions'   && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
           {tab === 'checkins'   && (isSelf
             ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} store={store} isSelf />
             : <ClientCheckInsTab coachingId={coachingId} checkinEnabled={checkinEnabled} onToggle={handleToggleCheckin} toggling={ciToggling} store={store} setStore={setStore} userId={userId} />)}
-          {tab === 'nutrition'  && <ClientNutritionTab coachingId={coachingId} userId={userId} />}
+          {tab === 'setup'      && <ClientSetupTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
+          {tab === 'daily'      && <window.Screens.HealthClientLogs clientStore={clientStore} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
       )}
@@ -788,6 +788,20 @@ function StatBox({ label, value, gold, onClick }) {
   );
 }
 
+// ─── Tab: Setup (Plan + Nutrition combined) ───────────────────────────────────
+
+function ClientSetupTab(props) {
+  const [sub, setSub] = useStateC('plan');
+  return (
+    <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }]}
+        active={sub} onChange={setSub} />
+      {sub === 'plan'      && <ClientPlanTab {...props} />}
+      {sub === 'nutrition' && <ClientNutritionTab coachingId={props.coachingId} userId={props.userId} />}
+    </div>
+  );
+}
+
 // ─── Tab: Plan ────────────────────────────────────────────────────────────────
 
 function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, userId, go, onReload, clientName }) {
@@ -883,20 +897,20 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
   return (
     <div style={{ overflowY: 'auto', flex: 1, padding: '16px 12px 32px' }}>
       {/* Actions row */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, justifyContent: 'flex-end' }}>
         <button
           onClick={() => go({ name: 'coaching-new-plan', coachingId, clientId, clientName: name })}
-          style={{ flex: 1, padding: '10px 0', borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.3)`, background: `rgba(var(--accent-rgb),0.06)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+          style={{ padding: '7px 14px', borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.3)`, background: `rgba(var(--accent-rgb),0.06)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
         >
-          <i className="fa-solid fa-plus" style={{ fontSize: 10 }} />
+          <i className="fa-solid fa-plus" style={{ fontSize: 9 }} />
           NEW PLAN
         </button>
         <input ref={importRef} type="file" accept=".json" style={{ display: 'none' }} onChange={importPlan} />
         <button
           onClick={() => importRef.current?.click()}
-          style={{ flex: 1, padding: '10px 0', borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+          style={{ padding: '7px 14px', borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
         >
-          <i className="fa-solid fa-file-import" style={{ fontSize: 10 }} />
+          <i className="fa-solid fa-file-import" style={{ fontSize: 9 }} />
           IMPORT
         </button>
       </div>

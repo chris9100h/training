@@ -142,6 +142,7 @@ async function deleteAllData(userId) {
     unwrap(_supabase.from('zane_profiles').delete().eq('id', userId)),
     unwrap(_supabase.from('zane_skips').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_cardio_logs').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_daily_logs').delete().eq('user_id', userId)),
   ]);
 }
 
@@ -219,10 +220,13 @@ async function importFromBackup(backup, userId) {
       smart_progression: sett.smartProgression ?? false,
       progression_range_top: sett.progressionRangeTop ?? null,
       equipment_config: sett.equipmentConfig ?? null,
+      weight_fill_down: sett.weightFillDown ?? true,
       show_warmup_in_summary: sett.showWarmupInSummary ?? false,
       show_coaching_tab: sett.showCoachingTab ?? false,
       be_your_own_coach: sett.beYourOwnCoach ?? false,
       session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
+      macro_targets: sett.macroTargets ?? null,
+      show_health_tab: sett.showHealthTab ?? false,
     })),
   ].filter(Boolean));
   // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
@@ -242,6 +246,18 @@ async function importFromBackup(backup, userId) {
         duration_minutes: l.durationMinutes, distance_m: l.distanceM ?? null,
         pace_feeling: l.paceFeeling ?? null, effort: l.effort ?? null,
         note: l.note ?? null, session_id: l.sessionId ?? null,
+      }))
+    ));
+  }
+  if (backup.dailyLogs?.length) {
+    await unwrap(_supabase.from('zane_daily_logs').upsert(
+      backup.dailyLogs.map(l => ({
+        id: l.id, user_id: userId, date: l.date,
+        weight: l.weight ?? null, steps: l.steps ?? null,
+        calories: l.calories ?? null, protein: l.protein ?? null,
+        carbs: l.carbs ?? null, fat: l.fat ?? null,
+        water_ml: l.waterMl ?? null, note: l.note ?? null,
+        adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
       }))
     ));
   }
@@ -336,11 +352,14 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
     // Cardio quick-logs — all records for the user (typically < a few hundred rows)
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    // Daily health logs (weight / steps / macros / water) — one row per day,
+    // all records for the user. Coach reads a client's via the same RLS path.
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, water_ml, note, adherence, targets_snap, created_at').eq('user_id', userId).order('date', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
-         cardioLogsRes] = await Promise.all(queries);
+         cardioLogsRes, dailyLogsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -448,6 +467,17 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       paceFeeling: l.pace_feeling ?? null, effort: l.effort ?? null,
       note: l.note ?? null, sessionId: l.session_id ?? null, createdAt: l.created_at,
     })),
+    // Daily health logs (tolerate RPC/table errors before the migration runs —
+    // an empty list just means the Health tab shows no history yet).
+    dailyLogs: (dailyLogsRes?.data || []).map(l => ({
+      id: l.id, date: l.date,
+      weight: l.weight ?? null, steps: l.steps ?? null,
+      calories: l.calories ?? null, protein: l.protein ?? null,
+      carbs: l.carbs ?? null, fat: l.fat ?? null,
+      waterMl: l.water_ml ?? null, note: l.note ?? null,
+      adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
+      createdAt: l.created_at,
+    })),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
     // and via the local cache also offline). bestE1rmForExercise combines this
     // with the windowed sessions, so PR detection stays exact mid-session.
@@ -474,6 +504,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         tempoEccentric: sett.tempo_eccentric ?? 4,
         tempoConcentric: sett.tempo_concentric ?? 1,
         smartProgression: sett.smart_progression ?? false,
+        weightFillDown: sett.weight_fill_down ?? true,
         progressionRangeTop: sett.progression_range_top ?? 4,
         equipmentConfig: sett.equipment_config ?? {},
         reminderEnabled: sett.reminder_enabled ?? false,
@@ -483,6 +514,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         beYourOwnCoach: sett.be_your_own_coach ?? false,
         sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
         defaultCheckinSchema: sett.default_checkin_schema ?? null,
+        macroTargets: sett.macro_targets ?? null,
+        showHealthTab: sett.show_health_tab ?? false,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -735,6 +768,23 @@ async function syncStore(prev, next, userId) {
     if (removed.length) ops.push(_supabase.from('zane_cardio_logs').delete().in('id', removed.map(l => l.id)));
   }
 
+  if (prev.dailyLogs !== next.dailyLogs) {
+    const upsert = (next.dailyLogs || []).filter(l => {
+      const p = (prev.dailyLogs || []).find(x => x.id === l.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(l);
+    });
+    const removed = (prev.dailyLogs || []).filter(l => !(next.dailyLogs || []).find(x => x.id === l.id));
+    if (upsert.length) ops.push(_supabase.from('zane_daily_logs').upsert(upsert.map(l => ({
+      id: l.id, user_id: userId, date: l.date,
+      weight: l.weight ?? null, steps: l.steps ?? null,
+      calories: l.calories ?? null, protein: l.protein ?? null,
+      carbs: l.carbs ?? null, fat: l.fat ?? null,
+      water_ml: l.waterMl ?? null, note: l.note ?? null,
+      adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_daily_logs').delete().in('id', removed.map(l => l.id)));
+  }
+
   if (prev.user?.name !== next.user?.name && next.user?.name) {
     ops.push(_supabase.from('zane_profiles').upsert({ id: userId, name: next.user.name }));
   }
@@ -760,6 +810,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.tempoEccentric     !== next.settings?.tempoEccentric     ||
     prev.settings?.tempoConcentric    !== next.settings?.tempoConcentric    ||
     prev.settings?.smartProgression   !== next.settings?.smartProgression   ||
+    prev.settings?.weightFillDown     !== next.settings?.weightFillDown     ||
     prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop ||
     JSON.stringify(prev.settings?.equipmentConfig) !== JSON.stringify(next.settings?.equipmentConfig) ||
     JSON.stringify(prev.customDayTypes) !== JSON.stringify(next.customDayTypes) ||
@@ -769,6 +820,8 @@ async function syncStore(prev, next, userId) {
     prev.settings?.showCoachingTab      !== next.settings?.showCoachingTab      ||
     prev.settings?.beYourOwnCoach         !== next.settings?.beYourOwnCoach         ||
     prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
+    prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
+    JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
     prev.nextReminderAt                   !== next.nextReminderAt;
 
   if (settingsChanged) {
@@ -793,6 +846,7 @@ async function syncStore(prev, next, userId) {
       tempo_eccentric: next.settings?.tempoEccentric ?? 4,
       tempo_concentric: next.settings?.tempoConcentric ?? 1,
       smart_progression: next.settings?.smartProgression ?? false,
+      weight_fill_down: next.settings?.weightFillDown ?? true,
       progression_range_top: next.settings?.progressionRangeTop ?? 4,
       equipment_config: next.settings?.equipmentConfig ?? {},
       custom_day_types: next.customDayTypes ?? [],
@@ -802,6 +856,8 @@ async function syncStore(prev, next, userId) {
       show_coaching_tab: next.settings?.showCoachingTab ?? false,
       be_your_own_coach: next.settings?.beYourOwnCoach ?? false,
       session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,
+      macro_targets: next.settings?.macroTargets ?? null,
+      show_health_tab: next.settings?.showHealthTab ?? false,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
     }));
@@ -1821,6 +1877,7 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
       if (f._distanceField) return `${(v / 1000).toFixed(1)} km`;
       if (f.key === 'hydration_ml') return `${(v / 1000).toFixed(1)} L/day`;
       if (f.key === 'steps') return Number(v).toLocaleString();
+      if (f.type === 'percent') return `${v}%`;
       if (f.type === 'choice') { const o = (f.options || []).find(o => String(o.value) === String(v)); return o ? o.label : String(v); }
       if (f.type === 'stepper') return `${v}/${f.max || 10}`;
       if (f.unit) return `${v} ${f.unit}`;
@@ -1985,6 +2042,143 @@ function detectCardioPRs(log, allLogs) {
   return { tier: items.some(i => i.tier === 'best') ? 'best' : 'improvement', type: log.type || null, items };
 }
 
+// ─── DAILY HEALTH LOGS ─────────────────────────────────────────────────────
+
+// A day counts as a TRAINING day for macro purposes only if a session was
+// actually logged (ended) on that date — a planned-but-skipped day is a rest
+// day ("you have to earn your macros"). Pass store.sessions.
+function isLoggedTrainingDay(sessions, dateISO) {
+  const d = (dateISO || '').slice(0, 10);
+  return (sessions || []).some(s => s.ended && (s.date || '').slice(0, 10) === d);
+}
+
+// Returns the PLANNED training day object for a date (or null for a planned rest
+// day / no plan), mirroring the home-screen retroactive-logging logic for both
+// weekday plans and cycle plans (with versioning). A "training day" here means
+// the plan slot for that date has at least one exercise.
+function plannedTrainingDay(state, dateStr) {
+  const ds = (dateStr || '').slice(0, 10);
+  const sch = state?.schedules?.find(s => s.id === state.activeScheduleId);
+  if (!sch || !sch.days?.length) return null;
+  if (isWeekdayPlan(sch)) {
+    if (state.weekPlanStartDate && ds < state.weekPlanStartDate) return null;
+    const dd = new Date(ds + 'T12:00:00');
+    const wd = dd.getDay() === 0 ? 6 : dd.getDay() - 1;
+    const vDays = getPlanDaysForDate(sch, ds);
+    return vDays.find(d => d.weekday === wd && d.items?.length > 0) || null;
+  }
+  if (state.cycleStartDate) {
+    const vDays = getPlanDaysForDate(sch, ds);
+    if (!vDays.length) return null;
+    const cyclePos = getCyclePosForDate(sch, ds);
+    let idx;
+    if (cyclePos !== null) idx = cyclePos;
+    else {
+      const start = parseDate(state.cycleStartDate);
+      const n = Math.round((new Date(ds + 'T12:00:00').getTime() - start.getTime()) / 86400000);
+      if (n < 0) return null;
+      idx = ((n % vDays.length) + vDays.length) % vDays.length;
+    }
+    const dayData = vDays[idx];
+    return (dayData?.items?.length > 0) ? dayData : null;
+  }
+  return null;
+}
+
+// Whether a date counts as a training day for health indicators. A day with a
+// logged (performed) session always counts. Otherwise a PLANNED training day
+// counts only while it's still today or in the future — a past planned day that
+// wasn't performed is downgraded to a rest day ("you have to earn it").
+function isTrainingDayForDate(state, dateStr) {
+  const ds = (dateStr || '').slice(0, 10);
+  if (isLoggedTrainingDay(state?.sessions, ds)) return true;
+  if (ds >= todayISO() && plannedTrainingDay(state, ds)) return true;
+  return false;
+}
+
+// Pick the {protein, carbs, fat, calories} target for a given day type out of a
+// macro-target object (works for both coaching macros and the user's personal
+// macroTargets — same field names). Returns null when no macro is set for that
+// day type.
+function dayTargetFromMacros(m, isTraining) {
+  if (!m) return null;
+  const protein  = isTraining ? m.proteinTraining  : m.proteinRest;
+  const carbs    = isTraining ? m.carbsTraining    : m.carbsRest;
+  const fat      = isTraining ? m.fatTraining      : m.fatRest;
+  const calories = isTraining ? m.caloriesTraining : m.caloriesRest;
+  if (protein == null && carbs == null && fat == null) return null;
+  return { protein: protein ?? null, carbs: carbs ?? null, fat: fat ?? null, calories: calories ?? null };
+}
+
+// Macro adherence as a 0–100 %, defined as the average per-macro closeness to
+// target across protein/carbs/fat. Per macro: clamp(1 − |actual − target| /
+// target, 0, 1). Calories are deliberately NOT part of the score — macros are
+// the goal. Returns null unless all three macros AND their targets are present.
+function macroAdherence(actual, target) {
+  if (!actual || !target) return null;
+  const scores = [];
+  for (const k of ['protein', 'carbs', 'fat']) {
+    const t = target[k]; const a = actual[k];
+    if (t == null || t <= 0 || a == null) return null;
+    scores.push(Math.max(0, 1 - Math.abs(a - t) / t));
+  }
+  return Math.round((scores.reduce((s, v) => s + v, 0) / scores.length) * 100);
+}
+
+// Effective macro targets for the user's OWN health screen: their personal
+// targets if set, otherwise the coach-assigned macros (so a coached user gets
+// adherence out of the box; a standalone user sets their own). Both share the
+// {proteinTraining, carbsTraining, …} shape.
+function effectiveMacroTargets(personal, coachingMacros) {
+  const has = m => m && (m.proteinTraining != null || m.carbsTraining != null || m.fatTraining != null ||
+    m.proteinRest != null || m.carbsRest != null || m.fatRest != null);
+  if (has(personal)) return personal;
+  if (has(coachingMacros)) return coachingMacros;
+  return null;
+}
+
+// Compute the persisted adherence + target snapshot for a daily log at save
+// time, so a later target change never rewrites history. Returns
+// { adherence, targetsSnap } — both null when targets/macros are incomplete.
+function dailyLogAdherence(log, targets, isTraining) {
+  const dayTarget = dayTargetFromMacros(targets, isTraining);
+  if (!dayTarget) return { adherence: null, targetsSnap: null };
+  const adherence = macroAdherence(
+    { protein: log.protein, carbs: log.carbs, fat: log.fat }, dayTarget);
+  if (adherence == null) return { adherence: null, targetsSnap: null };
+  return { adherence, targetsSnap: { ...dayTarget, dayType: isTraining ? 'training' : 'rest' } };
+}
+
+// Aggregate a week of daily logs into check-in prefill values, keyed by the
+// check-in form field keys. weekStart = Monday ('YYYY-MM-DD'); the window is
+// [weekStart, weekStart+7). weight_avg_last_week comes from the prior week.
+// Returns null when there is nothing to prefill.
+function dailyLogsWeekPrefill(dailyLogs, weekStart) {
+  if (!dailyLogs?.length || !weekStart) return null;
+  const ws = weekStart.slice(0, 10);
+  const shift = (base, days) => { const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
+  const we = shift(ws, 7);
+  const prevWs = shift(ws, -7);
+  const inRange = (lo, hi) => dailyLogs.filter(l => l.date >= lo && l.date < hi);
+  const week = inRange(ws, we);
+  const prevWeek = inRange(prevWs, ws);
+  if (!week.length && !prevWeek.length) return null;
+  const avg = (arr, key) => { const vs = arr.map(l => l[key]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
+  const r1 = v => Math.round(v * 10) / 10;
+  const out = {};
+  const weightLogs = week.filter(l => l.weight != null).sort((a, b) => a.date.localeCompare(b.date));
+  if (weightLogs.length) out.weight_today = r1(weightLogs[weightLogs.length - 1].weight);
+  const weekW = avg(week, 'weight'); if (weekW != null) out.weight_avg_last_week = r1(weekW);
+  const steps = avg(week, 'steps'); if (steps != null) out.steps = Math.round(steps);
+  const cal = avg(week, 'calories'); if (cal != null) out.calories_avg = Math.round(cal);
+  const p = avg(week, 'protein'); if (p != null) out.protein_avg = Math.round(p);
+  const c = avg(week, 'carbs'); if (c != null) out.carbs_avg = Math.round(c);
+  const f = avg(week, 'fat'); if (f != null) out.fat_avg = Math.round(f);
+  const hyd = avg(week, 'waterMl'); if (hyd != null) out.hydration_ml = Math.round(hyd);
+  const adh = avg(week, 'adherence'); if (adh != null) out.macro_adherence = Math.round(adh);
+  return Object.keys(out).length ? { ...out, count: week.length } : null;
+}
+
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, fnFetch,
@@ -2004,4 +2198,5 @@ window.LB = {
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill, detectCardioPRs,
+  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill,
 };

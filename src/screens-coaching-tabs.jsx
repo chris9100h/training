@@ -77,14 +77,8 @@ function CoachingMultiView({ views, renderView }) {
   const activeId = views.some(v => v.id === active) ? active : views[0].id;
   return (
     <div style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: UI.bg, color: UI.ink }}>
-      <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0, paddingTop: 'env(safe-area-inset-top, 0px)' }}>
-        {views.map(t => (
-          <button key={t.id} onClick={() => setActive(t.id)} style={{ flex: 1, padding: '10px 4px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, borderBottom: activeId === t.id ? '2px solid var(--accent)' : '2px solid transparent', WebkitTapHighlightColor: 'transparent' }}>
-            <i className={`fa-solid ${t.icon}`} style={{ fontSize: 14, color: activeId === t.id ? 'var(--accent)' : UI.inkFaint }} />
-            <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.08em', color: activeId === t.id ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase' }}>{t.label}</span>
-          </button>
-        ))}
-      </div>
+      <TopBar title="Coaching" />
+      <SubTabBar tabs={views} active={activeId} onChange={setActive} style={{ paddingBottom: 8 }} />
       {views.map(v => (
         <div key={v.id} style={{ flex: 1, overflow: 'hidden', display: activeId === v.id ? 'flex' : 'none', flexDirection: 'column' }}>
           {renderView(v.id, true)}
@@ -438,6 +432,7 @@ function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit
     if (f._distanceField) return distUnit === 'mi' ? `${(v / 1609.344).toFixed(1)} mi` : `${(v / 1000).toFixed(1)} km`;
     if (f.key === 'hydration_ml') return `${(v / 1000).toFixed(1)} L / day`;
     if (f.key === 'steps') return Number(v).toLocaleString();
+    if (f.type === 'percent') return `${v}%`;
     if (f.type === 'choice' && f.options?.length) {
       const opt = f.options.find(o => String(o.value) === String(v));
       return opt ? opt.label : String(v);
@@ -608,7 +603,7 @@ function toResponse(field, raw, distUnit) {
     if (isNaN(n) || n <= 0) return null;
     return distUnit === 'mi' ? Math.round(n * 1609.344) : Math.round(n * 1000);
   }
-  if (field.type === 'integer') { const n = parseInt(raw, 10); return isNaN(n) ? null : n; }
+  if (field.type === 'integer' || field.type === 'percent') { const n = parseInt(raw, 10); return isNaN(n) ? null : n; }
   if (field.type === 'decimal') { const n = parseFloat(String(raw).replace(',', '.')); return isNaN(n) ? null : n; }
   return raw; // text, stepper, choice
 }
@@ -640,6 +635,21 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
   const lbl = (field.unit === 'weight'
     ? `${field.label} (${UI.unit()})`
     : field.unit ? `${field.label} (${field.unit})` : field.label) + req;
+
+  // Read-only / computed fields (e.g. macro adherence %). Value is prefilled
+  // from the daily logs and shown, not entered.
+  if (field.type === 'percent' || field.readOnly) {
+    const has = value != null && value !== '';
+    return (
+      <>
+        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>{lbl}</div>
+        <div style={{ ...inputStyle, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, color: has ? 'var(--accent)' : UI.inkGhost, fontFamily: UI.fontNum, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>{has ? value : '—'}{has && field.type === 'percent' ? '%' : ''}</span>
+          <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.06em' }}>FROM LOGS</span>
+        </div>
+      </>
+    );
+  }
 
   if (field.type === 'text') {
     return (
@@ -774,7 +784,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
 
 // ─── CheckInForm ──────────────────────────────────────────────────────────────
 
-function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefill, onSaved, schema }) {
+function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefill, dailyPrefill, onSaved, schema }) {
   const sections = schema || CHECKIN_DEFAULT_SCHEMA;
   const allFields = sections.flatMap(s => s.fields || []);
 
@@ -785,15 +795,19 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
   const [form, setForm] = useStateC(() => {
     const du = getDistUnit();
     if (existing) return initFormState(sections, existing.responses || {}, du);
+    const base = initFormState(sections, {}, du);
     if (prefill) {
-      const base = initFormState(sections, {}, du);
       if (prefill.cardioMinutes != null) base.cardio_minutes = String(prefill.cardioMinutes);
       if (prefill.cardioDistanceM != null) base.cardio_distance_m = du === 'mi' ? (prefill.cardioDistanceM / 1609.344).toFixed(2) : (prefill.cardioDistanceM / 1000).toFixed(2);
       if (prefill.paceFeeling != null) base.cardio_pace_feeling = prefill.paceFeeling;
       if (prefill.effort != null) base.cardio_effort = prefill.effort;
-      return base;
     }
-    return initFormState(sections, {}, du);
+    // Daily-log prefill: keys map 1:1 to form field keys (weight_today, steps,
+    // protein_avg, macro_adherence, …). Only apply keys the schema actually has.
+    if (dailyPrefill) {
+      allFields.forEach(f => { if (dailyPrefill[f.key] != null) base[f.key] = String(dailyPrefill[f.key]); });
+    }
+    return base;
   });
 
   const [saving, setSaving] = useStateC(false);
@@ -839,9 +853,11 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {prefill && !existing && (
+      {(prefill || dailyPrefill) && !existing && (
         <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.08)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
-          Cardio prefilled from {prefill.count} log{prefill.count !== 1 ? 's' : ''} this week
+          {dailyPrefill
+            ? `Prefilled from your daily logs${prefill ? ' & cardio' : ''} this week — review before submitting`
+            : `Cardio prefilled from ${prefill.count} log${prefill.count !== 1 ? 's' : ''} this week`}
         </div>
       )}
       {sections.map(section => {
@@ -871,6 +887,9 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
 
 function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true, store, isSelf = false }) {
   const weekStart = LB.checkinWeekStart();
+  // Check-ins cover Mon–Sun. On Sunday the current week isn't over yet — only
+  // allow submission from Monday onwards (day 1; Sunday = 0 in JS getDay()).
+  const canSubmitToday = new Date().getDay() !== 0;
   const [checkins, setCheckins] = useStateC(null);
   const [schema, setSchema] = useStateC(null); // null = loading, then resolved or CHECKIN_DEFAULT_SCHEMA
   const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
@@ -927,6 +946,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           weekStart={formWeek}
           existing={target}
           prefill={!target ? LB.cardioWeekPrefill(store?.cardioLogs, formWeek) : undefined}
+          dailyPrefill={!target ? LB.dailyLogsWeekPrefill(store?.dailyLogs, formWeek) : undefined}
           onSaved={() => { setEditTarget(null); load(); }}
           schema={resolvedSchema}
         />
@@ -947,7 +967,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {!thisWeek && checkinEnabled && (
+          {!thisWeek && checkinEnabled && canSubmitToday && (
             <button onClick={() => setEditTarget('new')}
               style={{ flex: 1, background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
               Submit this week's check-in

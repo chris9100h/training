@@ -91,6 +91,24 @@ CREATE TABLE public.zane_cardio_logs (
   created_at       timestamp with time zone NOT NULL DEFAULT now()
 );
 
+CREATE TABLE public.zane_daily_logs (
+  id           text        NOT NULL,
+  user_id      uuid        NOT NULL,
+  date         text        NOT NULL,
+  weight       numeric,
+  steps        integer,
+  calories     integer,
+  protein      integer,
+  carbs        integer,
+  fat          integer,
+  water_ml     integer,
+  note         text,
+  adherence    numeric,
+  targets_snap jsonb,
+  created_at   timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT zane_daily_logs_user_id_date_key UNIQUE (user_id, date)
+);
+
 CREATE TABLE public.zane_skips (
   id text NOT NULL,
   user_id uuid,
@@ -133,7 +151,10 @@ CREATE TABLE public.zane_user_settings (
   show_coaching_tab boolean DEFAULT false,
   be_your_own_coach boolean NOT NULL DEFAULT false,
   session_timeout_minutes integer DEFAULT 90,
-  auto_close_notify jsonb
+  auto_close_notify jsonb,
+  macro_targets jsonb,
+  show_health_tab boolean NOT NULL DEFAULT false,
+  weight_fill_down boolean NOT NULL DEFAULT true
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -302,6 +323,7 @@ ALTER TABLE public.zane_sessions         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_session_entries  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_sets             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_cardio_logs      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_daily_logs       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_skips            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_user_settings    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_feature_grants   ENABLE ROW LEVEL SECURITY;  -- no policies: service-role / SECURITY DEFINER only
@@ -351,6 +373,10 @@ CREATE POLICY "coach can delete client sets" ON public.zane_sets FOR DELETE TO p
 
 -- cardio logs
 CREATE POLICY "Users manage own cardio logs" ON public.zane_cardio_logs FOR ALL TO authenticated USING ((auth.uid() = user_id)) WITH CHECK ((auth.uid() = user_id));
+
+-- daily logs
+CREATE POLICY "Users manage own daily logs" ON public.zane_daily_logs FOR ALL TO authenticated USING ((auth.uid() = user_id)) WITH CHECK ((auth.uid() = user_id));
+CREATE POLICY "coach can read client daily logs" ON public.zane_daily_logs FOR SELECT TO authenticated USING (zane_is_coach_of(user_id));
 
 -- skips
 CREATE POLICY "own skips" ON public.zane_skips FOR ALL TO public USING ((user_id = auth.uid())) WITH CHECK ((user_id = auth.uid()));

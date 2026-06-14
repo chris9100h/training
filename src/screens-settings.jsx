@@ -177,6 +177,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
   // Category sheets
   const [coachingSheet, setCoachingSheet] = useStateSet(false);
+  const [healthSheet, setHealthSheet] = useStateSet(false);
   const [accountSheet, setAccountSheet] = useStateSet(false);
   const [trainingSheet, setTrainingSheet] = useStateSet(false);
   const [appearanceSheet, setAppearanceSheet] = useStateSet(false);
@@ -399,6 +400,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
             <NavRow label="Active users" hint={activeCount > 0 ? `${activeCount} active` : null} onTap={() => setActiveUsersSheet(true)} />
           )}
           <NavRow label="Coaching" onTap={() => setCoachingSheet(true)} />
+          <NavRow label="Health" onTap={() => setHealthSheet(true)} />
           <NavRow label="Account" onTap={() => setAccountSheet(true)} />
           <NavRow label="Training" onTap={() => setTrainingSheet(true)} />
           <NavRow label="Appearance" onTap={() => setAppearanceSheet(true)} />
@@ -554,6 +556,21 @@ function SettingsScreen({ store, setStore, go, userId }) {
         </div>
       </SettingsSheet>
 
+      {/* ══ Health Sheet ══ */}
+      <SettingsSheet open={healthSheet} onClose={() => setHealthSheet(false)} title="Health">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <Row label="Health tab" first>
+            <Toggle on={!!store.settings?.showHealthTab} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, showHealthTab: !s.settings?.showHealthTab } }))} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Pin a Health tab to the nav bar to log daily weight, steps & macros and see your trends. These daily logs also prefill your weekly coach check-in.
+          </div>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setHealthSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
       {/* ══ Account Sheet ══ */}
       <SettingsSheet open={accountSheet} onClose={() => setAccountSheet(false)} title="Account">
         <div>
@@ -614,6 +631,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
               ? <button style={accentBtn} onClick={() => setProgressionSheet(true)}>Change</button>
               : <Toggle on={false} onToggle={() => { setStore(s => ({ ...s, settings: { ...s.settings, smartProgression: true } })); setProgDisclaimer(true); }} />
             }
+          </Row>
+          <Row label="Fill weight down">
+            <Toggle on={store.settings?.weightFillDown !== false} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, weightFillDown: s.settings?.weightFillDown === false } }))} />
           </Row>
           <Row label="Equipment setup">
             <button style={accentBtn} onClick={() => setProgConfigOpen(true)}>Change</button>

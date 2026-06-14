@@ -92,6 +92,11 @@ const CHECKIN_DEFAULT_SCHEMA = [
     fields: [
       { key: 'off_plan_days', label: 'Off-plan days', type: 'integer', width: 'half', required: false, direction: null },
       { key: 'hydration_ml', label: 'Avg hydration / day (ml)', type: 'integer', width: 'half', required: false, direction: 'higher_better', icon: 'fa-droplet' },
+      { key: 'calories_avg', label: 'Avg calories / day', type: 'integer', width: 'half', required: false, direction: null, icon: 'fa-fire' },
+      { key: 'protein_avg', label: 'Avg protein / day (g)', type: 'integer', width: 'half', required: false, direction: 'higher_better', icon: 'fa-drumstick-bite' },
+      { key: 'carbs_avg', label: 'Avg carbs / day (g)', type: 'integer', width: 'half', required: false, direction: null, icon: 'fa-wheat-awn' },
+      { key: 'fat_avg', label: 'Avg fat / day (g)', type: 'integer', width: 'half', required: false, direction: null, icon: 'fa-bacon' },
+      { key: 'macro_adherence', label: 'Macro adherence', type: 'percent', width: 'full', required: false, direction: 'higher_better', readOnly: true, icon: 'fa-bullseye' },
       { key: 'off_plan_notes', label: 'Off-plan notes', type: 'text', rows: 2, width: 'full', required: false },
     ],
   },

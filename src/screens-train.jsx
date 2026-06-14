@@ -1075,7 +1075,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             ...en,
             sets: en.sets.map((st, si) =>
               si === setIdx ? { ...st, kg: num ?? null, done: false }
-              : si > setIdx && !st.done ? { ...st, kg: num ?? null }
+              : store.settings?.weightFillDown !== false && si > setIdx && !st.done ? { ...st, kg: num ?? null }
               : st
             ),
           }),
@@ -1751,7 +1751,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         ...en,
                         sets: en.sets.map((st, si) =>
                           si === bgSetIdx ? { ...st, kg, done: false }
-                          : si > bgSetIdx && !st.done && !st.warmup ? { ...st, kg }
+                          : store.settings?.weightFillDown !== false && si > bgSetIdx && !st.done && !st.warmup ? { ...st, kg }
                           : st
                         ),
                       }),
@@ -1925,7 +1925,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           ...en,
                           sets: en.sets.map((st, si) =>
                             si === i ? { ...st, kg, done: false }
-                            : si > i && !st.done && !st.warmup ? { ...st, kg }
+                            : store.settings?.weightFillDown !== false && si > i && !st.done && !st.warmup ? { ...st, kg }
                             : st
                           ),
                         }),
@@ -2312,13 +2312,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             {/* BracketFrame hero */}
             <BracketFrame gold padding={0}>
               <div style={{ padding: '12px 6px 16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0 18px', marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0 18px', marginBottom: 6 }}>
                   <span className="micro-gold">
                     WARMUP {String(warmupOverlayNum).padStart(2, '0')} / {String(warmupCount).padStart(2, '0')}
                   </span>
                   <span className="num" style={{ color: UI.goldSoft, fontSize: 11, letterSpacing: '0.1em' }}>
                     {warmupOverlaySet.warmupPct}% of working weight
                   </span>
+                </div>
+                <div style={{ textAlign: 'center', padding: '0 18px', marginBottom: 10 }}>
+                  <span style={{ fontFamily: UI.fontDisplay, fontWeight: 700, fontSize: 18, color: UI.inkSoft, letterSpacing: '0.01em' }}>{entry.name}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '0 14px' }}>
                   <div style={{ flex: 1, textAlign: 'center' }}>

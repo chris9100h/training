@@ -313,6 +313,106 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.detectCardioPRs(cLog({ id: 'n', dur: 30, dist: 5000, date: '2026-06-01' }), prior), null);
   });
 
+  // ── Daily health logs ─────────────────────────────────────────────────────
+  const MACROS = { proteinTraining: 200, carbsTraining: 250, fatTraining: 70, caloriesTraining: 2430,
+                   proteinRest: 180, carbsRest: 150, fatRest: 60, caloriesRest: 1860 };
+
+  test('isLoggedTrainingDay: only an ended session on that date counts', () => {
+    const sessions = [
+      { date: '2026-06-10T00:00:00', ended: '2026-06-10T11:00:00' },
+      { date: '2026-06-11', ended: null }, // planned/started but not logged
+    ];
+    assert.strictEqual(LB.isLoggedTrainingDay(sessions, '2026-06-10'), true);
+    assert.strictEqual(LB.isLoggedTrainingDay(sessions, '2026-06-11'), false); // earn your macros
+    assert.strictEqual(LB.isLoggedTrainingDay(sessions, '2026-06-12'), false);
+  });
+
+  test('plannedTrainingDay: weekday plan returns training slot, null for rest/empty/no-plan', () => {
+    const allTrain = { id: 'p1', mode: 'weekday', days: Array.from({ length: 7 }, (_, wd) => ({ weekday: wd, name: 'D', items: [{ exId: 'x' }] })) };
+    assert.ok(LB.plannedTrainingDay({ activeScheduleId: 'p1', schedules: [allTrain] }, '2026-06-10'));
+    const allRest = { id: 'p1', mode: 'weekday', days: Array.from({ length: 7 }, (_, wd) => ({ weekday: wd, name: 'REST', items: [] })) };
+    assert.strictEqual(LB.plannedTrainingDay({ activeScheduleId: 'p1', schedules: [allRest] }, '2026-06-10'), null);
+    assert.strictEqual(LB.plannedTrainingDay({ activeScheduleId: null, schedules: [] }, '2026-06-10'), null);
+    // before the plan started → not yet a training day
+    assert.strictEqual(LB.plannedTrainingDay({ activeScheduleId: 'p1', schedules: [allTrain], weekPlanStartDate: '2026-06-15' }, '2026-06-10'), null);
+  });
+
+  test('isTrainingDayForDate: performed always counts; planned counts only today/future', () => {
+    const allTrain = { id: 'p1', mode: 'weekday', days: Array.from({ length: 7 }, (_, wd) => ({ weekday: wd, name: 'D', items: [{ exId: 'x' }] })) };
+    const today = LB.todayISO();
+    const shift = (d, n) => { const x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+    const future = shift(today, 3), past = shift(today, -3);
+    const base = { activeScheduleId: 'p1', schedules: [allTrain], sessions: [] };
+    assert.strictEqual(LB.isTrainingDayForDate(base, future), true);              // planned future → training
+    assert.strictEqual(LB.isTrainingDayForDate(base, past), false);              // planned past, not done → rest
+    const done = { ...base, sessions: [{ date: past + 'T10:00:00', ended: past + 'T11:00:00' }] };
+    assert.strictEqual(LB.isTrainingDayForDate(done, past), true);               // performed past → training
+    assert.strictEqual(LB.isTrainingDayForDate({ activeScheduleId: null, schedules: [], sessions: [] }, future), false);
+  });
+
+  test('dayTargetFromMacros picks training vs rest, null when unset', () => {
+    // deepStrictEqual would trip on the vm realm's distinct Object.prototype —
+    // compare by JSON instead (same as the rest of this suite avoids it).
+    assert.strictEqual(JSON.stringify(LB.dayTargetFromMacros(MACROS, true)), JSON.stringify({ protein: 200, carbs: 250, fat: 70, calories: 2430 }));
+    assert.strictEqual(JSON.stringify(LB.dayTargetFromMacros(MACROS, false)), JSON.stringify({ protein: 180, carbs: 150, fat: 60, calories: 1860 }));
+    assert.strictEqual(LB.dayTargetFromMacros(null, true), null);
+    assert.strictEqual(LB.dayTargetFromMacros({ proteinTraining: null, carbsTraining: null, fatTraining: null }, true), null);
+  });
+
+  test('macroAdherence: 100% on target, averages P/C/F, ignores calories, null if incomplete', () => {
+    const t = { protein: 200, carbs: 250, fat: 70 };
+    assert.strictEqual(LB.macroAdherence({ protein: 200, carbs: 250, fat: 70 }, t), 100);
+    // protein 10% off, carbs/fat perfect → (0.9+1+1)/3 = 0.9667 → 97
+    assert.strictEqual(LB.macroAdherence({ protein: 180, carbs: 250, fat: 70 }, t), 97);
+    // way over clamps the per-macro score at 0 (never negative)
+    assert.strictEqual(LB.macroAdherence({ protein: 0, carbs: 250, fat: 70 }, t), 67);
+    assert.strictEqual(LB.macroAdherence({ protein: 200, carbs: null, fat: 70 }, t), null);
+    assert.strictEqual(LB.macroAdherence({ protein: 200, carbs: 250, fat: 70 }, null), null);
+  });
+
+  test('effectiveMacroTargets prefers personal, falls back to coaching, else null', () => {
+    const personal = { proteinTraining: 210 };
+    assert.strictEqual(LB.effectiveMacroTargets(personal, MACROS), personal);
+    assert.strictEqual(LB.effectiveMacroTargets(null, MACROS), MACROS);
+    assert.strictEqual(LB.effectiveMacroTargets({}, MACROS), MACROS);
+    assert.strictEqual(LB.effectiveMacroTargets(null, null), null);
+  });
+
+  test('dailyLogAdherence snapshots target + dayType, null when targets missing', () => {
+    const log = { protein: 200, carbs: 250, fat: 70 };
+    const r = LB.dailyLogAdherence(log, MACROS, true);
+    assert.strictEqual(r.adherence, 100);
+    assert.strictEqual(JSON.stringify(r.targetsSnap), JSON.stringify({ protein: 200, carbs: 250, fat: 70, calories: 2430, dayType: 'training' }));
+    // Rest day uses rest targets
+    assert.strictEqual(LB.dailyLogAdherence({ protein: 180, carbs: 150, fat: 60 }, MACROS, false).adherence, 100);
+    // No targets → no adherence, no snapshot
+    const noT = LB.dailyLogAdherence(log, null, true);
+    assert.strictEqual(noT.adherence, null); assert.strictEqual(noT.targetsSnap, null);
+    // Incomplete macros → no adherence
+    const inc = LB.dailyLogAdherence({ protein: 200, carbs: 250 }, MACROS, true);
+    assert.strictEqual(inc.adherence, null); assert.strictEqual(inc.targetsSnap, null);
+  });
+
+  test('dailyLogsWeekPrefill averages the week + last-week weight', () => {
+    const logs = [
+      // target week Mon 2026-06-08 … Sun 2026-06-14
+      { date: '2026-06-08', weight: 84.0, steps: 8000, calories: 2000, protein: 180, carbs: 200, fat: 60, waterMl: 2000, adherence: 90 },
+      { date: '2026-06-10', weight: 83.6, steps: 10000, calories: 2200, protein: 200, carbs: 220, fat: 70, waterMl: 3000, adherence: 100 },
+      // prior week
+      { date: '2026-06-02', weight: 85.0 },
+      { date: '2026-06-04', weight: 85.4 },
+    ];
+    const p = LB.dailyLogsWeekPrefill(logs, '2026-06-08');
+    assert.strictEqual(p.weight_today, 83.6);      // latest weight in the week
+    assert.strictEqual(p.weight_avg_last_week, 83.8); // avg of the reported week (Jun 8–14)
+    assert.strictEqual(p.steps, 9000);
+    assert.strictEqual(p.calories_avg, 2100);
+    assert.strictEqual(p.protein_avg, 190);
+    assert.strictEqual(p.macro_adherence, 95);
+    assert.strictEqual(p.count, 2);
+    assert.strictEqual(LB.dailyLogsWeekPrefill([], '2026-06-08'), null);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
