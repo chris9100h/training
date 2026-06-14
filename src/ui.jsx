@@ -380,7 +380,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
           const badge = t.id === 'coaching' ? coachingBadge : null;
           return (
             <button key={t.id} onClick={() => onChange(t.id)} style={{
-              flex: 1, background: 'transparent', border: 'none', cursor: 'pointer',
+              flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
               padding: '10px 6px 8px',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
               color: on ? UI.gold : UI.inkFaint,

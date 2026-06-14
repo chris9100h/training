@@ -137,9 +137,12 @@ function HealthBarChart({ series, from, to, format, target }) {
   const maxV = Math.max(...pts.map(p => p.value), target || 0);
   const dom = UI.chartDomain(0, maxV, { min: 0 });
   const totalDays = Math.max(1, healthDayDiff(from, to));
-  const xOf = d => padL + (totalDays ? healthDayDiff(from, d) / totalDays : 0.5) * plotW;
-  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const bw = Math.max(2, Math.min(16, plotW / (totalDays + 1) * 0.7));
+  // Inset both ends by half a bar (+gap) so the first/last bars never bleed
+  // into the y-axis labels or right edge — matters most in the 1W view.
+  const inset = bw / 2 + 3;
+  const xOf = d => padL + inset + (totalDays ? healthDayDiff(from, d) / totalDays : 0.5) * (plotW - 2 * inset);
+  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
 
   return (
@@ -178,9 +181,12 @@ function HealthMacroChart({ series, from, to }) {
   const maxV = Math.max(...pts.map(p => Math.max(calOf(p), p.targetCal || 0)), 1);
   const dom = UI.chartDomain(0, maxV, { min: 0 });
   const totalDays = Math.max(1, healthDayDiff(from, to));
-  const xOf = d => padL + (totalDays ? healthDayDiff(from, d) / totalDays : 0.5) * plotW;
-  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const bw = Math.max(2, Math.min(16, plotW / (totalDays + 1) * 0.7));
+  // Inset both ends by half a bar (+gap) so the first/last bars never bleed
+  // into the y-axis labels or right edge — matters most in the 1W view.
+  const inset = bw / 2 + 3;
+  const xOf = d => padL + inset + (totalDays ? healthDayDiff(from, d) / totalDays : 0.5) * (plotW - 2 * inset);
+  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
 
   return (
@@ -458,6 +464,70 @@ function HealthMetricsCard({ log }) {
 }
 
 
+// ─── This-week overview card (Mon–Sun averages + verdict) ─────────────────────
+
+function HealthWeekCard({ stats }) {
+  const { from, to, daysLogged, daysTrained, weight, steps, calories, protein, carbs, fat, water, adherence } = stats;
+  const r = v => v == null ? null : Math.round(v);
+  const range = `${healthFmtDate(from, { day: 'numeric', month: 'short' })} – ${healthFmtDate(to, { day: 'numeric', month: 'short' })}`;
+  const verdict = adherence == null ? null : adherence >= 90 ? 'Strong week' : adherence >= 75 ? 'On track' : 'Off track';
+
+  const cell = (label, value, unit) => (
+    <div style={{ minWidth: 0 }}>
+      <div className="num" style={{ fontSize: 16, color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300, whiteSpace: 'nowrap' }}>
+        {value != null ? value : '—'}{value != null && unit ? <span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>{unit}</span> : ''}
+      </div>
+      <div style={{ fontSize: 8.5, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase', marginTop: 2 }}>{label}</div>
+    </div>
+  );
+
+  if (!daysLogged) {
+    return (
+      <Card style={{ padding: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: 8 }}>
+          <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>THIS WEEK</span>
+          <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{range}</span>
+        </div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>Nothing logged yet this week.</div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card accent style={{ padding: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: adherence != null ? 12 : 14 }}>
+        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>THIS WEEK</span>
+        <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{range}</span>
+      </div>
+
+      {adherence != null && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+            <span className="num" style={{ fontSize: 30, color: adherenceColor(adherence), fontWeight: 300, lineHeight: 1 }}>{r(adherence)}%</span>
+            <span style={{ fontSize: 12, color: adherenceColor(adherence), fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.04em' }}>{verdict}</span>
+            <span style={{ flex: 1 }} />
+            <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase' }}>avg adherence</span>
+          </div>
+          <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
+            <div style={{ width: `${Math.min(100, adherence)}%`, height: '100%', background: adherenceColor(adherence) }} />
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 8px' }}>
+        {cell('Weight', weight != null ? Math.round(weight * 10) / 10 : null, UI.unit())}
+        {cell('Steps', steps != null ? r(steps).toLocaleString() : null)}
+        {cell('Calories', r(calories), 'kcal')}
+        {cell('Water', water != null ? (Math.round(water / 100) / 10) : null, 'L')}
+        {cell('Protein', r(protein), 'g')}
+        {cell('Carbs', r(carbs), 'g')}
+        {cell('Fat', r(fat), 'g')}
+        {cell('Logged', `${daysLogged}/7`, daysTrained ? `· ${daysTrained} tr` : '')}
+      </div>
+    </Card>
+  );
+}
+
 // ─── Date strip (current week Mon–Sun) ────────────────────────────────────────
 
 function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
@@ -505,20 +575,20 @@ function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
                 color: sel ? UI.gold : has ? UI.ink : UI.inkFaint }}>
                 {new Date(d + 'T12:00:00').getDate()}
               </div>
-              <div style={{ height: 12, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                {/* Training day: dumbbell dot (shown when no health log yet) */}
-                {trained && !has && (
-                  <i className="fa-solid fa-dumbbell" style={{ fontSize: 6, color: sel ? UI.gold : 'var(--accent)', opacity: 0.75 }} />
+              {/* Day-type indicator — ALWAYS shown: dumbbell = training, dot = rest.
+                 Logged status is conveyed by the gold cell bg/border + the small
+                 check below. */}
+              <div style={{ height: 13, marginTop: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                {trained ? (
+                  <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: sel || has ? 'var(--accent)' : UI.inkFaint }} />
+                ) : (
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', border: `1px solid ${sel || has ? UI.goldSoft : UI.hairStrong}`, background: 'transparent', display: 'inline-block' }} />
                 )}
-                {/* Health logged: gold checkmark (or dot when selected) */}
-                {has && sel && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold }} />}
-                {has && !sel && (
-                  <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8">
+                {has && (
+                  <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="2">
                     <path d="M2 6l2.5 2.5L10 3"/>
                   </svg>
                 )}
-                {/* Rest day, nothing logged */}
-                {!has && !trained && <div style={{ width: 4, height: 4, borderRadius: '50%', background: isToday ? UI.hairStrong : UI.hair }} />}
               </div>
             </div>
           );
@@ -581,11 +651,18 @@ function HealthScreen({ store, setStore, go, userId }) {
   const dailyLogs = store.dailyLogs || [];
   const selectedLog = dailyLogs.find(l => l.date === selectedDate) || null;
 
-  // Windowed series builder for the charts.
+  // Windowed series builder for the charts. The x-range is tightened to the
+  // actual logged days inside the window (not the full timeframe) so a sparse
+  // window doesn't leave most of the chart empty — 80 of 90 days fills the chart.
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[1]).days;
   const seriesFor = (days, pick) => {
     const { start, end } = healthWindow(days);
-    return { from: start, to: end, data: dailyLogs.filter(l => l.date >= start && l.date <= end).map(l => ({ date: l.date, ...pick(l) })) };
+    const data = dailyLogs.filter(l => l.date >= start && l.date <= end).map(l => ({ date: l.date, ...pick(l) }));
+    const dates = data.map(d => d.date);
+    let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
+    let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
+    if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
+    return { from, to, data };
   };
 
   const windowDays = tfDays(tf);
@@ -600,31 +677,74 @@ function HealthScreen({ store, setStore, go, userId }) {
   const stepsAvg = avg(stepsSeries.data, 'value');
   const adhAvg = avg(adhSeries.data, 'value');
 
-  const targetRow = (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-      <div style={{ flex: 1, fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.7 }}>
-        {targets ? (
-          [['Training', 'Training'], ['Rest', 'Rest']].map(([label, suffix]) => {
-            const p = targets[`protein${suffix}`], c = targets[`carbs${suffix}`], f = targets[`fat${suffix}`], cal = targets[`calories${suffix}`];
-            if (p == null && c == null && f == null) return null;
-            return (
-              <div key={suffix}>
-                <span style={{ color: UI.inkGhost, marginRight: 5, fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</span>
-                {[cal != null && `${cal} kcal`, p != null && `P ${p}`, c != null && `C ${c}`, f != null && `F ${f}`].filter(Boolean).join(' · ')}
-              </div>
-            );
-          })
-        ) : (
-          <span style={{ color: UI.inkGhost }}>Set targets to track macro adherence</span>
+  // Current week (Mon–Sun) averages for the overview card.
+  const weekStats = useMemoH(() => {
+    const now = new Date(today + 'T12:00:00');
+    const jsDow = now.getDay();
+    const monday = healthShiftISO(today, -((jsDow === 0 ? 7 : jsDow) - 1));
+    const sunday = healthShiftISO(monday, 6);
+    const inWeek = dailyLogs.filter(l => l.date >= monday && l.date <= sunday);
+    const avgK = k => { const vs = inWeek.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
+    const trained = (store.sessions || []).filter(s => s.ended).filter(s => {
+      const d = s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
+      return d && d >= monday && d <= sunday;
+    }).length;
+    return {
+      from: monday, to: sunday, daysLogged: inWeek.length, daysTrained: trained,
+      weight: avgK('weight'), steps: avgK('steps'), calories: avgK('calories'),
+      protein: avgK('protein'), carbs: avgK('carbs'), fat: avgK('fat'), water: avgK('waterMl'),
+      adherence: avgK('adherence'),
+    };
+  }, [dailyLogs, store.sessions, today]);
+
+  const targetDayRow = (label, suffix) => {
+    const p = targets[`protein${suffix}`], c = targets[`carbs${suffix}`], f = targets[`fat${suffix}`], cal = targets[`calories${suffix}`];
+    if (p == null && c == null && f == null) return null;
+    const chip = (k, v) => (
+      <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}>
+        <span style={{ color: UI.inkGhost, fontSize: 9 }}>{k}</span> {v}
+      </span>
+    );
+    return (
+      <div key={suffix} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0' }}>
+        <span style={{ width: 62, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint }}>{label}</span>
+        {cal != null && (
+          <span className="num" style={{ fontSize: 16, color: 'var(--accent)', fontWeight: 400 }}>
+            {cal}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span>
+          </span>
         )}
-        {fromCoach && <div style={{ fontSize: 9, color: UI.inkGhost, marginTop: 1 }}>↑ From coach</div>}
+        <span style={{ flex: 1 }} />
+        <span style={{ display: 'flex', gap: 9 }}>
+          {p != null && chip('P', p)}
+          {c != null && chip('C', c)}
+          {f != null && chip('F', f)}
+        </span>
       </div>
-      <button onClick={() => setTargetOpen(true)} style={{
-        background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`,
-        borderRadius: 4, padding: '4px 10px', color: 'var(--accent)',
-        fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, cursor: 'pointer',
-        WebkitTapHighlightColor: 'transparent', flexShrink: 0,
-      }}>{targets ? 'Edit' : 'Set'}</button>
+    );
+  };
+
+  const targetRow = (
+    <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: targets ? 2 : 0 }}>
+        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>DAILY TARGETS{fromCoach ? ' · FROM COACH' : ''}</span>
+        <button onClick={() => setTargetOpen(true)} style={{
+          background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`,
+          borderRadius: 4, padding: '3px 12px', color: 'var(--accent)',
+          fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
+          WebkitTapHighlightColor: 'transparent', flexShrink: 0,
+        }}>{targets ? 'EDIT' : 'SET'}</button>
+      </div>
+      {targets ? (
+        <>
+          {targetDayRow('Training', 'Training')}
+          <div style={{ height: 0.5, background: UI.hair }} />
+          {targetDayRow('Rest', 'Rest')}
+        </>
+      ) : (
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4 }}>
+          Set protein / carbs / fat goals to track macro adherence.
+        </div>
+      )}
     </div>
   );
 
@@ -644,6 +764,8 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
 
         <HealthMetricsCard log={selectedLog} />
+
+        <HealthWeekCard stats={weekStats} />
 
         <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf}
           headline={weightHeadline} sub={weightHeadline ? 'latest' : null}>
@@ -685,7 +807,12 @@ function HealthClientLogs({ clientStore }) {
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[1]).days;
   const seriesFor = (days, pick) => {
     const { start, end } = healthWindow(days);
-    return { from: start, to: end, data: logs.filter(l => l.date >= start && l.date <= end).map(l => ({ date: l.date, value: pick(l) })) };
+    const data = logs.filter(l => l.date >= start && l.date <= end).map(l => ({ date: l.date, value: pick(l) }));
+    const dates = data.map(d => d.date);
+    let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
+    let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
+    if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
+    return { from, to, data };
   };
   const weightSeries = seriesFor(tfDays(weightTf), l => l.weight);
   const adhSeries = seriesFor(tfDays(adhTf), l => l.adherence);

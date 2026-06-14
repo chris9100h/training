@@ -1537,7 +1537,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             const r = !d.items?.length;
             const slotLabel = weekdayMode
               ? WEEKDAYS[i]
-              : d.date.toLocaleDateString('en-US', { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
+              : d.date.toLocaleDateString(undefined, { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
             let isCompleted = false;
             if (!r) {
               if (weekdayMode) {
@@ -1572,7 +1572,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                     <>
                       <div>{WEEKDAYS[d.weekday]}</div>
                       <div style={{ fontSize: 7, marginTop: 1, opacity: 0.75 }}>
-                        {d.date.toLocaleDateString('en-US', { day: 'numeric', month: 'numeric' }).replace(/\.$/, '')}
+                        {d.date.toLocaleDateString(undefined, { day: 'numeric', month: 'numeric' }).replace(/\.$/, '')}
                       </div>
                     </>
                   ) : slotLabel}
