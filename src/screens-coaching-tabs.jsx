@@ -634,7 +634,9 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
   const req = field.required ? ' *' : '';
   const lbl = (field.unit === 'weight'
     ? `${field.label} (${UI.unit()})`
-    : field.unit ? `${field.label} (${field.unit})` : field.label) + req;
+    : field.unit === 'pace'
+      ? `${field.label} (${UI.unit() === 'lbs' ? '/mi' : '/km'})`
+      : field.unit ? `${field.label} (${field.unit})` : field.label) + req;
 
   // Read-only / computed fields (e.g. macro adherence %). Value is prefilled
   // from the daily logs and shown, not entered.
@@ -686,6 +688,33 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
           </div>
         </div>
         <input type="number" inputMode="decimal" placeholder="–" value={value || ''} onChange={e => onChange(e.target.value)} style={inputStyle} />
+      </>
+    );
+  }
+
+  if (field.type === 'pace') {
+    const raw = value || '';
+    const colon = raw.indexOf(':');
+    const mins = colon >= 0 ? raw.slice(0, colon) : raw;
+    const secs = colon >= 0 ? raw.slice(colon + 1) : '';
+    const combine = (m, s) => {
+      const mm = m.replace(/\D/g, '').slice(0, 2);
+      const ss = s.replace(/\D/g, '').slice(0, 2);
+      if (!mm && !ss) { onChange(''); return; }
+      onChange(`${mm || '0'}:${(ss || '0').padStart(2, '0')}`);
+    };
+    return (
+      <>
+        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>{lbl}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input type="number" inputMode="numeric" min="0" max="99" placeholder="mm"
+            value={mins} onChange={e => combine(e.target.value, secs)}
+            style={{ ...inputStyle, textAlign: 'center', flex: 1 }} />
+          <span style={{ color: UI.inkFaint, fontFamily: UI.fontNum, fontSize: 18, lineHeight: 1, flexShrink: 0 }}>:</span>
+          <input type="number" inputMode="numeric" min="0" max="59" placeholder="ss"
+            value={secs} onChange={e => combine(mins, e.target.value)}
+            style={{ ...inputStyle, textAlign: 'center', flex: 1 }} />
+        </div>
       </>
     );
   }
@@ -799,6 +828,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
     if (prefill) {
       if (prefill.cardioMinutes != null) base.cardio_minutes = String(prefill.cardioMinutes);
       if (prefill.cardioDistanceM != null) base.cardio_distance_m = du === 'mi' ? (prefill.cardioDistanceM / 1609.344).toFixed(2) : (prefill.cardioDistanceM / 1000).toFixed(2);
+      if (prefill.pace != null) base.cardio_pace = prefill.pace;
       if (prefill.paceFeeling != null) base.cardio_pace_feeling = prefill.paceFeeling;
       if (prefill.effort != null) base.cardio_effort = prefill.effort;
     }
@@ -945,7 +975,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           userId={userId}
           weekStart={formWeek}
           existing={target}
-          prefill={!target ? LB.cardioWeekPrefill(store?.cardioLogs, formWeek) : undefined}
+          prefill={!target ? LB.cardioWeekPrefill(store?.cardioLogs, formWeek, store?.settings?.unit) : undefined}
           dailyPrefill={!target ? LB.dailyLogsWeekPrefill(store?.dailyLogs, formWeek) : undefined}
           onSaved={() => { setEditTarget(null); load(); }}
           schema={resolvedSchema}

@@ -1983,7 +1983,7 @@ async function deleteCheckin(checkinId, userId) {
 
 // Aggregate cardio logs for a given week (weekStart = 'YYYY-MM-DD' Monday).
 // Returns { cardioMinutes, cardioDistanceM, paceFeeling, effort, count } or null.
-function cardioWeekPrefill(cardioLogs, weekStart) {
+function cardioWeekPrefill(cardioLogs, weekStart, unit) {
   if (!cardioLogs?.length || !weekStart) return null;
   const ws = weekStart.slice(0, 10);
   const we = (() => { const d = new Date(ws + 'T12:00:00'); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })();
@@ -1994,11 +1994,23 @@ function cardioWeekPrefill(cardioLogs, weekStart) {
   const totalDistM = hasDistArr.length ? Math.round(hasDistArr.reduce((s, l) => s + l.distanceM, 0)) : null;
   const pfVals = logs.filter(l => l.paceFeeling != null).map(l => l.paceFeeling);
   const efVals = logs.filter(l => l.effort != null).map(l => l.effort);
+  const withDist = logs.filter(l => l.distanceM > 0 && l.durationMinutes > 0);
+  let pace = null;
+  if (withDist.length) {
+    const pMin = withDist.reduce((s, l) => s + l.durationMinutes, 0);
+    const distUnit = unit === 'lbs' ? 1609.344 : 1000;
+    const dist = withDist.reduce((s, l) => s + l.distanceM, 0) / distUnit;
+    const paceMinPer = pMin / dist;
+    const m = Math.floor(paceMinPer);
+    const sec = Math.round((paceMinPer - m) * 60);
+    pace = `${m}:${String(sec).padStart(2, '0')}`;
+  }
   return {
     cardioMinutes: totalMin || null,
     cardioDistanceM: totalDistM,
     paceFeeling: pfVals.length ? Math.round(pfVals.reduce((s, v) => s + v, 0) / pfVals.length) : null,
     effort: efVals.length ? Math.round(efVals.reduce((s, v) => s + v, 0) / efVals.length) : null,
+    pace,
     count: logs.length,
   };
 }

@@ -81,6 +81,7 @@ const CHECKIN_DEFAULT_SCHEMA = [
       { key: 'steps', label: 'Steps', type: 'integer', width: 'full', required: false, direction: 'higher_better', icon: 'fa-shoe-prints' },
       { key: 'cardio_minutes', label: 'Cardio (min)', type: 'integer', width: 'half', required: false, direction: null, icon: 'fa-person-running' },
       { key: 'cardio_distance_m', label: 'Distance', type: 'decimal', width: 'half', required: false, direction: null, _distanceField: true },
+      { key: 'cardio_pace', label: 'Avg pace', type: 'pace', unit: 'pace', width: 'half', required: false, direction: 'lower_better', icon: 'fa-stopwatch' },
       { key: 'cardio_pace_feeling', label: 'Pace feeling', type: 'choice',
         options: [{ value: 1, label: 'Easy' }, { value: 2, label: 'Light' }, { value: 3, label: 'Steady' }, { value: 4, label: 'Solid' }, { value: 5, label: 'Hard' }, { value: 6, label: 'Max' }],
         labeled: true, width: 'full', required: false, direction: null, icon: 'fa-gauge' },
