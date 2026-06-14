@@ -2048,6 +2048,50 @@ function isLoggedTrainingDay(sessions, dateISO) {
   return (sessions || []).some(s => s.ended && (s.date || '').slice(0, 10) === d);
 }
 
+// Returns the PLANNED training day object for a date (or null for a planned rest
+// day / no plan), mirroring the home-screen retroactive-logging logic for both
+// weekday plans and cycle plans (with versioning). A "training day" here means
+// the plan slot for that date has at least one exercise.
+function plannedTrainingDay(state, dateStr) {
+  const ds = (dateStr || '').slice(0, 10);
+  const sch = state?.schedules?.find(s => s.id === state.activeScheduleId);
+  if (!sch || !sch.days?.length) return null;
+  if (isWeekdayPlan(sch)) {
+    if (state.weekPlanStartDate && ds < state.weekPlanStartDate) return null;
+    const dd = new Date(ds + 'T12:00:00');
+    const wd = dd.getDay() === 0 ? 6 : dd.getDay() - 1;
+    const vDays = getPlanDaysForDate(sch, ds);
+    return vDays.find(d => d.weekday === wd && d.items?.length > 0) || null;
+  }
+  if (state.cycleStartDate) {
+    const vDays = getPlanDaysForDate(sch, ds);
+    if (!vDays.length) return null;
+    const cyclePos = getCyclePosForDate(sch, ds);
+    let idx;
+    if (cyclePos !== null) idx = cyclePos;
+    else {
+      const start = parseDate(state.cycleStartDate);
+      const n = Math.round((new Date(ds + 'T12:00:00').getTime() - start.getTime()) / 86400000);
+      if (n < 0) return null;
+      idx = ((n % vDays.length) + vDays.length) % vDays.length;
+    }
+    const dayData = vDays[idx];
+    return (dayData?.items?.length > 0) ? dayData : null;
+  }
+  return null;
+}
+
+// Whether a date counts as a training day for health indicators. A day with a
+// logged (performed) session always counts. Otherwise a PLANNED training day
+// counts only while it's still today or in the future — a past planned day that
+// wasn't performed is downgraded to a rest day ("you have to earn it").
+function isTrainingDayForDate(state, dateStr) {
+  const ds = (dateStr || '').slice(0, 10);
+  if (isLoggedTrainingDay(state?.sessions, ds)) return true;
+  if (ds >= todayISO() && plannedTrainingDay(state, ds)) return true;
+  return false;
+}
+
 // Pick the {protein, carbs, fat, calories} target for a given day type out of a
 // macro-target object (works for both coaching macros and the user's personal
 // macroTargets — same field names). Returns null when no macro is set for that
@@ -2150,5 +2194,5 @@ window.LB = {
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill, detectCardioPRs,
-  isLoggedTrainingDay, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill,
+  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill,
 };

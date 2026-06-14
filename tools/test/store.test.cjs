@@ -327,6 +327,29 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.isLoggedTrainingDay(sessions, '2026-06-12'), false);
   });
 
+  test('plannedTrainingDay: weekday plan returns training slot, null for rest/empty/no-plan', () => {
+    const allTrain = { id: 'p1', mode: 'weekday', days: Array.from({ length: 7 }, (_, wd) => ({ weekday: wd, name: 'D', items: [{ exId: 'x' }] })) };
+    assert.ok(LB.plannedTrainingDay({ activeScheduleId: 'p1', schedules: [allTrain] }, '2026-06-10'));
+    const allRest = { id: 'p1', mode: 'weekday', days: Array.from({ length: 7 }, (_, wd) => ({ weekday: wd, name: 'REST', items: [] })) };
+    assert.strictEqual(LB.plannedTrainingDay({ activeScheduleId: 'p1', schedules: [allRest] }, '2026-06-10'), null);
+    assert.strictEqual(LB.plannedTrainingDay({ activeScheduleId: null, schedules: [] }, '2026-06-10'), null);
+    // before the plan started → not yet a training day
+    assert.strictEqual(LB.plannedTrainingDay({ activeScheduleId: 'p1', schedules: [allTrain], weekPlanStartDate: '2026-06-15' }, '2026-06-10'), null);
+  });
+
+  test('isTrainingDayForDate: performed always counts; planned counts only today/future', () => {
+    const allTrain = { id: 'p1', mode: 'weekday', days: Array.from({ length: 7 }, (_, wd) => ({ weekday: wd, name: 'D', items: [{ exId: 'x' }] })) };
+    const today = LB.todayISO();
+    const shift = (d, n) => { const x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+    const future = shift(today, 3), past = shift(today, -3);
+    const base = { activeScheduleId: 'p1', schedules: [allTrain], sessions: [] };
+    assert.strictEqual(LB.isTrainingDayForDate(base, future), true);              // planned future → training
+    assert.strictEqual(LB.isTrainingDayForDate(base, past), false);              // planned past, not done → rest
+    const done = { ...base, sessions: [{ date: past + 'T10:00:00', ended: past + 'T11:00:00' }] };
+    assert.strictEqual(LB.isTrainingDayForDate(done, past), true);               // performed past → training
+    assert.strictEqual(LB.isTrainingDayForDate({ activeScheduleId: null, schedules: [], sessions: [] }, future), false);
+  });
+
   test('dayTargetFromMacros picks training vs rest, null when unset', () => {
     // deepStrictEqual would trip on the vm realm's distinct Object.prototype —
     // compare by JSON instead (same as the rest of this suite avoids it).

@@ -60,14 +60,16 @@ function HealthChartEmpty({ label }) {
   );
 }
 
-// Section wrapper: title + 1W/1M/3M toggle + subtitle.
-function HealthChartCard({ title, icon, tf, setTf, headline, sub, children }) {
+// Section wrapper: title + 1W/1M/3M toggle + subtitle. `dragHandle` renders a
+// reorder grip at the start of the header when the card is in a reorder list.
+function HealthChartCard({ title, icon, tf, setTf, headline, sub, dragHandle, children }) {
   return (
     <Card style={{ padding: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        {dragHandle}
         {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 11, color: UI.inkFaint }} />}
         <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{title}</span>
-        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+        <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
           {HEALTH_TFS.map(t => (
             <button key={t.id} onClick={() => setTf(t.id)} style={{
               padding: '2px 8px', cursor: 'pointer', border: 'none',
@@ -466,11 +468,13 @@ function HealthMetricsCard({ log }) {
 
 // ─── This-week overview card (Mon–Sun averages + verdict) ─────────────────────
 
-function HealthWeekCard({ stats }) {
-  const { from, to, daysLogged, daysTrained, weight, steps, calories, protein, carbs, fat, water, adherence } = stats;
+function HealthWeekCard({ stats, dragHandle }) {
+  const { from, to, daysLogged, trainingsDone, trainingsPlanned, cardioMinutes, cardioSessions,
+    weight, steps, calories, protein, carbs, fat, water, adherence } = stats;
   const r = v => v == null ? null : Math.round(v);
   const range = `${healthFmtDate(from, { day: 'numeric', month: 'short' })} – ${healthFmtDate(to, { day: 'numeric', month: 'short' })}`;
   const verdict = adherence == null ? null : adherence >= 90 ? 'Strong week' : adherence >= 75 ? 'On track' : 'Off track';
+  const trainingPct = trainingsPlanned > 0 ? Math.min(100, (trainingsDone / trainingsPlanned) * 100) : (trainingsDone > 0 ? 100 : 0);
 
   const cell = (label, value, unit) => (
     <div style={{ minWidth: 0 }}>
@@ -481,10 +485,24 @@ function HealthWeekCard({ stats }) {
     </div>
   );
 
-  if (!daysLogged) {
+  const miniBar = (label, headEl, pct, color, sub) => (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 5 }}>
+        {headEl}
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{sub}</span>
+      </div>
+      <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color }} />
+      </div>
+    </div>
+  );
+
+  if (!daysLogged && !trainingsDone && !trainingsPlanned && !cardioMinutes) {
     return (
       <Card style={{ padding: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+          {dragHandle}
           <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>THIS WEEK</span>
           <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{range}</span>
         </div>
@@ -495,34 +513,37 @@ function HealthWeekCard({ stats }) {
 
   return (
     <Card accent style={{ padding: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: adherence != null ? 12 : 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
+        {dragHandle}
         <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>THIS WEEK</span>
         <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{range}</span>
       </div>
 
-      {adherence != null && (
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
-            <span className="num" style={{ fontSize: 30, color: adherenceColor(adherence), fontWeight: 300, lineHeight: 1 }}>{r(adherence)}%</span>
-            <span style={{ fontSize: 12, color: adherenceColor(adherence), fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.04em' }}>{verdict}</span>
-            <span style={{ flex: 1 }} />
-            <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase' }}>avg adherence</span>
-          </div>
-          <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
-            <div style={{ width: `${Math.min(100, adherence)}%`, height: '100%', background: adherenceColor(adherence) }} />
-          </div>
-        </div>
-      )}
+      {adherence != null && miniBar('adherence',
+        <>
+          <span className="num" style={{ fontSize: 30, color: adherenceColor(adherence), fontWeight: 300, lineHeight: 1 }}>{r(adherence)}%</span>
+          <span style={{ fontSize: 12, color: adherenceColor(adherence), fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.04em' }}>{verdict}</span>
+        </>,
+        Math.min(100, adherence), adherenceColor(adherence), 'avg adherence')}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 8px' }}>
+      {(trainingsPlanned > 0 || trainingsDone > 0) && miniBar('trainings',
+        <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+          <span className="num" style={{ fontSize: 18, color: 'var(--accent)', fontWeight: 300, lineHeight: 1 }}>
+            {trainingsDone}<span style={{ fontSize: 12, color: UI.inkFaint }}> / {trainingsPlanned || trainingsDone}</span>
+          </span>
+          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, fontWeight: 600 }}>trainings</span>
+        </span>,
+        trainingPct, 'var(--accent)', 'planned vs done')}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 8px', marginTop: 4 }}>
         {cell('Weight', weight != null ? Math.round(weight * 10) / 10 : null, UI.unit())}
         {cell('Steps', steps != null ? r(steps).toLocaleString() : null)}
         {cell('Calories', r(calories), 'kcal')}
-        {cell('Water', water != null ? (Math.round(water / 100) / 10) : null, 'L')}
+        {cell('Cardio', cardioMinutes ? cardioMinutes : null, cardioMinutes ? (cardioSessions > 1 ? `min · ${cardioSessions}×` : 'min') : '')}
         {cell('Protein', r(protein), 'g')}
         {cell('Carbs', r(carbs), 'g')}
         {cell('Fat', r(fat), 'g')}
-        {cell('Logged', `${daysLogged}/7`, daysTrained ? `· ${daysTrained} tr` : '')}
+        {cell('Water', water != null ? (Math.round(water / 100) / 10) : null, 'L')}
       </div>
     </Card>
   );
@@ -537,25 +558,22 @@ function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
   const monday = healthShiftISO(today, -((jsDow === 0 ? 7 : jsDow) - 1));
   const days = Array.from({ length: 7 }, (_, i) => healthShiftISO(monday, i));
   const loggedSet = new Set((store.dailyLogs || []).map(l => l.date));
-  const trainedSet = new Set(
-    (store.sessions || []).filter(s => s.ended).map(s => {
-      const d = s.date; if (!d) return null;
-      return typeof d === 'string' ? d.slice(0, 10) : new Date(d).toISOString().slice(0, 10);
-    }).filter(Boolean)
-  );
+  const sunday = days[6];
+  // Month label for the week — spans two months at a boundary (e.g. "MAY – JUN").
+  const mLabel = iso => new Date(iso + 'T12:00:00').toLocaleDateString(undefined, { month: 'short' }).toUpperCase();
+  const monthLabel = mLabel(monday) === mLabel(sunday)
+    ? `${mLabel(monday)} ${new Date(sunday + 'T12:00:00').getFullYear()}`
+    : `${mLabel(monday)} – ${mLabel(sunday)}`;
 
   return (
-    <div style={{
-      flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 12px) 16px 10px',
-      position: 'sticky', top: 0, zIndex: 5,
-      background: 'rgba(var(--bg-rgb),0.92)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-    }}>
+    <div style={{ flexShrink: 0, padding: '4px 16px 12px' }}>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6, paddingLeft: 2 }}>{monthLabel}</div>
       {/* Day cells — same card style as the home screen day strip */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
         {days.map((d, i) => {
           const sel = d === selectedDate;
           const has = loggedSet.has(d);
-          const trained = trainedSet.has(d);
+          const trained = LB.isTrainingDayForDate(store, d);
           const isToday = d === today;
           const future = d > today;
           return (
@@ -580,7 +598,7 @@ function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
                  check below. */}
               <div style={{ height: 13, marginTop: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                 {trained ? (
-                  <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: sel || has ? 'var(--accent)' : UI.inkFaint }} />
+                  <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: 'var(--accent)' }} />
                 ) : (
                   <span style={{ width: 5, height: 5, borderRadius: '50%', border: `1px solid ${sel || has ? UI.goldSoft : UI.hairStrong}`, background: 'transparent', display: 'inline-block' }} />
                 )}
@@ -671,31 +689,70 @@ function HealthScreen({ store, setStore, go, userId }) {
   const macroSeries = useMemoH(() => seriesFor(windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null })), [dailyLogs, tf]);
   const adhSeries = useMemoH(() => seriesFor(windowDays, l => ({ value: l.adherence })), [dailyLogs, tf]);
 
+  // Cardio chart series — minutes summed per day from store.cardioLogs.
+  const cardioSeries = useMemoH(() => {
+    const { start, end } = healthWindow(windowDays);
+    const byDay = {};
+    (store.cardioLogs || []).forEach(l => { if (l.date >= start && l.date <= end) byDay[l.date] = (byDay[l.date] || 0) + (l.durationMinutes || 0); });
+    const data = Object.keys(byDay).map(date => ({ date, value: byDay[date] }));
+    const dates = data.map(d => d.date);
+    let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
+    let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
+    if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
+    return { from, to, data };
+  }, [store.cardioLogs, tf]);
+
   const avg = (arr, key) => { const vs = arr.map(d => d[key]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const wVals = weightSeries.data.map(d => d.value).filter(v => v != null);
   const weightHeadline = wVals.length ? `${(wVals[wVals.length - 1])}${UI.unit()}` : null;
   const stepsAvg = avg(stepsSeries.data, 'value');
   const adhAvg = avg(adhSeries.data, 'value');
+  const cardioTotal = cardioSeries.data.reduce((s, d) => s + (d.value || 0), 0);
 
-  // Current week (Mon–Sun) averages for the overview card.
+  // Reorderable card order, persisted per device.
+  const CARD_ORDER_KEY = 'logbook-health-card-order';
+  const DEFAULT_CARD_ORDER = ['week', 'weight', 'steps', 'macros', 'cardio', 'adherence'];
+  const [cardOrder, setCardOrder] = useStateH(() => {
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]'); } catch (_) {}
+    const valid = (Array.isArray(saved) ? saved : []).filter(id => DEFAULT_CARD_ORDER.includes(id));
+    return [...valid, ...DEFAULT_CARD_ORDER.filter(id => !valid.includes(id))];
+  });
+  const reorderCards = (from, to) => {
+    if (from === to) return;
+    setCardOrder(prev => {
+      const visible = prev.filter(id => cardEls[id]);
+      const moved = [...visible];
+      const [m] = moved.splice(from, 1);
+      moved.splice(to, 0, m);
+      const next = [...moved, ...prev.filter(id => !visible.includes(id))];
+      try { localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+  };
+
+  // Current week (Mon–Sun) averages + training/cardio tallies for the overview.
   const weekStats = useMemoH(() => {
     const now = new Date(today + 'T12:00:00');
     const jsDow = now.getDay();
     const monday = healthShiftISO(today, -((jsDow === 0 ? 7 : jsDow) - 1));
     const sunday = healthShiftISO(monday, 6);
+    const weekDays = Array.from({ length: 7 }, (_, i) => healthShiftISO(monday, i));
     const inWeek = dailyLogs.filter(l => l.date >= monday && l.date <= sunday);
     const avgK = k => { const vs = inWeek.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
-    const trained = (store.sessions || []).filter(s => s.ended).filter(s => {
-      const d = s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
-      return d && d >= monday && d <= sunday;
-    }).length;
+    const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
+    const trainingsDone = (store.sessions || []).filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= monday && d <= sunday; }).length;
+    const trainingsPlanned = weekDays.filter(d => LB.plannedTrainingDay(store, d)).length;
+    const weekCardio = (store.cardioLogs || []).filter(l => l.date >= monday && l.date <= sunday);
+    const cardioMinutes = weekCardio.reduce((s, l) => s + (l.durationMinutes || 0), 0);
     return {
-      from: monday, to: sunday, daysLogged: inWeek.length, daysTrained: trained,
+      from: monday, to: sunday, daysLogged: inWeek.length,
+      trainingsDone, trainingsPlanned, cardioMinutes, cardioSessions: weekCardio.length,
       weight: avgK('weight'), steps: avgK('steps'), calories: avgK('calories'),
       protein: avgK('protein'), carbs: avgK('carbs'), fat: avgK('fat'), water: avgK('waterMl'),
       adherence: avgK('adherence'),
     };
-  }, [dailyLogs, store.sessions, today]);
+  }, [dailyLogs, store.sessions, store.cardioLogs, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate, today]);
 
   const targetDayRow = (label, suffix) => {
     const p = targets[`protein${suffix}`], c = targets[`carbs${suffix}`], f = targets[`fat${suffix}`], cal = targets[`calories${suffix}`];
@@ -727,7 +784,7 @@ function HealthScreen({ store, setStore, go, userId }) {
     <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: targets ? 2 : 0 }}>
         <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>DAILY TARGETS{fromCoach ? ' · FROM COACH' : ''}</span>
-        <button onClick={() => setTargetOpen(true)} style={{
+        <button data-reorder-ignore="true" onClick={() => setTargetOpen(true)} style={{
           background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`,
           borderRadius: 4, padding: '3px 12px', color: 'var(--accent)',
           fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
@@ -748,12 +805,49 @@ function HealthScreen({ store, setStore, go, userId }) {
     </div>
   );
 
+  const handle = <DragHandle style={{ width: 20, height: 22, marginLeft: -4, cursor: 'grab' }} />;
+  const cardEls = {
+    week: <HealthWeekCard stats={weekStats} dragHandle={handle} />,
+    weight: (
+      <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
+        headline={weightHeadline} sub={weightHeadline ? 'latest' : null}>
+        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}`} />
+      </HealthChartCard>
+    ),
+    steps: (
+      <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={tf} setTf={setTf} dragHandle={handle}
+        headline={stepsAvg != null ? Math.round(stepsAvg).toLocaleString() : null} sub={stepsAvg != null ? 'avg / day' : null}>
+        <HealthBarChart series={stepsSeries.data} from={stepsSeries.from} to={stepsSeries.to} format={v => v >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`} />
+      </HealthChartCard>
+    ),
+    macros: (
+      <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf} dragHandle={handle}>
+        {targetRow}
+        <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
+        <MacroLegend />
+      </HealthChartCard>
+    ),
+    cardio: (
+      <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle}
+        headline={cardioTotal ? cardioTotal : null} sub={cardioTotal ? 'min total' : null}>
+        <HealthBarChart series={cardioSeries.data} from={cardioSeries.from} to={cardioSeries.to} format={v => `${Math.round(v)}`} />
+      </HealthChartCard>
+    ),
+    adherence: targets ? (
+      <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={tf} setTf={setTf} dragHandle={handle}
+        headline={adhAvg != null ? `${Math.round(adhAvg)}%` : null} sub={adhAvg != null ? 'avg' : null}>
+        <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
+      </HealthChartCard>
+    ) : null,
+  };
+
   return (
     <Screen>
+      <TopBar title="HEALTH" />
       <HealthDateStrip store={store} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} />
 
       {/* max-width cap so charts don't blow up on iPad */}
-      <div style={{ padding: '8px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
+      <div style={{ padding: '4px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 2px' }}>
           <span style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink }}>
             {selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' })}
@@ -765,30 +859,12 @@ function HealthScreen({ store, setStore, go, userId }) {
 
         <HealthMetricsCard log={selectedLog} />
 
-        <HealthWeekCard stats={weekStats} />
-
-        <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf}
-          headline={weightHeadline} sub={weightHeadline ? 'latest' : null}>
-          <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}`} />
-        </HealthChartCard>
-
-        <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={tf} setTf={setTf}
-          headline={stepsAvg != null ? Math.round(stepsAvg).toLocaleString() : null} sub={stepsAvg != null ? 'avg / day' : null}>
-          <HealthBarChart series={stepsSeries.data} from={stepsSeries.from} to={stepsSeries.to} format={v => v >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`} />
-        </HealthChartCard>
-
-        <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf}>
-          {targetRow}
-          <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
-          <MacroLegend />
-        </HealthChartCard>
-
-        {targets && (
-          <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={tf} setTf={setTf}
-            headline={adhAvg != null ? `${Math.round(adhAvg)}%` : null} sub={adhAvg != null ? 'avg' : null}>
-            <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
-          </HealthChartCard>
-        )}
+        {/* Reorderable cards — drag the grip to reorder; order persists per device. */}
+        <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {cardOrder.map(id => cardEls[id] ? (
+            <div key={id} data-reorder-item="true">{cardEls[id]}</div>
+          ) : null)}
+        </ReorderList>
       </div>
 
       <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} />
