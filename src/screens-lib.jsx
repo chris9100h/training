@@ -1488,20 +1488,9 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
           Filter{filterCount > 0 && <span style={{ background: UI.gold, color: '#0a0805', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{filterCount}</span>}
         </button>
       ) : null} />
-      {/* Tab strip */}
-      <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
-        {[['workouts','Workouts'],['cardio','Cardio'],['stats','Stats']].map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)} style={{
-            flex: 1, background: 'transparent', border: 'none',
-            padding: '11px 0', cursor: 'pointer',
-            color: tab === id ? UI.gold : UI.inkFaint,
-            fontFamily: UI.fontUi, fontSize: 10, fontWeight: tab === id ? 600 : 400,
-            letterSpacing: '0.14em', textTransform: 'uppercase',
-            borderBottom: `0.5px solid ${tab === id ? UI.gold : 'transparent'}`,
-            marginBottom: -0.5, transition: 'color 0.2s',
-          }}>{label}</button>
-        ))}
-      </div>
+      <SubTabBar
+        tabs={[{ id: 'workouts', label: 'Workouts', icon: 'fa-dumbbell' }, { id: 'cardio', label: 'Cardio', icon: 'fa-person-running' }, { id: 'stats', label: 'Stats', icon: 'fa-chart-simple' }]}
+        active={tab} onChange={setTab} style={{ paddingBottom: 8 }} />
 
       {tab === 'workouts' && (
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
