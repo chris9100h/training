@@ -457,87 +457,98 @@ function HealthMetricsCard({ log }) {
   );
 }
 
-// ─── Target macros card ───────────────────────────────────────────────────────
-
-function HealthTargetCard({ targets, fromCoach, onEdit }) {
-  const dayLine = (label, m, suffix) => {
-    const p = m[`protein${suffix}`], c = m[`carbs${suffix}`], f = m[`fat${suffix}`], cal = m[`calories${suffix}`];
-    if (p == null && c == null && f == null) return null;
-    return (
-      <div style={{ marginBottom: 8 }}>
-        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{label}</div>
-        <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>
-          {[cal != null && `${cal} kcal`, p != null && `P ${p}`, c != null && `C ${c}`, f != null && `F ${f}`].filter(Boolean).join(' · ')}
-        </div>
-      </div>
-    );
-  };
-  return (
-    <Card style={{ padding: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
-        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>MACRO TARGETS</span>
-        <button onClick={onEdit} style={{ background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '4px 12px', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-          {targets ? 'Edit' : 'Set'}
-        </button>
-      </div>
-      {targets ? (
-        <>
-          {dayLine('TRAINING DAY', targets, 'Training')}
-          {dayLine('REST DAY', targets, 'Rest')}
-          {fromCoach && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4 }}>↑ From your coach</div>}
-        </>
-      ) : (
-        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
-          Set your daily protein / carbs / fat targets to track macro adherence.
-        </div>
-      )}
-    </Card>
-  );
-}
 
 // ─── Date strip (current week Mon–Sun) ────────────────────────────────────────
 
-function HealthDateStrip({ store, selectedDate, onSelect, onCalendar, onLog }) {
+function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
   const today = LB.todayISO();
-  // Monday of the current week.
   const now = new Date(today + 'T12:00:00');
-  const jsDow = now.getDay(); // 0=Sun
+  const jsDow = now.getDay();
   const monday = healthShiftISO(today, -((jsDow === 0 ? 7 : jsDow) - 1));
   const days = Array.from({ length: 7 }, (_, i) => healthShiftISO(monday, i));
-  const logged = new Set((store.dailyLogs || []).map(l => l.date));
+  const loggedSet = new Set((store.dailyLogs || []).map(l => l.date));
+  const trainedSet = new Set(
+    (store.sessions || []).filter(s => s.ended).map(s => {
+      const d = s.date; if (!d) return null;
+      return typeof d === 'string' ? d.slice(0, 10) : new Date(d).toISOString().slice(0, 10);
+    }).filter(Boolean)
+  );
 
   return (
     <div style={{
-      flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 12px) 18px 10px',
+      flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 12px) 16px 10px',
       position: 'sticky', top: 0, zIndex: 5,
       background: 'rgba(var(--bg-rgb),0.92)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ flex: 1, display: 'flex', gap: 3 }}>
-          {days.map((d, i) => {
-            const sel = d === selectedDate;
-            const has = logged.has(d);
-            const isToday = d === today;
-            const future = d > today;
-            return (
-              <button key={d} onClick={() => !future && onSelect(d)} disabled={future} style={{
-                flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                padding: '5px 0', borderRadius: 4, cursor: future ? 'default' : 'pointer',
-                background: sel ? `rgba(var(--accent-rgb),0.14)` : 'transparent',
-                border: `1px solid ${sel ? UI.goldSoft : 'transparent'}`,
-                opacity: future ? 0.3 : 1, WebkitTapHighlightColor: 'transparent',
+      {/* Day cells — same card style as the home screen day strip */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+        {days.map((d, i) => {
+          const sel = d === selectedDate;
+          const has = loggedSet.has(d);
+          const trained = trainedSet.has(d);
+          const isToday = d === today;
+          const future = d > today;
+          return (
+            <div key={d} onClick={() => !future && onSelect(d)}
+              style={{
+                flex: 1, padding: '10px 4px 8px', textAlign: 'center',
+                background: sel ? UI.goldFaint : has ? UI.goldFaint : 'transparent',
+                border: `${sel ? '2px' : '0.5px'} solid ${sel ? UI.gold : has ? UI.goldSoft : isToday ? UI.hairStrong : UI.hair}`,
+                borderRadius: 4, cursor: future ? 'default' : 'pointer',
+                opacity: future ? 0.35 : 1, minHeight: 56,
+                WebkitTapHighlightColor: 'transparent',
               }}>
-                <span style={{ fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.06em', color: isToday ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase' }}>{WEEKDAYS[i]}</span>
-                <span className="num" style={{ fontSize: 13, color: sel ? 'var(--accent)' : UI.ink }}>{new Date(d + 'T12:00:00').getDate()}</span>
-                <span style={{ width: 5, height: 5, borderRadius: '50%', background: has ? 'var(--accent)' : UI.hairStrong }} />
-              </button>
-            );
-          })}
+              <div className="num" style={{ fontSize: 9, color: sel ? UI.gold : isToday ? UI.inkSoft : UI.inkFaint }}>
+                {WEEKDAYS[i]}
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, letterSpacing: '0.06em',
+                color: sel ? UI.gold : has ? UI.ink : UI.inkFaint }}>
+                {new Date(d + 'T12:00:00').getDate()}
+              </div>
+              <div style={{ height: 12, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                {/* Training day: dumbbell dot (shown when no health log yet) */}
+                {trained && !has && (
+                  <i className="fa-solid fa-dumbbell" style={{ fontSize: 6, color: sel ? UI.gold : 'var(--accent)', opacity: 0.75 }} />
+                )}
+                {/* Health logged: gold checkmark (or dot when selected) */}
+                {has && sel && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold }} />}
+                {has && !sel && (
+                  <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8">
+                    <path d="M2 6l2.5 2.5L10 3"/>
+                  </svg>
+                )}
+                {/* Rest day, nothing logged */}
+                {!has && !trained && <div style={{ width: 4, height: 4, borderRadius: '50%', background: isToday ? UI.hairStrong : UI.hair }} />}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {/* Calendar picker + LOG button — calendar is an overlaid <input> for iOS compat */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ position: 'relative', width: 34, height: 34, flexShrink: 0 }}>
+          <button style={{
+            width: '100%', height: '100%', borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
+            background: 'transparent', color: UI.inkSoft, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <i className="fa-solid fa-calendar-day" style={{ fontSize: 14 }} />
+          </button>
+          <input type="date" value={selectedDate}
+            onChange={e => e.target.value && onSelect(e.target.value)}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+          />
         </div>
-        <button onClick={onCalendar} style={{ width: 34, height: 34, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
-          <i className="fa-solid fa-calendar-day" style={{ fontSize: 14 }} />
-        </button>
-        <button onClick={onLog} style={{ height: 34, borderRadius: 4, border: 'none', background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', cursor: 'pointer', padding: '0 14px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5, WebkitTapHighlightColor: 'transparent' }}>
+        <div style={{ flex: 1 }} />
+        <button onClick={onLog} style={{
+          height: 34, borderRadius: 4, border: 'none',
+          background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
+          color: '#0a0805', cursor: 'pointer', padding: '0 14px',
+          fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em',
+          flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5,
+          WebkitTapHighlightColor: 'transparent',
+        }}>
           <i className="fa-solid fa-plus" style={{ fontSize: 11 }} /> LOG
         </button>
       </div>
@@ -553,11 +564,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   const [logOpen, setLogOpen] = useStateH(false);
   const [targetOpen, setTargetOpen] = useStateH(false);
   const [coachingMacros, setCoachingMacros] = useStateH(null);
-  const [weightTf, setWeightTf] = useStateH('1M');
-  const [stepsTf, setStepsTf] = useStateH('1M');
-  const [macroTf, setMacroTf] = useStateH('1M');
-  const [adhTf, setAdhTf] = useStateH('1M');
-  const dateRef = useRefH(null);
+  const [tf, setTf] = useStateH('1M');
 
   // Load coach-assigned macros (used to prefill targets + power adherence when
   // the user hasn't set personal targets). asClient or self-coaching row.
@@ -581,10 +588,11 @@ function HealthScreen({ store, setStore, go, userId }) {
     return { from: start, to: end, data: dailyLogs.filter(l => l.date >= start && l.date <= end).map(l => ({ date: l.date, ...pick(l) })) };
   };
 
-  const weightSeries = useMemoH(() => seriesFor(tfDays(weightTf), l => ({ value: l.weight })), [dailyLogs, weightTf]);
-  const stepsSeries = useMemoH(() => seriesFor(tfDays(stepsTf), l => ({ value: l.steps })), [dailyLogs, stepsTf]);
-  const macroSeries = useMemoH(() => seriesFor(tfDays(macroTf), l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null })), [dailyLogs, macroTf]);
-  const adhSeries = useMemoH(() => seriesFor(tfDays(adhTf), l => ({ value: l.adherence })), [dailyLogs, adhTf]);
+  const windowDays = tfDays(tf);
+  const weightSeries = useMemoH(() => seriesFor(windowDays, l => ({ value: l.weight })), [dailyLogs, tf]);
+  const stepsSeries = useMemoH(() => seriesFor(windowDays, l => ({ value: l.steps })), [dailyLogs, tf]);
+  const macroSeries = useMemoH(() => seriesFor(windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null })), [dailyLogs, tf]);
+  const adhSeries = useMemoH(() => seriesFor(windowDays, l => ({ value: l.adherence })), [dailyLogs, tf]);
 
   const avg = (arr, key) => { const vs = arr.map(d => d[key]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const wVals = weightSeries.data.map(d => d.value).filter(v => v != null);
@@ -592,20 +600,40 @@ function HealthScreen({ store, setStore, go, userId }) {
   const stepsAvg = avg(stepsSeries.data, 'value');
   const adhAvg = avg(adhSeries.data, 'value');
 
+  const targetRow = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+      <div style={{ flex: 1, fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.7 }}>
+        {targets ? (
+          [['Training', 'Training'], ['Rest', 'Rest']].map(([label, suffix]) => {
+            const p = targets[`protein${suffix}`], c = targets[`carbs${suffix}`], f = targets[`fat${suffix}`], cal = targets[`calories${suffix}`];
+            if (p == null && c == null && f == null) return null;
+            return (
+              <div key={suffix}>
+                <span style={{ color: UI.inkGhost, marginRight: 5, fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</span>
+                {[cal != null && `${cal} kcal`, p != null && `P ${p}`, c != null && `C ${c}`, f != null && `F ${f}`].filter(Boolean).join(' · ')}
+              </div>
+            );
+          })
+        ) : (
+          <span style={{ color: UI.inkGhost }}>Set targets to track macro adherence</span>
+        )}
+        {fromCoach && <div style={{ fontSize: 9, color: UI.inkGhost, marginTop: 1 }}>↑ From coach</div>}
+      </div>
+      <button onClick={() => setTargetOpen(true)} style={{
+        background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`,
+        borderRadius: 4, padding: '4px 10px', color: 'var(--accent)',
+        fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, cursor: 'pointer',
+        WebkitTapHighlightColor: 'transparent', flexShrink: 0,
+      }}>{targets ? 'Edit' : 'Set'}</button>
+    </div>
+  );
+
   return (
     <Screen>
-      <HealthDateStrip
-        store={store}
-        selectedDate={selectedDate}
-        onSelect={setSelectedDate}
-        onCalendar={() => { try { dateRef.current?.showPicker(); } catch (_) { dateRef.current?.click(); } }}
-        onLog={() => setLogOpen(true)}
-      />
-      <input ref={dateRef} type="date" value={selectedDate} max={today}
-        onChange={e => { if (e.target.value) setSelectedDate(e.target.value); }}
-        style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />
+      <HealthDateStrip store={store} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} />
 
-      <div style={{ padding: '8px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* max-width cap so charts don't blow up on iPad */}
+      <div style={{ padding: '8px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 2px' }}>
           <span style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink }}>
             {selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' })}
@@ -617,29 +645,28 @@ function HealthScreen({ store, setStore, go, userId }) {
 
         <HealthMetricsCard log={selectedLog} />
 
-        <HealthChartCard title="Weight" icon="fa-weight-scale" tf={weightTf} setTf={setWeightTf}
+        <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf}
           headline={weightHeadline} sub={weightHeadline ? 'latest' : null}>
           <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}`} />
         </HealthChartCard>
 
-        <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={stepsTf} setTf={setStepsTf}
+        <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={tf} setTf={setTf}
           headline={stepsAvg != null ? Math.round(stepsAvg).toLocaleString() : null} sub={stepsAvg != null ? 'avg / day' : null}>
           <HealthBarChart series={stepsSeries.data} from={stepsSeries.from} to={stepsSeries.to} format={v => v >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`} />
         </HealthChartCard>
 
-        <HealthChartCard title="Macros" icon="fa-utensils" tf={macroTf} setTf={setMacroTf}>
+        <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf}>
+          {targetRow}
           <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
           <MacroLegend />
         </HealthChartCard>
 
         {targets && (
-          <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={adhTf} setTf={setAdhTf}
+          <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={tf} setTf={setTf}
             headline={adhAvg != null ? `${Math.round(adhAvg)}%` : null} sub={adhAvg != null ? 'avg' : null}>
             <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
           </HealthChartCard>
         )}
-
-        <HealthTargetCard targets={targets} fromCoach={fromCoach} onEdit={() => setTargetOpen(true)} />
       </div>
 
       <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} />
@@ -690,7 +717,7 @@ function HealthClientLogs({ clientStore }) {
   }
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 32px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 32px', display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={weightTf} setTf={setWeightTf}>
         <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}`} />
       </HealthChartCard>
