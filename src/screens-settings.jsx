@@ -632,6 +632,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
               : <Toggle on={false} onToggle={() => { setStore(s => ({ ...s, settings: { ...s.settings, smartProgression: true } })); setProgDisclaimer(true); }} />
             }
           </Row>
+          <Row label="Fill weight down">
+            <Toggle on={store.settings?.weightFillDown !== false} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, weightFillDown: s.settings?.weightFillDown === false } }))} />
+          </Row>
           <Row label="Equipment setup">
             <button style={accentBtn} onClick={() => setProgConfigOpen(true)}>Change</button>
           </Row>

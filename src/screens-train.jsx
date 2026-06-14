@@ -1751,7 +1751,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         ...en,
                         sets: en.sets.map((st, si) =>
                           si === bgSetIdx ? { ...st, kg, done: false }
-                          : si > bgSetIdx && !st.done && !st.warmup ? { ...st, kg }
+                          : store.settings?.weightFillDown !== false && si > bgSetIdx && !st.done && !st.warmup ? { ...st, kg }
                           : st
                         ),
                       }),
@@ -1925,7 +1925,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           ...en,
                           sets: en.sets.map((st, si) =>
                             si === i ? { ...st, kg, done: false }
-                            : si > i && !st.done && !st.warmup ? { ...st, kg }
+                            : store.settings?.weightFillDown !== false && si > i && !st.done && !st.warmup ? { ...st, kg }
                             : st
                           ),
                         }),

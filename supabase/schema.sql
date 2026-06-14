@@ -153,7 +153,8 @@ CREATE TABLE public.zane_user_settings (
   session_timeout_minutes integer DEFAULT 90,
   auto_close_notify jsonb,
   macro_targets jsonb,
-  show_health_tab boolean NOT NULL DEFAULT false
+  show_health_tab boolean NOT NULL DEFAULT false,
+  weight_fill_down boolean NOT NULL DEFAULT true
 );
 
 CREATE TABLE public.zane_pushover_active (

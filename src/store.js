@@ -220,6 +220,7 @@ async function importFromBackup(backup, userId) {
       smart_progression: sett.smartProgression ?? false,
       progression_range_top: sett.progressionRangeTop ?? null,
       equipment_config: sett.equipmentConfig ?? null,
+      weight_fill_down: sett.weightFillDown ?? true,
       show_warmup_in_summary: sett.showWarmupInSummary ?? false,
       show_coaching_tab: sett.showCoachingTab ?? false,
       be_your_own_coach: sett.beYourOwnCoach ?? false,
@@ -503,6 +504,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         tempoEccentric: sett.tempo_eccentric ?? 4,
         tempoConcentric: sett.tempo_concentric ?? 1,
         smartProgression: sett.smart_progression ?? false,
+        weightFillDown: sett.weight_fill_down ?? true,
         progressionRangeTop: sett.progression_range_top ?? 4,
         equipmentConfig: sett.equipment_config ?? {},
         reminderEnabled: sett.reminder_enabled ?? false,
@@ -808,6 +810,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.tempoEccentric     !== next.settings?.tempoEccentric     ||
     prev.settings?.tempoConcentric    !== next.settings?.tempoConcentric    ||
     prev.settings?.smartProgression   !== next.settings?.smartProgression   ||
+    prev.settings?.weightFillDown     !== next.settings?.weightFillDown     ||
     prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop ||
     JSON.stringify(prev.settings?.equipmentConfig) !== JSON.stringify(next.settings?.equipmentConfig) ||
     JSON.stringify(prev.customDayTypes) !== JSON.stringify(next.customDayTypes) ||
@@ -843,6 +846,7 @@ async function syncStore(prev, next, userId) {
       tempo_eccentric: next.settings?.tempoEccentric ?? 4,
       tempo_concentric: next.settings?.tempoConcentric ?? 1,
       smart_progression: next.settings?.smartProgression ?? false,
+      weight_fill_down: next.settings?.weightFillDown ?? true,
       progression_range_top: next.settings?.progressionRangeTop ?? 4,
       equipment_config: next.settings?.equipmentConfig ?? {},
       custom_day_types: next.customDayTypes ?? [],
