@@ -946,7 +946,7 @@ function CardioTypeDetailSheet({ type, logs, open, onClose }) {
   const charts = [
     durPoints.length >= 2 && { points: durPoints, label: 'DURATION', formatVal: v => `${Math.round(v)}min` },
     speedPoints.length >= 2 && { points: speedPoints, label: `SPEED (${du}/h)`, formatVal: v => v.toFixed(1) },
-    effortPoints.length >= 2 && { points: effortPoints, label: 'EFFORT', formatVal: v => `${v}/10`, yMin: 0, yMax: 10 },
+    effortPoints.length >= 2 && { points: effortPoints, label: 'EFFORT', formatVal: v => `${Math.round(v * 10) / 10}/10`, yMin: 0, yMax: 10 },
     paceFlPoints.length >= 2 && { points: paceFlPoints, label: 'PACE FEELING', formatVal: v => paceFlLabels[Math.round(v)] || Math.round(v), yMin: 0, yMax: 6 },
     distPoints.length >= 2 && { points: distPoints, label: `DISTANCE (${du})`, formatVal: v => v.toFixed(2) },
   ].filter(Boolean);
@@ -960,7 +960,7 @@ function CardioTypeDetailSheet({ type, logs, open, onClose }) {
   return (
     <Sheet open={open} onClose={onClose} title={type}>
       <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16 }}>{summaryParts.join(' · ')}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, paddingBottom: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, paddingBottom: 8 }}>
         {charts.map((c, i) => <CardioLineChart key={i} points={c.points} label={c.label} formatVal={c.formatVal} yMin={c.yMin} yMax={c.yMax} />)}
       </div>
     </Sheet>
