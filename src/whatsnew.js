@@ -19,10 +19,10 @@ window.WHATS_NEW = [
     id: 'v2.276',
     title: 'Weight fill-down control',
     items: [
-      'By default the app copies your weight to all remaining sets when you enter it — perfect for straight sets.',
-      'If you train with drop sets, pyramids or varying loads, this can get in the way.',
-      'New toggle in Settings → Training: turn off "Fill weight down" and every set stays blank until you log it yourself.',
-      'Existing behaviour is unchanged — only flip it if you want full manual control per set.',
+      'When you enter a weight for a set, the app normally copies it to all remaining sets in that exercise — great for straight sets.',
+      'If you train with drop sets, pyramids or varying loads per set, this automatic copy gets in the way.',
+      'New toggle in Settings → Training: turn off "Fill weight down" to stop the cascade — each set keeps its own pre-filled value from last time and smart progression, but changing one set no longer overwrites the others.',
+      'Default is on, so existing behaviour is unchanged.',
     ],
   },
   {
