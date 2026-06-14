@@ -1945,9 +1945,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <button onClick={takeScreenshot} disabled={capturing} style={{
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-              borderRadius: 4, padding: '5px 10px', cursor: 'pointer',
-              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase',
-            }}>{capturing ? '…' : '↓'}</button>
+              borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
+              color: capturing ? UI.inkGhost : UI.inkSoft, lineHeight: 1,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
+            </button>
             <button onClick={() => setEditing(true)} style={{
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               borderRadius: 4, padding: '5px 10px', cursor: 'pointer',
