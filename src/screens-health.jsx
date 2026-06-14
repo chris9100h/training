@@ -1049,7 +1049,7 @@ function HealthClientLogs({ clientStore }) {
   const [tf, setTf] = useStateH('1M');
 
   const COACH_ORDER_KEY = 'logbook-coach-health-card-order';
-  const DEFAULT_COACH_ORDER = ['week', 'weight', 'steps', 'macros', 'cardio', 'adherence', 'weekly'];
+  const DEFAULT_COACH_ORDER = ['week', 'today', 'weight', 'steps', 'macros', 'cardio', 'adherence', 'weekly'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(COACH_ORDER_KEY) || '[]'); } catch (_) {}
@@ -1170,9 +1170,17 @@ function HealthClientLogs({ clientStore }) {
     );
   }
 
+  const todayLog = logs.find(l => l.date === today) || null;
+  const trainedToday = LB.isLoggedTrainingDay(clientStore?.sessions, today);
+  const cardioToday = cardioLogs.some(l => l.date === today);
+
   const handle = <DragHandle style={{ width: 20, height: 22, marginLeft: -4, cursor: 'grab' }} />;
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={null} tf={tf} setTf={setTf} />,
+    today: (
+      <HealthMetricsCard log={todayLog} dateLabel="Today" isToday={true} onJumpToday={null}
+        dragHandle={handle} trained={trainedToday} hasCardio={cardioToday} hasTargets={false} />
+    ),
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
         headline={weightAvg != null ? `${weightAvg}` : null} sub={weightAvg != null ? 'avg' : null}>
