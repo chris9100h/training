@@ -428,7 +428,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 
 // ─── Today / selected-day metrics card ────────────────────────────────────────
 
-function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle }) {
+function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, hasTargets }) {
   const stat = (label, value, unit) => (
     <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
       <div className="num" style={{ fontSize: 22, color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300 }}>
@@ -438,9 +438,16 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle })
     </div>
   );
   const adh = log?.adherence;
+  const showAdh = hasTargets || adh != null;
+  const badge = (icon, label, alpha) => (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 4, background: `rgba(var(--accent-rgb),${alpha})`, border: `0.5px solid rgba(var(--accent-rgb),${alpha * 2})`, borderRadius: 4, padding: '3px 7px' }}>
+      <i className={`fa-solid ${icon}`} style={{ fontSize: 9, color: 'var(--accent)' }} />
+      <span style={{ fontSize: 9, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em' }}>{label}</span>
+    </span>
+  );
   return (
     <Card accent style={{ padding: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: trained || hasCardio ? 8 : 12 }}>
         {dragHandle}
         <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink }}>
           {dateLabel}
@@ -449,24 +456,30 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle })
           <button data-reorder-ignore="true" onClick={onJumpToday} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Today →</button>
         )}
       </div>
+      {(trained || hasCardio) && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+          {trained && badge('fa-dumbbell', 'TRAINED', 0.12)}
+          {hasCardio && badge('fa-person-running', 'CARDIO', 0.08)}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
         {stat('Weight', log?.weight != null ? log.weight : null, UI.unit())}
         {stat('Steps', log?.steps != null ? log.steps.toLocaleString() : null)}
         {stat('Calories', log?.calories != null ? log.calories : null, 'kcal')}
       </div>
-      <div style={{ display: 'flex', gap: 12, marginBottom: adh != null ? 14 : 0 }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: showAdh ? 14 : 0 }}>
         {stat('Protein', log?.protein != null ? log.protein : null, 'g')}
         {stat('Carbs', log?.carbs != null ? log.carbs : null, 'g')}
         {stat('Fat', log?.fat != null ? log.fat : null, 'g')}
       </div>
-      {adh != null && (
+      {showAdh && (
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
             <span className="micro" style={{ color: UI.inkFaint }}>MACRO ADHERENCE</span>
-            <span className="num" style={{ fontSize: 13, color: adherenceColor(adh) }}>{adh}%</span>
+            <span className="num" style={{ fontSize: 13, color: adh != null ? adherenceColor(adh) : UI.inkGhost }}>{adh != null ? `${adh}%` : '—'}</span>
           </div>
           <div style={{ height: 7, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
-            <div style={{ width: `${Math.min(100, adh)}%`, height: '100%', background: adherenceColor(adh), transition: 'width 0.3s' }} />
+            {adh != null && <div style={{ width: `${Math.min(100, adh)}%`, height: '100%', background: adherenceColor(adh), transition: 'width 0.3s' }} />}
           </div>
         </div>
       )}
@@ -819,9 +832,11 @@ function HealthScreen({ store, setStore, go, userId }) {
 
   const handle = <DragHandle style={{ width: 20, height: 22, marginLeft: -4, cursor: 'grab' }} />;
   const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
+  const trainedSelected = LB.isLoggedTrainingDay(store.sessions, selectedDate);
+  const cardioSelected = (store.cardioLogs || []).some(l => l.date === selectedDate);
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} />,
-    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} />,
+    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} hasTargets={!!targets} />,
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
         headline={weightHeadline} sub={weightHeadline ? 'latest' : null}>
