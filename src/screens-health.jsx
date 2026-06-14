@@ -491,18 +491,20 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
 
 // ─── This-week overview card (Mon–Sun averages + verdict) ─────────────────────
 
-function HealthWeekCard({ stats, dragHandle, targets }) {
-  const { from, to, daysLogged, trainingsDone, trainingsPlanned, cardioMinutes, cardioSessions,
-    weight, stepsSum, calories, protein, carbs, fat, water, adherence } = stats;
+function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
+  const { from, to, periodDays, daysLogged, trainingsDone, trainingsPlanned, cardioMinutes, cardioSessions,
+    weight, steps, stepsSum, calories, protein, carbs, fat, water, adherence } = stats;
   const r = v => v == null ? null : Math.round(v);
   const range = `${healthFmtDate(from, { day: 'numeric', month: 'short' })} – ${healthFmtDate(to, { day: 'numeric', month: 'short' })}`;
+  const periodLabel = tf === '1W' ? 'THIS WEEK' : tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS';
   const verdict = adherence == null ? null : adherence >= 97 ? 'Perfect week' : adherence >= 90 ? 'Strong week' : adherence >= 75 ? 'On track' : 'Off track';
   const isPerfect = adherence != null && adherence >= 97;
   const trainingPct = trainingsPlanned > 0 ? Math.min(100, (trainingsDone / trainingsPlanned) * 100) : (trainingsDone > 0 ? 100 : 0);
 
-  // Weighted daily target averages: (training targets × n + rest targets × (7−n)) / 7
-  const tDays = trainingsPlanned || 0, rDays = 7 - tDays;
-  const tgt = (tk, rk) => targets ? Math.round(((targets[tk] || 0) * tDays + (targets[rk] || 0) * rDays) / 7) : null;
+  // Weighted daily target averages over the period
+  const totalDays = periodDays || 7;
+  const tDays = trainingsPlanned || 0, rDays = totalDays - tDays;
+  const tgt = (tk, rk) => targets ? Math.round(((targets[tk] || 0) * tDays + (targets[rk] || 0) * rDays) / totalDays) : null;
   const tgtCal  = tgt('caloriesTraining', 'caloriesRest');
   const tgtProt = tgt('proteinTraining',  'proteinRest');
   const tgtCarb = tgt('carbsTraining',    'carbsRest');
@@ -530,24 +532,39 @@ function HealthWeekCard({ stats, dragHandle, targets }) {
     </div>
   );
 
+  const tfToggle = setTf ? (
+    <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+      {HEALTH_TFS.map(t => (
+        <button key={t.id} onClick={() => setTf(t.id)} style={{
+          padding: '2px 8px', cursor: 'pointer', border: 'none',
+          background: tf === t.id ? 'var(--accent)' : 'transparent',
+          color: tf === t.id ? '#0a0805' : UI.inkFaint,
+          fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
+          WebkitTapHighlightColor: 'transparent',
+        }}>{t.id}</button>
+      ))}
+    </div>
+  ) : null;
+
   if (!daysLogged && !trainingsDone && !trainingsPlanned && !cardioMinutes) {
     return (
       <Card style={{ padding: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           {dragHandle}
-          <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>THIS WEEK</span>
-          <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{range}</span>
+          <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{periodLabel}</span>
+          {tfToggle}
         </div>
-        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>Nothing logged yet this week.</div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>Nothing logged yet.</div>
       </Card>
     );
   }
 
   return (
     <Card accent style={{ padding: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         {dragHandle}
-        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>THIS WEEK</span>
+        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{periodLabel}</span>
+        {tfToggle}
         <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{range}</span>
       </div>
 
@@ -569,7 +586,9 @@ function HealthWeekCard({ stats, dragHandle, targets }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 8px', marginTop: 4 }}>
         {cell('Weight', weight != null ? Math.round(weight * 10) / 10 : null, UI.unit())}
-        {cell('Steps (sum)', stepsSum != null ? r(stepsSum).toLocaleString() : null)}
+        {tf === '1W'
+          ? cell('Steps (sum)', stepsSum != null ? r(stepsSum).toLocaleString() : null)
+          : cell('Steps (avg)', steps != null ? r(steps).toLocaleString() : null)}
         {cell(cardioSessions ? `Cardio (${cardioSessions}×)` : 'Cardio', cardioMinutes ? cardioMinutes : null, 'min')}
         {cell('Water', water != null ? (Math.round(water / 100) / 10) : null, 'L')}
         {cell('Calories', r(calories), 'kcal')}
@@ -776,29 +795,36 @@ function HealthScreen({ store, setStore, go, userId }) {
     });
   };
 
-  // Current week (Mon–Sun) averages + training/cardio tallies for the overview.
+  // Period overview — adapts to tf: 1W = current Mon–Sun, 1M/3M = rolling window.
   const weekStats = useMemoH(() => {
-    const now = new Date(today + 'T12:00:00');
-    const jsDow = now.getDay();
-    const monday = healthShiftISO(today, -((jsDow === 0 ? 7 : jsDow) - 1));
-    const sunday = healthShiftISO(monday, 6);
-    const weekDays = Array.from({ length: 7 }, (_, i) => healthShiftISO(monday, i));
-    const inWeek = dailyLogs.filter(l => l.date >= monday && l.date <= sunday);
-    const avgK = k => { const vs = inWeek.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
-    const sumK = k => { const vs = inWeek.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
     const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
-    const trainingsDone = (store.sessions || []).filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= monday && d <= sunday; }).length;
-    const trainingsPlanned = weekDays.filter(d => LB.plannedTrainingDay(store, d)).length;
-    const weekCardio = (store.cardioLogs || []).filter(l => l.date >= monday && l.date <= sunday);
-    const cardioMinutes = weekCardio.reduce((s, l) => s + (l.durationMinutes || 0), 0);
+    let from, to, periodDays;
+    if (tf === '1W') {
+      const jsDow = new Date(today + 'T12:00:00').getDay();
+      const monday = healthShiftISO(today, -((jsDow === 0 ? 7 : jsDow) - 1));
+      from = monday; to = healthShiftISO(monday, 6); periodDays = 7;
+    } else {
+      const days = tfDays(tf);
+      to = today; from = healthShiftISO(today, -(days - 1)); periodDays = days;
+    }
+    const allDays = Array.from({ length: periodDays }, (_, i) => healthShiftISO(from, i));
+    const inPeriod = dailyLogs.filter(l => l.date >= from && l.date <= to);
+    const avgK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
+    const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
+    const trainingsDone = (store.sessions || []).filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= from && d <= to; }).length;
+    const trainingsPlanned = allDays.filter(d => d <= today && LB.plannedTrainingDay(store, d)).length;
+    const periodCardio = (store.cardioLogs || []).filter(l => l.date >= from && l.date <= to);
     return {
-      from: monday, to: sunday, daysLogged: inWeek.length,
-      trainingsDone, trainingsPlanned, cardioMinutes, cardioSessions: weekCardio.length,
-      weight: avgK('weight'), steps: avgK('steps'), stepsSum: sumK('steps'), calories: avgK('calories'),
-      protein: avgK('protein'), carbs: avgK('carbs'), fat: avgK('fat'), water: avgK('waterMl'),
-      adherence: avgK('adherence'),
+      from, to, periodDays, daysLogged: inPeriod.length,
+      trainingsDone, trainingsPlanned,
+      cardioMinutes: periodCardio.reduce((s, l) => s + (l.durationMinutes || 0), 0),
+      cardioSessions: periodCardio.length,
+      weight: avgK('weight'), steps: avgK('steps'),
+      stepsSum: tf === '1W' ? sumK('steps') : null,
+      calories: avgK('calories'), protein: avgK('protein'), carbs: avgK('carbs'),
+      fat: avgK('fat'), water: avgK('waterMl'), adherence: avgK('adherence'),
     };
-  }, [dailyLogs, store.sessions, store.cardioLogs, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate, today]);
+  }, [dailyLogs, store.sessions, store.cardioLogs, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate, today, tf]);
 
   const targetDayRow = (label, suffix) => {
     const p = targets[`protein${suffix}`], c = targets[`carbs${suffix}`], f = targets[`fat${suffix}`], cal = targets[`calories${suffix}`];
@@ -856,7 +882,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   const trainedSelected = LB.isLoggedTrainingDay(store.sessions, selectedDate);
   const cardioSelected = (store.cardioLogs || []).some(l => l.date === selectedDate);
   const cardEls = {
-    week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={targets} />,
+    week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={targets} tf={tf} setTf={setTf} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} hasTargets={!!targets} />,
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
