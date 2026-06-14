@@ -774,6 +774,19 @@ function HealthScreen({ store, setStore, go, userId }) {
   const dailyLogs = store.dailyLogs || [];
   const selectedLog = dailyLogs.find(l => l.date === selectedDate) || null;
 
+  // Cache targets in localStorage so the adherence bar and macro target row
+  // are at their final height on the very first render (no jump when settings load).
+  const [cachedTargets, setCachedTargets] = useStateH(() => {
+    try { return JSON.parse(localStorage.getItem('logbook-health-targets') || 'null'); } catch { return null; }
+  });
+  const storeReady = store.settings != null;
+  const effectiveTargets = storeReady ? targets : (cachedTargets ?? null);
+  useEffectH(() => {
+    if (!storeReady) return;
+    try { localStorage.setItem('logbook-health-targets', JSON.stringify(targets)); } catch {}
+    setCachedTargets(targets);
+  }, [storeReady, targets]);
+
   // Windowed series builder for the charts. The x-range is tightened to the
   // actual logged days inside the window (not the full timeframe) so a sparse
   // window doesn't leave most of the chart empty — 80 of 90 days fills the chart.
@@ -887,7 +900,8 @@ function HealthScreen({ store, setStore, go, userId }) {
   }, [dailyLogs, store.sessions, store.cardioLogs, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate, today, tf]);
 
   const targetDayRow = (label, suffix) => {
-    const p = targets[`protein${suffix}`], c = targets[`carbs${suffix}`], f = targets[`fat${suffix}`], cal = targets[`calories${suffix}`];
+    const t = effectiveTargets || {};
+    const p = t[`protein${suffix}`], c = t[`carbs${suffix}`], f = t[`fat${suffix}`], cal = t[`calories${suffix}`];
     if (p == null && c == null && f == null) return null;
     return (
       <div key={suffix} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0' }}>
@@ -917,16 +931,16 @@ function HealthScreen({ store, setStore, go, userId }) {
     : `DAILY TARGETS${fromCoach ? ' · FROM COACH' : ''}`;
   const targetRow = (
     <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: targets ? 2 : 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: effectiveTargets ? 2 : 0 }}>
         <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{targetLabel}</span>
         <button data-reorder-ignore="true" onClick={() => setTargetOpen(true)} style={{
           background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`,
           borderRadius: 4, padding: '3px 12px', color: 'var(--accent)',
           fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
           WebkitTapHighlightColor: 'transparent', flexShrink: 0,
-        }}>{targets ? 'EDIT' : 'SET'}</button>
+        }}>{effectiveTargets ? 'EDIT' : 'SET'}</button>
       </div>
-      {targets ? (
+      {effectiveTargets ? (
         macroTargetAvg ? (
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0' }}>
             <span className="num" style={{ fontSize: 16, color: 'var(--accent)', fontWeight: 400 }}>
@@ -960,7 +974,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   const cardioSelected = (store.cardioLogs || []).some(l => l.date === selectedDate);
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={targets} tf={tf} setTf={setTf} />,
-    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} hasTargets={!!targets} />,
+    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} hasTargets={!!effectiveTargets} />,
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
         headline={weightHeadline} sub={weightHeadline ? 'latest' : null}>
@@ -986,7 +1000,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         <HealthBarChart series={cardioSeries.data} from={cardioSeries.from} to={cardioSeries.to} format={v => `${Math.round(v)}`} />
       </HealthChartCard>
     ),
-    adherence: targets ? (
+    adherence: effectiveTargets ? (
       <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={tf} setTf={setTf} dragHandle={handle}
         headline={adhAvg != null ? `${Math.round(adhAvg)}%` : null} sub={adhAvg != null ? 'avg' : null}>
         <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
