@@ -57,10 +57,9 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
 
   const TABS = [
     { id: 'overview',   icon: 'fa-chart-bar',         label: 'Overview' },
-    { id: 'nutrition',  icon: 'fa-utensils',           label: 'Nutrition' },
     { id: 'daily',      icon: 'fa-heart-pulse',        label: 'Daily' },
     { id: 'sessions',   icon: 'fa-dumbbell',           label: 'Sessions' },
-    { id: 'plan',       icon: 'fa-calendar-days',      label: 'Plan' },
+    { id: 'setup',      icon: 'fa-sliders',            label: 'Setup' },
     { id: 'notes',      icon: 'fa-comment',            label: 'Notes' },
     { id: 'checkins',   icon: 'fa-clipboard-list',     label: 'Check-ins' },
   ];
@@ -111,12 +110,11 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
             </div>
           )}
           {tab === 'overview'   && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} onSelectSession={openSession} />}
-          {tab === 'plan'       && <ClientPlanTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
           {tab === 'sessions'   && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
           {tab === 'checkins'   && (isSelf
             ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} store={store} isSelf />
             : <ClientCheckInsTab coachingId={coachingId} checkinEnabled={checkinEnabled} onToggle={handleToggleCheckin} toggling={ciToggling} store={store} setStore={setStore} userId={userId} />)}
-          {tab === 'nutrition'  && <ClientNutritionTab coachingId={coachingId} userId={userId} />}
+          {tab === 'setup'      && <ClientSetupTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
           {tab === 'daily'      && <window.Screens.HealthClientLogs clientStore={clientStore} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
@@ -786,6 +784,35 @@ function StatBox({ label, value, gold, onClick }) {
       <div className="num" style={{ fontSize: 20, color: gold ? UI.gold : UI.ink, lineHeight: 1, marginBottom: 4 }}>{value}</div>
       <div className="micro" style={{ color: UI.inkFaint }}>{label}</div>
       {onClick && <div style={{ marginTop: 5 }}><i className="fa-solid fa-chart-line" style={{ fontSize: 7, color: UI.inkGhost }} /></div>}
+    </div>
+  );
+}
+
+// ─── Tab: Setup (Plan + Nutrition combined) ───────────────────────────────────
+
+function ClientSetupTab(props) {
+  const [sub, setSub] = useStateC('plan');
+  return (
+    <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flexShrink: 0, padding: '10px 16px 0' }}>
+        <div style={{ display: 'inline-flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+          {[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }].map(s => (
+            <button key={s.id} onClick={() => setSub(s.id)} style={{
+              padding: '6px 18px', cursor: 'pointer', border: 'none',
+              background: sub === s.id ? 'var(--accent)' : 'transparent',
+              color: sub === s.id ? '#0a0805' : UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em',
+              display: 'flex', alignItems: 'center', gap: 6,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <i className={`fa-solid ${s.icon}`} style={{ fontSize: 10 }} />
+              {s.label.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </div>
+      {sub === 'plan'      && <ClientPlanTab {...props} />}
+      {sub === 'nutrition' && <ClientNutritionTab coachingId={props.coachingId} userId={props.userId} />}
     </div>
   );
 }
