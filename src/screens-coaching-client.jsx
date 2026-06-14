@@ -897,20 +897,20 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
   return (
     <div style={{ overflowY: 'auto', flex: 1, padding: '16px 12px 32px' }}>
       {/* Actions row */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, justifyContent: 'flex-end' }}>
         <button
           onClick={() => go({ name: 'coaching-new-plan', coachingId, clientId, clientName: name })}
-          style={{ flex: 1, padding: '10px 0', borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.3)`, background: `rgba(var(--accent-rgb),0.06)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+          style={{ padding: '7px 14px', borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.3)`, background: `rgba(var(--accent-rgb),0.06)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
         >
-          <i className="fa-solid fa-plus" style={{ fontSize: 10 }} />
+          <i className="fa-solid fa-plus" style={{ fontSize: 9 }} />
           NEW PLAN
         </button>
         <input ref={importRef} type="file" accept=".json" style={{ display: 'none' }} onChange={importPlan} />
         <button
           onClick={() => importRef.current?.click()}
-          style={{ flex: 1, padding: '10px 0', borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+          style={{ padding: '7px 14px', borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
         >
-          <i className="fa-solid fa-file-import" style={{ fontSize: 10 }} />
+          <i className="fa-solid fa-file-import" style={{ fontSize: 9 }} />
           IMPORT
         </button>
       </div>
