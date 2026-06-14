@@ -1075,7 +1075,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             ...en,
             sets: en.sets.map((st, si) =>
               si === setIdx ? { ...st, kg: num ?? null, done: false }
-              : si > setIdx && !st.done ? { ...st, kg: num ?? null }
+              : store.settings?.weightFillDown !== false && si > setIdx && !st.done ? { ...st, kg: num ?? null }
               : st
             ),
           }),
