@@ -141,9 +141,11 @@ function LibraryScreen({ store, setStore, go }) {
   return (
     <Screen>
       <TopBar title="Library" right={topBarRight} />
+      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'lib', label: 'Library', icon: 'fa-book' }]}
+        active="lib" onChange={() => go({ name: 'plan' })} />
 
       {/* Tab strip */}
-      <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
+      <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0, marginTop: 8 }}>
         {[['recent','Recent'],['all','All']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)} style={{
             flex: 1, background: 'transparent', border: 'none',

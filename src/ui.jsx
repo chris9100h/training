@@ -81,6 +81,32 @@ function TopBar({ title, sub, onBack, right }) {
   );
 }
 
+// ─── SubTabBar — segmented control for in-screen sub-navigation ───────
+// Used e.g. to switch Plan ⇄ Library inside the merged "Plan" tab.
+function SubTabBar({ tabs, active, onChange, style = {} }) {
+  return (
+    <div style={{ flexShrink: 0, display: 'flex', gap: 4, padding: '10px 22px 2px', ...style }}>
+      {tabs.map(t => {
+        const on = t.id === active;
+        return (
+          <button key={t.id} onClick={() => !on && onChange(t.id)} style={{
+            flex: 1, padding: '9px 8px', borderRadius: 6, cursor: on ? 'default' : 'pointer',
+            background: on ? UI.goldFaint : 'transparent',
+            border: `1px solid ${on ? UI.goldSoft : UI.hairStrong}`,
+            color: on ? UI.gold : UI.inkSoft,
+            fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+            WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+          }}>
+            {t.icon && <i className={`fa-solid ${t.icon}`} style={{ fontSize: 12 }} />}
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── TabBar — floating dock with position indicator ──────────────────
 const TAB_ICONS = {
   coaching: (
@@ -91,7 +117,7 @@ const TAB_ICONS = {
   ),
   home: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V10.5z"/>
+      <path d="M4 9v6M7 7v10M17 7v10M20 9v6M7 12h10"/>
     </svg>
   ),
   plan: (
@@ -120,9 +146,8 @@ const TAB_ICONS = {
 
 function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoaching = false, coachingBadge = null, showHealth = false }) {
   const tabs = [
-    { id: 'home', label: 'Today' },
+    { id: 'home', label: 'Train' },
     { id: 'plan', label: 'Plan' },
-    { id: 'lib',  label: 'Library' },
     { id: 'hist', label: 'History' },
     ...(showHealth ? [{ id: 'health', label: 'Health' }] : []),
     ...(showCoaching ? [{ id: 'coaching', label: 'Coaching' }] : []),
@@ -1111,7 +1136,7 @@ function ReorderList({ onReorder, longPressMs, moveTolerance, style, className, 
 }
 
 Object.assign(window, {
-  UI, Screen, TopBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty,
+  UI, Screen, TopBar, SubTabBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty,
   ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
   btnPrimary, btnGhost, useConfirm, DragHandle, ReorderList,
   MUSCLES, WEEKDAYS, WEEKDAYS_FULL,

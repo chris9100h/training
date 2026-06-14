@@ -78,7 +78,9 @@ function PlanScreen({ store, setStore, go }) {
           </div>
         }
       />
-      <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'lib', label: 'Library', icon: 'fa-book' }]}
+        active="plan" onChange={() => go({ name: 'lib' })} />
+      <div style={{ padding: '14px 22px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {store.schedules.length === 0 && (
           <Empty title="No plans yet"
             sub="Create a training plan to start sessions."

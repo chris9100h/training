@@ -93,6 +93,7 @@
   - `logbook-push-enabled`
   - `logbook-cycle-week-view`
   - `logbook-whatsnew-seen` — zuletzt gesehene `WHATS_NEW.id` (siehe „What's New / Changelog")
+  - `logbook-health-card-order` — vom Nutzer gewählte Reihenfolge der Health-Tab-Karten (per Gerät, kein DB-Sync)
 
 ## What's New / Changelog
 

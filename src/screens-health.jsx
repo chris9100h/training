@@ -428,7 +428,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 
 // ─── Today / selected-day metrics card ────────────────────────────────────────
 
-function HealthMetricsCard({ log }) {
+function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle }) {
   const stat = (label, value, unit) => (
     <div style={{ flex: 1, minWidth: 0 }}>
       <div className="num" style={{ fontSize: 22, color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300 }}>
@@ -440,6 +440,15 @@ function HealthMetricsCard({ log }) {
   const adh = log?.adherence;
   return (
     <Card accent style={{ padding: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+        {dragHandle}
+        <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink }}>
+          {dateLabel}
+        </span>
+        {!isToday && onJumpToday && (
+          <button data-reorder-ignore="true" onClick={onJumpToday} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Today →</button>
+        )}
+      </div>
       <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
         {stat('Weight', log?.weight != null ? log.weight : null, UI.unit())}
         {stat('Steps', log?.steps != null ? log.steps.toLocaleString() : null)}
@@ -709,14 +718,16 @@ function HealthScreen({ store, setStore, go, userId }) {
   const adhAvg = avg(adhSeries.data, 'value');
   const cardioTotal = cardioSeries.data.reduce((s, d) => s + (d.value || 0), 0);
 
-  // Reorderable card order, persisted per device.
+  // Reorderable card order, persisted per device. Missing ids (e.g. after a new
+  // card ships) are inserted at their default position, not appended at the end.
   const CARD_ORDER_KEY = 'logbook-health-card-order';
-  const DEFAULT_CARD_ORDER = ['week', 'weight', 'steps', 'macros', 'cardio', 'adherence'];
+  const DEFAULT_CARD_ORDER = ['week', 'today', 'weight', 'steps', 'macros', 'cardio', 'adherence'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]'); } catch (_) {}
-    const valid = (Array.isArray(saved) ? saved : []).filter(id => DEFAULT_CARD_ORDER.includes(id));
-    return [...valid, ...DEFAULT_CARD_ORDER.filter(id => !valid.includes(id))];
+    const result = (Array.isArray(saved) ? saved : []).filter(id => DEFAULT_CARD_ORDER.includes(id));
+    DEFAULT_CARD_ORDER.forEach((id, i) => { if (!result.includes(id)) result.splice(Math.min(i, result.length), 0, id); });
+    return result;
   });
   const reorderCards = (from, to) => {
     if (from === to) return;
@@ -806,8 +817,10 @@ function HealthScreen({ store, setStore, go, userId }) {
   );
 
   const handle = <DragHandle style={{ width: 20, height: 22, marginLeft: -4, cursor: 'grab' }} />;
+  const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} />,
+    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} />,
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
         headline={weightHeadline} sub={weightHeadline ? 'latest' : null}>
@@ -846,20 +859,9 @@ function HealthScreen({ store, setStore, go, userId }) {
       <TopBar title="HEALTH" />
       <HealthDateStrip store={store} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} />
 
-      {/* max-width cap so charts don't blow up on iPad */}
-      <div style={{ padding: '4px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 2px' }}>
-          <span style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink }}>
-            {selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' })}
-          </span>
-          {selectedDate !== today && (
-            <button onClick={() => setSelectedDate(today)} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer' }}>Jump to today →</button>
-          )}
-        </div>
-
-        <HealthMetricsCard log={selectedLog} />
-
-        {/* Reorderable cards — drag the grip to reorder; order persists per device. */}
+      {/* max-width cap so charts don't blow up on iPad. Reorderable cards —
+         drag the grip to reorder; order persists per device. */}
+      <div style={{ padding: '8px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
         <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {cardOrder.map(id => cardEls[id] ? (
             <div key={id} data-reorder-item="true">{cardEls[id]}</div>
