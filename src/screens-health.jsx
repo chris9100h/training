@@ -1006,16 +1006,18 @@ function HealthScreen({ store, setStore, go, userId }) {
           {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
         </button>
       } />
-      <HealthDateStrip store={store} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} />
+      <div ref={captureRef}>
+        <HealthDateStrip store={store} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} />
 
-      {/* max-width cap so charts don't blow up on iPad. Reorderable cards —
-         drag the grip to reorder; order persists per device. */}
-      <div ref={captureRef} style={{ padding: '8px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
-        <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {cardOrder.map(id => cardEls[id] ? (
-            <div key={id} data-reorder-item="true">{cardEls[id]}</div>
-          ) : null)}
-        </ReorderList>
+        {/* max-width cap so charts don't blow up on iPad. Reorderable cards —
+           drag the grip to reorder; order persists per device. */}
+        <div style={{ padding: capturing ? '8px 16px 16px' : '8px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
+          <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {cardOrder.map(id => cardEls[id] ? (
+              <div key={id} data-reorder-item="true">{cardEls[id]}</div>
+            ) : null)}
+          </ReorderList>
+        </div>
       </div>
 
       <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} />
