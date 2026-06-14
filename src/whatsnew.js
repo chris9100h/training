@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.276',
+    title: 'Weight fill-down control',
+    items: [
+      'By default the app copies your weight to all remaining sets when you enter it — perfect for straight sets.',
+      'If you train with drop sets, pyramids or varying loads, this can get in the way.',
+      'New toggle in Settings → Training: turn off "Fill weight down" and every set stays blank until you log it yourself.',
+      'Existing behaviour is unchanged — only flip it if you want full manual control per set.',
+    ],
+  },
+  {
     id: 'v2.256',
     title: 'A Healthy Update',
     items: [
