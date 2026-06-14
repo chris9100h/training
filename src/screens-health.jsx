@@ -716,6 +716,48 @@ function HealthScreen({ store, setStore, go, userId }) {
   const [targetOpen, setTargetOpen] = useStateH(false);
   const [coachingMacros, setCoachingMacros] = useStateH(null);
   const [tf, setTf] = useStateH('1W');
+  const [capturing, setCapturing] = useStateH(false);
+  const captureRef = useRefH(null);
+
+  const takeScreenshot = async () => {
+    if (!captureRef.current) return;
+    const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
+    if (!html2canvas) return;
+    setCapturing(true);
+    const scrollParent = captureRef.current.parentElement;
+    const saved = { overflow: scrollParent.style.overflow, height: scrollParent.style.height, minHeight: scrollParent.style.minHeight };
+    scrollParent.style.overflow = 'visible';
+    scrollParent.style.height = 'auto';
+    scrollParent.style.minHeight = 'auto';
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try {
+      const el = captureRef.current;
+      const canvas = await html2canvas(el, {
+        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
+        scale: 2, useCORS: true, logging: false,
+        height: el.scrollHeight, windowHeight: el.scrollHeight,
+      });
+      canvas.toBlob(async (blob) => {
+        const filename = `health-${selectedDate}.png`;
+        const file = new File([blob], filename, { type: 'image/png' });
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
+          try { await navigator.share({ files: [file] }); } catch (_) {}
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+      }, 'image/png');
+    } finally {
+      scrollParent.style.overflow = saved.overflow;
+      scrollParent.style.height = saved.height;
+      scrollParent.style.minHeight = saved.minHeight;
+      setCapturing(false);
+    }
+  };
 
   // Load coach-assigned macros (used to prefill targets + power adherence when
   // the user hasn't set personal targets). asClient or self-coaching row.
@@ -954,12 +996,21 @@ function HealthScreen({ store, setStore, go, userId }) {
 
   return (
     <Screen>
-      <TopBar title="HEALTH" />
+      <TopBar title="HEALTH" right={
+        <button onClick={takeScreenshot} disabled={capturing} style={{
+          background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+          borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
+          color: capturing ? UI.inkGhost : UI.inkSoft, lineHeight: 1,
+          WebkitTapHighlightColor: 'transparent',
+        }}>
+          {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
+        </button>
+      } />
       <HealthDateStrip store={store} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} />
 
       {/* max-width cap so charts don't blow up on iPad. Reorderable cards —
          drag the grip to reorder; order persists per device. */}
-      <div style={{ padding: '8px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
+      <div ref={captureRef} style={{ padding: '8px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
         <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {cardOrder.map(id => cardEls[id] ? (
             <div key={id} data-reorder-item="true">{cardEls[id]}</div>
