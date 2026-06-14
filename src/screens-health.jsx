@@ -779,13 +779,14 @@ function HealthScreen({ store, setStore, go, userId }) {
   const [cachedTargets, setCachedTargets] = useStateH(() => {
     try { return JSON.parse(localStorage.getItem('logbook-health-targets') || 'null'); } catch { return null; }
   });
-  const storeReady = store.settings != null;
-  const effectiveTargets = storeReady ? targets : (cachedTargets ?? null);
+  // targets is null until coachingMacros loads (async). Use cached value from the
+  // previous visit so adherence bar + target rows are visible on the first render.
+  const effectiveTargets = targets ?? cachedTargets;
   useEffectH(() => {
-    if (!storeReady) return;
+    if (targets === null && cachedTargets !== null) return; // don't overwrite a good cache with a transient null
     try { localStorage.setItem('logbook-health-targets', JSON.stringify(targets)); } catch {}
-    setCachedTargets(targets);
-  }, [storeReady, targets]);
+    if (targets !== cachedTargets) setCachedTargets(targets);
+  }, [targets]);
 
   // Windowed series builder for the charts. The x-range is tightened to the
   // actual logged days inside the window (not the full timeframe) so a sparse
@@ -973,7 +974,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   const trainedSelected = LB.isLoggedTrainingDay(store.sessions, selectedDate);
   const cardioSelected = (store.cardioLogs || []).some(l => l.date === selectedDate);
   const cardEls = {
-    week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={targets} tf={tf} setTf={setTf} />,
+    week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} hasTargets={!!effectiveTargets} />,
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
