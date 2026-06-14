@@ -581,12 +581,12 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
         </>,
         Math.min(100, adherence), adherenceColor(adherence), 'avg adherence')}
 
-      {(trainingsPlanned > 0 || trainingsDone > 0) && miniBar('trainings',
+      {(trainingsPlanned > 0 || trainingsDone > 0) && miniBar('workouts',
         <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span className="num" style={{ fontSize: 18, color: 'var(--accent)', fontWeight: 300, lineHeight: 1 }}>
             {trainingsDone}<span style={{ fontSize: 12, color: UI.inkFaint }}> / {trainingsPlanned || trainingsDone}</span>
           </span>
-          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, fontWeight: 600 }}>trainings</span>
+          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, fontWeight: 600 }}>workouts</span>
         </span>,
         trainingPct, 'var(--accent)', 'planned vs done')}
 
