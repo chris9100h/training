@@ -496,7 +496,8 @@ function HealthWeekCard({ stats, dragHandle, targets }) {
     weight, stepsSum, calories, protein, carbs, fat, water, adherence } = stats;
   const r = v => v == null ? null : Math.round(v);
   const range = `${healthFmtDate(from, { day: 'numeric', month: 'short' })} – ${healthFmtDate(to, { day: 'numeric', month: 'short' })}`;
-  const verdict = adherence == null ? null : adherence >= 90 ? 'Strong week' : adherence >= 75 ? 'On track' : 'Off track';
+  const verdict = adherence == null ? null : adherence >= 97 ? 'Perfect week' : adherence >= 90 ? 'Strong week' : adherence >= 75 ? 'On track' : 'Off track';
+  const isPerfect = adherence != null && adherence >= 97;
   const trainingPct = trainingsPlanned > 0 ? Math.min(100, (trainingsDone / trainingsPlanned) * 100) : (trainingsDone > 0 ? 100 : 0);
 
   // Weighted daily target averages: (training targets × n + rest targets × (7−n)) / 7
@@ -553,7 +554,7 @@ function HealthWeekCard({ stats, dragHandle, targets }) {
       {adherence != null && miniBar('adherence',
         <>
           <span className="num" style={{ fontSize: 30, color: adherenceColor(adherence), fontWeight: 300, lineHeight: 1 }}>{r(adherence)}%</span>
-          <span style={{ fontSize: 12, color: adherenceColor(adherence), fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.04em' }}>{verdict}</span>
+          <span className={isPerfect ? 'perfect-week-pulse' : ''} style={{ fontSize: 12, color: adherenceColor(adherence), fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.04em' }}>{verdict}</span>
         </>,
         Math.min(100, adherence), adherenceColor(adherence), 'avg adherence')}
 
