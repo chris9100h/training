@@ -833,8 +833,8 @@ function HealthScreen({ store, setStore, go, userId }) {
   }, [dailyLogs, tf]);
 
   const avg = (arr, key) => { const vs = arr.map(d => d[key]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
-  const wVals = weightSeries.data.map(d => d.value).filter(v => v != null);
-  const weightHeadline = wVals.length ? `${(wVals[wVals.length - 1])}${UI.unit()}` : null;
+  const wLatest = weightSeries.data.filter(d => d.value != null).sort((a, b) => b.date.localeCompare(a.date))[0];
+  const weightHeadline = wLatest ? `${wLatest.value}${UI.unit()}` : null;
   const stepsAvg = avg(stepsSeries.data, 'value');
   const adhAvg = avg(adhSeries.data, 'value');
   const cardioTotal = cardioSeries.data.reduce((s, d) => s + (d.value || 0), 0);
