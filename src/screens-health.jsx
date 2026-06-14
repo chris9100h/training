@@ -586,7 +586,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
           <span className="num" style={{ fontSize: 18, color: 'var(--accent)', fontWeight: 300, lineHeight: 1 }}>
             {trainingsDone}<span style={{ fontSize: 12, color: UI.inkFaint }}> / {trainingsPlanned || trainingsDone}</span>
           </span>
-          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, fontWeight: 600 }}>workouts</span>
+          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Workouts</span>
         </span>,
         trainingPct, 'var(--accent)', 'planned vs done')}
 
