@@ -437,6 +437,7 @@ function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit
       const opt = f.options.find(o => String(o.value) === String(v));
       return opt ? opt.label : String(v);
     }
+    if (f.type === 'pace') return String(v);
     if (f.unit) return `${v} ${f.unit}`;
     return String(v);
   };
