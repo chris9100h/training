@@ -190,6 +190,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
     () => localStorage.getItem('logbook-active-users-access') === 'true'
   );
   const [signupApproval, setSignupApproval] = useStateSet(null); // null = loading, bool = current
+  const [autoApproveLeft, setAutoApproveLeft] = useStateSet(null); // null = no batch budget, int = remaining
+  const [budgetSheet, setBudgetSheet] = useStateSet(false);
+  const [budgetDraft, setBudgetDraft] = useStateSet(20);
   const [recentSignups, setRecentSignups] = useStateSet([]);
   const [signupsSheet, setSignupsSheet] = useStateSet(false);
   const [seenSignups, setSeenSignups] = useStateSet(() => {
@@ -241,9 +244,14 @@ function SettingsScreen({ store, setStore, go, userId }) {
   useEffectSet(() => {
     if (!isAdmin) return;
     let mounted = true;
-    LB.supabase.rpc('get_signup_requires_approval').then(({ data, error }) => { if (mounted && !error) setSignupApproval(data !== false); }).catch(() => {});
+    LB.supabase.rpc('get_signup_config').then(({ data, error }) => {
+      if (!mounted || error) return;
+      const row = Array.isArray(data) ? data[0] : data;
+      setSignupApproval(row ? row.requires_approval !== false : true);
+      setAutoApproveLeft(row ? (row.auto_approve_remaining ?? null) : null);
+    }).catch(() => {});
     return () => { mounted = false; };
-  }, [isAdmin]);
+  }, [isAdmin, accountSheet]);
 
   // Admin-only: recent sign-ups feed. Reloaded each time the Account sheet opens.
   useEffectSet(() => {
@@ -264,8 +272,18 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const toggleSignupApproval = async () => {
     const next = !signupApproval;
     setSignupApproval(next);
+    setAutoApproveLeft(null); // manual toggle clears any batch budget
     const { error } = await LB.supabase.rpc('set_signup_requires_approval', { p_value: next });
     if (error) { setSignupApproval(!next); await confirm(error.message || 'Could not update this setting.', { title: 'Update failed', ok: 'OK' }); }
+  };
+
+  const saveBudget = async () => {
+    const n = budgetDraft;
+    setBudgetSheet(false);
+    setSignupApproval(n <= 0);            // n>0 → open for a batch; n<=0 → re-lock now
+    setAutoApproveLeft(n > 0 ? n : null);
+    const { error } = await LB.supabase.rpc('set_auto_approve_budget', { p_count: n });
+    if (error) await confirm(error.message || 'Could not update this setting.', { title: 'Update failed', ok: 'OK' });
   };
 
   const approveUser = async (uid) => {
@@ -638,6 +656,15 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
                 When on, new sign-ups land on a waiting screen until you approve them here. When off, new accounts are activated immediately. Existing pending users are unaffected.
               </div>
+              <Hairline style={{ margin: '14px 0' }} />
+              <Row label="Auto-approve batch" first>
+                <button style={accentBtn} onClick={() => { setBudgetDraft(autoApproveLeft || 20); setBudgetSheet(true); }}>
+                  {autoApproveLeft != null ? `${autoApproveLeft} left` : 'Off'}
+                </button>
+              </Row>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+                Open registration for a set number of sign-ups — they're auto-approved until the batch is used up, then approval turns itself back on.
+              </div>
               {(() => {
                 const unseenCount = recentSignups.filter(u => !seenSignups.has(u.user_id)).length;
                 return (
@@ -947,6 +974,20 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>Always train past that number. Push to failure or near-failure on each set. The algo only bumps weight when <em>all</em> sets hit the top of the range — so getting extra reps is how you earn the next weight.</div>
         </div>
         <Btn onClick={() => setProgDisclaimer(false)}>Got it</Btn>
+      </SettingsSheet>
+
+      {/* ══ Auto-approve batch sheet (admin) ══ */}
+      <SettingsSheet open={budgetSheet} onClose={() => setBudgetSheet(false)} title="Auto-approve batch">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+          <div>
+            <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>SIGN-UPS TO AUTO-APPROVE</div>
+            <Stepper value={budgetDraft} step={5} min={0} max={500} suffix=" sign-ups" onChange={setBudgetDraft} />
+          </div>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
+            The next {budgetDraft > 0 ? budgetDraft : '—'} new accounts skip the waiting screen. Once that many have joined, “Registrations need approval” switches back on automatically. Set to 0 to re-lock now.
+          </div>
+          <Btn onClick={saveBudget}>{budgetDraft > 0 ? `Open for ${budgetDraft}` : 'Re-lock now'}</Btn>
+        </div>
       </SettingsSheet>
 
       {/* ══ Recent sign-ups sheet (admin) ══ */}

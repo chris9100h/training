@@ -130,7 +130,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_profiles`:** `id` (uuid), `name` (text), `approved` (boolean, default = `signup_default_approved()` — auto-approved unless the global `zane_app_config.signup_requires_approval` flag is on)
 
-**`zane_app_config`:** `id` (int, singleton = 1), `signup_requires_approval` (boolean, default true) — global admin toggle (RLS on, only SECURITY DEFINER fns touch it). Drives the `zane_profiles.approved` column default, so flipping it changes future signups only.
+**`zane_app_config`:** `id` (int, singleton = 1), `signup_requires_approval` (boolean, default true), `auto_approve_remaining` (int, nullable — batch budget: when approval is off and this is set, each new signup decrements it via the `signup_consume_budget()` AFTER-INSERT trigger on `zane_profiles`; at 0 the trigger flips `signup_requires_approval` back on and clears the budget). Global admin config (RLS on, only SECURITY DEFINER fns touch it). Drives the `zane_profiles.approved` column default, so flipping it changes future signups only.
 
 **`zane_pushover_active`:** `id` (text), `nonce` (text)
 
@@ -168,7 +168,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`set_active_users_grant(p_email text, p_granted boolean)`** → `void` — erteilt oder entzieht den `active_users`-Grant (nur Admin)
 
-**`get_signup_requires_approval()`** → `boolean` / **`set_signup_requires_approval(p_value boolean)`** → `void` — liest/setzt den globalen „Registrations need approval"-Toggle in `zane_app_config` (nur Admin). **`signup_default_approved()`** → `boolean` (SECURITY DEFINER) ist die invertierte Flag und dient als Column-Default für `zane_profiles.approved`.
+**`get_signup_config()`** → `TABLE(requires_approval boolean, auto_approve_remaining int)` / **`set_signup_requires_approval(p_value boolean)`** → `void` (setzt den Master-Toggle, löscht dabei jedes Batch-Budget) / **`set_auto_approve_budget(p_count int)`** → `void` (öffnet die Registrierung für `p_count` Signups, danach Selbst-Sperre; `p_count ≤ 0` sperrt sofort) — alle nur Admin. **`get_signup_requires_approval()`** → `boolean` existiert weiter (Legacy). **`signup_default_approved()`** → `boolean` (SECURITY DEFINER) ist die invertierte Flag und dient als Column-Default für `zane_profiles.approved`; **`signup_consume_budget()`** ist die Trigger-Funktion (AFTER INSERT auf `zane_profiles`), die das Budget runterzählt und bei 0 wieder zusperrt.
 
 **`get_recent_signups(p_limit int default 50)`** → `TABLE(user_id uuid, name text, email text, created_at timestamptz, approved boolean)` — jüngste Registrierungen (approved + pending) für den Admin-„Recent sign-ups"-Feed im Account-Tab (nur Admin). „Got it"-Dismiss pro Gerät via localStorage `logbook-seen-signups`. Migration 0075.
 
