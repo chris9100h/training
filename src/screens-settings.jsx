@@ -134,6 +134,27 @@ function SettingsSheet(props) {
   return <Sheet titleColor="var(--accent)" {...props} />;
 }
 
+// ─── HOW TO SHEET ────────────────────────────────────────────────────
+function HowToSheet({ open, onClose }) {
+  return (
+    <SettingsSheet open={open} onClose={onClose} title="How to…">
+      <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+        <button onClick={() => { onClose(); window.__startTour?.('createPlan'); }} style={{
+          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          padding: '14px 0', WebkitTapHighlightColor: 'transparent',
+        }}>
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Create a plan &amp; exercise</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Guided tour of plan creation and the training loop</div>
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+    </SettingsSheet>
+  );
+}
+
 // ─── CHANGELOG SHEET ─────────────────────────────────────────────────
 function ChangelogSheet({ open, onClose }) {
   const [selected, setSelected] = useStateSet(null);
@@ -184,6 +205,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [dataSheet, setDataSheet] = useStateSet(false);
   const [changelogSheet, setChangelogSheet] = useStateSet(false);
   const [activeUsersSheet, setActiveUsersSheet] = useStateSet(false);
+  const [howToSheet, setHowToSheet] = useStateSet(false);
 
   // Training sub-sheets
   const [restSheet, setRestSheet] = useStateSet(false);
@@ -395,7 +417,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
         {/* ─── Category navigation ─── */}
         <Frame style={{ padding: '0 14px' }}>
-          <NavRow label="Changelog" hint={(window.WHATS_NEW || [])[0]?.id} onTap={() => setChangelogSheet(true)} first accent />
+          <NavRow label="How to…" onTap={() => setHowToSheet(true)} first />
+          <NavRow label="Changelog" hint={(window.WHATS_NEW || [])[0]?.id} onTap={() => setChangelogSheet(true)} accent />
           {hasActiveUsersAccess && (
             <NavRow label="Active users" hint={activeCount > 0 ? `${activeCount} active` : null} onTap={() => setActiveUsersSheet(true)} />
           )}
@@ -702,6 +725,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Delete all data</Btn>
         </div>
       </SettingsSheet>
+
+      {/* ══ How To Sheet ══ */}
+      <HowToSheet open={howToSheet} onClose={() => setHowToSheet(false)} />
 
       {/* ══ Changelog Sheet ══ */}
       <ChangelogSheet open={changelogSheet} onClose={() => setChangelogSheet(false)} />

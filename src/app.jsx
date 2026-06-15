@@ -323,6 +323,8 @@ function App() {
   const [whatsNew, setWhatsNew] = useStateA(null); // array of unseen changelog entries, or null
   const [syncStatus, setSyncStatus] = useStateA('synced'); // 'synced' | 'pending' | 'error'
   const [storageFull, setStorageFull] = useStateA(false);  // local cache write failed (quota)
+  const [onboardingState, setOnboardingState] = useStateA(null); // null | { phase:'prompt' } | { phase:'tour', tourKey }
+  const onboardingChecked = useRefA(false);
   const retryTimer                = useRefA(null);  // one-shot retry after a failed sync
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
@@ -652,6 +654,30 @@ function App() {
     setWhatsNew(null);
   }, []);
 
+  // Onboarding: show welcome prompt to new users (no completed sessions).
+  // Users who already trained get the flag set silently.
+  useEffectA(() => {
+    if (phase !== 'ready' || !store || onboardingChecked.current) return;
+    onboardingChecked.current = true;
+    if ((store.sessions || []).some(s => s.ended)) {
+      if (!store.settings?.onboardingCompleted) {
+        setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s);
+      }
+      return;
+    }
+    if (!store.settings?.onboardingCompleted) {
+      // Pre-dismiss What's New so it doesn't stack with the welcome prompt
+      try {
+        const newest = (window.WHATS_NEW || [])[0];
+        if (newest?.id && !localStorage.getItem(WHATS_NEW_KEY)) {
+          localStorage.setItem(WHATS_NEW_KEY, newest.id);
+        }
+      } catch (_) {}
+      setWhatsNew(null);
+      setOnboardingState({ phase: 'prompt' });
+    }
+  }, [phase, store]);
+
   // Realtime: coaching invites + messages only. (Cross-device live workout sync
   // was removed — the local store is the single source of truth for a session.)
   useEffectA(() => {
@@ -804,6 +830,9 @@ function App() {
     return () => clearInterval(iv);
   }, [isCoachActive]);
 
+  // Exposed globally so Settings → How to… can launch any tour
+  window.__startTour = (tourKey) => setOnboardingState({ phase: 'tour', tourKey });
+
   // helper for in-sheet "+ new exercise"
   window.__createExercise = (name) => {
     const id = LB.uid();
@@ -879,6 +908,20 @@ function App() {
         {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
         {route.name !== 'train' && <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} />}
         {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
+        {onboardingState?.phase === 'prompt' && (
+          <window.Screens.OnboardingPrompt
+            onStart={() => setOnboardingState({ phase: 'tour', tourKey: 'createPlan' })}
+            onSkip={() => { setOnboardingState(null); setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s); }}
+          />
+        )}
+        {onboardingState?.phase === 'tour' && (
+          <window.Screens.OnboardingTour
+            tourKey={onboardingState.tourKey}
+            go={go}
+            route={route}
+            onDone={() => { setOnboardingState(null); setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s); }}
+          />
+        )}
       </div>
     );
   }
@@ -899,6 +942,20 @@ function App() {
       {route.name !== 'train' && <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} />}
       {showTab && <TabBar active={tabActive} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
+      {onboardingState?.phase === 'prompt' && (
+        <window.Screens.OnboardingPrompt
+          onStart={() => setOnboardingState({ phase: 'tour', tourKey: 'createPlan' })}
+          onSkip={() => { setOnboardingState(null); setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s); }}
+        />
+      )}
+      {onboardingState?.phase === 'tour' && (
+        <window.Screens.OnboardingTour
+          tourKey={onboardingState.tourKey}
+          go={go}
+          route={route}
+          onDone={() => { setOnboardingState(null); setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s); }}
+        />
+      )}
     </>
   );
 }

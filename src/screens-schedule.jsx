@@ -84,7 +84,7 @@ function PlanScreen({ store, setStore, go }) {
         {store.schedules.length === 0 && (
           <Empty title="No plans yet"
             sub="Create a training plan to start sessions."
-            action={<Btn onClick={() => go({ name: 'schedule-new' })}>Create plan</Btn>}
+            action={<Btn data-tour="plan-new-btn" onClick={() => go({ name: 'schedule-new' })}>Create plan</Btn>}
             icon={ICON_CALENDAR} />
         )}
         {store.schedules.filter(s => !s.archived).map(s => {

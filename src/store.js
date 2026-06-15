@@ -518,6 +518,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         defaultCheckinSchema: sett.default_checkin_schema ?? null,
         macroTargets: sett.macro_targets ?? null,
         showHealthTab: sett.show_health_tab ?? false,
+        onboardingCompleted: sett.onboarding_completed ?? false,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -825,6 +826,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
     prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
+    prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
     prev.nextReminderAt                   !== next.nextReminderAt;
 
   if (settingsChanged) {
@@ -862,6 +864,7 @@ async function syncStore(prev, next, userId) {
       session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,
       macro_targets: next.settings?.macroTargets ?? null,
       show_health_tab: next.settings?.showHealthTab ?? false,
+      onboarding_completed: next.settings?.onboardingCompleted ?? false,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
     }));

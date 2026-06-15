@@ -192,7 +192,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
               const on = t.id === active;
               const badge = t.id === 'coaching' ? coachingBadge : null;
               return (
-                <button key={t.id} onClick={() => onChange(t.id)} style={{
+                <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => onChange(t.id)} style={{
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
@@ -404,7 +404,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
           const on = t.id === active;
           const badge = t.id === 'coaching' ? coachingBadge : null;
           return (
-            <button key={t.id} onClick={() => onChange(t.id)} style={{
+            <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => onChange(t.id)} style={{
               flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
               padding: '10px 6px 8px',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
