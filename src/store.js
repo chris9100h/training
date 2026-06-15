@@ -2202,20 +2202,15 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions) {
     const thisEnded = sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= ws && d < we; });
     const prevEnded = sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= prevWs && d < ws; });
     if (thisEnded.length) out.days_trained = thisEnded.length;
-    let perfScore = 0, perfFactors = 0;
     if (thisEnded.length > 0 || prevEnded.length > 0) {
-      perfScore += Math.sign(thisEnded.length - prevEnded.length);
-      perfFactors++;
-    }
-    const prevStepsLogs = prevWeek.filter(l => l.steps != null);
-    if (stepsLogs.length && prevStepsLogs.length) {
-      const thisSteps = stepsLogs.reduce((s, l) => s + l.steps, 0);
-      const prevSteps = prevStepsLogs.reduce((s, l) => s + l.steps, 0);
-      perfScore += Math.sign(thisSteps - prevSteps);
-      perfFactors++;
-    }
-    if (perfFactors > 0) {
-      out.performance_vs_last_week = perfScore > 0 ? 'improved' : perfScore < 0 ? 'worse' : 'same';
+      const sessionDoneSets = s =>
+        s.aggDoneSets != null
+          ? s.aggDoneSets
+          : (s.entries || []).reduce((n, e) => n + (e.sets || []).filter(x => x.done && !x.warmup).length, 0);
+      const thisSets = thisEnded.reduce((n, s) => n + sessionDoneSets(s), 0);
+      const prevSets = prevEnded.reduce((n, s) => n + sessionDoneSets(s), 0);
+      const diff = thisSets !== prevSets ? Math.sign(thisSets - prevSets) : Math.sign(thisEnded.length - prevEnded.length);
+      out.performance_vs_last_week = diff > 0 ? 'improved' : diff < 0 ? 'worse' : 'same';
     }
   }
   return Object.keys(out).length ? { ...out, count: week.length } : null;
