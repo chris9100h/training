@@ -217,6 +217,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [adminBgPreview, setAdminBgPreview] = useStateSet(
     () => localStorage.getItem('logbook-admin-bg-preview') || 'standard'
   );
+  const [bgPreviewSheet, setBgPreviewSheet] = useStateSet(false);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
 
   useEffectSet(() => {
@@ -680,30 +681,11 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 );
               })()}
               <Hairline style={{ margin: '14px 0' }} />
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>VIP BACKGROUND PREVIEW</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {[
-                  { key: 'standard', label: 'Standard' },
-                  { key: 'mike',     label: 'Mike' },
-                  { key: 'phoenix',  label: 'Phoenix' },
-                ].map(({ key, label }) => {
-                  const active = adminBgPreview === key;
-                  return (
-                    <button key={key} onClick={() => {
-                      setAdminBgPreview(key);
-                      if (key === 'standard') localStorage.removeItem('logbook-admin-bg-preview');
-                      else localStorage.setItem('logbook-admin-bg-preview', key);
-                    }} style={{
-                      flex: 1, padding: '8px 6px', borderRadius: 6,
-                      border: active ? `1.5px solid var(--accent)` : `0.5px solid ${UI.hairStrong}`,
-                      background: active ? `rgba(var(--accent-rgb), 0.1)` : UI.bgInset,
-                      color: active ? 'var(--accent)' : UI.inkSoft,
-                      fontFamily: UI.fontUi, fontSize: 12, fontWeight: active ? 600 : 400,
-                      cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                    }}>{label}</button>
-                  );
-                })}
-              </div>
+              <Row label="Background" first>
+                <button style={accentBtn} onClick={() => setBgPreviewSheet(true)}>
+                  {{ standard: 'Standard', mike: 'Mike', phoenix: 'Phoenix' }[adminBgPreview] || 'Change'}
+                </button>
+              </Row>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
                 Preview VIP background images on your home screen before notifying users.
               </div>
@@ -1018,6 +1000,41 @@ function SettingsScreen({ store, setStore, go, userId }) {
             The next {budgetDraft > 0 ? budgetDraft : '—'} new accounts skip the waiting screen. Once that many have joined, “Registrations need approval” switches back on automatically. Set to 0 to re-lock now.
           </div>
           <Btn onClick={saveBudget}>{budgetDraft > 0 ? `Open for ${budgetDraft}` : 'Re-lock now'}</Btn>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ VIP background preview sheet (admin) ══ */}
+      <SettingsSheet open={bgPreviewSheet} onClose={() => setBgPreviewSheet(false)} title="Background">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {[
+            { key: 'standard', label: 'Standard', sub: 'Zane logo watermark' },
+            { key: 'mike',     label: 'Mike',     sub: 'mikeapicelli777' },
+            { key: 'phoenix',  label: 'Phoenix',  sub: 'mb2489' },
+          ].map(({ key, label, sub }) => {
+            const active = adminBgPreview === key;
+            return (
+              <button key={key} onClick={() => {
+                setAdminBgPreview(key);
+                if (key === 'standard') localStorage.removeItem('logbook-admin-bg-preview');
+                else localStorage.setItem('logbook-admin-bg-preview', key);
+              }} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '12px 14px', borderRadius: 6,
+                border: active ? `1.5px solid var(--accent)` : `0.5px solid ${UI.hairStrong}`,
+                background: active ? `rgba(var(--accent-rgb), 0.1)` : UI.bgInset,
+                cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textAlign: 'left',
+              }}>
+                <div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: active ? 'var(--accent)' : UI.ink }}>{label}</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{sub}</div>
+                </div>
+                {active && <svg width="14" height="11" viewBox="0 0 14 11" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 5.5L5 9.5L13 1.5" /></svg>}
+              </button>
+            );
+          })}
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 4 }}>
+            Previews on your own home screen only — device-local, nothing is synced or shown to users.
+          </div>
         </div>
       </SettingsSheet>
 
