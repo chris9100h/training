@@ -2172,7 +2172,7 @@ function dailyLogAdherence(log, targets, isTraining) {
 // check-in form field keys. weekStart = Monday ('YYYY-MM-DD'); the window is
 // [weekStart, weekStart+7). weight_avg_last_week comes from the prior week.
 // Returns null when there is nothing to prefill.
-function dailyLogsWeekPrefill(dailyLogs, weekStart) {
+function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions) {
   if (!dailyLogs?.length || !weekStart) return null;
   const ws = weekStart.slice(0, 10);
   const shift = (base, days) => { const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
@@ -2185,16 +2185,39 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart) {
   const avg = (arr, key) => { const vs = arr.map(l => l[key]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const r1 = v => Math.round(v * 10) / 10;
   const out = {};
-  const weightLogs = week.filter(l => l.weight != null).sort((a, b) => a.date.localeCompare(b.date));
-  if (weightLogs.length) out.weight_today = r1(weightLogs[weightLogs.length - 1].weight);
+  const todayStr = todayISO();
+  const todayLogEntry = week.find(l => l.date === todayStr);
+  if (todayLogEntry?.weight != null) out.weight_today = r1(todayLogEntry.weight);
   const weekW = avg(week, 'weight'); if (weekW != null) out.weight_avg_last_week = r1(weekW);
-  const steps = avg(week, 'steps'); if (steps != null) out.steps = Math.round(steps);
+  const stepsLogs = week.filter(l => l.steps != null);
+  if (stepsLogs.length) out.steps = stepsLogs.reduce((s, l) => s + l.steps, 0);
   const cal = avg(week, 'calories'); if (cal != null) out.calories_avg = Math.round(cal);
   const p = avg(week, 'protein'); if (p != null) out.protein_avg = Math.round(p);
   const c = avg(week, 'carbs'); if (c != null) out.carbs_avg = Math.round(c);
   const f = avg(week, 'fat'); if (f != null) out.fat_avg = Math.round(f);
   const hyd = avg(week, 'waterMl'); if (hyd != null) out.hydration_ml = Math.round(hyd);
   const adh = avg(week, 'adherence'); if (adh != null) out.macro_adherence = Math.round(adh);
+  if (sessions != null) {
+    const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
+    const thisEnded = sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= ws && d < we; });
+    const prevEnded = sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= prevWs && d < ws; });
+    if (thisEnded.length) out.days_trained = thisEnded.length;
+    let perfScore = 0, perfFactors = 0;
+    if (thisEnded.length > 0 || prevEnded.length > 0) {
+      perfScore += Math.sign(thisEnded.length - prevEnded.length);
+      perfFactors++;
+    }
+    const prevStepsLogs = prevWeek.filter(l => l.steps != null);
+    if (stepsLogs.length && prevStepsLogs.length) {
+      const thisSteps = stepsLogs.reduce((s, l) => s + l.steps, 0);
+      const prevSteps = prevStepsLogs.reduce((s, l) => s + l.steps, 0);
+      perfScore += Math.sign(thisSteps - prevSteps);
+      perfFactors++;
+    }
+    if (perfFactors > 0) {
+      out.performance_vs_last_week = perfScore > 0 ? 'improved' : perfScore < 0 ? 'worse' : 'same';
+    }
+  }
   return Object.keys(out).length ? { ...out, count: week.length } : null;
 }
 

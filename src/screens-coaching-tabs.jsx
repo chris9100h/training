@@ -635,7 +635,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
   const lbl = (field.unit === 'weight'
     ? `${field.label} (${UI.unit()})`
     : field.unit === 'pace'
-      ? `${field.label} (${UI.unit() === 'lbs' ? '/mi' : '/km'})`
+      ? `${field.label} (min${UI.unit() === 'lbs' ? '/mi' : '/km'})`
       : field.unit ? `${field.label} (${field.unit})` : field.label) + req;
 
   // Read-only / computed fields (e.g. macro adherence %). Value is prefilled
@@ -976,7 +976,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           weekStart={formWeek}
           existing={target}
           prefill={!target ? LB.cardioWeekPrefill(store?.cardioLogs, formWeek, store?.settings?.unit) : undefined}
-          dailyPrefill={!target ? LB.dailyLogsWeekPrefill(store?.dailyLogs, formWeek) : undefined}
+          dailyPrefill={!target ? LB.dailyLogsWeekPrefill(store?.dailyLogs, formWeek, store?.sessions) : undefined}
           onSaved={() => { setEditTarget(null); load(); }}
           schema={resolvedSchema}
         />

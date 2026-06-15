@@ -621,9 +621,10 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
 
 function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
   const today = LB.todayISO();
-  const now = new Date(today + 'T12:00:00');
-  const jsDow = now.getDay();
-  const monday = healthShiftISO(today, -((jsDow === 0 ? 7 : jsDow) - 1));
+  const anchor = selectedDate || today;
+  const anchorDate = new Date(anchor + 'T12:00:00');
+  const jsDow = anchorDate.getDay();
+  const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
   const days = Array.from({ length: 7 }, (_, i) => healthShiftISO(monday, i));
   const loggedSet = new Set((store.dailyLogs || []).map(l => l.date));
   const sunday = days[6];
@@ -697,7 +698,7 @@ function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
           />
         </div>
         <div style={{ flex: 1 }} />
-        <button onClick={onLog} style={{
+        {onLog && <button onClick={onLog} style={{
           height: 34, borderRadius: 4, border: 'none',
           background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
           color: '#0a0805', cursor: 'pointer', padding: '0 14px',
@@ -706,7 +707,7 @@ function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
           WebkitTapHighlightColor: 'transparent',
         }}>
           <i className="fa-solid fa-plus" style={{ fontSize: 11 }} /> LOG
-        </button>
+        </button>}
       </div>
     </div>
   );
@@ -873,8 +874,9 @@ function HealthScreen({ store, setStore, go, userId }) {
     const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
     let from, to, periodDays;
     if (tf === '1W') {
-      const jsDow = new Date(today + 'T12:00:00').getDay();
-      const monday = healthShiftISO(today, -((jsDow === 0 ? 7 : jsDow) - 1));
+      const anchor = selectedDate;
+      const jsDow = new Date(anchor + 'T12:00:00').getDay();
+      const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
       from = monday; to = healthShiftISO(monday, 6); periodDays = 7;
     } else {
       const days = tfDays(tf);
@@ -903,7 +905,7 @@ function HealthScreen({ store, setStore, go, userId }) {
       snapTgtCal: avgSnap('calories'), snapTgtProt: avgSnap('protein'),
       snapTgtCarb: avgSnap('carbs'), snapTgtFat: avgSnap('fat'),
     };
-  }, [dailyLogs, store.sessions, store.cardioLogs, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate, today, tf]);
+  }, [dailyLogs, store.sessions, store.cardioLogs, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate, today, selectedDate, tf]);
 
   const targetDayRow = (label, suffix) => {
     const t = effectiveTargets || {};
@@ -1073,6 +1075,8 @@ function HealthClientLogs({ clientStore }) {
     });
   };
 
+  const [selectedDate, setSelectedDate] = useStateH(() => LB.todayISO());
+
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[1]).days;
   const windowDays = tfDays(tf);
 
@@ -1136,8 +1140,9 @@ function HealthClientLogs({ clientStore }) {
     const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
     let from, to, periodDays;
     if (tf === '1W') {
-      const jsDow = new Date(today + 'T12:00:00').getDay();
-      const monday = healthShiftISO(today, -((jsDow === 0 ? 7 : jsDow) - 1));
+      const anchor = selectedDate;
+      const jsDow = new Date(anchor + 'T12:00:00').getDay();
+      const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
       from = monday; to = healthShiftISO(monday, 6); periodDays = 7;
     } else {
       const days = tfDays(tf);
@@ -1164,7 +1169,7 @@ function HealthClientLogs({ clientStore }) {
       snapTgtCal: avgSnap('calories'), snapTgtProt: avgSnap('protein'),
       snapTgtCarb: avgSnap('carbs'), snapTgtFat: avgSnap('fat'),
     };
-  }, [logs, clientStore?.sessions, clientStore?.cardioLogs, clientStore?.schedules, clientStore?.activeScheduleId, clientStore?.cycleStartDate, clientStore?.weekPlanStartDate, today, tf]);
+  }, [logs, clientStore?.sessions, clientStore?.cardioLogs, clientStore?.schedules, clientStore?.activeScheduleId, clientStore?.cycleStartDate, clientStore?.weekPlanStartDate, today, selectedDate, tf]);
 
   if (!logs.length && !cardioLogs.length) {
     return (
@@ -1175,16 +1180,17 @@ function HealthClientLogs({ clientStore }) {
     );
   }
 
-  const todayLog = logs.find(l => l.date === today) || null;
-  const trainedToday = LB.isLoggedTrainingDay(clientStore?.sessions, today);
-  const cardioToday = cardioLogs.some(l => l.date === today);
+  const selectedLog = logs.find(l => l.date === selectedDate) || null;
+  const trainedSelected = LB.isLoggedTrainingDay(clientStore?.sessions, selectedDate);
+  const cardioSelected = cardioLogs.some(l => l.date === selectedDate);
+  const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
 
   const handle = <DragHandle style={{ width: 20, height: 22, marginLeft: -4, cursor: 'grab' }} />;
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={null} tf={tf} setTf={setTf} />,
     today: (
-      <HealthMetricsCard log={todayLog} dateLabel="Today" isToday={true} onJumpToday={null}
-        dragHandle={handle} trained={trainedToday} hasCardio={cardioToday} hasTargets={false} />
+      <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)}
+        dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} hasTargets={false} />
     ),
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
@@ -1245,12 +1251,15 @@ function HealthClientLogs({ clientStore }) {
   };
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 32px', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
-      <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {cardOrder.map(id => cardEls[id] ? (
-          <div key={id} data-reorder-item="true">{cardEls[id]}</div>
-        ) : null)}
-      </ReorderList>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <HealthDateStrip store={clientStore} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={null} />
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 32px', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
+        <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {cardOrder.map(id => cardEls[id] ? (
+            <div key={id} data-reorder-item="true">{cardEls[id]}</div>
+          ) : null)}
+        </ReorderList>
+      </div>
     </div>
   );
 }
