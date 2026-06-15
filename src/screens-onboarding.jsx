@@ -85,61 +85,61 @@ window.TOURS.doWorkout = [
   {
     target: null,
     title: 'The Training Screen',
-    body: 'Each exercise shows as a card with set rows. Done sets are highlighted, open sets wait for input. A progress bar tracks completed work sets.',
+    body: 'Exercise chips run across the top — tap any to jump to it. Below is the exercise card with your set rows: set number, last-time reference, weight, reps, done button, and a − to remove that set.',
     visual: 'trainOverview',
   },
   {
     target: null,
     title: 'Warmup Sets',
-    body: "Warmup rows are marked with 'W'. They are logged and tracked, but don't count toward your session progress bar or volume stats.",
+    body: "Before your first working set, a warmup modal slides up. It shows each warmup set one at a time with the target weight and reps. Tap 'Check warmup set' to log it, or 'Skip' to jump straight to your working sets.",
     visual: 'trainWarmup',
   },
   {
     target: null,
     title: 'Logging a Set',
-    body: 'Tap a set row to open the inline inputs. Adjust weight and reps, then tap the checkmark to mark the set done. Completed sets glow.',
+    body: 'Tap a set row to activate it — the weight field gets a gold underline. Enter weight, tap the reps field, enter reps. The keyboard auto-advances between fields and can confirm the set in one tap.',
     visual: 'trainLogSet',
   },
   {
     target: null,
     title: 'The Quick Keyboard',
-    body: 'The custom numpad dials in weight and reps fast. Tap between the KG and REPS fields, long-press +/− to step by small increments.',
+    body: 'The custom numpad sits at the bottom. ↓ / ↑ step the weight up or down by your equipment increment. The dumbbell icon opens the plate calculator. The tall gold button confirms the set.',
     visual: 'trainKeyboard',
   },
   {
     target: null,
     title: 'Plate Calculator',
-    body: 'Tap the scale icon in the numpad to see exactly which plates to load on the bar — calculated from your available equipment.',
+    body: 'Opens from the dumbbell key on the keyboard. Shows which plates to load on each side of the bar as colored circles — calculated from your available equipment.',
     visual: 'trainPlates',
   },
   {
     target: null,
     title: 'Add & Remove Sets',
-    body: "Tap '+ ADD SET' below the last row to add a set. Swipe any set row left to reveal the delete button and remove it.",
+    body: 'The + button below the sets adds a new set (duplicating the last one). Each set row has a − button on the right — tap it to remove that set.',
     visual: 'trainSets',
   },
   {
     target: null,
     title: 'Exercise Notes',
-    body: 'Tap the note icon in the exercise header to attach a note — tempo cues, substitutions, range of motion reminders. Shown every time you do that exercise.',
+    body: 'The Note button sits to the right of the + button, below the sets. Tap it to add a session note or a permanent exercise note — cues, tempo, substitutions. The note is shown every time you train that exercise.',
     visual: 'trainNotes',
   },
   {
     target: null,
     title: 'Navigate Exercises',
-    body: 'Use the exercise tabs at the bottom to jump directly to any exercise. Swipe left or right to step through them in order.',
+    body: 'The exercise chips at the top of the screen are your navigation. Tap any chip to jump to that exercise. Completed exercises show a small dot below their chip.',
     visual: 'trainNav',
   },
   {
     target: null,
-    title: 'Skip an Exercise',
-    body: "Can't do an exercise today? Tap SKIP to log it as skipped and move on. You can optionally leave a reason for your coach or future self.",
+    title: 'Skip Remaining Sets',
+    body: "The footer bar at the bottom has a 'Skip remaining sets' button. Tap it to mark all incomplete sets of the current exercise as skipped and move on to the next.",
     visual: 'trainSkip',
   },
   {
     target: null,
-    title: 'End Your Workout',
-    body: "When you're done, tap END in the top bar. A summary appears showing sets done, total volume, and session time.",
+    title: 'Finish Your Workout',
+    body: "Once you reach the last exercise, a 'Finish →' button appears in the footer. Tap it to end the session — you'll see a summary of sets, volume, and duration.",
     visual: 'trainEnd',
   },
   {
@@ -225,266 +225,215 @@ function TourVisualDrag() {
 }
 
 function TourVisualTrainOverview() {
+  const chips = ['BENCH', 'INCLINE', 'TRICEP'];
   const sets = [
-    { label: 'W', kg: '60', reps: '10', done: true, warmup: true },
-    { label: '1', kg: '80', reps: '8', done: true, warmup: false },
-    { label: '2', kg: '80', reps: '8', done: false, warmup: false },
-    { label: '3', kg: '80', reps: '8', done: false, warmup: false },
+    { label: '1', done: true },
+    { label: '2', done: false, active: true },
+    { label: '3', done: false },
   ];
   return (
-    <div style={{ background: UI.bgCard, borderRadius: 8, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
-      <div style={{ padding: '9px 12px', borderBottom: `0.5px solid ${UI.hair}`, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontFamily: UI.fontDisplay, fontSize: 15, fontWeight: 700, letterSpacing: '0.04em', color: UI.ink, textTransform: 'uppercase', flex: 1 }}>Bench Press</span>
-        <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost, letterSpacing: '0.06em' }}>3 × 8</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+      <div style={{ display: 'flex', gap: 5 }}>
+        {chips.map((c, i) => (
+          <div key={c} style={{
+            padding: '5px 10px', borderRadius: 999, fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.07em',
+            background: i === 0 ? 'var(--accent)' : i === 1 ? `rgba(var(--accent-rgb),0.15)` : UI.bgInset,
+            color: i === 0 ? '#0a0805' : i === 1 ? 'var(--accent)' : UI.inkFaint,
+            border: `0.5px solid ${i === 0 ? 'var(--accent)' : i === 1 ? 'rgba(var(--accent-rgb),0.3)' : UI.hairStrong}`,
+          }}>{c}</div>
+        ))}
       </div>
-      {sets.map((s, i) => (
-        <div key={s.label} style={{
-          display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px',
-          background: s.done && !s.warmup ? `rgba(var(--accent-rgb),0.06)` : s.warmup ? `rgba(var(--accent-rgb),0.03)` : 'transparent',
-          borderBottom: i < sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
-        }}>
-          <div style={{
-            width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-            background: s.warmup ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
-            border: `0.5px solid ${s.warmup ? 'rgba(var(--accent-rgb),0.3)' : UI.hairStrong}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700,
-            color: s.warmup ? 'var(--accent)' : UI.inkGhost,
-          }}>{s.label}</div>
-          <div className="num" style={{ flex: 1, fontSize: 13, color: UI.ink }}>{s.kg} kg</div>
-          <div className="num" style={{ fontSize: 13, color: UI.ink, marginRight: 4 }}>{s.reps} reps</div>
-          <div style={{
-            width: 30, height: 30, borderRadius: 6, flexShrink: 0,
-            background: s.done ? 'var(--accent)' : UI.bgInset,
-            border: `1px solid ${s.done ? 'var(--accent)' : UI.hairStrong}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            {s.done && <i className="fa-solid fa-check" style={{ fontSize: 11, color: '#0a0805' }} />}
-          </div>
+      <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+        <div style={{ padding: '7px 10px', borderBottom: `0.5px solid ${UI.hair}`, display: 'flex', alignItems: 'center' }}>
+          <span style={{ fontFamily: UI.fontDisplay, fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', color: UI.ink, textTransform: 'uppercase', flex: 1 }}>Bench Press</span>
+          <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>3 × 8</span>
         </div>
-      ))}
+        {sets.map((s, i) => (
+          <div key={s.label} style={{
+            display: 'grid', gridTemplateColumns: '22px 1fr auto 28px 22px', alignItems: 'center', gap: 6, padding: '6px 10px',
+            background: s.active ? `rgba(var(--accent-rgb),0.07)` : s.done ? `rgba(var(--accent-rgb),0.04)` : 'transparent',
+            borderBottom: i < sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
+          }}>
+            <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{s.label}</div>
+            <div className="num" style={{ fontSize: 12, color: s.active ? 'var(--accent)' : UI.ink }}>80 kg</div>
+            <div className="num" style={{ fontSize: 12, color: s.active ? 'var(--accent)' : UI.inkSoft }}>8</div>
+            <div style={{ width: 26, height: 26, borderRadius: 4, background: s.done ? 'var(--accent)' : s.active ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset, border: `1.5px solid ${(s.done || s.active) ? 'var(--accent)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: s.active ? `0 0 0 3px rgba(var(--accent-rgb),0.15)` : 'none' }}>
+              {s.done && <i className="fa-solid fa-check" style={{ fontSize: 9, color: '#0a0805' }} />}
+            </div>
+            <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>−</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 function TourVisualTrainWarmup() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {[['W1', '50', '10'], ['W2', '65', '6']].map(([label, kg, reps]) => (
-        <div key={label} style={{
-          display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
-          background: `rgba(var(--accent-rgb),0.06)`,
-          border: `0.5px solid rgba(var(--accent-rgb),0.2)`, borderRadius: 6,
-        }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: 4,
-            background: `rgba(var(--accent-rgb),0.15)`,
-            border: `0.5px solid rgba(var(--accent-rgb),0.35)`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: 'var(--accent)',
-          }}>{label}</div>
-          <span className="num" style={{ flex: 1, fontSize: 13, color: UI.inkSoft }}>{kg} kg</span>
-          <span className="num" style={{ fontSize: 13, color: UI.inkSoft, marginRight: 4 }}>{reps} reps</span>
-          <div style={{
-            width: 30, height: 30, borderRadius: 6,
-            background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <i className="fa-solid fa-check" style={{ fontSize: 11, color: '#0a0805' }} />
+    <div style={{ background: UI.bgRaised, borderRadius: 8, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden', paddingBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 10, paddingBottom: 8 }}>
+        <div style={{ width: 32, height: 3, borderRadius: 2, background: UI.inkGhost }} />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '0 16px 12px', gap: 8 }}>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--accent)' }}>WARMUP</span>
+        <div style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--accent)', opacity: 0.7 }} />
+        <div style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 4, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.07em' }}>SKIP</div>
+      </div>
+      <div style={{ textAlign: 'center', padding: '0 16px 14px' }}>
+        <div className="num" style={{ fontSize: 36, color: UI.ink, fontWeight: 300 }}>40 kg</div>
+        <div className="num" style={{ fontSize: 15, color: UI.inkSoft, marginTop: 2 }}>× 10 reps</div>
+      </div>
+      <div style={{ padding: '0 16px 14px' }}>
+        <div style={{ padding: '12px', borderRadius: 6, textAlign: 'center', background: 'linear-gradient(160deg, var(--accent-light), var(--accent))', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em' }}>✓ CHECK WARMUP SET</div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
+        {[0, 1, 2].map(i => (
+          <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+            <div style={{ width: 24, height: 24, borderRadius: 12, background: i === 0 ? 'var(--accent)' : i === 1 ? `rgba(var(--accent-rgb),0.2)` : UI.bgInset, border: `1.5px solid ${i === 0 ? 'var(--accent)' : i === 1 ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {i === 0 && <i className="fa-solid fa-check" style={{ fontSize: 8, color: '#0a0805' }} />}
+            </div>
+            <span style={{ fontSize: 7, fontFamily: UI.fontUi, color: i === 0 ? 'var(--accent)' : UI.inkGhost, fontWeight: 700 }}>W{i + 1}</span>
           </div>
-        </div>
-      ))}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 2px' }}>
-        <i className="fa-solid fa-circle-info" style={{ fontSize: 10, color: UI.inkGhost }} />
-        <span style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi }}>Warmup sets don't count toward progress or volume</span>
+        ))}
       </div>
     </div>
   );
 }
 
 function TourVisualTrainLogSet() {
+  const sets = [
+    { label: '1', done: true },
+    { label: '2', done: false, active: true },
+    { label: '3', done: false },
+  ];
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px',
-        background: `rgba(var(--accent-rgb),0.08)`,
-        border: `1.5px solid rgba(var(--accent-rgb),0.5)`, borderRadius: 6,
-        boxShadow: `0 0 0 3px rgba(var(--accent-rgb),0.1)`,
-      }}>
-        <div style={{
-          width: 24, height: 24, borderRadius: 4, background: UI.bgInset,
-          border: `0.5px solid ${UI.hairStrong}`, flexShrink: 0,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost,
-        }}>2</div>
-        <div className="num" style={{ flex: 1, fontSize: 16, color: 'var(--accent)' }}>80.0</div>
-        <div className="num" style={{ fontSize: 16, color: 'var(--accent)', marginRight: 6 }}>8</div>
-        <div style={{
-          width: 32, height: 32, borderRadius: 6, background: UI.bgInset,
-          border: `1px solid ${UI.hairStrong}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+    <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+      <div style={{ padding: '7px 10px', borderBottom: `0.5px solid ${UI.hair}`, display: 'flex', alignItems: 'center' }}>
+        <span style={{ fontFamily: UI.fontDisplay, fontSize: 13, fontWeight: 700, color: UI.ink, textTransform: 'uppercase', flex: 1 }}>Bench Press</span>
+      </div>
+      {sets.map((s, i) => (
+        <div key={s.label} style={{
+          display: 'grid', gridTemplateColumns: '22px 1fr auto 30px 22px', alignItems: 'center', gap: 6, padding: '7px 10px',
+          background: s.active ? `rgba(var(--accent-rgb),0.08)` : s.done ? `rgba(var(--accent-rgb),0.04)` : 'transparent',
+          borderBottom: i < sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
         }}>
-          <i className="fa-solid fa-check" style={{ fontSize: 12, color: UI.inkGhost }} />
-        </div>
-      </div>
-      <div style={{ textAlign: 'center', color: UI.inkGhost }}>
-        <i className="fa-solid fa-arrow-down" style={{ fontSize: 11 }} />
-        <span style={{ fontSize: 10, fontFamily: UI.fontUi, marginLeft: 5 }}>tap to confirm</span>
-      </div>
-      <div style={{ display: 'flex', gap: 6, padding: '8px 10px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
-        {[['KG', '80.0', true], ['REPS', '8', false]].map(([lbl, val, active]) => (
-          <div key={lbl} style={{
-            flex: 1, textAlign: 'center', padding: '6px 4px',
-            background: UI.bgCard, borderRadius: 4,
-            border: `${active ? '1.5px' : '0.5px'} solid ${active ? 'var(--accent)' : UI.hairStrong}`,
-          }}>
-            <div style={{ fontSize: 8, color: UI.inkGhost, fontFamily: UI.fontUi, marginBottom: 2, letterSpacing: '0.06em' }}>{lbl}</div>
-            <div className="num" style={{ fontSize: 17, color: active ? 'var(--accent)' : UI.ink }}>{val}</div>
+          <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{s.label}</div>
+          <div className="num" style={{ fontSize: 13, color: s.active ? 'var(--accent)' : UI.ink }}>80.0</div>
+          <div className="num" style={{ fontSize: 13, color: s.active ? 'var(--accent)' : UI.inkSoft }}>8</div>
+          <div style={{ width: 28, height: 28, borderRadius: 4, background: s.done ? 'var(--accent)' : s.active ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset, border: `1.5px solid ${(s.done || s.active) ? 'var(--accent)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: s.active ? `0 0 0 3px rgba(var(--accent-rgb),0.15)` : 'none' }}>
+            {s.done ? <i className="fa-solid fa-check" style={{ fontSize: 10, color: '#0a0805' }} /> : s.active ? <i className="fa-solid fa-check" style={{ fontSize: 10, color: 'var(--accent)' }} /> : null}
           </div>
-        ))}
-        <div style={{
-          width: 42, borderRadius: 4, background: 'var(--accent)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <i className="fa-solid fa-check" style={{ fontSize: 13, color: '#0a0805' }} />
+          <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>−</div>
         </div>
+      ))}
+      <div style={{ padding: '5px 10px 7px', display: 'flex', alignItems: 'center', gap: 5 }}>
+        <i className="fa-solid fa-arrow-up" style={{ fontSize: 9, color: UI.inkGhost }} />
+        <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Tap the ✓ on the active row to confirm the set</span>
       </div>
     </div>
   );
 }
 
 function TourVisualTrainKeyboard() {
-  const numBtns = ['7','8','9','4','5','6','1','2','3'];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 2 }}>
+      <div style={{ display: 'flex', gap: 5, marginBottom: 2 }}>
         {[['KG', '80.0', true], ['REPS', '8', false]].map(([lbl, val, active]) => (
           <div key={lbl} style={{
-            flex: 1, textAlign: 'center', padding: '6px 4px',
+            flex: 1, textAlign: 'center', padding: '5px 4px',
             background: UI.bgCard, borderRadius: 4,
-            border: `${active ? '1.5px' : '0.5px'} solid ${active ? 'var(--accent)' : UI.hairStrong}`,
+            border: `0.5px solid ${active ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
+            borderBottom: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
           }}>
             <div style={{ fontSize: 8, color: UI.inkGhost, fontFamily: UI.fontUi, marginBottom: 1, letterSpacing: '0.06em' }}>{lbl}</div>
-            <div className="num" style={{ fontSize: 18, color: active ? 'var(--accent)' : UI.ink }}>{val}</div>
+            <div className="num" style={{ fontSize: 17, color: active ? 'var(--accent)' : UI.inkSoft }}>{val}</div>
           </div>
         ))}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4 }}>
-        {numBtns.map(n => (
-          <div key={n} style={{
-            padding: '9px 0', borderRadius: 4, textAlign: 'center',
-            background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-            fontFamily: UI.fontNum, fontSize: 15, color: UI.ink,
-          }}>{n}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr) 50px', gridTemplateRows: 'repeat(5, 32px)', gap: 3 }}>
+        {['↓', null, '↑'].map((k, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 3, fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontNum }}>
+            {k === null ? <i className="fa-solid fa-dumbbell" style={{ fontSize: 11, color: UI.inkSoft }} /> : k}
+          </div>
         ))}
-        <div style={{
-          padding: '9px 0', borderRadius: 4, textAlign: 'center',
-          background: `rgba(var(--accent-rgb),0.1)`, border: `0.5px solid rgba(var(--accent-rgb),0.25)`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <i className="fa-solid fa-scale-balanced" style={{ fontSize: 11, color: 'var(--accent)' }} />
+        <div style={{ gridRow: '1 / 5', background: 'var(--accent)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 7, fontWeight: 700, letterSpacing: '0.1em', color: '#0a0805', writingMode: 'vertical-rl', textOrientation: 'mixed' }}>CONFIRM</span>
         </div>
-        <div style={{
-          padding: '9px 0', borderRadius: 4, textAlign: 'center',
-          background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-          fontFamily: UI.fontNum, fontSize: 15, color: UI.ink,
-        }}>0</div>
-        <div style={{
-          padding: '9px 0', borderRadius: 4, textAlign: 'center',
-          background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
-          fontFamily: UI.fontNum, fontSize: 15, color: UI.inkSoft,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>⌫</div>
+        {['7','8','9','4','5','6','1','2','3'].map(n => (
+          <div key={n} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 3, fontFamily: UI.fontNum, fontSize: 14, color: UI.ink }}>{n}</div>
+        ))}
+        {[',','0','⌫','⌄'].map(k => (
+          <div key={k} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 3, fontFamily: UI.fontNum, fontSize: 13, color: k === '⌫' ? UI.inkSoft : UI.ink }}>{k}</div>
+        ))}
       </div>
     </div>
   );
 }
 
 function TourVisualTrainPlates() {
-  const plates = [
-    { kg: 20, color: '#2060b0' },
-    { kg: 10, color: '#b03030' },
+  const plateTypes = [
+    { kg: 20, color: '#1a5cb0', h: 52 },
+    { kg: 15, color: '#2a7a2a', h: 43 },
+    { kg: 10, color: '#b03030', h: 36 },
+    { kg: 5, color: '#c0a010', h: 29 },
+    { kg: 2.5, color: '#777', h: 22 },
   ];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px' }}>
-        <span style={{ fontSize: 11, fontFamily: UI.fontUi, color: UI.inkFaint }}>Total weight</span>
-        <span className="num" style={{ fontSize: 20, color: 'var(--accent)' }}>80 kg</span>
-        <span style={{ fontSize: 11, fontFamily: UI.fontUi, color: UI.inkFaint }}>30 kg / side</span>
+      <div style={{ display: 'flex', gap: 2, background: UI.bgInset, borderRadius: 4, padding: 2, alignSelf: 'center' }}>
+        {['DUAL', 'SINGLE'].map((t, i) => (
+          <div key={t} style={{ padding: '5px 14px', borderRadius: 3, background: i === 0 ? UI.bgCard : 'transparent', color: i === 0 ? UI.ink : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.07em', border: i === 0 ? `0.5px solid ${UI.hairStrong}` : 'none' }}>{t}</div>
+        ))}
       </div>
-      <div style={{ position: 'relative', height: 52, display: 'flex', alignItems: 'center' }}>
-        <div style={{ position: 'absolute', left: 0, right: 0, height: 8, background: UI.inkGhost, borderRadius: 4 }} />
-        <div style={{ position: 'absolute', left: '12%', display: 'flex', alignItems: 'center', flexDirection: 'row-reverse' }}>
-          {plates.map((p, i) => (
-            <div key={i} style={{ width: 10, height: p.kg === 20 ? 42 : 32, background: p.color, borderRadius: 3, marginLeft: 2, opacity: 0.85 }} />
-          ))}
-        </div>
-        <div style={{ position: 'absolute', right: '12%', display: 'flex', alignItems: 'center' }}>
-          {plates.map((p, i) => (
-            <div key={i} style={{ width: 10, height: p.kg === 20 ? 42 : 32, background: p.color, borderRadius: 3, marginRight: 2, opacity: 0.85 }} />
-          ))}
-        </div>
-        <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', width: 22, height: 16, background: UI.bgCard, border: `1px solid ${UI.hairStrong}`, borderRadius: 3, zIndex: 1 }} />
+      <div style={{ textAlign: 'center' }}>
+        <div className="num" style={{ fontSize: 30, color: UI.ink, fontWeight: 300 }}>80</div>
+        <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint, marginTop: 1, letterSpacing: '0.08em' }}>{UI.unit().toUpperCase()} — SELECT PLATES BELOW</div>
       </div>
-      <div style={{ display: 'flex', gap: 12 }}>
-        {plates.map(p => (
-          <div key={p.kg} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <div style={{ width: 10, height: 10, borderRadius: 2, background: p.color, opacity: 0.85 }} />
-            <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{p.kg} kg × 2</span>
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'flex-end', padding: '4px 0' }}>
+        {plateTypes.map((p, i) => (
+          <div key={p.kg} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, opacity: i > 1 ? 0.35 : 1 }}>
+            <div style={{ width: Math.round(p.h * 0.52), height: p.h, borderRadius: Math.round(p.h * 0.28), background: p.color, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `inset 0 0 0 1.5px rgba(255,255,255,0.18)` }}>
+              <span style={{ fontSize: 7, fontFamily: UI.fontUi, fontWeight: 700, color: 'rgba(255,255,255,0.9)' }}>{p.kg}</span>
+            </div>
           </div>
         ))}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <i className="fa-solid fa-circle-info" style={{ fontSize: 10, color: UI.inkGhost }} />
+        <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Tap plates to build your load — shows what goes on each side</span>
       </div>
     </div>
   );
 }
 
 function TourVisualTrainSets() {
+  const sets = [
+    { label: '1', done: true },
+    { label: '2', done: true },
+    { label: '3', done: false },
+  ];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-      {['1','2'].map(n => (
-        <div key={n} style={{
-          display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px',
-          background: UI.bgInset, borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`,
-        }}>
-          <div style={{
-            width: 22, height: 22, borderRadius: 4, background: UI.bgCard,
-            border: `0.5px solid ${UI.hairStrong}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost,
-          }}>{n}</div>
-          <span className="num" style={{ flex: 1, fontSize: 13, color: UI.inkSoft }}>80 kg · 8 reps</span>
-        </div>
-      ))}
-      <div style={{
-        position: 'relative', overflow: 'hidden',
-        display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px',
-        background: UI.bgInset, borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`,
-      }}>
-        <div style={{
-          width: 22, height: 22, borderRadius: 4, background: UI.bgCard,
-          border: `0.5px solid ${UI.hairStrong}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost,
-        }}>3</div>
-        <span className="num" style={{ flex: 1, fontSize: 13, color: UI.inkSoft }}>80 kg · 8 reps</span>
-        <div style={{
-          position: 'absolute', right: 0, top: 0, bottom: 0, width: 52,
-          background: '#c03030', borderRadius: '0 4px 4px 0',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <i className="fa-solid fa-trash" style={{ fontSize: 11, color: '#fff' }} />
-        </div>
+      <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+        {sets.map((s, i) => (
+          <div key={s.label} style={{ display: 'grid', gridTemplateColumns: '22px 1fr auto 28px 22px', alignItems: 'center', gap: 6, padding: '6px 10px', background: s.done ? `rgba(var(--accent-rgb),0.04)` : 'transparent', borderBottom: i < sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none' }}>
+            <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{s.label}</div>
+            <div className="num" style={{ fontSize: 12, color: UI.ink }}>80 kg</div>
+            <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>8</div>
+            <div style={{ width: 26, height: 26, borderRadius: 4, background: s.done ? 'var(--accent)' : UI.bgInset, border: `1px solid ${s.done ? 'var(--accent)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {s.done && <i className="fa-solid fa-check" style={{ fontSize: 9, color: '#0a0805' }} />}
+            </div>
+            <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>−</div>
+          </div>
+        ))}
       </div>
-      <button style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-        padding: '8px 0', borderRadius: 4,
-        background: 'transparent', border: `0.5px dashed ${UI.hairStrong}`,
-        cursor: 'default', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
-      }}>
-        <i className="fa-solid fa-plus" style={{ fontSize: 9 }} /> ADD SET
-      </button>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <i className="fa-solid fa-circle-info" style={{ fontSize: 10, color: UI.inkGhost }} />
-        <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>Swipe a row left to delete it</span>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '8px 0', borderRadius: 4, background: 'transparent', border: `0.5px dashed ${UI.hairStrong}`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em' }}>
+          <i className="fa-solid fa-plus" style={{ fontSize: 9 }} /> ADD SET
+        </div>
+        <div style={{ padding: '8px 12px', borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', gap: 5, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.06em' }}>
+          <i className="fa-solid fa-note-sticky" style={{ fontSize: 9 }} /> NOTE
+        </div>
       </div>
     </div>
   );
@@ -492,65 +441,65 @@ function TourVisualTrainSets() {
 
 function TourVisualTrainNotes() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px',
-        background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`,
-      }}>
-        <span style={{ fontFamily: UI.fontDisplay, fontSize: 15, fontWeight: 700, color: UI.ink, flex: 1, textTransform: 'uppercase' }}>Bench Press</span>
-        <div style={{
-          width: 30, height: 30, borderRadius: 4,
-          background: `rgba(var(--accent-rgb),0.12)`,
-          border: `1px solid rgba(var(--accent-rgb),0.35)`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: `0 0 0 3px rgba(var(--accent-rgb),0.12)`,
-        }}>
-          <i className="fa-solid fa-note-sticky" style={{ fontSize: 11, color: 'var(--accent)' }} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+        {[1, 2].map((n, i) => (
+          <div key={n} style={{ display: 'grid', gridTemplateColumns: '22px 1fr auto 28px 22px', alignItems: 'center', gap: 6, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.04)`, borderBottom: i === 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+            <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{n}</div>
+            <div className="num" style={{ fontSize: 12, color: UI.ink }}>80 kg</div>
+            <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>8</div>
+            <div style={{ width: 26, height: 26, borderRadius: 4, background: 'var(--accent)', border: `1px solid var(--accent)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <i className="fa-solid fa-check" style={{ fontSize: 9, color: '#0a0805' }} />
+            </div>
+            <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>−</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '8px 0', borderRadius: 4, background: 'transparent', border: `0.5px dashed ${UI.hairStrong}`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em' }}>
+          <i className="fa-solid fa-plus" style={{ fontSize: 9 }} /> ADD SET
+        </div>
+        <div style={{ padding: '8px 12px', borderRadius: 4, background: `rgba(var(--accent-rgb),0.12)`, border: `1px solid rgba(var(--accent-rgb),0.4)`, boxShadow: `0 0 0 3px rgba(var(--accent-rgb),0.1)`, display: 'flex', alignItems: 'center', gap: 5, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.06em' }}>
+          <i className="fa-solid fa-note-sticky" style={{ fontSize: 9 }} /> NOTE
         </div>
       </div>
-      <div style={{
-        padding: '10px 12px', background: UI.bgInset, borderRadius: 6,
-        border: `0.5px solid ${UI.hairStrong}`,
-      }}>
-        <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost, marginBottom: 6, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Note</div>
-        <div style={{ fontSize: 13, fontFamily: UI.fontUi, color: UI.inkSoft, lineHeight: 1.5 }}>
-          Elbows at 45° — pause 1s at chest
-        </div>
+      <div style={{ padding: '10px 12px', background: `rgba(var(--accent-rgb),0.06)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+        <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: 'var(--accent)', marginBottom: 5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Note</div>
+        <div style={{ fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft, lineHeight: 1.5 }}>Elbows at 45° — pause 1s at chest</div>
       </div>
     </div>
   );
 }
 
 function TourVisualTrainNav() {
-  const exs = ['BENCH PRESS', 'INCLINE DB', 'TRICEP DIP'];
+  const exs = [
+    { name: 'BENCH', state: 'done' },
+    { name: 'INCLINE', state: 'active' },
+    { name: 'TRICEP', state: 'pending' },
+  ];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint }}>Exercise</span>
-        <span className="num" style={{ fontSize: 13, color: 'var(--accent)' }}>2</span>
-        <span style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint }}>of {exs.length}</span>
-        <div style={{ flex: 1, height: 3, background: UI.bgInset, borderRadius: 2, marginLeft: 4, overflow: 'hidden' }}>
-          <div style={{ width: '66%', height: '100%', background: 'var(--accent)', borderRadius: 2 }} />
-        </div>
-      </div>
-      <div style={{
-        display: 'flex', background: UI.bgInset, borderRadius: 6,
-        border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden',
-      }}>
-        {exs.map((ex, i) => (
-          <div key={ex} style={{
-            flex: 1, padding: '8px 2px', textAlign: 'center',
-            background: i === 1 ? 'var(--accent)' : 'transparent',
-            color: i === 1 ? '#0a0805' : UI.inkFaint,
-            fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
-            borderRight: i < exs.length - 1 ? `0.5px solid ${UI.hairStrong}` : 'none',
-            lineHeight: 1.3,
-          }}>{ex}</div>
+      <div style={{ display: 'flex', gap: 5 }}>
+        {exs.map((e) => (
+          <div key={e.name} style={{
+            padding: '5px 10px', borderRadius: 999, fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.07em',
+            background: e.state === 'active' ? 'var(--accent)' : e.state === 'done' ? `rgba(var(--accent-rgb),0.15)` : UI.bgInset,
+            color: e.state === 'active' ? '#0a0805' : e.state === 'done' ? 'var(--accent)' : UI.inkFaint,
+            border: `0.5px solid ${e.state === 'active' ? 'var(--accent)' : e.state === 'done' ? 'rgba(var(--accent-rgb),0.3)' : UI.hairStrong}`,
+            display: 'flex', alignItems: 'center', gap: 4,
+          }}>
+            {e.state === 'done' && <i className="fa-solid fa-check" style={{ fontSize: 7 }} />}
+            {e.name}
+          </div>
         ))}
+      </div>
+      <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, padding: '8px 10px', display: 'flex', alignItems: 'center' }}>
+        <span style={{ fontFamily: UI.fontDisplay, fontSize: 13, fontWeight: 700, color: UI.ink, textTransform: 'uppercase', flex: 1 }}>Incline DB</span>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkGhost }}>0 / 3 done</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <i className="fa-solid fa-circle-info" style={{ fontSize: 10, color: UI.inkGhost }} />
-        <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>Swipe left / right to step through exercises</span>
+        <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>Tap a chip to jump to that exercise; done ones show a checkmark</span>
       </div>
     </div>
   );
@@ -559,30 +508,24 @@ function TourVisualTrainNav() {
 function TourVisualTrainSkip() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px',
-        background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`,
-      }}>
-        <span style={{ fontFamily: UI.fontDisplay, fontSize: 15, fontWeight: 700, color: UI.ink, flex: 1, textTransform: 'uppercase' }}>Leg Press</span>
-        <button style={{
-          padding: '5px 11px', borderRadius: 4, border: `0.5px solid rgba(var(--accent-rgb),0.3)`,
-          background: `rgba(var(--accent-rgb),0.08)`, cursor: 'default',
-          color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
-          boxShadow: `0 0 0 3px rgba(var(--accent-rgb),0.1)`,
-        }}>SKIP</button>
+      <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, padding: '9px 10px' }}>
+        <span style={{ fontFamily: UI.fontDisplay, fontSize: 13, fontWeight: 700, color: UI.ink, textTransform: 'uppercase' }}>Leg Press</span>
+        <div className="num" style={{ fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>0 / 3 sets done</div>
       </div>
-      <div style={{
-        padding: '10px 12px', background: UI.bgInset, borderRadius: 6,
-        border: `0.5px solid ${UI.hairStrong}`,
-        display: 'flex', alignItems: 'flex-start', gap: 8,
-      }}>
-        <i className="fa-solid fa-forward-step" style={{ fontSize: 13, color: UI.inkFaint, marginTop: 1 }} />
-        <div>
-          <div style={{ fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft, fontWeight: 500, marginBottom: 3 }}>Skip exercise</div>
-          <div style={{ fontSize: 11, fontFamily: UI.fontUi, color: UI.inkFaint, lineHeight: 1.4 }}>
-            Logged as skipped — you can leave an optional reason before moving to the next exercise.
-          </div>
+      <div style={{ background: UI.bgRaised, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, padding: '9px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}` }}>
+          <i className="fa-solid fa-list" style={{ fontSize: 9, color: UI.inkFaint }} />
+          <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, fontWeight: 700, letterSpacing: '0.07em' }}>EXERCISES</span>
         </div>
+        <div style={{ flex: 1 }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 4, background: `rgba(var(--accent-rgb),0.1)`, border: `0.5px solid rgba(var(--accent-rgb),0.3)`, boxShadow: `0 0 0 3px rgba(var(--accent-rgb),0.08)` }}>
+          <i className="fa-solid fa-forward-step" style={{ fontSize: 9, color: 'var(--accent)' }} />
+          <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.07em' }}>SKIP REMAINING</span>
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <i className="fa-solid fa-circle-info" style={{ fontSize: 10, color: UI.inkGhost }} />
+        <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>Marks unchecked sets as skipped and moves to the next exercise</span>
       </div>
     </div>
   );
@@ -591,30 +534,23 @@ function TourVisualTrainSkip() {
 function TourVisualTrainEnd() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', padding: '10px 12px',
-        background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`,
-      }}>
-        <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 16, fontWeight: 700, letterSpacing: '0.08em', color: UI.ink }}>TRAINING</span>
-        <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkFaint, marginRight: 10 }}>42:18</span>
-        <button style={{
-          padding: '6px 12px', borderRadius: 4, border: 'none', cursor: 'default',
-          background: 'linear-gradient(160deg, var(--accent-light), var(--accent))',
-          color: '#0a0805', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
-          boxShadow: `0 0 0 3px rgba(var(--accent-rgb),0.25)`,
-        }}>END</button>
+      <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, padding: '9px 10px' }}>
+        <span style={{ fontFamily: UI.fontDisplay, fontSize: 13, fontWeight: 700, color: UI.ink, textTransform: 'uppercase' }}>Tricep Dip</span>
+        <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: 'var(--accent)', marginTop: 2, letterSpacing: '0.06em' }}>Last exercise</div>
       </div>
-      <div style={{
-        padding: '10px 12px', background: UI.bgInset, borderRadius: 6,
-        border: `0.5px solid ${UI.hairStrong}`,
-        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
-      }}>
-        {[['SETS', '18'], ['VOLUME', '6.2k'], ['TIME', '42m']].map(([lbl, val]) => (
-          <div key={lbl} style={{ textAlign: 'center' }}>
-            <div className="num" style={{ fontSize: 18, color: UI.ink, fontWeight: 300 }}>{val}</div>
-            <div style={{ fontSize: 8, fontFamily: UI.fontUi, color: UI.inkGhost, letterSpacing: '0.08em', marginTop: 2 }}>{lbl}</div>
-          </div>
-        ))}
+      <div style={{ background: UI.bgRaised, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, padding: '9px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}` }}>
+          <i className="fa-solid fa-list" style={{ fontSize: 9, color: UI.inkFaint }} />
+          <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, fontWeight: 700, letterSpacing: '0.07em' }}>EXERCISES</span>
+        </div>
+        <div className="num" style={{ flex: 1, fontSize: 12, color: UI.inkGhost, textAlign: 'center' }}>44:22</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 4, background: 'linear-gradient(160deg, var(--accent-light), var(--accent))', boxShadow: `0 4px 14px rgba(var(--accent-rgb),0.4)` }}>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: '#0a0805', fontWeight: 700, letterSpacing: '0.07em' }}>FINISH →</span>
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <i className="fa-solid fa-circle-info" style={{ fontSize: 10, color: UI.inkGhost }} />
+        <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>Also auto-finishes when every set is checked off</span>
       </div>
     </div>
   );
@@ -836,32 +772,33 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
         position: 'fixed', inset: 0, zIndex: 9998,
         background: 'rgba(0,0,0,0.82)',
         backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 24, overflowY: 'auto',
+        overflowY: 'auto',
       }}>
-        <div style={{
-          width: '100%', maxWidth: 340,
-          background: UI.bgRaised,
-          border: `1px solid ${UI.goldSoft}`,
-          borderRadius: 6,
-          padding: '24px 22px',
-          display: 'flex', flexDirection: 'column', gap: 12,
-          boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
-          animation: 'fadeUp 0.25s ease',
-        }}>
-          <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
-            {step.title}
-          </div>
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-            {step.body}
-          </div>
-          {VisualComp && (
-            <div style={{ marginTop: 2 }}>
-              <VisualComp />
+        <div style={{ minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{
+            width: '100%', maxWidth: 340,
+            background: UI.bgRaised,
+            border: `1px solid ${UI.goldSoft}`,
+            borderRadius: 6,
+            padding: '24px 22px',
+            display: 'flex', flexDirection: 'column', gap: 12,
+            boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
+            animation: 'fadeUp 0.25s ease',
+          }}>
+            <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
+              {step.title}
             </div>
-          )}
-          <BtnRow compact={false} />
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+              {step.body}
+            </div>
+            {VisualComp && (
+              <div style={{ marginTop: 2 }}>
+                <VisualComp />
+              </div>
+            )}
+            <BtnRow compact={false} />
+          </div>
         </div>
       </div>
     );
