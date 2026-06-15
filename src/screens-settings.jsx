@@ -176,6 +176,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateSet(
     () => localStorage.getItem('logbook-active-users-access') === 'true'
   );
+  const [signupApproval, setSignupApproval] = useStateSet(null); // null = loading, bool = current
   const [nowS, setNowS] = useStateSet(Date.now());
   const [importing, setImporting] = useStateSet(false);
   const [swVersion, setSwVersion] = useStateSet('');
@@ -217,6 +218,21 @@ function SettingsScreen({ store, setStore, go, userId }) {
     if (!('caches' in window)) return;
     caches.keys().then(keys => { const name = keys.find(k => k.startsWith('zane-')); if (name) setSwVersion(name.replace('zane-', '')); });
   }, []);
+
+  // Admin-only: current global "signups need approval" setting.
+  useEffectSet(() => {
+    if (!isAdmin) return;
+    let mounted = true;
+    LB.supabase.rpc('get_signup_requires_approval').then(({ data, error }) => { if (mounted && !error) setSignupApproval(data !== false); }).catch(() => {});
+    return () => { mounted = false; };
+  }, [isAdmin]);
+
+  const toggleSignupApproval = async () => {
+    const next = !signupApproval;
+    setSignupApproval(next);
+    const { error } = await LB.supabase.rpc('set_signup_requires_approval', { p_value: next });
+    if (error) { setSignupApproval(!next); await confirm(error.message || 'Could not update this setting.', { title: 'Update failed', ok: 'OK' }); }
+  };
 
   const approveUser = async (uid) => {
     setApprovingId(uid);
@@ -579,6 +595,17 @@ function SettingsScreen({ store, setStore, go, userId }) {
               : <Toggle on={false} onToggle={toggleReminder} />
             }
           </Row>
+          {isAdmin && (
+            <>
+              <Hairline style={{ margin: '14px 0' }} />
+              <Row label="Registrations need approval" first>
+                <Toggle on={signupApproval !== false} onToggle={toggleSignupApproval} />
+              </Row>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+                When on, new sign-ups land on a waiting screen until you approve them here. When off, new accounts are activated immediately. Existing pending users are unaffected.
+              </div>
+            </>
+          )}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setAccountSheet(false)}>Done</Btn>
           </div>

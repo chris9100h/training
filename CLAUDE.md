@@ -127,7 +127,9 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_feature_grants`:** `feature` (text), `email` (text)
 
-**`zane_profiles`:** `id` (uuid), `name` (text)
+**`zane_profiles`:** `id` (uuid), `name` (text), `approved` (boolean, default = `signup_default_approved()` — auto-approved unless the global `zane_app_config.signup_requires_approval` flag is on)
+
+**`zane_app_config`:** `id` (int, singleton = 1), `signup_requires_approval` (boolean, default true) — global admin toggle (RLS on, only SECURITY DEFINER fns touch it). Drives the `zane_profiles.approved` column default, so flipping it changes future signups only.
 
 **`zane_pushover_active`:** `id` (text), `nonce` (text)
 
@@ -164,6 +166,8 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 **`get_active_users_grants()`** → `TABLE(email text)` — listet alle Emails mit `active_users`-Grant (nur Admin)
 
 **`set_active_users_grant(p_email text, p_granted boolean)`** → `void` — erteilt oder entzieht den `active_users`-Grant (nur Admin)
+
+**`get_signup_requires_approval()`** → `boolean` / **`set_signup_requires_approval(p_value boolean)`** → `void` — liest/setzt den globalen „Registrations need approval"-Toggle in `zane_app_config` (nur Admin). **`signup_default_approved()`** → `boolean` (SECURITY DEFINER) ist die invertierte Flag und dient als Column-Default für `zane_profiles.approved`.
 
 **`get_active_sessions_overview()`** → `TABLE(...)` — aktive + kürzlich beendete Sessions aller User inkl. Sets/Dauer-Statistik (gated by feature grant)
 

@@ -10,7 +10,14 @@
 CREATE TABLE public.zane_profiles (
   id   uuid NOT NULL,
   name text NOT NULL,
-  approved boolean DEFAULT false
+  approved boolean DEFAULT false  -- overridden below to signup_default_approved() once that fn exists
+);
+
+-- Global app config (single row). Drives the zane_profiles.approved default.
+CREATE TABLE public.zane_app_config (
+  id int PRIMARY KEY DEFAULT 1,
+  signup_requires_approval boolean NOT NULL DEFAULT true,
+  CONSTRAINT zane_app_config_singleton CHECK (id = 1)
 );
 
 CREATE TABLE public.zane_exercises (
@@ -321,6 +328,7 @@ CREATE INDEX zane_sets_session_id_idx ON public.zane_sets USING btree (session_i
 -- ── Row Level Security ─────────────────────────────────────────────────────────
 
 ALTER TABLE public.zane_profiles         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_app_config       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_exercises        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_schedules        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_sessions         ENABLE ROW LEVEL SECURITY;
@@ -549,6 +557,48 @@ BEGIN
     RAISE EXCEPTION 'User not found or already approved';
   END IF;
   DELETE FROM zane_profiles WHERE id = p_user_id;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.signup_default_approved()
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  SELECT NOT COALESCE((SELECT signup_requires_approval FROM zane_app_config WHERE id = 1), true);
+$function$;
+
+-- Now that the helper exists, point the column default at it.
+ALTER TABLE public.zane_profiles ALTER COLUMN approved SET DEFAULT public.signup_default_approved();
+
+CREATE OR REPLACE FUNCTION public.get_signup_requires_approval()
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+  RETURN COALESCE((SELECT signup_requires_approval FROM zane_app_config WHERE id = 1), true);
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.set_signup_requires_approval(p_value boolean)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+  INSERT INTO zane_app_config (id, signup_requires_approval)
+  VALUES (1, p_value)
+  ON CONFLICT (id) DO UPDATE SET signup_requires_approval = EXCLUDED.signup_requires_approval;
 END;
 $function$;
 
