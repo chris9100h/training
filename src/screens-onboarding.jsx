@@ -825,24 +825,6 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
     };
   }, [stepIdx, route.name]);
 
-  // GUARANTEED ESCAPE, independent of any in-tour button: the phone/browser Back
-  // button and the Escape key always close the tour. We push one history entry
-  // on mount so Back is captured here instead of navigating the app away.
-  const onDoneRef = useRefOB(onDone);
-  onDoneRef.current = onDone;
-  useEffectOB(() => {
-    const close = () => { try { onDoneRef.current && onDoneRef.current(); } catch (_) {} };
-    try { window.history.pushState({ zaneTour: true }, ''); } catch (_) {}
-    const onPop = () => close();
-    const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Backspace') close(); };
-    window.addEventListener('popstate', onPop);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('popstate', onPop);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, []);
-
   const advance = () => {
     if (isLast) { onDone(); } else { setStepIdx(i => i + 1); }
   };
