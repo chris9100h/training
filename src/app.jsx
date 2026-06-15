@@ -663,16 +663,18 @@ function App() {
 
   // Onboarding: show welcome prompt to new users (no completed sessions).
   // Users who already trained get the flag set silently.
-  // Also prompts existing kg users once for unit preference (logbook-unit-prompted flag).
+  // Unit prompt fires whenever unit is null (not yet chosen); setting it un-arms.
   useEffectA(() => {
     if (phase !== 'ready' || !store || onboardingChecked.current) return;
+    // Unit null = not chosen yet. Show picker and defer onboarding check until unit is set.
+    if (store.settings?.unit == null) {
+      setUnitPromptOpen(true);
+      return; // don't set onboardingChecked — re-fire after unit is saved
+    }
     onboardingChecked.current = true;
     if ((store.sessions || []).some(s => s.ended)) {
       if (!store.settings?.onboardingCompleted) {
         setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s);
-      }
-      if (store.settings?.unit !== 'lbs' && !localStorage.getItem('logbook-unit-prompted')) {
-        setUnitPromptOpen(true);
       }
       return;
     }
@@ -966,10 +968,7 @@ function App() {
         <window.Screens.UnitPromptModal
           onDone={(chosenUnit) => {
             setUnitPromptOpen(false);
-            localStorage.setItem('logbook-unit-prompted', '1');
-            if (chosenUnit === 'lbs') {
-              setStore(s => s ? { ...s, settings: { ...s.settings, unit: 'lbs' } } : s);
-            }
+            setStore(s => s ? { ...s, settings: { ...s.settings, unit: chosenUnit } } : s);
           }}
         />
       )}

@@ -133,7 +133,7 @@ CREATE TABLE public.zane_user_settings (
   active_schedule_id text,
   cycle_index integer NOT NULL DEFAULT 0,
   last_advanced_date date,
-  unit text NOT NULL DEFAULT 'kg'::text,
+  unit text,
   rest_default integer NOT NULL DEFAULT 120,
   in_progress_session_id text,
   cycle_start_date text,

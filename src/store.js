@@ -115,7 +115,7 @@ async function signIn(email, password) {
   return data;
 }
 
-async function signUp(email, password, name, unit = 'kg') {
+async function signUp(email, password, name, unit = null) {
   const { data, error } = await _supabase.auth.signUp({
     email, password,
     options: { data: { name, unit } },   // store in user_metadata for email-confirm flow
@@ -201,7 +201,7 @@ async function importFromBackup(backup, userId) {
       cycle_start_date: backup.cycleStartDate ?? null,
       last_advanced_date: backup.lastAdvancedDate ?? null,
       in_progress_session_id: backup.inProgress ?? null,
-      unit: sett.unit || 'kg',
+      unit: sett.unit ?? null,
       rest_default: sett.restDefault || 120,
       rest_big: sett.restBig || 180,
       rest_medium: sett.restMedium || 120,
@@ -267,10 +267,10 @@ async function importFromBackup(backup, userId) {
 
 // ─── SETUP NEW USER ──────────────────────────────────────────────────────
 
-async function setupNewUser(userId, name, unit = 'kg') {
+async function setupNewUser(userId, name, unit) {
   await Promise.all([
     _supabase.from('zane_profiles').upsert({ id: userId, name }),
-    _supabase.from('zane_user_settings').upsert({ user_id: userId, unit: unit || 'kg', rest_default: 120 }),
+    _supabase.from('zane_user_settings').upsert({ user_id: userId, ...(unit != null ? { unit } : {}), rest_default: 120 }),
   ]);
 }
 
@@ -380,7 +380,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     if (_depth > 0) throw new Error('User profile setup failed');
     const { data: { user } } = await _supabase.auth.getUser();
     const name = user?.user_metadata?.name || user?.email?.split('@')[0] || 'Athlete';
-    const unit = user?.user_metadata?.unit || 'kg';
+    const unit = user?.user_metadata?.unit ?? null;
     try {
       await setupNewUser(userId, name, unit);
     } catch (setupErr) {
@@ -493,7 +493,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     inProgress: sett.in_progress_session_id ?? null,
     customDayTypes: sett.custom_day_types ?? [],
     settings: {
-        unit: sett.unit || 'kg',
+        unit: sett.unit ?? null,
         restDefault: sett.rest_default || 120,
         restBig:     sett.rest_big     || 180,
         restMedium:  sett.rest_medium  || 120,
@@ -841,7 +841,7 @@ async function syncStore(prev, next, userId) {
       cycle_start_date: next.cycleStartDate ?? null,
       week_plan_start_date: next.weekPlanStartDate ?? null,
       last_advanced_date: next.lastAdvancedDate ?? null,
-      unit: next.settings?.unit || 'kg',
+      unit: next.settings?.unit ?? null,
       rest_default: next.settings?.restDefault || 120,
       rest_big:     next.settings?.restBig     || 180,
       rest_medium:  next.settings?.restMedium  || 120,
