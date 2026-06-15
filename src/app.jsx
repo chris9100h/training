@@ -592,10 +592,16 @@ function App() {
         // login screen — you can't sign in offline, and a retry recovers.
         else          { setPhase(navigator.onLine ? 'unauthed' : 'error'); }
       } else if (event === 'SIGNED_IN') {
+        // Re-arm the onboarding check for the freshly signed-in user. The ref is
+        // a one-shot guard that survives in-session account switches (logout →
+        // login without a page reload), so without this a new/approved user
+        // logging in after a previous 'ready' session would never be prompted.
+        onboardingChecked.current = false;
         setUserId(session.user.id);
         if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
         else loadData(session.user.id);
       } else if (event === 'SIGNED_OUT') {
+        onboardingChecked.current = false;
         // An offline SIGNED_OUT is almost always a failed token refresh, not a
         // real sign-out — never wipe the cache or drop to the login screen.
         if (!navigator.onLine) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
