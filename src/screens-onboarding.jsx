@@ -735,7 +735,7 @@ function TourCompleteScreen({ title, onDone }) {
   return (
     <div
       style={{
-        position: 'fixed', top: 'calc(-1 * env(safe-area-inset-top, 0px))', left: 0, right: 0, bottom: 0, zIndex: 10000,
+        position: 'fixed', top: '-100px', left: 0, right: 0, bottom: 0, zIndex: 10000,
         background: 'linear-gradient(165deg, var(--accent-light) 0%, var(--accent) 48%, var(--accent-deep) 100%)',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         gap: 22, padding: 32, textAlign: 'center', animation: 'fadeUp 0.35s ease',
@@ -876,14 +876,14 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
   if (!step.target || targetRect === null) {
     return (
       <div style={{
-        position: 'fixed', top: 'calc(-1 * env(safe-area-inset-top, 0px))', left: 0, right: 0, bottom: 0, zIndex: 10000,
+        position: 'fixed', top: '-100px', left: 0, right: 0, bottom: 0, zIndex: 10000,
         background: 'var(--bg)',
         display: 'flex', flexDirection: 'column',
       }}>
         {/* Scrollable content */}
         <div style={{
           flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
-          padding: 'calc(env(safe-area-inset-top, 0px) * 2 + 30px) 26px 18px',
+          padding: 'calc(100px + env(safe-area-inset-top, 0px) + 30px) 26px 18px',
           display: 'flex', flexDirection: 'column', gap: 16,
         }}>
           <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
@@ -917,7 +917,7 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
   if (targetRect === undefined) {
     return (
       <div onClick={onDone} style={{
-        position: 'fixed', top: 'calc(-1 * env(safe-area-inset-top, 0px))', left: 0, right: 0, bottom: 0, zIndex: 10000,
+        position: 'fixed', top: '-100px', left: 0, right: 0, bottom: 0, zIndex: 10000,
         background: 'rgba(0,0,0,0.35)',
       }} />
     );
