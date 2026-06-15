@@ -115,6 +115,7 @@ function checkinFieldFormat(field, distUnit) {
   if (field.key === 'days_trained') return v => `${v}d`;
   if (field.key === 'cardio_minutes') return v => `${v} min`;
   if (field._distanceField) return v => distUnit === 'mi' ? `${(v / 1609.344).toFixed(1)} mi` : `${(v / 1000).toFixed(1)} km`;
+  if (field.type === 'pace') return v => { const m = Math.floor(v / 60); const s = Math.round(v % 60); return `${m}:${String(s).padStart(2, '0')}`; };
   if (field.type === 'percent') return v => `${Math.round(v)}%`;
   if (field.type === 'stepper') return v => `${v}/${field.max || 10}`;
   if (field.type === 'choice' && field.options?.length)
@@ -129,9 +130,12 @@ function checkinChartMetrics(recent, schema, distUnit) {
   const metrics = [];
   (schema || CHECKIN_DEFAULT_SCHEMA).forEach(section => (section.fields || []).forEach(field => {
     if (field.type === 'text') return;
+    const paceToSec = v => { if (!v) return null; const [m, s] = String(v).split(':'); const t = parseInt(m, 10) * 60 + parseInt(s, 10); return isNaN(t) ? null : t; };
     const values = field.type === 'choice'
       ? recent.map(c => checkinChoiceRank(field, c.responses?.[field.key]))
-      : recent.map(c => { const v = c.responses?.[field.key]; return (v != null && v !== '') ? Number(v) : null; });
+      : field.type === 'pace'
+        ? recent.map(c => paceToSec(c.responses?.[field.key]))
+        : recent.map(c => { const v = c.responses?.[field.key]; return (v != null && v !== '') ? Number(v) : null; });
     metrics.push({ label: field.label, values, format: checkinFieldFormat(field, distUnit), ...checkinFieldYRange(field) });
   }));
   return metrics;
@@ -352,9 +356,12 @@ function CheckInTrendCards({ recent, schema }) {
     if (field.type === 'text') return null;
     if (SUB_KEYS.has(field.key)) return null;
 
+    const paceToSec = v => { if (!v) return null; const [m, s] = String(v).split(':'); const t = parseInt(m, 10) * 60 + parseInt(s, 10); return isNaN(t) ? null : t; };
     const vals = field.type === 'choice'
       ? recent.map(c => choiceRank(field, c.responses?.[field.key]))
-      : recent.map(c => { const v = c.responses?.[field.key]; return (v != null && v !== '') ? Number(v) : null; });
+      : field.type === 'pace'
+        ? recent.map(c => paceToSec(c.responses?.[field.key]))
+        : recent.map(c => { const v = c.responses?.[field.key]; return (v != null && v !== '') ? Number(v) : null; });
 
     if (field.key === 'cardio_minutes') {
       const validItems = recent.filter(c => c.responses?.cardio_minutes != null);

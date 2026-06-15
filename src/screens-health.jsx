@@ -239,7 +239,8 @@ function MacroLegend() {
 
 function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
-  const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', water: '', note: '' };
+  const manualCal = !!store.settings?.manualCalories;
+  const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', calories: '', water: '', note: '' };
   const [form, setForm] = useStateH(empty);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -252,6 +253,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
         protein: existing.protein != null ? String(existing.protein) : '',
         carbs: existing.carbs != null ? String(existing.carbs) : '',
         fat: existing.fat != null ? String(existing.fat) : '',
+        calories: existing.calories != null ? String(existing.calories) : '',
         water: existing.waterMl != null ? String(existing.waterMl) : '',
         note: existing.note || '',
       });
@@ -268,7 +270,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
   const save = () => {
     if (!canSave) return;
     const protein = healthInt(form.protein), carbs = healthInt(form.carbs), fat = healthInt(form.fat);
-    const calories = caloriesFromMacros(protein, carbs, fat);
+    const calories = manualCal ? healthInt(form.calories) : caloriesFromMacros(protein, carbs, fat);
     const isTraining = LB.isLoggedTrainingDay(store.sessions, date);
     const { adherence, targetsSnap } = LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
     const log = {
@@ -330,10 +332,13 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
         {numField('fat', 'Fat', 'g')}
       </div>
       <div style={{ marginBottom: 16 }}>
-        <div style={labelStyle}>Calories (kcal) · from macros</div>
-        <div style={{ ...inputStyle, color: autoCals != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
-          {autoCals != null ? autoCals : '—'}
-        </div>
+        <div style={labelStyle}>Calories (kcal){manualCal ? '' : ' · from macros'}</div>
+        {manualCal
+          ? <input type="number" inputMode="decimal" placeholder="—" value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
+          : <div style={{ ...inputStyle, color: autoCals != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
+              {autoCals != null ? autoCals : '—'}
+            </div>
+        }
       </div>
 
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>HYDRATION</div>
@@ -498,7 +503,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
   const r = v => v == null ? null : Math.round(v);
   const range = `${healthFmtDate(from, { day: 'numeric', month: 'short' })} – ${healthFmtDate(to, { day: 'numeric', month: 'short' })}`;
   const periodLabel = tf === '1W' ? 'THIS WEEK' : tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS';
-  const verdict = adherence == null ? null : adherence >= 97 ? 'Perfect week' : adherence >= 90 ? 'Strong week' : adherence >= 75 ? 'On track' : 'Off track';
+  const verdict = adherence == null ? null : adherence >= 97 ? 'PERFECT WEEK' : adherence >= 90 ? 'STRONG WEEK' : adherence >= 75 ? 'ON TRACK' : 'OFF TRACK';
   const isPerfect = adherence != null && adherence >= 97;
   const trainingPct = trainingsPlanned > 0 ? Math.min(100, (trainingsDone / trainingsPlanned) * 100) : (trainingsDone > 0 ? 100 : 0);
 
@@ -572,16 +577,16 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
       {adherence != null && miniBar('adherence',
         <>
           <span className={isPerfect ? 'perfect-week-pulse num' : 'num'} style={{ fontSize: 30, color: adherenceColor(adherence), fontWeight: 300, lineHeight: 1 }}>{r(adherence)}%</span>
-          <span className={isPerfect ? 'perfect-week-pulse' : ''} style={{ fontSize: 12, color: adherenceColor(adherence), fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.04em' }}>{verdict}</span>
+          <span className={isPerfect ? 'perfect-week-pulse' : ''} style={{ fontSize: 12, color: adherenceColor(adherence), fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.08em' }}>{verdict}</span>
         </>,
         Math.min(100, adherence), adherenceColor(adherence), 'avg adherence')}
 
-      {(trainingsPlanned > 0 || trainingsDone > 0) && miniBar('trainings',
+      {(trainingsPlanned > 0 || trainingsDone > 0) && miniBar('workouts',
         <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span className="num" style={{ fontSize: 18, color: 'var(--accent)', fontWeight: 300, lineHeight: 1 }}>
             {trainingsDone}<span style={{ fontSize: 12, color: UI.inkFaint }}> / {trainingsPlanned || trainingsDone}</span>
           </span>
-          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, fontWeight: 600 }}>trainings</span>
+          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Workouts</span>
         </span>,
         trainingPct, 'var(--accent)', 'planned vs done')}
 
@@ -833,8 +838,8 @@ function HealthScreen({ store, setStore, go, userId }) {
   }, [dailyLogs, tf]);
 
   const avg = (arr, key) => { const vs = arr.map(d => d[key]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
-  const wVals = weightSeries.data.map(d => d.value).filter(v => v != null);
-  const weightHeadline = wVals.length ? `${(wVals[wVals.length - 1])}${UI.unit()}` : null;
+  const wLatest = weightSeries.data.filter(d => d.value != null).sort((a, b) => b.date.localeCompare(a.date))[0];
+  const weightHeadline = wLatest ? `${wLatest.value}${UI.unit()}` : null;
   const stepsAvg = avg(stepsSeries.data, 'value');
   const adhAvg = avg(adhSeries.data, 'value');
   const cardioTotal = cardioSeries.data.reduce((s, d) => s + (d.value || 0), 0);
