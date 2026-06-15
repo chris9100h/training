@@ -719,10 +719,52 @@ function TourCrashCard({ onClose }) {
   );
 }
 
+// Flashy fullscreen "guide complete" celebration shown as the LAST step. It
+// closes itself on a 3s timer (no button / onDone-via-tap dependency) and also
+// on a tap anywhere — so reaching it always ends the tour, even if individual
+// buttons misbehave. Kept deliberately simple (no heavy mockup) so its render
+// can't hang.
+function TourCompleteScreen({ title, onDone }) {
+  const doneRef = useRefOB(onDone);
+  doneRef.current = onDone;
+  useEffectOB(() => {
+    const close = () => { try { doneRef.current && doneRef.current(); } catch (_) {} };
+    const t = setTimeout(close, 3000);
+    return () => clearTimeout(t);
+  }, []);
+  return (
+    <div
+      onPointerDown={(e) => { e.preventDefault(); try { onDone(); } catch (_) {} }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 10000,
+        background: 'linear-gradient(165deg, var(--accent-light) 0%, var(--accent) 48%, var(--accent-deep) 100%)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        gap: 22, padding: 32, textAlign: 'center', animation: 'fadeUp 0.35s ease',
+      }}>
+      <div style={{
+        width: 104, height: 104, borderRadius: '50%',
+        background: 'rgba(255,255,255,0.2)', border: '2px solid rgba(255,255,255,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        animation: 'logoPulse 2.4s ease-in-out infinite',
+      }}>
+        <i className="fa-solid fa-trophy" style={{ fontSize: 46, color: '#0a0805' }} />
+      </div>
+      <div style={{ fontFamily: UI.fontDisplay, fontSize: 42, color: '#0a0805', fontWeight: 700, lineHeight: 1.04, letterSpacing: '0.02em' }}>
+        {title || 'Guide Complete'}
+      </div>
+      <div style={{ fontFamily: UI.fontUi, fontSize: 14.5, color: 'rgba(10,8,5,0.78)', fontWeight: 600, letterSpacing: '0.03em', maxWidth: 300, lineHeight: 1.5 }}>
+        You're all set — go crush your next session.
+      </div>
+      <div style={{ marginTop: 6, fontFamily: UI.fontUi, fontSize: 11, color: 'rgba(10,8,5,0.5)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+        Tap to finish
+      </div>
+    </div>
+  );
+}
+
 function OnboardingTour(props) {
   return (
-    <TourBoundary fallback={<TourCrashCard onClose={props.onDone} />}>
-      <OnboardingTourInner {...props} />
+    <TourBoundary fallback={<TourCrashCard onClose={props.onDone} />}>      <OnboardingTourInner {...props} />
     </TourBoundary>
   );
 }
@@ -807,6 +849,11 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
   const goBack = () => { if (stepIdx > 0) setStepIdx(i => i - 1); };
 
   if (!step) return null;
+
+  // Final step → flashy auto-dismissing celebration instead of a normal modal
+  // with an exit button. It closes on a 3s timer and on tap-anywhere, so the
+  // tour always ends without depending on a single button working.
+  if (isLast) return <TourCompleteScreen title={step.title} onDone={onDone} />;
 
   // Shared button row. IMPORTANT: this is a render *helper* called as a plain
   // function — never render it as <BtnRow/>. A component defined inside render
