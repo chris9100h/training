@@ -790,19 +790,22 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
         position: 'fixed', inset: 0, zIndex: 9998,
         background: 'rgba(0,0,0,0.82)',
         backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-        overflowY: 'auto',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 24,
       }}>
-        <div style={{ minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div style={{
-            width: '100%', maxWidth: 340,
-            background: UI.bgRaised,
-            border: `1px solid ${UI.goldSoft}`,
-            borderRadius: 6,
-            padding: '24px 22px',
-            display: 'flex', flexDirection: 'column', gap: 12,
-            boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
-            animation: 'fadeUp 0.25s ease',
-          }}>
+        <div style={{
+          width: '100%', maxWidth: 340,
+          maxHeight: 'calc(100dvh - 48px)',
+          background: UI.bgRaised,
+          border: `1px solid ${UI.goldSoft}`,
+          borderRadius: 6,
+          display: 'flex', flexDirection: 'column',
+          overflow: 'hidden',
+          boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
+          animation: 'fadeUp 0.25s ease',
+        }}>
+          {/* Scrollable content — only this region scrolls if the visual is tall */}
+          <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '24px 22px 4px', display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
               {step.title}
@@ -815,6 +818,10 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
                 <VisualComp />
               </div>
             )}
+          </div>
+          {/* Pinned footer — buttons are NEVER inside the scroll region, so they
+              can't fall below the fold and trap the user on a tall step */}
+          <div style={{ flexShrink: 0, padding: '12px 22px 22px', borderTop: `0.5px solid ${UI.hair}` }}>
             <BtnRow compact={false} />
           </div>
         </div>
