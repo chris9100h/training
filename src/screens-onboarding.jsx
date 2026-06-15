@@ -754,7 +754,7 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
   const renderBtnRow = (compact) => (
     <div style={{ display: 'flex', gap: 8, marginTop: compact ? 0 : 4 }}>
       {stepIdx > 0 && (
-        <button onClick={goBack} style={{
+        <button onPointerUp={e => { e.preventDefault(); goBack(); }} style={{
           flex: '0 0 auto', padding: compact ? '9px 13px' : '11px 15px', borderRadius: compact ? 4 : 6,
           border: `1px solid ${UI.hairStrong}`, cursor: 'pointer',
           background: 'transparent',
@@ -762,7 +762,7 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
           WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
         }} aria-label="Back">←</button>
       )}
-      <button onClick={onDone} style={{
+      <button onPointerUp={e => { e.preventDefault(); onDone(); }} style={{
         flex: 1, padding: compact ? '9px 0' : '11px 0', borderRadius: compact ? 4 : 6,
         border: `1px solid ${UI.hairStrong}`, cursor: 'pointer',
         background: 'transparent',
@@ -770,7 +770,7 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
         letterSpacing: '0.08em', textTransform: 'uppercase',
         WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
       }}>Skip</button>
-      <button onClick={advance} style={{
+      <button onPointerUp={e => { e.preventDefault(); advance(); }} style={{
         flex: 2, padding: compact ? '9px 0' : '11px 0', borderRadius: compact ? 4 : 6,
         border: 'none', cursor: 'pointer',
         background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
@@ -793,12 +793,21 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
     return (
       <div style={{
         position: 'fixed', inset: 0, zIndex: 9998,
-        background: 'rgba(0,0,0,0.82)',
-        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: 24,
       }}>
+        {/* Backdrop as a SEPARATE, non-interactive layer — never an ancestor of
+            the card. A backdrop-filter ancestor mis-hit-tests taps on descendant
+            buttons on iOS once an inner overflow:auto layer composites (happens
+            on the tall last step), which is why only the last modal went dead. */}
         <div style={{
+          position: 'absolute', inset: 0,
+          background: 'rgba(0,0,0,0.82)',
+          backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+          pointerEvents: 'none',
+        }} />
+        <div style={{
+          position: 'relative', zIndex: 1,
           width: '100%', maxWidth: 340,
           maxHeight: 'calc(100dvh - 48px)',
           background: UI.bgRaised,
