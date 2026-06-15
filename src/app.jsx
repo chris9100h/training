@@ -894,54 +894,44 @@ function App() {
     default:                  screen = <window.Screens.HomeScreen {...props} />; break;
   }
 
-  if (isPad && showTab) {
-    return (
-      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <TabBar active={tabActive} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
-            {screen}
-          </ErrorBoundary>
-        </div>
-        {/* Hold the update banner back while a session is live — never interrupt a workout */}
-        {updateAvailable && !store?.inProgress && <UpdateBanner onUpdate={applyUpdate} />}
-        {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
-        {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
-        {route.name !== 'train' && <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} />}
-        {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
-        {onboardingState?.phase === 'prompt' && (
-          <window.Screens.OnboardingPrompt
-            onStart={() => setOnboardingState({ phase: 'tour', tourKey: 'createPlan' })}
-            onSkip={() => { setOnboardingState(null); setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s); }}
-          />
-        )}
-        {onboardingState?.phase === 'tour' && (
-          <window.Screens.OnboardingTour
-            tourKey={onboardingState.tourKey}
-            go={go}
-            route={route}
-            onDone={() => { setOnboardingState(null); setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s); }}
-          />
-        )}
-      </div>
-    );
-  }
-
   // Expose the weight-unit label globally so UI.unit() can read it anywhere
   // (display-only; the stored numbers stay the same).
   window.__UNIT = store?.settings?.unit || 'kg';
 
-  return (
+  // Two layout variants: the iPad sidebar layout (only on tab routes) and the
+  // full-bleed layout (everything else). Navigating between a tab route and a
+  // non-tab route (e.g. plan → schedule-new) flips between them on iPad.
+  const layout = (isPad && showTab) ? (
+    <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <TabBar active={tabActive} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
+          {screen}
+        </ErrorBoundary>
+      </div>
+    </div>
+  ) : (
     <>
       <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
         {screen}
       </ErrorBoundary>
+      {showTab && <TabBar active={tabActive} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />}
+    </>
+  );
+
+  // Overlays live OUTSIDE the layout variants at a stable tree position so they
+  // never remount when navigation flips the layout on iPad. Remounting
+  // OnboardingTour mid-tour would reset its step counter — that was the
+  // "3/10 → 4/10 → snaps back to 1/10" bug when the tour navigated from the
+  // plan tab (sidebar layout) to schedule-new (full-bleed layout).
+  return (
+    <>
+      {layout}
       {/* Hold the update banner back while a session is live — never interrupt a workout */}
       {updateAvailable && !store?.inProgress && <UpdateBanner onUpdate={applyUpdate} />}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {route.name !== 'train' && <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} />}
-      {showTab && <TabBar active={tabActive} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
       {onboardingState?.phase === 'prompt' && (
         <window.Screens.OnboardingPrompt
