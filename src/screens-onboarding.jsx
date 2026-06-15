@@ -230,10 +230,17 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
       return;
     }
 
-    // Find target in DOM with retries (allows for screen transitions)
+    // Find target in DOM with retries (allows for screen transitions).
+    // `cancelled` + `cancelAnimationFrame` prevent a stale rAF callback from
+    // firing after this effect re-runs (e.g. when the user advances to the next
+    // step), which would overwrite the fresh targetRect with the old element's
+    // rect and lock the tour in spotlight mode with no working buttons.
     setTargetRect(undefined);
+    let cancelled = false;
+    let rafId = null;
     let attempts = 0;
     const tryFind = () => {
+      if (cancelled) return;
       const el = document.querySelector(`[data-tour="${step.target}"]`);
       if (el) {
         const r = el.getBoundingClientRect();
@@ -241,11 +248,15 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
       }
       attempts++;
       if (attempts < 30) { retryRef.current = setTimeout(tryFind, 80); }
-      else { setTargetRect(null); } // graceful fallback
+      else { setTargetRect(null); }
     };
-    requestAnimationFrame(tryFind);
+    rafId = requestAnimationFrame(tryFind);
 
-    return () => clearTimeout(retryRef.current);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+      clearTimeout(retryRef.current);
+    };
   }, [stepIdx, route.name]);
 
   const advance = () => {
