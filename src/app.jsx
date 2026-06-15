@@ -325,6 +325,7 @@ function App() {
   const [storageFull, setStorageFull] = useStateA(false);  // local cache write failed (quota)
   const [onboardingState, setOnboardingState] = useStateA(null); // null | { phase:'prompt' } | { phase:'tour', tourKey }
   const onboardingChecked = useRefA(false);
+  const [unitPromptOpen, setUnitPromptOpen] = useStateA(false);
   const retryTimer                = useRefA(null);  // one-shot retry after a failed sync
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
@@ -656,12 +657,16 @@ function App() {
 
   // Onboarding: show welcome prompt to new users (no completed sessions).
   // Users who already trained get the flag set silently.
+  // Also prompts existing kg users once for unit preference (logbook-unit-prompted flag).
   useEffectA(() => {
     if (phase !== 'ready' || !store || onboardingChecked.current) return;
     onboardingChecked.current = true;
     if ((store.sessions || []).some(s => s.ended)) {
       if (!store.settings?.onboardingCompleted) {
         setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s);
+      }
+      if (store.settings?.unit !== 'lbs' && !localStorage.getItem('logbook-unit-prompted')) {
+        setUnitPromptOpen(true);
       }
       return;
     }
@@ -922,6 +927,17 @@ function App() {
           go={go}
           route={route}
           onDone={() => { setOnboardingState(null); go({ name: 'home' }); setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s); }}
+        />
+      )}
+      {unitPromptOpen && window.Screens?.UnitPromptModal && (
+        <window.Screens.UnitPromptModal
+          onDone={(chosenUnit) => {
+            setUnitPromptOpen(false);
+            localStorage.setItem('logbook-unit-prompted', '1');
+            if (chosenUnit === 'lbs') {
+              setStore(s => s ? { ...s, settings: { ...s.settings, unit: 'lbs' } } : s);
+            }
+          }}
         />
       )}
     </>

@@ -66,6 +66,7 @@ function LoginScreen() {
   const [email, setEmail]         = useState('');
   const [password, setPassword]   = useState('');
   const [confirm, setConfirm]     = useState('');
+  const [unit, setUnit]           = useState('kg'); // 'kg' | 'lbs'
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
   const [swVersion, setSwVersion] = useState('');
@@ -117,7 +118,8 @@ function LoginScreen() {
     if (!pwMatch) { setError('Passwords do not match'); return; }
     setLoading(true); setError('');
     try {
-      await LB.signUp(email.trim(), password, name.trim());
+      await LB.signUp(email.trim(), password, name.trim(), unit);
+      localStorage.setItem('logbook-unit-prompted', '1');
     } catch (e) {
       setError(e.message || 'Registration failed');
       setLoading(false);
@@ -183,6 +185,27 @@ function LoginScreen() {
               <TextInput value={confirm} onChange={setConfirm} type="password" placeholder="repeat password"
                 autoComplete="new-password" />
             </Field>
+          )}
+
+          {!isLogin && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="label" style={{ color: UI.inkFaint }}>Units</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {[{ id: 'kg', label: 'Metric', sub: 'kg / km' }, { id: 'lbs', label: 'Imperial', sub: 'lbs / mi' }].map(opt => (
+                  <button key={opt.id} type="button" onClick={() => setUnit(opt.id)} style={{
+                    padding: '10px 0', borderRadius: 4, cursor: 'pointer',
+                    background: unit === opt.id ? UI.goldFaint : 'transparent',
+                    border: `1px solid ${unit === opt.id ? UI.gold : UI.hairStrong}`,
+                    color: unit === opt.id ? UI.gold : UI.inkFaint,
+                    fontFamily: UI.fontUi, textAlign: 'center',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{opt.label}</div>
+                    <div style={{ fontSize: 10, marginTop: 2, opacity: 0.7 }}>{opt.sub}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
 
           {!isLogin && confirm.length > 0 && !pwMatch && (
@@ -1996,5 +2019,59 @@ function PendingApprovalScreen({ onSignOut }) {
   );
 }
 
+// ─── UNIT PROMPT (existing users) ────────────────────────────────────────────
+function UnitPromptModal({ onDone }) {
+  const opts = [
+    { id: 'kg', label: 'Metric', sub: 'kg / km', icon: 'fa-ruler-combined' },
+    { id: 'lbs', label: 'Imperial', sub: 'lbs / mi', icon: 'fa-flag' },
+  ];
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9998,
+      background: 'rgba(0,0,0,0.72)',
+      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 32,
+    }}>
+      <div style={{
+        width: '100%', maxWidth: 320,
+        background: UI.bgRaised,
+        border: `1px solid ${UI.hairStrong}`,
+        borderRadius: 6,
+        padding: '28px 24px',
+        display: 'flex', flexDirection: 'column', gap: 16,
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
+        animation: 'fadeUp 0.3s ease',
+      }}>
+        <div>
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 400, marginBottom: 8 }}>Units &amp; system</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+            Which unit system do you use? This can be changed later in Settings.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {opts.map(opt => (
+            <button key={opt.id} onClick={() => onDone(opt.id)} style={{
+              flex: 1, padding: '14px 0', borderRadius: 6, cursor: 'pointer',
+              background: UI.bgInset,
+              border: `1px solid ${UI.hairStrong}`,
+              color: UI.inkSoft,
+              fontFamily: UI.fontUi, textAlign: 'center',
+              WebkitTapHighlightColor: 'transparent',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+            }}>
+              <i className={`fa-solid ${opt.icon}`} style={{ fontSize: 20, color: UI.inkFaint }} />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink }}>{opt.label}</div>
+                <div style={{ fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 window.Screens = window.Screens || {};
-Object.assign(window.Screens, { LoginScreen, HomeScreen, SetPasswordScreen, PendingApprovalScreen, CardioQuickLogSheet });
+Object.assign(window.Screens, { LoginScreen, HomeScreen, SetPasswordScreen, PendingApprovalScreen, CardioQuickLogSheet, UnitPromptModal });

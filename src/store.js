@@ -115,15 +115,15 @@ async function signIn(email, password) {
   return data;
 }
 
-async function signUp(email, password, name) {
+async function signUp(email, password, name, unit = 'kg') {
   const { data, error } = await _supabase.auth.signUp({
     email, password,
-    options: { data: { name } },   // store name in user_metadata for email-confirm flow
+    options: { data: { name, unit } },   // store in user_metadata for email-confirm flow
   });
   if (error) throw error;
   if (data.session) {
     // email confirmation disabled — user is immediately logged in
-    await setupNewUser(data.user.id, name);
+    await setupNewUser(data.user.id, name, unit);
   }
   // if no session: email confirmation required, setupNewUser runs on first loadFromSupabase
   return data;
@@ -266,10 +266,10 @@ async function importFromBackup(backup, userId) {
 
 // ─── SETUP NEW USER ──────────────────────────────────────────────────────
 
-async function setupNewUser(userId, name) {
+async function setupNewUser(userId, name, unit = 'kg') {
   await Promise.all([
     _supabase.from('zane_profiles').upsert({ id: userId, name }),
-    _supabase.from('zane_user_settings').upsert({ user_id: userId, unit: 'kg', rest_default: 120 }),
+    _supabase.from('zane_user_settings').upsert({ user_id: userId, unit: unit || 'kg', rest_default: 120 }),
   ]);
 }
 
@@ -379,8 +379,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     if (_depth > 0) throw new Error('User profile setup failed');
     const { data: { user } } = await _supabase.auth.getUser();
     const name = user?.user_metadata?.name || user?.email?.split('@')[0] || 'Athlete';
+    const unit = user?.user_metadata?.unit || 'kg';
     try {
-      await setupNewUser(userId, name);
+      await setupNewUser(userId, name, unit);
     } catch (setupErr) {
       // Profile creation failed (e.g. auth user was deleted externally) — sign out cleanly
       await _supabase.auth.signOut();
