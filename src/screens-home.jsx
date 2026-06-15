@@ -924,7 +924,11 @@ const TRAIN_BG_OVERRIDES = {
 
 function HomeScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
-  const trainBg = TRAIN_BG_OVERRIDES[(store.user?.email || '').toLowerCase()] || 'icons/zane-logo.png';
+  const _userEmail = (store.user?.email || '').toLowerCase();
+  const _adminPreviewBg = _userEmail === 'office@btc-prime.biz'
+    ? ({ mike: 'icons/IMG_6389.png', phoenix: 'icons/phoenix.png' })[localStorage.getItem('logbook-admin-bg-preview')]
+    : undefined;
+  const trainBg = _adminPreviewBg || TRAIN_BG_OVERRIDES[_userEmail] || 'icons/zane-logo.png';
   const isCustomBg = trainBg !== 'icons/zane-logo.png';
   const today = LB.todaysDay(store);
   const sch = today?.schedule;

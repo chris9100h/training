@@ -214,6 +214,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
   const [unitPickerOpen, setUnitPickerOpen] = useStateSet(false);
+  const [adminBgPreview, setAdminBgPreview] = useStateSet(
+    () => localStorage.getItem('logbook-admin-bg-preview') || 'standard'
+  );
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
 
   useEffectSet(() => {
@@ -676,6 +679,34 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   </>
                 );
               })()}
+              <Hairline style={{ margin: '14px 0' }} />
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>VIP BACKGROUND PREVIEW</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[
+                  { key: 'standard', label: 'Standard' },
+                  { key: 'mike',     label: 'Mike' },
+                  { key: 'phoenix',  label: 'Phoenix' },
+                ].map(({ key, label }) => {
+                  const active = adminBgPreview === key;
+                  return (
+                    <button key={key} onClick={() => {
+                      setAdminBgPreview(key);
+                      if (key === 'standard') localStorage.removeItem('logbook-admin-bg-preview');
+                      else localStorage.setItem('logbook-admin-bg-preview', key);
+                    }} style={{
+                      flex: 1, padding: '8px 6px', borderRadius: 6,
+                      border: active ? `1.5px solid var(--accent)` : `0.5px solid ${UI.hairStrong}`,
+                      background: active ? `rgba(var(--accent-rgb), 0.1)` : UI.bgInset,
+                      color: active ? 'var(--accent)' : UI.inkSoft,
+                      fontFamily: UI.fontUi, fontSize: 12, fontWeight: active ? 600 : 400,
+                      cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                    }}>{label}</button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+                Preview VIP background images on your home screen before notifying users.
+              </div>
             </>
           )}
           <div style={{ marginTop: 24 }}>
