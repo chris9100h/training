@@ -218,6 +218,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
     () => localStorage.getItem('logbook-admin-bg-preview') || 'standard'
   );
   const [bgPreviewSheet, setBgPreviewSheet] = useStateSet(false);
+  const [adminSheet, setAdminSheet] = useStateSet(false);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
 
   useEffectSet(() => {
@@ -641,6 +642,15 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <Hairline style={{ marginBottom: 14 }} />
             </>
           )}
+          {isAdmin && (() => {
+            const unseenCount = recentSignups.filter(u => !seenSignups.has(u.user_id)).length;
+            return (
+              <>
+                <NavRow label="Admin" hint={unseenCount > 0 ? `${unseenCount} new` : undefined} onTap={() => setAdminSheet(true)} first />
+                <Hairline style={{ margin: '14px 0' }} />
+              </>
+            );
+          })()}
           <Row label="Push notifications" first>
             <button style={accentBtn} onClick={() => setPushSheet(true)}>Configure</button>
           </Row>
@@ -651,48 +661,52 @@ function SettingsScreen({ store, setStore, go, userId }) {
               : <Toggle on={false} onToggle={toggleReminder} />
             }
           </Row>
-          {isAdmin && (
-            <>
-              <Hairline style={{ margin: '14px 0' }} />
-              <Row label="Registrations need approval" first>
-                <Toggle on={signupApproval !== false} onToggle={toggleSignupApproval} />
-              </Row>
-              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-                When on, new sign-ups land on a waiting screen until you approve them here. When off, new accounts are activated immediately. Existing pending users are unaffected.
-              </div>
-              <Hairline style={{ margin: '14px 0' }} />
-              <Row label="Auto-approve batch" first>
-                <button style={accentBtn} onClick={() => { setBudgetDraft(autoApproveLeft || 20); setBudgetSheet(true); }}>
-                  {autoApproveLeft != null ? `${autoApproveLeft} left` : 'Off'}
-                </button>
-              </Row>
-              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-                Open registration for a set number of sign-ups — they're auto-approved until the batch is used up, then approval turns itself back on.
-              </div>
-              {(() => {
-                const unseenCount = recentSignups.filter(u => !seenSignups.has(u.user_id)).length;
-                return (
-                  <>
-                    <Hairline style={{ margin: '14px 0' }} />
-                    <Row label="Recent sign-ups" first>
-                      <button style={accentBtn} onClick={() => setSignupsSheet(true)}>{unseenCount > 0 ? `${unseenCount} new` : 'View'}</button>
-                    </Row>
-                  </>
-                );
-              })()}
-              <Hairline style={{ margin: '14px 0' }} />
-              <Row label="Background" first>
-                <button style={accentBtn} onClick={() => setBgPreviewSheet(true)}>
-                  {{ standard: 'Standard', mike: 'Mike', phoenix: 'Phoenix' }[adminBgPreview] || 'Change'}
-                </button>
-              </Row>
-              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-                Preview VIP background images on your home screen before notifying users.
-              </div>
-            </>
-          )}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setAccountSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Admin Sheet ══ */}
+      <SettingsSheet open={adminSheet} onClose={() => setAdminSheet(false)} title="Admin">
+        <div>
+          <Row label="Registrations need approval" first>
+            <Toggle on={signupApproval !== false} onToggle={toggleSignupApproval} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            When on, new sign-ups land on a waiting screen until you approve them here. When off, new accounts are activated immediately. Existing pending users are unaffected.
+          </div>
+          <Hairline style={{ margin: '14px 0' }} />
+          <Row label="Auto-approve batch" first>
+            <button style={accentBtn} onClick={() => { setBudgetDraft(autoApproveLeft || 20); setBudgetSheet(true); }}>
+              {autoApproveLeft != null ? `${autoApproveLeft} left` : 'Off'}
+            </button>
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Open registration for a set number of sign-ups — they're auto-approved until the batch is used up, then approval turns itself back on.
+          </div>
+          {(() => {
+            const unseenCount = recentSignups.filter(u => !seenSignups.has(u.user_id)).length;
+            return (
+              <>
+                <Hairline style={{ margin: '14px 0' }} />
+                <Row label="Recent sign-ups" first>
+                  <button style={accentBtn} onClick={() => setSignupsSheet(true)}>{unseenCount > 0 ? `${unseenCount} new` : 'View'}</button>
+                </Row>
+              </>
+            );
+          })()}
+          <Hairline style={{ margin: '14px 0' }} />
+          <Row label="Background" first>
+            <button style={accentBtn} onClick={() => setBgPreviewSheet(true)}>
+              {{ standard: 'Standard', mike: 'Mike', phoenix: 'Phoenix' }[adminBgPreview] || 'Change'}
+            </button>
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Preview VIP background images on your home screen before notifying users.
+          </div>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setAdminSheet(false)}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>
