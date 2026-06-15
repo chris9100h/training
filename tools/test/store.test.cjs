@@ -393,7 +393,8 @@ async function testAsync(name, fn) {
     assert.strictEqual(inc.adherence, null); assert.strictEqual(inc.targetsSnap, null);
   });
 
-  test('dailyLogsWeekPrefill averages the week + last-week weight', () => {
+  test('dailyLogsWeekPrefill: today weight + week sum/averages', () => {
+    const today = LB.todayISO(); // weight_today is sourced from TODAY's log
     const logs = [
       // target week Mon 2026-06-08 … Sun 2026-06-14
       { date: '2026-06-08', weight: 84.0, steps: 8000, calories: 2000, protein: 180, carbs: 200, fat: 60, waterMl: 2000, adherence: 90 },
@@ -401,11 +402,13 @@ async function testAsync(name, fn) {
       // prior week
       { date: '2026-06-02', weight: 85.0 },
       { date: '2026-06-04', weight: 85.4 },
+      // today's log (outside the reported week) — weight_today reads from here
+      { date: today, weight: 96.6 },
     ];
     const p = LB.dailyLogsWeekPrefill(logs, '2026-06-08');
-    assert.strictEqual(p.weight_today, 83.6);      // latest weight in the week
+    assert.strictEqual(p.weight_today, 96.6);         // from today's log, not the week
     assert.strictEqual(p.weight_avg_last_week, 83.8); // avg of the reported week (Jun 8–14)
-    assert.strictEqual(p.steps, 9000);
+    assert.strictEqual(p.steps, 18000);               // SUM of the week's steps
     assert.strictEqual(p.calories_avg, 2100);
     assert.strictEqual(p.protein_avg, 190);
     assert.strictEqual(p.macro_adherence, 95);

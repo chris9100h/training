@@ -10,70 +10,15 @@ const MI_TO_M_T = 1609.344;
 function mToDisplayT(m, unit) { return m == null ? '' : unit === 'mi' ? (m / MI_TO_M_T).toFixed(2) : (m / 1000).toFixed(2); }
 function distToMT(val, unit) { const n = parseFloat(val); return isNaN(n) ? null : unit === 'mi' ? Math.round(n * MI_TO_M_T) : Math.round(n * 1000); }
 
-// ── Debug log ────────────────────────────────────────────────────────────────
-window._dbg = window._dbg || [];
-window._log = window._log || ((msg) => {
-  const entry = { t: Date.now(), msg };
-  window._dbg.push(entry);
-  if (window._dbg.length > 1000) window._dbg.shift();
-});
-const _log = window._log;
-
-// Patch console so DebugPanel captures it like DevTools
-if (!window._consolePatched) {
-  window._consolePatched = true;
-
-  // console.log / warn / error
-  ['log', 'warn', 'error'].forEach(level => {
-    const orig = console[level];
-    console[level] = (...args) => {
-      window._log(`[${level.toUpperCase()}] ${args.map(a => {
-        try { return typeof a === 'object' ? JSON.stringify(a) : String(a); } catch (_) { return String(a); }
-      }).join(' ')}`);
-      orig.apply(console, args);
-    };
-  });
-
-  // Uncaught JS exceptions
-  window.addEventListener('error', e => {
-    window._log(`[UNCAUGHT] ${e.message} @ ${(e.filename || '').split('/').pop()}:${e.lineno}`);
-  });
-
-  // Unhandled promise rejections
-  window.addEventListener('unhandledrejection', e => {
-    const reason = e.reason instanceof Error ? e.reason.message : String(e.reason ?? 'unknown');
-    window._log(`[PROMISE] ${reason}`);
-  });
-
-  // Fetch — log every request and its response
-  const origFetch = window.fetch;
-  window.fetch = async (...args) => {
-    const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '?');
-    const method = (args[1]?.method || 'GET').toUpperCase();
-    const short = url.replace(/^https?:\/\/[^/]+/, '').slice(0, 80);
-    window._log(`[FETCH →] ${method} ${short}`);
-    try {
-      const res = await origFetch(...args);
-      window._log(`[FETCH ${res.ok ? '✓' : '✗'}] ${res.status} ${method} ${short}`);
-      return res;
-    } catch (err) {
-      window._log(`[FETCH ERR] ${method} ${short} — ${err.message}`);
-      throw err;
-    }
-  };
-
-  // WebSocket — log Realtime connection state changes
-  const _OrigWS = window.WebSocket;
-  window.WebSocket = function(url, protocols) {
-    const short = String(url).replace(/^wss?:\/\/[^/]+/, '').slice(0, 70);
-    window._log(`[WS] connect → ${short}`);
-    const ws = protocols !== undefined ? new _OrigWS(url, protocols) : new _OrigWS(url);
-    ws.addEventListener('open',  ()  => window._log('[WS] open'));
-    ws.addEventListener('close', e   => window._log(`[WS] close code=${e.code} reason=${e.reason || '-'}`));
-    ws.addEventListener('error', ()  => window._log('[WS] error'));
-    return ws;
-  };
-}
+// ── Debug log (disabled) ──────────────────────────────────────────────────────
+// NOTE: a previous debugging session monkey-patched window.fetch, window.WebSocket
+// and console here. The WebSocket wrapper dropped the static WebSocket.OPEN/
+// CONNECTING/… constants that Supabase Realtime reads to track socket state,
+// which could drive a reconnect loop that floods and kills the renderer
+// ("Render process gone"). All of that is removed; _log is now a no-op so the
+// scattered _log(...) calls below stay harmless.
+const _log = () => {};
+window._log = _log;
 // ─────────────────────────────────────────────────────────────────────────────
 
 function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }) {
