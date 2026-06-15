@@ -683,7 +683,34 @@ function App() {
     }
   }, [phase, store]);
 
-  // Realtime: coaching invites + messages only. (Cross-device live workout sync
+  // While the account is pending approval, re-check on every foreground (and a
+  // light poll) — same idea as the SW-update banner. A PWA resumes on the stale
+  // pending screen otherwise: the 30-min background reload above doesn't cover a
+  // quick approval, so the user would sit on "Waiting for approval" even after
+  // being approved. We poll the cheap `approved` flag and only escalate to a
+  // full loadData (→ ready → onboarding prompt) the moment it flips true.
+  useEffectA(() => {
+    if (phase !== 'pending' || !userId) return;
+    let cancelled = false;
+    let done = false;
+    const recheck = () => {
+      if (cancelled || done || document.visibilityState !== 'visible') return;
+      LB.supabase.from('zane_profiles').select('approved').eq('id', userId).maybeSingle()
+        .then(({ data }) => {
+          if (cancelled || done || !data?.approved) return;
+          done = true;
+          loadData(userId);
+        })
+        .catch(() => {});
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') recheck(); };
+    document.addEventListener('visibilitychange', onVisible);
+    const iv = setInterval(recheck, 15000);
+    recheck();
+    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVisible); clearInterval(iv); };
+  }, [phase, userId]);
+
+
   // was removed — the local store is the single source of truth for a session.)
   useEffectA(() => {
     if (!userId) return;
