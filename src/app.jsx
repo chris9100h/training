@@ -720,6 +720,7 @@ function App() {
     return () => document.removeEventListener('visibilitychange', recheck);
   }, [phase, userId, store?.settings?.unit]);
 
+  // While the account is pending approval, re-check on every foreground (and a
   // light poll) — same idea as the SW-update banner. A PWA resumes on the stale
   // pending screen otherwise: the 30-min background reload above doesn't cover a
   // quick approval, so the user would sit on "Waiting for approval" even after
