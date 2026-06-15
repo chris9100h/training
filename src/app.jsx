@@ -545,7 +545,11 @@ function App() {
             // edits. For items with IDs we use an ID-based merge instead.
             merged = {
               ...fresh,
-              settings: { ...fresh.settings, ...cur.settings },
+              // Local cache is authoritative for scalar settings (preserves
+              // offline edits) — except a server-side unit of null (admin reset
+              // / not chosen) must win so the picker re-fires, since the cache
+              // still holds the old kg/lbs value.
+              settings: { ...fresh.settings, ...cur.settings, ...(fresh.settings.unit == null ? { unit: null } : {}) },
               activeScheduleId: cur.activeScheduleId,
               cycleIndex: cur.cycleIndex,
               cycleStartDate: cur.cycleStartDate,
@@ -662,15 +666,12 @@ function App() {
   }, []);
 
   // Onboarding: show welcome prompt to new users (no completed sessions).
-  // Users who already trained get the flag set silently.
-  // Unit prompt fires whenever unit is null (not yet chosen); setting it un-arms.
+  // Users who already trained get the flag set silently. While the unit is
+  // still unchosen (null) we defer — the unit picker (separate effect below)
+  // takes precedence so the two don't stack — and re-fire once it's set.
   useEffectA(() => {
     if (phase !== 'ready' || !store || onboardingChecked.current) return;
-    // Unit null = not chosen yet. Show picker and defer onboarding check until unit is set.
-    if (store.settings?.unit == null) {
-      setUnitPromptOpen(true);
-      return; // don't set onboardingChecked — re-fire after unit is saved
-    }
+    if (store.settings?.unit == null) return; // wait until unit chosen; don't mark checked
     onboardingChecked.current = true;
     if ((store.sessions || []).some(s => s.ended)) {
       if (!store.settings?.onboardingCompleted) {
@@ -691,7 +692,34 @@ function App() {
     }
   }, [phase, store]);
 
-  // While the account is pending approval, re-check on every foreground (and a
+  // Unit picker: opens whenever the stored unit is null — a fresh user, or a
+  // user an admin reset (kg → null) to re-ask. Ungated by onboardingChecked so
+  // a reset re-prompts even long-onboarded users. Setting the unit closes it.
+  useEffectA(() => {
+    if (phase === 'ready' && store && store.settings?.unit == null) setUnitPromptOpen(true);
+  }, [phase, store?.settings?.unit]);
+
+  // Detect an admin-side unit reset on a session that's already open. The
+  // cache-first merge keeps the locally cached unit, so a server-side flip to
+  // null wouldn't surface on its own. Re-fetch the unit on foreground (like the
+  // SW-update check) and clear it locally when the server says null — the
+  // picker effect above then fires. Stops polling once the unit is null.
+  useEffectA(() => {
+    if (phase !== 'ready' || !userId || store?.settings?.unit == null) return;
+    const recheck = () => {
+      if (document.visibilityState !== 'visible') return;
+      LB.supabase.from('zane_user_settings').select('unit').eq('user_id', userId).maybeSingle()
+        .then(({ data, error }) => {
+          if (error || !data || data.unit != null) return;
+          setStore(s => (s && s.settings?.unit != null) ? { ...s, settings: { ...s.settings, unit: null } } : s);
+        })
+        .catch(() => {});
+    };
+    document.addEventListener('visibilitychange', recheck);
+    recheck();
+    return () => document.removeEventListener('visibilitychange', recheck);
+  }, [phase, userId, store?.settings?.unit]);
+
   // light poll) — same idea as the SW-update banner. A PWA resumes on the stale
   // pending screen otherwise: the 30-min background reload above doesn't cover a
   // quick approval, so the user would sit on "Waiting for approval" even after
