@@ -682,7 +682,52 @@ function OnboardingPrompt({ onStart, onSkip }) {
 }
 
 // ─── OnboardingTour ──────────────────────────────────────────────────
-function OnboardingTour({ tourKey, go, route, onDone }) {
+// Error boundary so the tour can NEVER white-screen / freeze the whole app.
+// Any render error inside the tour (e.g. a misbehaving visual) is caught and
+// turned into a dismissible "Close tour" card instead of crashing the root.
+class TourBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { crashed: false }; }
+  static getDerivedStateFromError() { return { crashed: true }; }
+  componentDidCatch(err) { try { console.error('[tour] render error:', err); } catch (_) {} }
+  render() { return this.state.crashed ? this.props.fallback : this.props.children; }
+}
+
+function TourCrashCard({ onClose }) {
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 10000,
+      background: 'rgba(0,0,0,0.85)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: '100%', maxWidth: 320, background: UI.bgRaised,
+        border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '24px 22px',
+        display: 'flex', flexDirection: 'column', gap: 14, textAlign: 'center',
+      }}>
+        <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 400 }}>Tour interrupted</div>
+        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+          Something went wrong showing this step. You can close the tour and keep using the app.
+        </div>
+        <button onClick={onClose} style={{
+          padding: '13px 0', borderRadius: 6, border: 'none', cursor: 'pointer',
+          background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+          color: '#0a0805', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.06em',
+          WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+        }}>Close tour</button>
+      </div>
+    </div>
+  );
+}
+
+function OnboardingTour(props) {
+  return (
+    <TourBoundary fallback={<TourCrashCard onClose={props.onDone} />}>
+      <OnboardingTourInner {...props} />
+    </TourBoundary>
+  );
+}
+
+function OnboardingTourInner({ tourKey, go, route, onDone }) {
   const steps = (window.TOURS || {})[tourKey] || [];
   const [stepIdx, setStepIdx] = useStateOB(0);
   // undefined = searching, null = no target (centered modal), DOMRect = found
@@ -793,35 +838,42 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
   if (!step.target || targetRect === null) {
     return (
       <div onClick={onDone} style={{
+        // NOTE: solid background, NO backdrop-filter. A full-screen backdrop blur
+        // recomposited over the modal's complex mockups can make the whole modal
+        // janky/unresponsive on weaker devices — that was the "modal reagiert
+        // nicht mehr" state. Solid dim looks the same and stays responsive.
         position: 'fixed', inset: 0, zIndex: 10000,
-        background: 'rgba(0,0,0,0.82)',
-        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+        background: 'rgba(0,0,0,0.9)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 24, overflowY: 'auto',
+        padding: 24,
       }}>
         <div onClick={e => e.stopPropagation()} style={{
-          width: '100%', maxWidth: 340, maxHeight: '88vh', overflowY: 'auto',
+          width: '100%', maxWidth: 340, maxHeight: '86vh',
           background: UI.bgRaised,
           border: `1px solid ${UI.goldSoft}`,
           borderRadius: 6,
-          padding: '24px 22px',
-          display: 'flex', flexDirection: 'column', gap: 12,
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
           boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
           animation: 'fadeUp 0.25s ease',
         }}>
-          <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
-            {step.title}
-          </div>
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-            {step.body}
-          </div>
-          {VisualComp && (
-            <div style={{ marginTop: 2 }}>
-              <VisualComp />
+          {/* Only this middle region scrolls; the buttons below never move */}
+          <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '24px 22px 6px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
+              {step.title}
             </div>
-          )}
-          {renderBtnRow(false)}
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+              {step.body}
+            </div>
+            {VisualComp && (
+              <div style={{ marginTop: 2 }}>
+                <TourBoundary fallback={null}><VisualComp /></TourBoundary>
+              </div>
+            )}
+          </div>
+          <div style={{ flexShrink: 0, padding: '10px 22px 20px' }}>
+            {renderBtnRow(false)}
+          </div>
         </div>
       </div>
     );
