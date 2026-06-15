@@ -2044,7 +2044,7 @@ function UnitPromptModal({ onDone }) {
         animation: 'fadeUp 0.3s ease',
       }}>
         <div>
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 400, marginBottom: 8 }}>Units &amp; system</div>
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: 'var(--accent)', fontWeight: 400, marginBottom: 8, textTransform: 'uppercase' }}>Units &amp; system</div>
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
             Which unit system do you use? This can be changed later in Settings.
           </div>
