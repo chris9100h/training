@@ -356,13 +356,17 @@ function TourVisualTrainKeyboard() {
             {k === null ? <i className="fa-solid fa-dumbbell" style={{ fontSize: 11, color: UI.inkSoft }} /> : k}
           </div>
         ))}
-        <div style={{ gridRow: '1 / 5', background: 'var(--accent)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 7, fontWeight: 700, letterSpacing: '0.1em', color: '#0a0805', writingMode: 'vertical-rl', textOrientation: 'mixed' }}>CONFIRM</span>
+        {/* CONFIRM — tall gold button spanning rows 1–4, column 4 */}
+        <div style={{ gridRow: '1 / 5', gridColumn: 4, background: 'var(--accent)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <i className="fa-solid fa-check" style={{ fontSize: 15, color: '#0a0805' }} />
         </div>
-        {['7','8','9','4','5','6','1','2','3'].map(n => (
+        {/* Rows 2–4: 1 2 3 / 4 5 6 / 7 8 9 */}
+        {['1','2','3','4','5','6','7','8','9'].map(n => (
           <div key={n} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 3, fontFamily: UI.fontNum, fontSize: 14, color: UI.ink }}>{n}</div>
         ))}
-        {[',','0','⌫','⌄'].map(k => (
+        {/* Row 5: blank / 0 / ⌫ / ⌄ */}
+        <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 3 }} />
+        {['0','⌫','⌄'].map(k => (
           <div key={k} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 3, fontFamily: UI.fontNum, fontSize: 13, color: k === '⌫' ? UI.inkSoft : UI.ink }}>{k}</div>
         ))}
       </div>
@@ -750,7 +754,7 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
         background: 'transparent',
         color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: compact ? 10 : 11, fontWeight: 600,
         letterSpacing: '0.08em', textTransform: 'uppercase',
-        WebkitTapHighlightColor: 'transparent',
+        WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
       }}>Skip</button>
       <button onClick={advance} style={{
         flex: 2, padding: compact ? '9px 0' : '11px 0', borderRadius: compact ? 4 : 6,
@@ -758,7 +762,7 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
         background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
         boxShadow: `0 ${compact ? 4 : 6}px ${compact ? 14 : 20}px rgba(var(--accent-rgb),0.4)`,
         color: '#0a0805', fontFamily: UI.fontUi, fontSize: compact ? 11 : 13, fontWeight: 700,
-        letterSpacing: '0.08em', WebkitTapHighlightColor: 'transparent',
+        letterSpacing: '0.08em', WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
       }}>{isLast ? 'DONE' : 'NEXT →'}</button>
     </div>
   );
