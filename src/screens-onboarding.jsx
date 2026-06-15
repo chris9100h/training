@@ -792,19 +792,21 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
   if (!step.target || targetRect === null) {
     return (
       <div style={{
-        position: 'fixed', inset: 0, zIndex: 9998,
+        // Above EVERY other app overlay (UpdateBanner is 9999) so nothing can
+        // cover the tour and swallow its taps.
+        position: 'fixed', inset: 0, zIndex: 10000,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: 24,
       }}>
-        {/* Backdrop as a SEPARATE, non-interactive layer — never an ancestor of
-            the card. A backdrop-filter ancestor mis-hit-tests taps on descendant
-            buttons on iOS once an inner overflow:auto layer composites (happens
-            on the tall last step), which is why only the last modal went dead. */}
-        <div style={{
+        {/* Backdrop is its own layer AND a guaranteed escape hatch: tapping the
+            dark area anywhere outside the card dismisses the tour. This means the
+            user can NEVER get trapped, regardless of why a card button might not
+            register a tap. It's a sibling (not an ancestor) of the card, so the
+            card's own buttons still hit-test correctly. */}
+        <div onPointerUp={e => { e.preventDefault(); onDone(); }} style={{
           position: 'absolute', inset: 0,
           background: 'rgba(0,0,0,0.82)',
           backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-          pointerEvents: 'none',
         }} />
         <div style={{
           position: 'relative', zIndex: 1,
@@ -818,8 +820,12 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
           boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
           animation: 'fadeUp 0.25s ease',
         }}>
-          {/* Scrollable content — only this region scrolls if the visual is tall */}
-          <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '24px 22px 4px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Scrollable content. NOTE: no -webkit-overflow-scrolling:touch — that
+              legacy momentum-scroll promotes this to its own iOS compositing
+              layer, which (only when it actually overflows, i.e. the tall last
+              step) swallows taps on the sibling footer below. That was the
+              "only the last modal's buttons are dead" bug. */}
+          <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '24px 22px 4px', display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
               {step.title}
@@ -833,8 +839,7 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
               </div>
             )}
           </div>
-          {/* Pinned footer — buttons are NEVER inside the scroll region, so they
-              can't fall below the fold and trap the user on a tall step */}
+          {/* Pinned footer — buttons are NEVER inside the scroll region */}
           <div style={{ flexShrink: 0, padding: '12px 22px 22px', borderTop: `0.5px solid ${UI.hair}` }}>
             {renderBtnRow(false)}
           </div>

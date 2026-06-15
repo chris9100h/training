@@ -928,7 +928,7 @@ function App() {
     <>
       {layout}
       {/* Hold the update banner back while a session is live — never interrupt a workout */}
-      {updateAvailable && !store?.inProgress && <UpdateBanner onUpdate={applyUpdate} />}
+      {updateAvailable && !store?.inProgress && !onboardingState && <UpdateBanner onUpdate={applyUpdate} />}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {route.name !== 'train' && <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} />}
