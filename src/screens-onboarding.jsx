@@ -836,12 +836,12 @@ class TourBoundary extends React.Component {
 
 function TourCrashCard({ onClose }) {
   return (
-    <div onClick={onClose} style={{
+    <div style={{
       position: 'fixed', inset: 0, zIndex: 10000,
       background: 'rgba(0,0,0,0.85)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
     }}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div style={{
         width: '100%', maxWidth: 320, background: UI.bgRaised,
         border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '24px 22px',
         display: 'flex', flexDirection: 'column', gap: 14, textAlign: 'center',
@@ -1055,12 +1055,11 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
   }
 
   // ── Brief loading state while navigating / searching ──
-  // Tap-to-dismiss so a search that never resolves can't trap the user.
   if (targetRect === undefined) {
     return (
-      <div onClick={onDone} style={{
+      <div style={{
         position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 10000,
-        background: 'rgba(0,0,0,0.35)',
+        background: 'rgba(0,0,0,0.35)', pointerEvents: 'none',
       }} />
     );
   }
@@ -1100,8 +1099,8 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
 
   return (
     <>
-      {/* Tap the dimmed background to dismiss — guaranteed escape on every step */}
-      <div style={{ position: 'fixed', inset: 0, zIndex: 9995, pointerEvents: 'auto' }} onClick={onDone} />
+      {/* Dark background — pointer events blocked so only the buttons dismiss the tour */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 9995, pointerEvents: 'none' }} />
 
       {/* Dark overlay via box-shadow (spotlight "hole") */}
       <div style={{
