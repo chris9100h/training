@@ -455,7 +455,9 @@ function CardioPROverlay({ pr, onDone }) {
     duration: { label: 'Longest Session',  fmt: v => `${v} min` },
   };
 
-  return (
+  // Portaled to <body> so the flash covers the whole screen (incl. behind the
+  // status bar); inside a <Screen> (overflow:hidden) iOS clips position:fixed.
+  return ReactDOM.createPortal(
     <div onClick={onDone} style={{
       position: 'fixed', inset: 0, zIndex: 200, background: 'rgb(8,6,3)',
       animation: 'improvedFade 3.8s ease forwards',
@@ -484,7 +486,8 @@ function CardioPROverlay({ pr, onDone }) {
           );
         })}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

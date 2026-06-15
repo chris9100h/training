@@ -1273,18 +1273,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   return (
     <Screen scroll={false}>
-      {/* Gold screen flash overlay */}
-      {screenFlash && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />
+      {/* Gold screen flash overlay. NOTE: these full-screen flashes are portaled
+          to <body> so they cover the WHOLE screen (incl. behind the status bar).
+          Inside <Screen> (overflow:hidden), iOS WebKit clips position:fixed
+          children to the screen box, capping the flash at the clock. */}
+      {screenFlash && ReactDOM.createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />,
+        document.body
       )}
-      {/* Improvement overlay */}
       {/* Block keyboard and content interaction while any overlay is visible */}
-      {(improvedSet || regressionSet || newBestSet || !!progressionUnlocked) && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} />
+      {(improvedSet || regressionSet || newBestSet || !!progressionUnlocked) && ReactDOM.createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} />,
+        document.body
       )}
 
       {/* New best (personal record) overlay */}
-      {newBestSet && (
+      {newBestSet && ReactDOM.createPortal(
         <div style={{
           position: 'fixed', inset: 0, zIndex: 155, pointerEvents: 'none',
           background: 'rgb(8,6,3)',
@@ -1305,10 +1309,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span style={{ fontFamily: UI.fontUi, fontSize: 30, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 18px rgba(201,169,97,1), 0 0 45px rgba(201,169,97,0.8), 0 0 90px rgba(201,169,97,0.4)' }}>NEW BEST</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, fontWeight: 700, letterSpacing: '0.28em' }}>PERSONAL RECORD</span>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {improvedSet && (
+      {improvedSet && ReactDOM.createPortal(
         <div style={{
           position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
           background: 'rgb(8,6,3)',
@@ -1330,10 +1335,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8), 0 0 80px rgba(201,169,97,0.4)' }}>IMPROVEMENT</span>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       {/* Regression overlay */}
-      {regressionSet && (
+      {regressionSet && ReactDOM.createPortal(
         <div style={{
           position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
           background: 'rgb(8,6,3)',
@@ -1353,11 +1359,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--danger-rgb),0.9), 0 0 70px rgba(var(--danger-rgb),0.5)' }}>↓</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.danger, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(var(--danger-rgb),1), 0 0 40px rgba(var(--danger-rgb),0.8), 0 0 80px rgba(var(--danger-rgb),0.4)' }}>REGRESSION</span>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Progression unlocked overlay */}
-      {progressionUnlocked && (
+      {progressionUnlocked && ReactDOM.createPortal(
         <div onClick={() => { setProgressionUnlocked(null); if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); } }} style={{
           position: 'fixed', inset: 0, zIndex: 160,
           background: 'rgb(8,6,3)',
@@ -1375,7 +1382,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(201,169,97,0.8)' }}>{progressionUnlocked.nextKg}{UI.unit()}</span>
           </div>
           <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, letterSpacing: '0.12em' }}>{progressionUnlocked.exName}</span>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Top: close + session timer */}
