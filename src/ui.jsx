@@ -192,7 +192,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
               const on = t.id === active;
               const badge = t.id === 'coaching' ? coachingBadge : null;
               return (
-                <button key={t.id} onClick={() => onChange(t.id)} style={{
+                <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => onChange(t.id)} style={{
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
@@ -404,7 +404,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
           const on = t.id === active;
           const badge = t.id === 'coaching' ? coachingBadge : null;
           return (
-            <button key={t.id} onClick={() => onChange(t.id)} style={{
+            <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => onChange(t.id)} style={{
               flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
               padding: '10px 6px 8px',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
@@ -552,7 +552,13 @@ function Sheet({ open, onClose, title, titleColor, children }) {
     const vv = window.visualViewport;
     if (!vv) return;
     const update = () => {
-      setKbHeight(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+      // Only treat the innerHeight↔visualViewport gap as keyboard height while a
+      // field is actually focused. Otherwise a persistent iOS viewport offset
+      // (the safe-area shift bug) would be misread as a keyboard, padding a black
+      // gap below the sheet.
+      const ae = document.activeElement;
+      const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
+      setKbHeight(typing ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0);
       setVvHeight(vv.height);
     };
     vv.addEventListener('resize', update);

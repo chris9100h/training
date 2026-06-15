@@ -115,15 +115,15 @@ async function signIn(email, password) {
   return data;
 }
 
-async function signUp(email, password, name) {
+async function signUp(email, password, name, unit = null) {
   const { data, error } = await _supabase.auth.signUp({
     email, password,
-    options: { data: { name } },   // store name in user_metadata for email-confirm flow
+    options: { data: { name, unit } },   // store in user_metadata for email-confirm flow
   });
   if (error) throw error;
   if (data.session) {
     // email confirmation disabled — user is immediately logged in
-    await setupNewUser(data.user.id, name);
+    await setupNewUser(data.user.id, name, unit);
   }
   // if no session: email confirmation required, setupNewUser runs on first loadFromSupabase
   return data;
@@ -201,7 +201,7 @@ async function importFromBackup(backup, userId) {
       cycle_start_date: backup.cycleStartDate ?? null,
       last_advanced_date: backup.lastAdvancedDate ?? null,
       in_progress_session_id: backup.inProgress ?? null,
-      unit: sett.unit || 'kg',
+      unit: sett.unit ?? null,
       rest_default: sett.restDefault || 120,
       rest_big: sett.restBig || 180,
       rest_medium: sett.restMedium || 120,
@@ -222,6 +222,7 @@ async function importFromBackup(backup, userId) {
       equipment_config: sett.equipmentConfig ?? null,
       weight_fill_down: sett.weightFillDown ?? true,
       manual_calories: sett.manualCalories ?? false,
+      net_carbs: sett.netCarbs ?? false,
       show_warmup_in_summary: sett.showWarmupInSummary ?? false,
       show_coaching_tab: sett.showCoachingTab ?? false,
       be_your_own_coach: sett.beYourOwnCoach ?? false,
@@ -256,7 +257,7 @@ async function importFromBackup(backup, userId) {
         id: l.id, user_id: userId, date: l.date,
         weight: l.weight ?? null, steps: l.steps ?? null,
         calories: l.calories ?? null, protein: l.protein ?? null,
-        carbs: l.carbs ?? null, fat: l.fat ?? null,
+        carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
         water_ml: l.waterMl ?? null, note: l.note ?? null,
         adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
       }))
@@ -266,10 +267,10 @@ async function importFromBackup(backup, userId) {
 
 // ─── SETUP NEW USER ──────────────────────────────────────────────────────
 
-async function setupNewUser(userId, name) {
+async function setupNewUser(userId, name, unit) {
   await Promise.all([
     _supabase.from('zane_profiles').upsert({ id: userId, name }),
-    _supabase.from('zane_user_settings').upsert({ user_id: userId, unit: 'kg', rest_default: 120 }),
+    _supabase.from('zane_user_settings').upsert({ user_id: userId, ...(unit != null ? { unit } : {}), rest_default: 120 }),
   ]);
 }
 
@@ -355,7 +356,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     // Daily health logs (weight / steps / macros / water) — one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, water_ml, note, adherence, targets_snap, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, adherence, targets_snap, created_at').eq('user_id', userId).order('date', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -379,8 +380,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     if (_depth > 0) throw new Error('User profile setup failed');
     const { data: { user } } = await _supabase.auth.getUser();
     const name = user?.user_metadata?.name || user?.email?.split('@')[0] || 'Athlete';
+    const unit = user?.user_metadata?.unit ?? null;
     try {
-      await setupNewUser(userId, name);
+      await setupNewUser(userId, name, unit);
     } catch (setupErr) {
       // Profile creation failed (e.g. auth user was deleted externally) — sign out cleanly
       await _supabase.auth.signOut();
@@ -474,7 +476,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       id: l.id, date: l.date,
       weight: l.weight ?? null, steps: l.steps ?? null,
       calories: l.calories ?? null, protein: l.protein ?? null,
-      carbs: l.carbs ?? null, fat: l.fat ?? null,
+      carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       waterMl: l.water_ml ?? null, note: l.note ?? null,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       createdAt: l.created_at,
@@ -491,7 +493,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     inProgress: sett.in_progress_session_id ?? null,
     customDayTypes: sett.custom_day_types ?? [],
     settings: {
-        unit: sett.unit || 'kg',
+        unit: sett.unit ?? null,
         restDefault: sett.rest_default || 120,
         restBig:     sett.rest_big     || 180,
         restMedium:  sett.rest_medium  || 120,
@@ -507,6 +509,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         smartProgression: sett.smart_progression ?? false,
         weightFillDown: sett.weight_fill_down ?? true,
         manualCalories: sett.manual_calories ?? false,
+        netCarbs: sett.net_carbs ?? false,
         progressionRangeTop: sett.progression_range_top ?? 4,
         equipmentConfig: sett.equipment_config ?? {},
         reminderEnabled: sett.reminder_enabled ?? false,
@@ -518,6 +521,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         defaultCheckinSchema: sett.default_checkin_schema ?? null,
         macroTargets: sett.macro_targets ?? null,
         showHealthTab: sett.show_health_tab ?? false,
+        onboardingCompleted: sett.onboarding_completed ?? false,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -780,7 +784,7 @@ async function syncStore(prev, next, userId) {
       id: l.id, user_id: userId, date: l.date,
       weight: l.weight ?? null, steps: l.steps ?? null,
       calories: l.calories ?? null, protein: l.protein ?? null,
-      carbs: l.carbs ?? null, fat: l.fat ?? null,
+      carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       water_ml: l.waterMl ?? null, note: l.note ?? null,
       adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
     }))));
@@ -814,6 +818,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.smartProgression   !== next.settings?.smartProgression   ||
     prev.settings?.weightFillDown     !== next.settings?.weightFillDown     ||
     prev.settings?.manualCalories     !== next.settings?.manualCalories     ||
+    prev.settings?.netCarbs           !== next.settings?.netCarbs           ||
     prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop ||
     JSON.stringify(prev.settings?.equipmentConfig) !== JSON.stringify(next.settings?.equipmentConfig) ||
     JSON.stringify(prev.customDayTypes) !== JSON.stringify(next.customDayTypes) ||
@@ -825,6 +830,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
     prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
+    prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
     prev.nextReminderAt                   !== next.nextReminderAt;
 
   if (settingsChanged) {
@@ -835,7 +841,7 @@ async function syncStore(prev, next, userId) {
       cycle_start_date: next.cycleStartDate ?? null,
       week_plan_start_date: next.weekPlanStartDate ?? null,
       last_advanced_date: next.lastAdvancedDate ?? null,
-      unit: next.settings?.unit || 'kg',
+      unit: next.settings?.unit ?? null,
       rest_default: next.settings?.restDefault || 120,
       rest_big:     next.settings?.restBig     || 180,
       rest_medium:  next.settings?.restMedium  || 120,
@@ -851,6 +857,7 @@ async function syncStore(prev, next, userId) {
       smart_progression: next.settings?.smartProgression ?? false,
       weight_fill_down: next.settings?.weightFillDown ?? true,
       manual_calories: next.settings?.manualCalories ?? false,
+      net_carbs: next.settings?.netCarbs ?? false,
       progression_range_top: next.settings?.progressionRangeTop ?? 4,
       equipment_config: next.settings?.equipmentConfig ?? {},
       custom_day_types: next.customDayTypes ?? [],
@@ -862,6 +869,7 @@ async function syncStore(prev, next, userId) {
       session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,
       macro_targets: next.settings?.macroTargets ?? null,
       show_health_tab: next.settings?.showHealthTab ?? false,
+      onboarding_completed: next.settings?.onboardingCompleted ?? false,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
     }));
@@ -2169,7 +2177,7 @@ function dailyLogAdherence(log, targets, isTraining) {
 // check-in form field keys. weekStart = Monday ('YYYY-MM-DD'); the window is
 // [weekStart, weekStart+7). weight_avg_last_week comes from the prior week.
 // Returns null when there is nothing to prefill.
-function dailyLogsWeekPrefill(dailyLogs, weekStart) {
+function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions) {
   if (!dailyLogs?.length || !weekStart) return null;
   const ws = weekStart.slice(0, 10);
   const shift = (base, days) => { const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
@@ -2182,16 +2190,37 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart) {
   const avg = (arr, key) => { const vs = arr.map(l => l[key]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const r1 = v => Math.round(v * 10) / 10;
   const out = {};
-  const weightLogs = week.filter(l => l.weight != null).sort((a, b) => a.date.localeCompare(b.date));
-  if (weightLogs.length) out.weight_today = r1(weightLogs[weightLogs.length - 1].weight);
+  const todayStr = todayISO();
+  const todayLogEntry = dailyLogs.find(l => l.date === todayStr);
+  if (todayLogEntry?.weight != null) out.weight_today = r1(todayLogEntry.weight);
   const weekW = avg(week, 'weight'); if (weekW != null) out.weight_avg_last_week = r1(weekW);
-  const steps = avg(week, 'steps'); if (steps != null) out.steps = Math.round(steps);
+  const stepsLogs = week.filter(l => l.steps != null);
+  if (stepsLogs.length) out.steps = stepsLogs.reduce((s, l) => s + l.steps, 0);
   const cal = avg(week, 'calories'); if (cal != null) out.calories_avg = Math.round(cal);
   const p = avg(week, 'protein'); if (p != null) out.protein_avg = Math.round(p);
   const c = avg(week, 'carbs'); if (c != null) out.carbs_avg = Math.round(c);
   const f = avg(week, 'fat'); if (f != null) out.fat_avg = Math.round(f);
   const hyd = avg(week, 'waterMl'); if (hyd != null) out.hydration_ml = Math.round(hyd);
   const adh = avg(week, 'adherence'); if (adh != null) out.macro_adherence = Math.round(adh);
+  if (sessions != null) {
+    const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
+    const thisEnded = sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= ws && d < we; });
+    const prevEnded = sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= prevWs && d < ws; });
+    if (thisEnded.length) out.days_trained = thisEnded.length;
+    if (thisEnded.length > 0 || prevEnded.length > 0) {
+      // Reuse the canonical totalVolume(): effReps = min(L,R) for unilateral
+      // sets (weaker side is the bottleneck) and the server-aggregate fallback
+      // for sessions windowed out of the boot load.
+      const thisVol = thisEnded.reduce((n, s) => n + totalVolume(s), 0);
+      const prevVol = prevEnded.reduce((n, s) => n + totalVolume(s), 0);
+      const thisAvg = thisEnded.length ? thisVol / thisEnded.length : 0;
+      const prevAvg = prevEnded.length ? prevVol / prevEnded.length : 0;
+      const diff = (thisAvg > 0 || prevAvg > 0)
+        ? Math.sign(thisAvg - prevAvg)
+        : Math.sign(thisEnded.length - prevEnded.length);
+      out.performance_vs_last_week = diff > 0 ? 'improved' : diff < 0 ? 'worse' : 'same';
+    }
+  }
   return Object.keys(out).length ? { ...out, count: week.length } : null;
 }
 

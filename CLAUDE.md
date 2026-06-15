@@ -94,6 +94,7 @@
   - `logbook-cycle-week-view`
   - `logbook-whatsnew-seen` — zuletzt gesehene `WHATS_NEW.id` (siehe „What's New / Changelog")
   - `logbook-health-card-order` — vom Nutzer gewählte Reihenfolge der Health-Tab-Karten (per Gerät, kein DB-Sync)
+  - `logbook-seen-signups` — vom Admin per „Got it" abgehakte Registrierungen im Account-Tab-Feed (Array von user_ids, per Gerät)
 
 ## What's New / Changelog
 
@@ -127,7 +128,9 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_feature_grants`:** `feature` (text), `email` (text)
 
-**`zane_profiles`:** `id` (uuid), `name` (text)
+**`zane_profiles`:** `id` (uuid), `name` (text), `approved` (boolean, default = `signup_default_approved()` — auto-approved unless the global `zane_app_config.signup_requires_approval` flag is on)
+
+**`zane_app_config`:** `id` (int, singleton = 1), `signup_requires_approval` (boolean, default true), `auto_approve_remaining` (int, nullable — batch budget: when approval is off and this is set, each new signup decrements it via the `signup_consume_budget()` AFTER-INSERT trigger on `zane_profiles`; at 0 the trigger flips `signup_requires_approval` back on and clears the budget). Global admin config (RLS on, only SECURITY DEFINER fns touch it). Drives the `zane_profiles.approved` column default, so flipping it changes future signups only.
 
 **`zane_pushover_active`:** `id` (text), `nonce` (text)
 
@@ -151,11 +154,11 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_cardio_logs`:** `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `type` (text, nullable), `duration_minutes` (int), `distance_m` (numeric, nullable), `pace_feeling` (int 1–6, nullable), `effort` (int 1–10, nullable), `note` (text, nullable), `created_at` (timestamptz)
 
-**`zane_daily_logs`:** `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `weight` (numeric, nullable), `steps` (int, nullable), `calories` (int, nullable), `protein` (int, nullable), `carbs` (int, nullable), `fat` (int, nullable), `water_ml` (int, nullable), `note` (text, nullable), `adherence` (numeric, nullable — macro-adherence % persisted **at save time**), `targets_snap` (jsonb, nullable — `{ protein, carbs, fat, calories, dayType }` snapshot so a later target change never rewrites past adherence), `created_at` (timestamptz) — UNIQUE (user_id, date). One row per day, source for the Health tab. Synced via the same diff model as cardio logs (UI mutates `store.dailyLogs` via `setStore`; `syncStore` writes). RLS: own rows + coach-of-client reads (so `loadClientStore` fills `clientStore.dailyLogs` for the coach „Daily" tab — no extra RPC). Migration 0069.
+**`zane_daily_logs`:** `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `weight` (numeric, nullable), `steps` (int, nullable), `calories` (int, nullable), `protein` (int, nullable), `carbs` (int, nullable — always **total** carbs), `fat` (int, nullable), `fiber` (int, nullable — only set in net-carb mode; calories then = `(protein + carbs − fiber)×4 + fat×9`; Migration 0073), `water_ml` (int, nullable), `note` (text, nullable), `adherence` (numeric, nullable — macro-adherence % persisted **at save time**; computed on total carbs, fiber does not affect it), `targets_snap` (jsonb, nullable — `{ protein, carbs, fat, calories, dayType }` snapshot so a later target change never rewrites past adherence), `created_at` (timestamptz) — UNIQUE (user_id, date). One row per day, source for the Health tab. Synced via the same diff model as cardio logs (UI mutates `store.dailyLogs` via `setStore`; `syncStore` writes). RLS: own rows + coach-of-client reads (so `loadClientStore` fills `clientStore.dailyLogs` for the coach „Daily" tab — no extra RPC). Migration 0069.
 
 **`zane_skips`:** `id` (text), `user_id` (uuid), `date` (text), `day_id` (text), `day_name` (text), `skip_reason` (text), `skipped_at` (timestamptz)
 
-**`zane_user_settings`:** `user_id` (uuid), `active_schedule_id` (text), `cycle_index` (int), `cycle_start_date` (text), `last_advanced_date` (date), `week_plan_start_date` (date), `in_progress_session_id` (text), `unit` (text), `rest_default`, `rest_big`, `rest_medium`, `rest_small` (int), `push_enabled` (boolean), `pushover_user_key` (text), `cycle_week_view` (boolean), `accent_color` (text), `dark_mode` (text), `tempo_enabled` (boolean), `tempo_eccentric` (numeric), `tempo_concentric` (numeric), `smart_progression` (boolean), `progression_range_top` (int), `equipment_config` (jsonb), `custom_day_types` (text[]), `reminder_enabled` (boolean), `reminder_time` (text, HH:MM), `next_reminder_at` (timestamptz), `show_warmup_in_summary` (boolean), `show_coaching_tab` (boolean), `be_your_own_coach` (boolean), `session_timeout_minutes` (int, default 90), `auto_close_notify` (jsonb, nullable — `{ dayName, date, durationMinutes }`, written by edge function, cleared by app on first read), `macro_targets` (jsonb, nullable — personal Health-tab targets `{ proteinTraining, carbsTraining, fatTraining, caloriesTraining, proteinRest, carbsRest, fatRest, caloriesRest }`; store field `macroTargets`), `show_health_tab` (boolean, default false — pins the Health tab; store field `showHealthTab`)
+**`zane_user_settings`:** `user_id` (uuid), `active_schedule_id` (text), `cycle_index` (int), `cycle_start_date` (text), `last_advanced_date` (date), `week_plan_start_date` (date), `in_progress_session_id` (text), `unit` (text), `rest_default`, `rest_big`, `rest_medium`, `rest_small` (int), `push_enabled` (boolean), `pushover_user_key` (text), `cycle_week_view` (boolean), `accent_color` (text), `dark_mode` (text), `tempo_enabled` (boolean), `tempo_eccentric` (numeric), `tempo_concentric` (numeric), `smart_progression` (boolean), `progression_range_top` (int), `equipment_config` (jsonb), `custom_day_types` (text[]), `reminder_enabled` (boolean), `reminder_time` (text, HH:MM), `next_reminder_at` (timestamptz), `show_warmup_in_summary` (boolean), `show_coaching_tab` (boolean), `be_your_own_coach` (boolean), `session_timeout_minutes` (int, default 90), `auto_close_notify` (jsonb, nullable — `{ dayName, date, durationMinutes }`, written by edge function, cleared by app on first read), `macro_targets` (jsonb, nullable — personal Health-tab targets `{ proteinTraining, carbsTraining, fatTraining, caloriesTraining, proteinRest, carbsRest, fatRest, caloriesRest }`; store field `macroTargets`), `show_health_tab` (boolean, default false — pins the Health tab; store field `showHealthTab`), `onboarding_completed` (boolean, default false — set after welcome tour or first session; store field `onboardingCompleted`), `net_carbs` (boolean, default false — Health-tab daily-log carb mode: net-carb tracking adds a fiber field; store field `netCarbs`; Migration 0073)
 
 ### Aktuelle RPCs & Realtime
 
@@ -164,6 +167,10 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 **`get_active_users_grants()`** → `TABLE(email text)` — listet alle Emails mit `active_users`-Grant (nur Admin)
 
 **`set_active_users_grant(p_email text, p_granted boolean)`** → `void` — erteilt oder entzieht den `active_users`-Grant (nur Admin)
+
+**`get_signup_config()`** → `TABLE(requires_approval boolean, auto_approve_remaining int)` / **`set_signup_requires_approval(p_value boolean)`** → `void` (setzt den Master-Toggle, löscht dabei jedes Batch-Budget) / **`set_auto_approve_budget(p_count int)`** → `void` (öffnet die Registrierung für `p_count` Signups, danach Selbst-Sperre; `p_count ≤ 0` sperrt sofort) — alle nur Admin. **`get_signup_requires_approval()`** → `boolean` existiert weiter (Legacy). **`signup_default_approved()`** → `boolean` (SECURITY DEFINER) ist die invertierte Flag und dient als Column-Default für `zane_profiles.approved`; **`signup_consume_budget()`** ist die Trigger-Funktion (AFTER INSERT auf `zane_profiles`), die das Budget runterzählt und bei 0 wieder zusperrt.
+
+**`get_recent_signups(p_limit int default 50)`** → `TABLE(user_id uuid, name text, email text, created_at timestamptz, approved boolean)` — jüngste Registrierungen (approved + pending) für den Admin-„Recent sign-ups"-Feed im Account-Tab (nur Admin). „Got it"-Dismiss pro Gerät via localStorage `logbook-seen-signups`. Migration 0075.
 
 **`get_active_sessions_overview()`** → `TABLE(...)` — aktive + kürzlich beendete Sessions aller User inkl. Sets/Dauer-Statistik (gated by feature grant)
 

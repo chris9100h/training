@@ -10,70 +10,15 @@ const MI_TO_M_T = 1609.344;
 function mToDisplayT(m, unit) { return m == null ? '' : unit === 'mi' ? (m / MI_TO_M_T).toFixed(2) : (m / 1000).toFixed(2); }
 function distToMT(val, unit) { const n = parseFloat(val); return isNaN(n) ? null : unit === 'mi' ? Math.round(n * MI_TO_M_T) : Math.round(n * 1000); }
 
-// ── Debug log ────────────────────────────────────────────────────────────────
-window._dbg = window._dbg || [];
-window._log = window._log || ((msg) => {
-  const entry = { t: Date.now(), msg };
-  window._dbg.push(entry);
-  if (window._dbg.length > 1000) window._dbg.shift();
-});
-const _log = window._log;
-
-// Patch console so DebugPanel captures it like DevTools
-if (!window._consolePatched) {
-  window._consolePatched = true;
-
-  // console.log / warn / error
-  ['log', 'warn', 'error'].forEach(level => {
-    const orig = console[level];
-    console[level] = (...args) => {
-      window._log(`[${level.toUpperCase()}] ${args.map(a => {
-        try { return typeof a === 'object' ? JSON.stringify(a) : String(a); } catch (_) { return String(a); }
-      }).join(' ')}`);
-      orig.apply(console, args);
-    };
-  });
-
-  // Uncaught JS exceptions
-  window.addEventListener('error', e => {
-    window._log(`[UNCAUGHT] ${e.message} @ ${(e.filename || '').split('/').pop()}:${e.lineno}`);
-  });
-
-  // Unhandled promise rejections
-  window.addEventListener('unhandledrejection', e => {
-    const reason = e.reason instanceof Error ? e.reason.message : String(e.reason ?? 'unknown');
-    window._log(`[PROMISE] ${reason}`);
-  });
-
-  // Fetch — log every request and its response
-  const origFetch = window.fetch;
-  window.fetch = async (...args) => {
-    const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '?');
-    const method = (args[1]?.method || 'GET').toUpperCase();
-    const short = url.replace(/^https?:\/\/[^/]+/, '').slice(0, 80);
-    window._log(`[FETCH →] ${method} ${short}`);
-    try {
-      const res = await origFetch(...args);
-      window._log(`[FETCH ${res.ok ? '✓' : '✗'}] ${res.status} ${method} ${short}`);
-      return res;
-    } catch (err) {
-      window._log(`[FETCH ERR] ${method} ${short} — ${err.message}`);
-      throw err;
-    }
-  };
-
-  // WebSocket — log Realtime connection state changes
-  const _OrigWS = window.WebSocket;
-  window.WebSocket = function(url, protocols) {
-    const short = String(url).replace(/^wss?:\/\/[^/]+/, '').slice(0, 70);
-    window._log(`[WS] connect → ${short}`);
-    const ws = protocols !== undefined ? new _OrigWS(url, protocols) : new _OrigWS(url);
-    ws.addEventListener('open',  ()  => window._log('[WS] open'));
-    ws.addEventListener('close', e   => window._log(`[WS] close code=${e.code} reason=${e.reason || '-'}`));
-    ws.addEventListener('error', ()  => window._log('[WS] error'));
-    return ws;
-  };
-}
+// ── Debug log (disabled) ──────────────────────────────────────────────────────
+// NOTE: a previous debugging session monkey-patched window.fetch, window.WebSocket
+// and console here. The WebSocket wrapper dropped the static WebSocket.OPEN/
+// CONNECTING/… constants that Supabase Realtime reads to track socket state,
+// which could drive a reconnect loop that floods and kills the renderer
+// ("Render process gone"). All of that is removed; _log is now a no-op so the
+// scattered _log(...) calls below stay harmless.
+const _log = () => {};
+window._log = _log;
 // ─────────────────────────────────────────────────────────────────────────────
 
 function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }) {
@@ -318,7 +263,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
       <div style={{ maxWidth: 480, margin: '0 auto', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gridTemplateRows: `repeat(5, ${H}px)`, gap: 4 }}>
         {/* Row 1: ↓ 🏋 ↑ | ✓ (spans rows 1-4) */}
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(-1); }}>↓</button>
-        <button style={act} onClick={onPlateCalc}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>
+        <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onPlateCalc(); }}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(1); }}>↑</button>
         <button onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onConfirm(); }} style={{ ...base, gridColumn: 4, gridRow: '1 / span 4', background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', fontSize: 20, fontWeight: 700, borderColor: 'var(--accent-deep)' }}>✓</button>
 
@@ -333,7 +278,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
         <button style={{ ...base, color: isKg ? 'var(--ink)' : 'var(--ink-faint)' }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (isKg) onType(','); }}>{isKg ? ',' : ''}</button>
         <button style={base} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onType('0'); }}>0</button>
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onBackspace(); }}>⌫</button>
-        <button style={act} onClick={onDismiss}>⌄</button>
+        <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onDismiss(); }}>⌄</button>
       </div>
     </div>
   );
@@ -1328,20 +1273,24 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   return (
     <Screen scroll={false}>
-      {/* Gold screen flash overlay */}
-      {screenFlash && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />
+      {/* Gold screen flash overlay. NOTE: these full-screen flashes are portaled
+          to <body> so they cover the WHOLE screen (incl. behind the status bar).
+          Inside <Screen> (overflow:hidden), iOS WebKit clips position:fixed
+          children to the screen box, capping the flash at the clock. */}
+      {screenFlash && ReactDOM.createPortal(
+        <div style={{ position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />,
+        document.body
       )}
-      {/* Improvement overlay */}
       {/* Block keyboard and content interaction while any overlay is visible */}
-      {(improvedSet || regressionSet || newBestSet || !!progressionUnlocked) && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} />
+      {(improvedSet || regressionSet || newBestSet || !!progressionUnlocked) && ReactDOM.createPortal(
+        <div style={{ position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 100 }} />,
+        document.body
       )}
 
       {/* New best (personal record) overlay */}
-      {newBestSet && (
+      {newBestSet && ReactDOM.createPortal(
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 155, pointerEvents: 'none',
+          position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 155, pointerEvents: 'none',
           background: 'rgb(8,6,3)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
@@ -1360,12 +1309,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span style={{ fontFamily: UI.fontUi, fontSize: 30, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 18px rgba(201,169,97,1), 0 0 45px rgba(201,169,97,0.8), 0 0 90px rgba(201,169,97,0.4)' }}>NEW BEST</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, fontWeight: 700, letterSpacing: '0.28em' }}>PERSONAL RECORD</span>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {improvedSet && (
+      {improvedSet && ReactDOM.createPortal(
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
+          position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 150, pointerEvents: 'none',
           background: 'rgb(8,6,3)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
@@ -1385,12 +1335,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8), 0 0 80px rgba(201,169,97,0.4)' }}>IMPROVEMENT</span>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       {/* Regression overlay */}
-      {regressionSet && (
+      {regressionSet && ReactDOM.createPortal(
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
+          position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 150, pointerEvents: 'none',
           background: 'rgb(8,6,3)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
@@ -1408,13 +1359,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--danger-rgb),0.9), 0 0 70px rgba(var(--danger-rgb),0.5)' }}>↓</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.danger, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(var(--danger-rgb),1), 0 0 40px rgba(var(--danger-rgb),0.8), 0 0 80px rgba(var(--danger-rgb),0.4)' }}>REGRESSION</span>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Progression unlocked overlay */}
-      {progressionUnlocked && (
+      {progressionUnlocked && ReactDOM.createPortal(
         <div onClick={() => { setProgressionUnlocked(null); if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); } }} style={{
-          position: 'fixed', inset: 0, zIndex: 160,
+          position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 160,
           background: 'rgb(8,6,3)',
           animation: 'improvedFade 4s ease forwards',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -1430,7 +1382,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(201,169,97,0.8)' }}>{progressionUnlocked.nextKg}{UI.unit()}</span>
           </div>
           <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, letterSpacing: '0.12em' }}>{progressionUnlocked.exName}</span>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Top: close + session timer */}

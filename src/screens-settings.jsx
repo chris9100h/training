@@ -6,6 +6,19 @@ const { useState: useStateSet, useEffect: useEffectSet, useRef: useRefSet } = Re
 
 const fmtSec = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+// Short "time since" label for the admin sign-up feed.
+const fmtAgo = (iso) => {
+  if (!iso) return '';
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+};
+
 function Toggle({ on, onToggle }) {
   return (
     <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
@@ -43,95 +56,66 @@ function NavRow({ label, hint, onTap, first = false, accent = false }) {
 
 const accentBtn = { background: 'rgba(var(--accent-rgb),0.10)', border: '0.5px solid rgba(var(--accent-rgb),0.22)', color: 'var(--accent)', padding: '5px 14px', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent', flexShrink: 0 };
 
-// ─── Debug panel overlay ─────────────────────────────────────────────
-function DebugPanel({ onClose }) {
-  const [entries, setEntries] = useStateSet([]);
-  useEffectSet(() => {
-    const refresh = () => setEntries([...(window._dbg || [])].reverse());
-    refresh();
-    const id = setInterval(refresh, 400);
-    return () => clearInterval(id);
-  }, []);
-
-  const buildText = () => {
-    const log = window._dbg || [];
-    return [...log].reverse().map((e, idx, arr) => {
-      const prev = arr[idx + 1];
-      const delta = prev ? `+${e.t - prev.t}ms` : '      ';
-      const ts = new Date(e.t).toISOString().slice(11, 23);
-      return `${ts}  ${delta.padStart(8)}  ${e.msg}`;
-    }).join('\n');
-  };
-
-  const exportTxt = () => {
-    const blob = new Blob([buildText()], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `zane-debug-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
-  const copyLog = () => navigator.clipboard?.writeText(buildText()).catch(() => {});
-
-  const tbBtn = {
-    background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 4,
-    color: '#888', fontSize: 10, padding: '4px 9px', cursor: 'pointer', fontFamily: 'monospace',
-  };
-
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 9991,
-      background: 'rgba(8,6,3,0.97)', display: 'flex', flexDirection: 'column',
-      fontFamily: 'monospace', fontSize: 11,
-    }}>
-      <div style={{
-        flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
-        padding: 'calc(env(safe-area-inset-top, 0px) + 12px) 12px 10px',
-        borderBottom: '0.5px solid rgba(255,255,255,0.12)',
-      }}>
-        <span style={{ flex: 1, color: '#c9a961', fontWeight: 700, fontSize: 11, letterSpacing: '0.10em' }}>DEBUG LOG</span>
-        <button onClick={exportTxt} style={tbBtn}>EXPORT .TXT</button>
-        <button onClick={copyLog} style={tbBtn}>COPY</button>
-        <button onClick={() => { window._dbg = []; setEntries([]); }} style={tbBtn}>CLEAR</button>
-        <button onClick={onClose} style={{ ...tbBtn, fontSize: 18, padding: '1px 8px', border: 'none', color: '#aaa' }}>×</button>
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0 calc(env(safe-area-inset-bottom, 0px) + 8px)' }}>
-        {entries.length === 0 && (
-          <div style={{ color: '#444', padding: '16px 12px', fontSize: 12 }}>— no entries —</div>
-        )}
-        {entries.map((e, idx) => {
-          const prev = entries[idx + 1];
-          const delta = prev ? e.t - prev.t : 0;
-          const color = e.msg.startsWith('[ERROR]') ? '#f55'
-            : e.msg.startsWith('[WARN]') ? '#f96'
-            : e.msg.includes('BLOCK') ? '#e87'
-            : e.msg.includes('NULL') ? '#f55'
-            : e.msg.includes('complete') || e.msg.includes('UNLOCK') ? '#c9a961'
-            : e.msg.startsWith('[NAV]') ? '#7bc'
-            : e.msg.startsWith('[LOG]') ? '#777'
-            : '#9db';
-          return (
-            <div key={idx} style={{
-              padding: '3px 10px', borderBottom: '0.5px solid rgba(255,255,255,0.04)',
-              display: 'flex', gap: 8, alignItems: 'baseline',
-            }}>
-              <span style={{ color: '#444', flexShrink: 0, width: 54, textAlign: 'right', fontSize: 10 }}>
-                {prev ? `+${delta}ms` : ''}
-              </span>
-              <span style={{ color, wordBreak: 'break-all' }}>{e.msg}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // Every settings sheet renders its title in the accent color.
 function SettingsSheet(props) {
   return <Sheet titleColor="var(--accent)" {...props} />;
+}
+
+// ─── HOW TO SHEET ────────────────────────────────────────────────────
+function HowToSheet({ open, onClose }) {
+  return (
+    <SettingsSheet open={open} onClose={onClose} title="How to…">
+      <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+        <button onClick={() => { onClose(); window.__startTour?.('createPlan'); }} style={{
+          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          padding: '14px 0', WebkitTapHighlightColor: 'transparent',
+        }}>
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Create a plan &amp; exercise</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Guided tour of plan creation and the training loop</div>
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <div className="knurl" />
+        <button onClick={() => { onClose(); window.__startTour?.('doWorkout'); }} style={{
+          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          padding: '14px 0', WebkitTapHighlightColor: 'transparent',
+        }}>
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Do a workout</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Logging sets, keyboard, plate calc, navigation and ending a session</div>
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <div className="knurl" />
+        <button onClick={() => { onClose(); window.__startTour?.('healthTab'); }} style={{
+          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          padding: '14px 0', WebkitTapHighlightColor: 'transparent',
+        }}>
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Use the Health tab</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Daily logging, macro targets, cardio tracking, and week overview</div>
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <div className="knurl" />
+        <button onClick={() => { onClose(); window.__startTour?.('coaching'); }} style={{
+          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          padding: '14px 0', WebkitTapHighlightColor: 'transparent',
+        }}>
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Be a coach / client</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Invites, weekly check-ins, macros and notes — coach and client side</div>
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+    </SettingsSheet>
+  );
 }
 
 // ─── CHANGELOG SHEET ─────────────────────────────────────────────────
@@ -184,6 +168,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [dataSheet, setDataSheet] = useStateSet(false);
   const [changelogSheet, setChangelogSheet] = useStateSet(false);
   const [activeUsersSheet, setActiveUsersSheet] = useStateSet(false);
+  const [howToSheet, setHowToSheet] = useStateSet(false);
 
   // Training sub-sheets
   const [restSheet, setRestSheet] = useStateSet(false);
@@ -204,6 +189,15 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateSet(
     () => localStorage.getItem('logbook-active-users-access') === 'true'
   );
+  const [signupApproval, setSignupApproval] = useStateSet(null); // null = loading, bool = current
+  const [autoApproveLeft, setAutoApproveLeft] = useStateSet(null); // null = no batch budget, int = remaining
+  const [budgetSheet, setBudgetSheet] = useStateSet(false);
+  const [budgetDraft, setBudgetDraft] = useStateSet(20);
+  const [recentSignups, setRecentSignups] = useStateSet([]);
+  const [signupsSheet, setSignupsSheet] = useStateSet(false);
+  const [seenSignups, setSeenSignups] = useStateSet(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('logbook-seen-signups') || '[]')); } catch (_) { return new Set(); }
+  });
   const [nowS, setNowS] = useStateSet(Date.now());
   const [importing, setImporting] = useStateSet(false);
   const [swVersion, setSwVersion] = useStateSet('');
@@ -219,8 +213,13 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
+  const [unitPickerOpen, setUnitPickerOpen] = useStateSet(false);
+  const [adminBgPreview, setAdminBgPreview] = useStateSet(
+    () => localStorage.getItem('logbook-admin-bg-preview') || 'standard'
+  );
+  const [bgPreviewSheet, setBgPreviewSheet] = useStateSet(false);
+  const [adminSheet, setAdminSheet] = useStateSet(false);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
-  const [debugPanelOpen, setDebugPanelOpen] = useStateSet(false);
 
   useEffectSet(() => {
     let mounted = true;
@@ -245,6 +244,52 @@ function SettingsScreen({ store, setStore, go, userId }) {
     if (!('caches' in window)) return;
     caches.keys().then(keys => { const name = keys.find(k => k.startsWith('zane-')); if (name) setSwVersion(name.replace('zane-', '')); });
   }, []);
+
+  // Admin-only: current global "signups need approval" setting.
+  useEffectSet(() => {
+    if (!isAdmin) return;
+    let mounted = true;
+    LB.supabase.rpc('get_signup_config').then(({ data, error }) => {
+      if (!mounted || error) return;
+      const row = Array.isArray(data) ? data[0] : data;
+      setSignupApproval(row ? row.requires_approval !== false : true);
+      setAutoApproveLeft(row ? (row.auto_approve_remaining ?? null) : null);
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, [isAdmin, accountSheet]);
+
+  // Admin-only: recent sign-ups feed. Reloaded each time the Account sheet opens.
+  useEffectSet(() => {
+    if (!isAdmin || !accountSheet) return;
+    let mounted = true;
+    LB.supabase.rpc('get_recent_signups', { p_limit: 50 }).then(({ data, error }) => { if (mounted && !error) setRecentSignups(data || []); }).catch(() => {});
+    return () => { mounted = false; };
+  }, [isAdmin, accountSheet]);
+
+  const markSignupSeen = (uid) => {
+    setSeenSignups(prev => {
+      const next = new Set(prev); next.add(uid);
+      try { localStorage.setItem('logbook-seen-signups', JSON.stringify([...next])); } catch (_) {}
+      return next;
+    });
+  };
+
+  const toggleSignupApproval = async () => {
+    const next = !signupApproval;
+    setSignupApproval(next);
+    setAutoApproveLeft(null); // manual toggle clears any batch budget
+    const { error } = await LB.supabase.rpc('set_signup_requires_approval', { p_value: next });
+    if (error) { setSignupApproval(!next); await confirm(error.message || 'Could not update this setting.', { title: 'Update failed', ok: 'OK' }); }
+  };
+
+  const saveBudget = async () => {
+    const n = budgetDraft;
+    setBudgetSheet(false);
+    setSignupApproval(n <= 0);            // n>0 → open for a batch; n<=0 → re-lock now
+    setAutoApproveLeft(n > 0 ? n : null);
+    const { error } = await LB.supabase.rpc('set_auto_approve_budget', { p_count: n });
+    if (error) await confirm(error.message || 'Could not update this setting.', { title: 'Update failed', ok: 'OK' });
+  };
 
   const approveUser = async (uid) => {
     setApprovingId(uid);
@@ -395,7 +440,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
         {/* ─── Category navigation ─── */}
         <Frame style={{ padding: '0 14px' }}>
-          <NavRow label="Changelog" hint={(window.WHATS_NEW || [])[0]?.id} onTap={() => setChangelogSheet(true)} first accent />
+          <NavRow label="Changelog" hint={(window.WHATS_NEW || [])[0]?.id} onTap={() => setChangelogSheet(true)} accent first />
+          <NavRow label="How to…" onTap={() => setHowToSheet(true)} />
           {hasActiveUsersAccess && (
             <NavRow label="Active users" hint={activeCount > 0 ? `${activeCount} active` : null} onTap={() => setActiveUsersSheet(true)} />
           )}
@@ -446,10 +492,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
             </Frame>
           </div>
         )}
-        {isAdmin && (
-          <NavRow label="Debug log" first onTap={() => setDebugPanelOpen(true)} />
-        )}
-
         <Btn kind="ghost" onClick={async () => { if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); } window.location.reload(true); }}>Clear cache &amp; reload</Btn>
         <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Sign out</Btn>
         <div className="micro" style={{ textAlign: 'center', marginTop: 4 }}>Zane · {swVersion || '…'} · Data in Supabase</div>
@@ -457,7 +499,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
       </div>
 
       {confirmEl}
-      {debugPanelOpen && <DebugPanel onClose={() => setDebugPanelOpen(false)} />}
 
       {/* ══ Active Users Sheet ══ */}
       <SettingsSheet open={activeUsersSheet} onClose={() => setActiveUsersSheet(false)} title="Active users">
@@ -601,6 +642,15 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <Hairline style={{ marginBottom: 14 }} />
             </>
           )}
+          {isAdmin && (() => {
+            const unseenCount = recentSignups.filter(u => !seenSignups.has(u.user_id)).length;
+            return (
+              <>
+                <NavRow label="Admin" hint={unseenCount > 0 ? `${unseenCount} new` : undefined} onTap={() => setAdminSheet(true)} first />
+                <Hairline style={{ margin: '14px 0' }} />
+              </>
+            );
+          })()}
           <Row label="Push notifications" first>
             <button style={accentBtn} onClick={() => setPushSheet(true)}>Configure</button>
           </Row>
@@ -613,6 +663,50 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </Row>
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setAccountSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Admin Sheet ══ */}
+      <SettingsSheet open={adminSheet} onClose={() => setAdminSheet(false)} title="Admin">
+        <div>
+          <Row label="Registrations need approval" first>
+            <Toggle on={signupApproval !== false} onToggle={toggleSignupApproval} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            When on, new sign-ups land on a waiting screen until you approve them here. When off, new accounts are activated immediately. Existing pending users are unaffected.
+          </div>
+          <Hairline style={{ margin: '14px 0' }} />
+          <Row label="Auto-approve batch" first>
+            <button style={accentBtn} onClick={() => { setBudgetDraft(autoApproveLeft || 20); setBudgetSheet(true); }}>
+              {autoApproveLeft != null ? `${autoApproveLeft} left` : 'Off'}
+            </button>
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Open registration for a set number of sign-ups — they're auto-approved until the batch is used up, then approval turns itself back on.
+          </div>
+          {(() => {
+            const unseenCount = recentSignups.filter(u => !seenSignups.has(u.user_id)).length;
+            return (
+              <>
+                <Hairline style={{ margin: '14px 0' }} />
+                <Row label="Recent sign-ups" first>
+                  <button style={accentBtn} onClick={() => setSignupsSheet(true)}>{unseenCount > 0 ? `${unseenCount} new` : 'View'}</button>
+                </Row>
+              </>
+            );
+          })()}
+          <Hairline style={{ margin: '14px 0' }} />
+          <Row label="Background" first>
+            <button style={accentBtn} onClick={() => setBgPreviewSheet(true)}>
+              {{ standard: 'Standard', mike: 'Mike', phoenix: 'Phoenix' }[adminBgPreview] || 'Change'}
+            </button>
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Preview VIP background images on your home screen before notifying users.
+          </div>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setAdminSheet(false)}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>
@@ -652,12 +746,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <Row label="Warmup sets in summary">
             <Toggle on={showWarmupInSummary} onToggle={() => { const n = !showWarmupInSummary; setShowWarmupInSummary(n); setStore(s => ({ ...s, settings: { ...s.settings, showWarmupInSummary: n } })); }} />
           </Row>
-          <Row label="Use lbs (pounds)">
-            <Toggle on={store.settings?.unit === 'lbs'} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, unit: s.settings?.unit === 'lbs' ? 'kg' : 'lbs' } }))} />
-          </Row>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-            Show weights in lbs instead of kg. Display label only — enter values directly in lbs (no conversion of existing numbers).
-          </div>
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setTrainingSheet(false)}>Done</Btn>
           </div>
@@ -686,6 +774,11 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <Row label="OLED black background">
             <Toggle on={darkMode === 'black'} onToggle={() => { const n = darkMode === 'black' ? 'dark' : 'black'; setDarkMode(n); localStorage.setItem('logbook-dark-mode', n); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: n } })); }} />
           </Row>
+          <Row label="Unit preference">
+            <button style={accentBtn} onClick={() => setUnitPickerOpen(true)}>
+              {store.settings?.unit === 'lbs' ? 'Imperial' : 'Metric'}
+            </button>
+          </Row>
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setAppearanceSheet(false)}>Done</Btn>
           </div>
@@ -703,8 +796,22 @@ function SettingsScreen({ store, setStore, go, userId }) {
         </div>
       </SettingsSheet>
 
+      {/* ══ How To Sheet ══ */}
+      <HowToSheet open={howToSheet} onClose={() => setHowToSheet(false)} />
+
       {/* ══ Changelog Sheet ══ */}
       <ChangelogSheet open={changelogSheet} onClose={() => setChangelogSheet(false)} />
+
+      {/* ══ Unit picker modal ══ */}
+      {unitPickerOpen && window.Screens?.UnitPromptModal && (
+        <window.Screens.UnitPromptModal
+          onDone={(chosenUnit) => {
+            setUnitPickerOpen(false);
+            localStorage.setItem('logbook-unit-prompted', '1');
+            setStore(s => s ? { ...s, settings: { ...s.settings, unit: chosenUnit } } : s);
+          }}
+        />
+      )}
 
       {/* ══ Auto-end session sheet ══ */}
       <SettingsSheet open={timeoutSheet} onClose={() => setTimeoutSheet(false)} title="Auto-end session">
@@ -894,6 +1001,84 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>Always train past that number. Push to failure or near-failure on each set. The algo only bumps weight when <em>all</em> sets hit the top of the range — so getting extra reps is how you earn the next weight.</div>
         </div>
         <Btn onClick={() => setProgDisclaimer(false)}>Got it</Btn>
+      </SettingsSheet>
+
+      {/* ══ Auto-approve batch sheet (admin) ══ */}
+      <SettingsSheet open={budgetSheet} onClose={() => setBudgetSheet(false)} title="Auto-approve batch">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+          <div>
+            <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>SIGN-UPS TO AUTO-APPROVE</div>
+            <Stepper value={budgetDraft} step={5} min={0} max={500} suffix=" sign-ups" onChange={setBudgetDraft} />
+          </div>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
+            The next {budgetDraft > 0 ? budgetDraft : '—'} new accounts skip the waiting screen. Once that many have joined, “Registrations need approval” switches back on automatically. Set to 0 to re-lock now.
+          </div>
+          <Btn onClick={saveBudget}>{budgetDraft > 0 ? `Open for ${budgetDraft}` : 'Re-lock now'}</Btn>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ VIP background preview sheet (admin) ══ */}
+      <SettingsSheet open={bgPreviewSheet} onClose={() => setBgPreviewSheet(false)} title="Background">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {[
+            { key: 'standard', label: 'Standard', sub: 'Zane logo watermark' },
+            { key: 'mike',     label: 'Mike',     sub: 'mikeapicelli777' },
+            { key: 'phoenix',  label: 'Phoenix',  sub: 'mb2489' },
+          ].map(({ key, label, sub }) => {
+            const active = adminBgPreview === key;
+            return (
+              <button key={key} onClick={() => {
+                setAdminBgPreview(key);
+                if (key === 'standard') localStorage.removeItem('logbook-admin-bg-preview');
+                else localStorage.setItem('logbook-admin-bg-preview', key);
+              }} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '12px 14px', borderRadius: 6,
+                border: active ? `1.5px solid var(--accent)` : `0.5px solid ${UI.hairStrong}`,
+                background: active ? `rgba(var(--accent-rgb), 0.1)` : UI.bgInset,
+                cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textAlign: 'left',
+              }}>
+                <div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: active ? 'var(--accent)' : UI.ink }}>{label}</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{sub}</div>
+                </div>
+                {active && <svg width="14" height="11" viewBox="0 0 14 11" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 5.5L5 9.5L13 1.5" /></svg>}
+              </button>
+            );
+          })}
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 4 }}>
+            Previews on your own home screen only — device-local, nothing is synced or shown to users.
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Recent sign-ups sheet (admin) ══ */}
+      <SettingsSheet open={signupsSheet} onClose={() => setSignupsSheet(false)} title="Recent sign-ups">
+        {(() => {
+          const unseen = recentSignups.filter(u => !seenSignups.has(u.user_id));
+          if (unseen.length === 0) {
+            return <div className="micro" style={{ color: UI.inkGhost, padding: '4px 0 12px' }}>Nothing new — you're all caught up.</div>;
+          }
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+              {unseen.map((u, i) => (
+                <div key={u.user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 17, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, color: UI.inkSoft }}>{(u.name || u.email || '?')[0].toUpperCase()}</span>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</span>
+                      <span className="micro" style={{ flexShrink: 0, color: u.approved ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.75)' }}>{u.approved ? 'ACTIVE' : 'PENDING'}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email} · {fmtAgo(u.created_at)}</div>
+                  </div>
+                  <button onClick={() => markSignupSeen(u.user_id)} style={{ ...accentBtn, padding: '5px 10px' }}>Got it</button>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </SettingsSheet>
 
       {/* ══ Push notifications sheet ══ */}

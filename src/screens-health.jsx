@@ -31,10 +31,11 @@ function healthWindow(days) {
 const healthNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(String(v).replace(',', '.'));
 const healthInt = v => (v === '' || v == null || isNaN(parseInt(v, 10))) ? null : parseInt(v, 10);
 
-// Calories from macros: P×4 + C×4 + F×9. Returns null when no macro is set.
-function caloriesFromMacros(p, c, f) {
+// Calories from macros: P×4 + C×4 + F×9. With fiber given (net-carb mode),
+// carbs contribute (C − fiber)×4. Returns null when no macro is set.
+function caloriesFromMacros(p, c, f, fiber) {
   if (p == null && c == null && f == null) return null;
-  return (p || 0) * 4 + (c || 0) * 4 + (f || 0) * 9;
+  return (p || 0) * 4 + ((c || 0) - (fiber || 0)) * 4 + (f || 0) * 9;
 }
 
 function healthFmtDate(iso, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
@@ -240,12 +241,17 @@ function MacroLegend() {
 function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
   const manualCal = !!store.settings?.manualCalories;
-  const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', calories: '', water: '', note: '' };
+  const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', fiber: '', calories: '', water: '', note: '' };
   const [form, setForm] = useStateH(empty);
+  // Net-carb mode: adds a fiber field; calories become (P + C − fiber)×4 + F×9.
+  // Defaults to the user's global preference; an existing net-logged day (fiber
+  // set) re-opens in net mode regardless, so its fiber value is preserved.
+  const [netCarbs, setNetCarbs] = useStateH(!!store.settings?.netCarbs);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   useEffectH(() => {
     if (!open) return;
+    setNetCarbs(existing?.fiber != null ? true : !!store.settings?.netCarbs);
     if (existing) {
       setForm({
         weight: existing.weight != null ? String(existing.weight) : '',
@@ -253,6 +259,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
         protein: existing.protein != null ? String(existing.protein) : '',
         carbs: existing.carbs != null ? String(existing.carbs) : '',
         fat: existing.fat != null ? String(existing.fat) : '',
+        fiber: existing.fiber != null ? String(existing.fiber) : '',
         calories: existing.calories != null ? String(existing.calories) : '',
         water: existing.waterMl != null ? String(existing.waterMl) : '',
         note: existing.note || '',
@@ -265,12 +272,21 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
   const tooOld = !existing && daysBack > 14;
   const canSave = open && !inFuture && !tooOld;
 
-  const autoCals = caloriesFromMacros(healthInt(form.protein), healthInt(form.carbs), healthInt(form.fat));
+  const pVal = healthInt(form.protein), cVal = healthInt(form.carbs), fVal = healthInt(form.fat), fibVal = healthInt(form.fiber);
+  const netCarbsVal = (cVal != null && fibVal != null) ? Math.max(0, cVal - fibVal) : null;
+  // Net mode only auto-fills calories once protein/carbs/fat/fiber are all present;
+  // otherwise the calories field is manual. Total mode keeps the existing behaviour.
+  const netAllFilled = pVal != null && cVal != null && fVal != null && fibVal != null;
+  const autoCals = netCarbs
+    ? (netAllFilled ? caloriesFromMacros(pVal, cVal, fVal, fibVal) : null)
+    : caloriesFromMacros(pVal, cVal, fVal);
+  const caloriesManual = netCarbs ? !netAllFilled : manualCal;
 
   const save = () => {
     if (!canSave) return;
     const protein = healthInt(form.protein), carbs = healthInt(form.carbs), fat = healthInt(form.fat);
-    const calories = manualCal ? healthInt(form.calories) : caloriesFromMacros(protein, carbs, fat);
+    const fiber = netCarbs ? healthInt(form.fiber) : null;
+    const calories = caloriesManual ? healthInt(form.calories) : autoCals;
     const isTraining = LB.isLoggedTrainingDay(store.sessions, date);
     const { adherence, targetsSnap } = LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
     const log = {
@@ -278,13 +294,18 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
       date,
       weight: healthNum(form.weight),
       steps: healthInt(form.steps),
-      calories, protein, carbs, fat,
+      calories, protein, carbs, fat, fiber,
       waterMl: healthInt(form.water),
       note: form.note.trim() || null,
       adherence, targetsSnap,
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
-    setStore(s => ({ ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== date)] }));
+    setStore(s => ({
+      ...s,
+      // Remember the carb mode globally so the next day defaults to it.
+      settings: s.settings?.netCarbs === netCarbs ? s.settings : { ...s.settings, netCarbs },
+      dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== date)],
+    }));
     onClose();
   };
 
@@ -325,15 +346,39 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
         {numField('steps', 'Steps')}
       </div>
 
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>NUTRITION</div>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>NUTRITION</span>
+        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+          {[{ id: false, label: 'Total carbs' }, { id: true, label: 'Net carbs' }].map(o => (
+            <button key={String(o.id)} onClick={() => setNetCarbs(o.id)} style={{
+              padding: '4px 10px', cursor: 'pointer', border: 'none',
+              background: netCarbs === o.id ? 'var(--accent)' : 'transparent',
+              color: netCarbs === o.id ? '#0a0805' : UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.05em',
+              WebkitTapHighlightColor: 'transparent',
+            }}>{o.label}</button>
+          ))}
+        </div>
+      </div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         {numField('protein', 'Protein', 'g')}
         {numField('carbs', 'Carbs', 'g')}
         {numField('fat', 'Fat', 'g')}
       </div>
+      {netCarbs && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          {numField('fiber', 'Fiber', 'g')}
+          <div style={{ flex: 1 }}>
+            <div style={labelStyle}>Net carbs (g)</div>
+            <div style={{ ...inputStyle, color: netCarbsVal != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
+              {netCarbsVal != null ? netCarbsVal : '—'}
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{ marginBottom: 16 }}>
-        <div style={labelStyle}>Calories (kcal){manualCal ? '' : ' · from macros'}</div>
-        {manualCal
+        <div style={labelStyle}>Calories (kcal){caloriesManual ? '' : (netCarbs ? ' · net carbs' : ' · from macros')}</div>
+        {caloriesManual
           ? <input type="number" inputMode="decimal" placeholder="—" value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
           : <div style={{ ...inputStyle, color: autoCals != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
               {autoCals != null ? autoCals : '—'}
@@ -621,9 +666,10 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
 
 function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
   const today = LB.todayISO();
-  const now = new Date(today + 'T12:00:00');
-  const jsDow = now.getDay();
-  const monday = healthShiftISO(today, -((jsDow === 0 ? 7 : jsDow) - 1));
+  const anchor = selectedDate || today;
+  const anchorDate = new Date(anchor + 'T12:00:00');
+  const jsDow = anchorDate.getDay();
+  const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
   const days = Array.from({ length: 7 }, (_, i) => healthShiftISO(monday, i));
   const loggedSet = new Set((store.dailyLogs || []).map(l => l.date));
   const sunday = days[6];
@@ -697,7 +743,7 @@ function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
           />
         </div>
         <div style={{ flex: 1 }} />
-        <button onClick={onLog} style={{
+        {onLog && <button data-tour="health-log-btn" onClick={onLog} style={{
           height: 34, borderRadius: 4, border: 'none',
           background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
           color: '#0a0805', cursor: 'pointer', padding: '0 14px',
@@ -706,7 +752,7 @@ function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
           WebkitTapHighlightColor: 'transparent',
         }}>
           <i className="fa-solid fa-plus" style={{ fontSize: 11 }} /> LOG
-        </button>
+        </button>}
       </div>
     </div>
   );
@@ -873,8 +919,9 @@ function HealthScreen({ store, setStore, go, userId }) {
     const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
     let from, to, periodDays;
     if (tf === '1W') {
-      const jsDow = new Date(today + 'T12:00:00').getDay();
-      const monday = healthShiftISO(today, -((jsDow === 0 ? 7 : jsDow) - 1));
+      const anchor = selectedDate;
+      const jsDow = new Date(anchor + 'T12:00:00').getDay();
+      const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
       from = monday; to = healthShiftISO(monday, 6); periodDays = 7;
     } else {
       const days = tfDays(tf);
@@ -903,7 +950,7 @@ function HealthScreen({ store, setStore, go, userId }) {
       snapTgtCal: avgSnap('calories'), snapTgtProt: avgSnap('protein'),
       snapTgtCarb: avgSnap('carbs'), snapTgtFat: avgSnap('fat'),
     };
-  }, [dailyLogs, store.sessions, store.cardioLogs, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate, today, tf]);
+  }, [dailyLogs, store.sessions, store.cardioLogs, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate, today, selectedDate, tf]);
 
   const targetDayRow = (label, suffix) => {
     const t = effectiveTargets || {};
@@ -1034,7 +1081,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         <div style={{ padding: capturing ? '8px 16px 16px' : '8px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
           <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {cardOrder.map(id => cardEls[id] ? (
-              <div key={id} data-reorder-item="true">{cardEls[id]}</div>
+              <div key={id} data-reorder-item="true" data-tour={`health-card-${id}`}>{cardEls[id]}</div>
             ) : null)}
           </ReorderList>
         </div>
@@ -1072,6 +1119,8 @@ function HealthClientLogs({ clientStore }) {
       return moved;
     });
   };
+
+  const [selectedDate, setSelectedDate] = useStateH(() => LB.todayISO());
 
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[1]).days;
   const windowDays = tfDays(tf);
@@ -1136,8 +1185,9 @@ function HealthClientLogs({ clientStore }) {
     const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
     let from, to, periodDays;
     if (tf === '1W') {
-      const jsDow = new Date(today + 'T12:00:00').getDay();
-      const monday = healthShiftISO(today, -((jsDow === 0 ? 7 : jsDow) - 1));
+      const anchor = selectedDate;
+      const jsDow = new Date(anchor + 'T12:00:00').getDay();
+      const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
       from = monday; to = healthShiftISO(monday, 6); periodDays = 7;
     } else {
       const days = tfDays(tf);
@@ -1164,7 +1214,7 @@ function HealthClientLogs({ clientStore }) {
       snapTgtCal: avgSnap('calories'), snapTgtProt: avgSnap('protein'),
       snapTgtCarb: avgSnap('carbs'), snapTgtFat: avgSnap('fat'),
     };
-  }, [logs, clientStore?.sessions, clientStore?.cardioLogs, clientStore?.schedules, clientStore?.activeScheduleId, clientStore?.cycleStartDate, clientStore?.weekPlanStartDate, today, tf]);
+  }, [logs, clientStore?.sessions, clientStore?.cardioLogs, clientStore?.schedules, clientStore?.activeScheduleId, clientStore?.cycleStartDate, clientStore?.weekPlanStartDate, today, selectedDate, tf]);
 
   if (!logs.length && !cardioLogs.length) {
     return (
@@ -1175,16 +1225,17 @@ function HealthClientLogs({ clientStore }) {
     );
   }
 
-  const todayLog = logs.find(l => l.date === today) || null;
-  const trainedToday = LB.isLoggedTrainingDay(clientStore?.sessions, today);
-  const cardioToday = cardioLogs.some(l => l.date === today);
+  const selectedLog = logs.find(l => l.date === selectedDate) || null;
+  const trainedSelected = LB.isLoggedTrainingDay(clientStore?.sessions, selectedDate);
+  const cardioSelected = cardioLogs.some(l => l.date === selectedDate);
+  const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
 
   const handle = <DragHandle style={{ width: 20, height: 22, marginLeft: -4, cursor: 'grab' }} />;
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={null} tf={tf} setTf={setTf} />,
     today: (
-      <HealthMetricsCard log={todayLog} dateLabel="Today" isToday={true} onJumpToday={null}
-        dragHandle={handle} trained={trainedToday} hasCardio={cardioToday} hasTargets={false} />
+      <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)}
+        dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} hasTargets={false} />
     ),
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
@@ -1245,12 +1296,15 @@ function HealthClientLogs({ clientStore }) {
   };
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 32px', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
-      <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {cardOrder.map(id => cardEls[id] ? (
-          <div key={id} data-reorder-item="true">{cardEls[id]}</div>
-        ) : null)}
-      </ReorderList>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <HealthDateStrip store={clientStore} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={null} />
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 32px', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
+        <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {cardOrder.map(id => cardEls[id] ? (
+            <div key={id} data-reorder-item="true">{cardEls[id]}</div>
+          ) : null)}
+        </ReorderList>
+      </div>
     </div>
   );
 }

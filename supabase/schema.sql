@@ -10,7 +10,15 @@
 CREATE TABLE public.zane_profiles (
   id   uuid NOT NULL,
   name text NOT NULL,
-  approved boolean DEFAULT false
+  approved boolean DEFAULT false  -- overridden below to signup_default_approved() once that fn exists
+);
+
+-- Global app config (single row). Drives the zane_profiles.approved default.
+CREATE TABLE public.zane_app_config (
+  id int PRIMARY KEY DEFAULT 1,
+  signup_requires_approval boolean NOT NULL DEFAULT true,
+  auto_approve_remaining int,
+  CONSTRAINT zane_app_config_singleton CHECK (id = 1)
 );
 
 CREATE TABLE public.zane_exercises (
@@ -101,6 +109,7 @@ CREATE TABLE public.zane_daily_logs (
   protein      integer,
   carbs        integer,
   fat          integer,
+  fiber        integer,
   water_ml     integer,
   note         text,
   adherence    numeric,
@@ -124,7 +133,7 @@ CREATE TABLE public.zane_user_settings (
   active_schedule_id text,
   cycle_index integer NOT NULL DEFAULT 0,
   last_advanced_date date,
-  unit text NOT NULL DEFAULT 'kg'::text,
+  unit text,
   rest_default integer NOT NULL DEFAULT 120,
   in_progress_session_id text,
   cycle_start_date text,
@@ -155,7 +164,9 @@ CREATE TABLE public.zane_user_settings (
   macro_targets jsonb,
   show_health_tab boolean NOT NULL DEFAULT false,
   weight_fill_down boolean NOT NULL DEFAULT true,
-  manual_calories boolean NOT NULL DEFAULT false
+  manual_calories boolean NOT NULL DEFAULT false,
+  onboarding_completed boolean DEFAULT false,
+  net_carbs boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -318,6 +329,7 @@ CREATE INDEX zane_sets_session_id_idx ON public.zane_sets USING btree (session_i
 -- ── Row Level Security ─────────────────────────────────────────────────────────
 
 ALTER TABLE public.zane_profiles         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_app_config       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_exercises        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_schedules        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_sessions         ENABLE ROW LEVEL SECURITY;
@@ -546,6 +558,129 @@ BEGIN
     RAISE EXCEPTION 'User not found or already approved';
   END IF;
   DELETE FROM zane_profiles WHERE id = p_user_id;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.get_recent_signups(p_limit int DEFAULT 50)
+ RETURNS TABLE(user_id uuid, name text, email text, created_at timestamptz, approved boolean)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
+    RETURN;
+  END IF;
+  RETURN QUERY
+    SELECT p.id, p.name, u.email::text, u.created_at, p.approved
+    FROM zane_profiles p
+    JOIN auth.users u ON u.id = p.id
+    ORDER BY u.created_at DESC
+    LIMIT GREATEST(p_limit, 1);
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.signup_default_approved()
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  SELECT NOT COALESCE((SELECT signup_requires_approval FROM zane_app_config WHERE id = 1), true);
+$function$;
+
+-- Now that the helper exists, point the column default at it.
+ALTER TABLE public.zane_profiles ALTER COLUMN approved SET DEFAULT public.signup_default_approved();
+
+CREATE OR REPLACE FUNCTION public.get_signup_requires_approval()
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+  RETURN COALESCE((SELECT signup_requires_approval FROM zane_app_config WHERE id = 1), true);
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.set_signup_requires_approval(p_value boolean)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+  INSERT INTO zane_app_config (id, signup_requires_approval, auto_approve_remaining)
+  VALUES (1, p_value, NULL)
+  ON CONFLICT (id) DO UPDATE
+    SET signup_requires_approval = EXCLUDED.signup_requires_approval,
+        auto_approve_remaining = NULL;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.get_signup_config()
+ RETURNS TABLE(requires_approval boolean, auto_approve_remaining int)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
+    RETURN;
+  END IF;
+  RETURN QUERY
+    SELECT c.signup_requires_approval, c.auto_approve_remaining
+    FROM zane_app_config c WHERE c.id = 1;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.set_auto_approve_budget(p_count int)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v int := NULLIF(GREATEST(COALESCE(p_count, 0), 0), 0);
+BEGIN
+  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+  INSERT INTO zane_app_config (id, signup_requires_approval, auto_approve_remaining)
+  VALUES (1, v IS NULL, v)
+  ON CONFLICT (id) DO UPDATE
+    SET signup_requires_approval = (v IS NULL),
+        auto_approve_remaining = v;
+END;
+$function$;
+
+-- AFTER INSERT on zane_profiles: consume one unit of auto-approve budget per new
+-- signup and re-lock registration once it's exhausted.
+CREATE OR REPLACE FUNCTION public.signup_consume_budget()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  cfg record;
+BEGIN
+  SELECT signup_requires_approval, auto_approve_remaining INTO cfg
+  FROM zane_app_config WHERE id = 1 FOR UPDATE;
+  IF cfg.signup_requires_approval = false AND cfg.auto_approve_remaining IS NOT NULL THEN
+    IF cfg.auto_approve_remaining <= 1 THEN
+      UPDATE zane_app_config SET signup_requires_approval = true, auto_approve_remaining = NULL WHERE id = 1;
+    ELSE
+      UPDATE zane_app_config SET auto_approve_remaining = auto_approve_remaining - 1 WHERE id = 1;
+    END IF;
+  END IF;
+  RETURN NEW;
 END;
 $function$;
 
@@ -1059,6 +1194,13 @@ DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+
+-- ── Trigger: consume auto-approve budget on each new profile ────────────────────
+
+DROP TRIGGER IF EXISTS zane_profiles_consume_budget ON public.zane_profiles;
+CREATE TRIGGER zane_profiles_consume_budget
+  AFTER INSERT ON public.zane_profiles
+  FOR EACH ROW EXECUTE FUNCTION signup_consume_budget();
 
 -- ── Realtime ───────────────────────────────────────────────────────────────────
 -- Coaching invites + messages are live; sessions are intentionally NOT published

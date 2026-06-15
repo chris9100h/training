@@ -323,6 +323,10 @@ function App() {
   const [whatsNew, setWhatsNew] = useStateA(null); // array of unseen changelog entries, or null
   const [syncStatus, setSyncStatus] = useStateA('synced'); // 'synced' | 'pending' | 'error'
   const [storageFull, setStorageFull] = useStateA(false);  // local cache write failed (quota)
+  const [onboardingState, setOnboardingState] = useStateA(null); // null | { phase:'prompt' } | { phase:'tour', tourKey }
+  const onboardingChecked = useRefA(false);
+  const [unitPromptOpen, setUnitPromptOpen] = useStateA(false);
+  const unitPicked                = useRefA(false); // user chose a unit this session — silences the reset watcher
   const retryTimer                = useRefA(null);  // one-shot retry after a failed sync
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
@@ -542,7 +546,11 @@ function App() {
             // edits. For items with IDs we use an ID-based merge instead.
             merged = {
               ...fresh,
-              settings: { ...fresh.settings, ...cur.settings },
+              // Local cache is authoritative for scalar settings (preserves
+              // offline edits) — except a server-side unit of null (admin reset
+              // / not chosen) must win so the picker re-fires, since the cache
+              // still holds the old kg/lbs value.
+              settings: { ...fresh.settings, ...cur.settings, ...(fresh.settings.unit == null ? { unit: null } : {}) },
               activeScheduleId: cur.activeScheduleId,
               cycleIndex: cur.cycleIndex,
               cycleStartDate: cur.cycleStartDate,
@@ -589,10 +597,18 @@ function App() {
         // login screen — you can't sign in offline, and a retry recovers.
         else          { setPhase(navigator.onLine ? 'unauthed' : 'error'); }
       } else if (event === 'SIGNED_IN') {
+        // Re-arm the onboarding check for the freshly signed-in user. The ref is
+        // a one-shot guard that survives in-session account switches (logout →
+        // login without a page reload), so without this a new/approved user
+        // logging in after a previous 'ready' session would never be prompted.
+        onboardingChecked.current = false;
+        unitPicked.current = false; // re-arm unit watcher for the new account
         setUserId(session.user.id);
         if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
         else loadData(session.user.id);
       } else if (event === 'SIGNED_OUT') {
+        onboardingChecked.current = false;
+        unitPicked.current = false;
         // An offline SIGNED_OUT is almost always a failed token refresh, not a
         // real sign-out — never wipe the cache or drop to the login screen.
         if (!navigator.onLine) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
@@ -652,7 +668,92 @@ function App() {
     setWhatsNew(null);
   }, []);
 
-  // Realtime: coaching invites + messages only. (Cross-device live workout sync
+  // Onboarding: show welcome prompt to new users (no completed sessions).
+  // Users who already trained get the flag set silently. While the unit is
+  // still unchosen (null) we defer — the unit picker (separate effect below)
+  // takes precedence so the two don't stack — and re-fire once it's set.
+  useEffectA(() => {
+    if (phase !== 'ready' || !store || onboardingChecked.current) return;
+    if (store.settings?.unit == null) return; // wait until unit chosen; don't mark checked
+    onboardingChecked.current = true;
+    if ((store.sessions || []).some(s => s.ended)) {
+      if (!store.settings?.onboardingCompleted) {
+        setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s);
+      }
+      return;
+    }
+    if (!store.settings?.onboardingCompleted) {
+      // Pre-dismiss What's New so it doesn't stack with the welcome prompt
+      try {
+        const newest = (window.WHATS_NEW || [])[0];
+        if (newest?.id && !localStorage.getItem(WHATS_NEW_KEY)) {
+          localStorage.setItem(WHATS_NEW_KEY, newest.id);
+        }
+      } catch (_) {}
+      setWhatsNew(null);
+      setOnboardingState({ phase: 'prompt' });
+    }
+  }, [phase, store]);
+
+  // Unit picker: opens whenever the stored unit is null — a fresh user, or a
+  // user an admin reset (kg → null) to re-ask. Ungated by onboardingChecked so
+  // a reset re-prompts even long-onboarded users. Setting the unit closes it.
+  useEffectA(() => {
+    if (phase === 'ready' && store && store.settings?.unit == null) setUnitPromptOpen(true);
+  }, [phase, store?.settings?.unit]);
+
+  // Detect an admin-side unit reset on a session that's already open. The
+  // cache-first merge keeps the locally cached unit, so a server-side flip to
+  // null wouldn't surface on its own. Re-fetch the unit on foreground (like the
+  // SW-update check) and clear it locally when the server says null — the
+  // picker effect above then fires. Stops polling once the unit is null.
+  useEffectA(() => {
+    if (phase !== 'ready' || !userId || store?.settings?.unit == null || unitPicked.current) return;
+    const recheck = () => {
+      // Don't fight a just-made local choice: the server is briefly still null
+      // until the pick syncs, which would otherwise reset us and re-open the
+      // picker in a loop. unitPicked latches that the user has decided.
+      if (document.visibilityState !== 'visible' || unitPicked.current) return;
+      LB.supabase.from('zane_user_settings').select('unit').eq('user_id', userId).maybeSingle()
+        .then(({ data, error }) => {
+          if (error || !data || data.unit != null || unitPicked.current) return;
+          setStore(s => (s && s.settings?.unit != null) ? { ...s, settings: { ...s.settings, unit: null } } : s);
+        })
+        .catch(() => {});
+    };
+    document.addEventListener('visibilitychange', recheck);
+    recheck();
+    return () => document.removeEventListener('visibilitychange', recheck);
+  }, [phase, userId, store?.settings?.unit]);
+
+  // While the account is pending approval, re-check on every foreground (and a
+  // light poll) — same idea as the SW-update banner. A PWA resumes on the stale
+  // pending screen otherwise: the 30-min background reload above doesn't cover a
+  // quick approval, so the user would sit on "Waiting for approval" even after
+  // being approved. We poll the cheap `approved` flag and only escalate to a
+  // full loadData (→ ready → onboarding prompt) the moment it flips true.
+  useEffectA(() => {
+    if (phase !== 'pending' || !userId) return;
+    let cancelled = false;
+    let done = false;
+    const recheck = () => {
+      if (cancelled || done || document.visibilityState !== 'visible') return;
+      LB.supabase.from('zane_profiles').select('approved').eq('id', userId).maybeSingle()
+        .then(({ data }) => {
+          if (cancelled || done || !data?.approved) return;
+          done = true;
+          loadData(userId);
+        })
+        .catch(() => {});
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') recheck(); };
+    document.addEventListener('visibilitychange', onVisible);
+    const iv = setInterval(recheck, 15000);
+    recheck();
+    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVisible); clearInterval(iv); };
+  }, [phase, userId]);
+
+
   // was removed — the local store is the single source of truth for a session.)
   useEffectA(() => {
     if (!userId) return;
@@ -687,29 +788,6 @@ function App() {
     if (store !== syncBase.current) setSyncStatus('pending');
     flushSync(userId);
   }, [store]);
-
-  // Global debug logging — DOM events + route changes captured on every screen.
-  useEffectA(() => {
-    const log = window._log; if (!log) return;
-    log(`[NAV] → ${route.name}`);
-  }, [route]);
-
-  useEffectA(() => {
-    const onPD = e => {
-      const log = window._log; if (!log) return;
-      log(`[DOM] pointerdown type=${e.pointerType} isPrimary=${e.isPrimary} tag=${e.target.tagName}`);
-    };
-    const onClick = e => {
-      const log = window._log; if (!log) return;
-      log(`[DOM] click isTrusted=${e.isTrusted} tag=${e.target.tagName}`);
-    };
-    document.addEventListener('pointerdown', onPD, true);
-    document.addEventListener('click', onClick, true);
-    return () => {
-      document.removeEventListener('pointerdown', onPD, true);
-      document.removeEventListener('click', onClick, true);
-    };
-  }, []);
 
   // Check for SW updates on every screen navigation and whenever the app
   // comes back to the foreground (visibilitychange). Fetches sw.js directly
@@ -804,6 +882,10 @@ function App() {
     return () => clearInterval(iv);
   }, [isCoachActive]);
 
+  // Exposed globally so Settings → How to… can launch any tour.
+  // Also clears WhatsNew so it doesn't block the tour overlay (z-index).
+  window.__startTour = (tourKey) => { setWhatsNew(null); setOnboardingState({ phase: 'tour', tourKey }); };
+
   // helper for in-sheet "+ new exercise"
   window.__createExercise = (name) => {
     const id = LB.uid();
@@ -864,41 +946,68 @@ function App() {
     default:                  screen = <window.Screens.HomeScreen {...props} />; break;
   }
 
-  if (isPad && showTab) {
-    return (
-      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <TabBar active={tabActive} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
-            {screen}
-          </ErrorBoundary>
-        </div>
-        {/* Hold the update banner back while a session is live — never interrupt a workout */}
-        {updateAvailable && !store?.inProgress && <UpdateBanner onUpdate={applyUpdate} />}
-        {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
-        {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
-        {route.name !== 'train' && <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} />}
-        {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
-      </div>
-    );
-  }
-
   // Expose the weight-unit label globally so UI.unit() can read it anywhere
   // (display-only; the stored numbers stay the same).
   window.__UNIT = store?.settings?.unit || 'kg';
 
-  return (
+  // Two layout variants: the iPad sidebar layout (only on tab routes) and the
+  // full-bleed layout (everything else). Navigating between a tab route and a
+  // non-tab route (e.g. plan → schedule-new) flips between them on iPad.
+  const layout = (isPad && showTab) ? (
+    <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <TabBar active={tabActive} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
+          {screen}
+        </ErrorBoundary>
+      </div>
+    </div>
+  ) : (
     <>
       <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
         {screen}
       </ErrorBoundary>
+      {showTab && <TabBar active={tabActive} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />}
+    </>
+  );
+
+  // Overlays live OUTSIDE the layout variants at a stable tree position so they
+  // never remount when navigation flips the layout on iPad. Remounting
+  // OnboardingTour mid-tour would reset its step counter — that was the
+  // "3/10 → 4/10 → snaps back to 1/10" bug when the tour navigated from the
+  // plan tab (sidebar layout) to schedule-new (full-bleed layout).
+  return (
+    <>
+      {layout}
       {/* Hold the update banner back while a session is live — never interrupt a workout */}
-      {updateAvailable && !store?.inProgress && <UpdateBanner onUpdate={applyUpdate} />}
+      {updateAvailable && !store?.inProgress && !onboardingState && <UpdateBanner onUpdate={applyUpdate} />}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {route.name !== 'train' && <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} />}
-      {showTab && <TabBar active={tabActive} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
+      {onboardingState?.phase === 'prompt' && (
+        <window.Screens.OnboardingPrompt
+          onStart={() => setOnboardingState({ phase: 'tour', tourKey: 'createPlan' })}
+          onSkip={() => { setOnboardingState(null); setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s); }}
+        />
+      )}
+      {onboardingState?.phase === 'tour' && (
+        <window.Screens.OnboardingTour
+          tourKey={onboardingState.tourKey}
+          go={go}
+          route={route}
+          onDone={() => { setOnboardingState(null); go({ name: 'home' }); setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s); }}
+        />
+      )}
+      {unitPromptOpen && window.Screens?.UnitPromptModal && (
+        <window.Screens.UnitPromptModal
+          onDone={(chosenUnit) => {
+            unitPicked.current = true; // latch before setStore so the reset watcher won't re-null
+            setUnitPromptOpen(false);
+            setStore(s => s ? { ...s, settings: { ...s.settings, unit: chosenUnit } } : s);
+          }}
+        />
+      )}
     </>
   );
 }
