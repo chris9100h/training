@@ -43,92 +43,6 @@ function NavRow({ label, hint, onTap, first = false, accent = false }) {
 
 const accentBtn = { background: 'rgba(var(--accent-rgb),0.10)', border: '0.5px solid rgba(var(--accent-rgb),0.22)', color: 'var(--accent)', padding: '5px 14px', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent', flexShrink: 0 };
 
-// ─── Debug panel overlay ─────────────────────────────────────────────
-function DebugPanel({ onClose }) {
-  const [entries, setEntries] = useStateSet([]);
-  useEffectSet(() => {
-    const refresh = () => setEntries([...(window._dbg || [])].reverse());
-    refresh();
-    const id = setInterval(refresh, 400);
-    return () => clearInterval(id);
-  }, []);
-
-  const buildText = () => {
-    const log = window._dbg || [];
-    return [...log].reverse().map((e, idx, arr) => {
-      const prev = arr[idx + 1];
-      const delta = prev ? `+${e.t - prev.t}ms` : '      ';
-      const ts = new Date(e.t).toISOString().slice(11, 23);
-      return `${ts}  ${delta.padStart(8)}  ${e.msg}`;
-    }).join('\n');
-  };
-
-  const exportTxt = () => {
-    const blob = new Blob([buildText()], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `zane-debug-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
-  const copyLog = () => navigator.clipboard?.writeText(buildText()).catch(() => {});
-
-  const tbBtn = {
-    background: 'none', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 4,
-    color: '#888', fontSize: 10, padding: '4px 9px', cursor: 'pointer', fontFamily: 'monospace',
-  };
-
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 9991,
-      background: 'rgba(8,6,3,0.97)', display: 'flex', flexDirection: 'column',
-      fontFamily: 'monospace', fontSize: 11,
-    }}>
-      <div style={{
-        flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
-        padding: 'calc(env(safe-area-inset-top, 0px) + 12px) 12px 10px',
-        borderBottom: '0.5px solid rgba(255,255,255,0.12)',
-      }}>
-        <span style={{ flex: 1, color: '#c9a961', fontWeight: 700, fontSize: 11, letterSpacing: '0.10em' }}>DEBUG LOG</span>
-        <button onClick={exportTxt} style={tbBtn}>EXPORT .TXT</button>
-        <button onClick={copyLog} style={tbBtn}>COPY</button>
-        <button onClick={() => { window._dbg = []; setEntries([]); }} style={tbBtn}>CLEAR</button>
-        <button onClick={onClose} style={{ ...tbBtn, fontSize: 18, padding: '1px 8px', border: 'none', color: '#aaa' }}>×</button>
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0 calc(env(safe-area-inset-bottom, 0px) + 8px)' }}>
-        {entries.length === 0 && (
-          <div style={{ color: '#444', padding: '16px 12px', fontSize: 12 }}>— no entries —</div>
-        )}
-        {entries.map((e, idx) => {
-          const prev = entries[idx + 1];
-          const delta = prev ? e.t - prev.t : 0;
-          const color = e.msg.startsWith('[ERROR]') ? '#f55'
-            : e.msg.startsWith('[WARN]') ? '#f96'
-            : e.msg.includes('BLOCK') ? '#e87'
-            : e.msg.includes('NULL') ? '#f55'
-            : e.msg.includes('complete') || e.msg.includes('UNLOCK') ? '#c9a961'
-            : e.msg.startsWith('[NAV]') ? '#7bc'
-            : e.msg.startsWith('[LOG]') ? '#777'
-            : '#9db';
-          return (
-            <div key={idx} style={{
-              padding: '3px 10px', borderBottom: '0.5px solid rgba(255,255,255,0.04)',
-              display: 'flex', gap: 8, alignItems: 'baseline',
-            }}>
-              <span style={{ color: '#444', flexShrink: 0, width: 54, textAlign: 'right', fontSize: 10 }}>
-                {prev ? `+${delta}ms` : ''}
-              </span>
-              <span style={{ color, wordBreak: 'break-all' }}>{e.msg}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // Every settings sheet renders its title in the accent color.
 function SettingsSheet(props) {
   return <Sheet titleColor="var(--accent)" {...props} />;
@@ -254,7 +168,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
-  const [debugPanelOpen, setDebugPanelOpen] = useStateSet(false);
 
   useEffectSet(() => {
     let mounted = true;
@@ -481,10 +394,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
             </Frame>
           </div>
         )}
-        {isAdmin && (
-          <NavRow label="Debug log" first onTap={() => setDebugPanelOpen(true)} />
-        )}
-
         <Btn kind="ghost" onClick={async () => { if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); } window.location.reload(true); }}>Clear cache &amp; reload</Btn>
         <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Sign out</Btn>
         <div className="micro" style={{ textAlign: 'center', marginTop: 4 }}>Zane · {swVersion || '…'} · Data in Supabase</div>
@@ -492,7 +401,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
       </div>
 
       {confirmEl}
-      {debugPanelOpen && <DebugPanel onClose={() => setDebugPanelOpen(false)} />}
 
       {/* ══ Active Users Sheet ══ */}
       <SettingsSheet open={activeUsersSheet} onClose={() => setActiveUsersSheet(false)} title="Active users">

@@ -921,7 +921,7 @@ function App() {
           tourKey={onboardingState.tourKey}
           go={go}
           route={route}
-          onDone={() => { setOnboardingState(null); setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s); }}
+          onDone={() => { setOnboardingState(null); go({ name: 'home' }); setStore(s => s ? { ...s, settings: { ...s.settings, onboardingCompleted: true } } : s); }}
         />
       )}
     </>
