@@ -156,6 +156,57 @@ window.TOURS.doWorkout = [
   },
 ];
 
+window.TOURS.healthTab = [
+  {
+    target: null,
+    title: 'Health Tab Tour',
+    body: "Let's walk through the Health tab — your daily log for weight, nutrition, steps, and cardio.",
+  },
+  {
+    route: 'home',
+    target: 'tab-health',
+    title: 'The Health tab',
+    body: 'Track your body metrics and nutrition alongside your training. Everything in one place.',
+    placement: 'top',
+  },
+  {
+    route: 'health',
+    target: 'health-log-btn',
+    title: 'Log your day',
+    body: 'Tap LOG to open the daily entry sheet. Record weight, steps, calories, macros, and water for any day.',
+    placement: 'top',
+  },
+  {
+    target: null,
+    title: 'Daily Log Sheet',
+    body: 'Fill in what you tracked today — body weight, step count, water intake, and your macros. Missed a day? Navigate to any past date and log it retroactively.',
+    visual: 'healthLog',
+  },
+  {
+    target: 'health-card-macros',
+    title: 'Macros & Targets',
+    body: 'Set your daily macro targets (protein / carbs / fat) and the app tracks your adherence automatically. Tap SET or EDIT in the Macros card to configure your goals.',
+    placement: 'bottom',
+  },
+  {
+    target: 'health-card-cardio',
+    title: 'Cardio Logging',
+    body: 'Log runs, rides, swims — any cardio activity. Duration, distance, pace feeling. Cardio minutes are charted over 1W / 1M / 3M views.',
+    placement: 'bottom',
+  },
+  {
+    target: null,
+    title: 'Week & Long-term View',
+    body: 'The Week card at the top summarises the current period — training sessions done, macro adherence, and cardio minutes. Switch to 1M or 3M for a longer-range overview.',
+    visual: 'healthWeek',
+  },
+  {
+    target: null,
+    title: "You're all set!",
+    body: 'Start logging daily and let the charts fill in over time. Even partial data — just weight or steps — is useful. Find the Health tab again in the bottom nav.',
+  },
+];
+
 // ─── Inline visual mockups ───────────────────────────────────────────
 function TourVisualDays() {
   const rowStyle = {
@@ -615,6 +666,67 @@ function TourVisualTrainWellDone() {
   );
 }
 
+function TourVisualHealthLog() {
+  const field = (label, value, unit) => (
+    <div style={{ display: 'flex', alignItems: 'center', padding: '8px 10px', borderBottom: `0.5px solid ${UI.hair}` }}>
+      <span style={{ flex: 1, fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft }}>{label}</span>
+      <span style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
+        <span className="num" style={{ fontSize: 14, color: UI.ink }}>{value}</span>
+        {unit && <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{unit}</span>}
+      </span>
+    </div>
+  );
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+      <div style={{ padding: '8px 10px', borderBottom: `0.5px solid ${UI.hairStrong}` }}>
+        <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.12em', color: UI.inkFaint }}>TODAY'S LOG</span>
+      </div>
+      {field('Body weight', '82.4', 'kg')}
+      {field('Steps', '9 200')}
+      {field('Calories', '2 180', 'kcal')}
+      {field('Protein', '185', 'g')}
+      {field('Carbs', '240', 'g')}
+      <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'center' }}>
+        <span style={{ flex: 1, fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft }}>Fat</span>
+        <span className="num" style={{ fontSize: 14, color: UI.ink }}>68 <span style={{ fontSize: 9, color: UI.inkFaint }}>g</span></span>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualHealthWeek() {
+  const bar = (label, pct, color) => (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+        <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint, letterSpacing: '0.07em', textTransform: 'uppercase' }}>{label}</span>
+        <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: color }}>{pct}%</span>
+      </div>
+      <div style={{ height: 5, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color }} />
+      </div>
+    </div>
+  );
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 14px' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
+        <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.12em', color: UI.inkFaint }}>THIS WEEK</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: 'var(--ok)' }}>STRONG WEEK</span>
+      </div>
+      {bar('Macro adherence', 92, 'var(--ok)')}
+      {bar('Training', 75, 'var(--accent)')}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 4 }}>
+        {[['Avg weight', '82.1', 'kg'], ['Steps avg', '9.4k', ''], ['Cardio', '85', 'min']].map(([lbl, val, unit]) => (
+          <div key={lbl} style={{ textAlign: 'center', padding: '6px 4px', background: UI.bgInset, borderRadius: 4 }}>
+            <div className="num" style={{ fontSize: 14, color: UI.ink, fontWeight: 300 }}>{val}<span style={{ fontSize: 8, color: UI.inkFaint, marginLeft: 2 }}>{unit}</span></div>
+            <div style={{ fontSize: 7.5, fontFamily: UI.fontUi, color: UI.inkGhost, letterSpacing: '0.07em', marginTop: 2, textTransform: 'uppercase' }}>{lbl}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const TOUR_VISUALS = {
   days: TourVisualDays, exercises: TourVisualExercises, drag: TourVisualDrag,
   trainOverview: TourVisualTrainOverview, trainWarmup: TourVisualTrainWarmup,
@@ -623,6 +735,7 @@ const TOUR_VISUALS = {
   trainNotes: TourVisualTrainNotes, trainNav: TourVisualTrainNav,
   trainSkip: TourVisualTrainSkip, trainEnd: TourVisualTrainEnd,
   trainFeel: TourVisualTrainFeel, trainWellDone: TourVisualTrainWellDone,
+  healthLog: TourVisualHealthLog, healthWeek: TourVisualHealthWeek,
 };
 
 // ─── OnboardingPrompt ────────────────────────────────────────────────

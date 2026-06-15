@@ -76,6 +76,18 @@ function HowToSheet({ open, onClose }) {
           </div>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </button>
+        <div className="knurl" />
+        <button onClick={() => { onClose(); window.__startTour?.('healthTab'); }} style={{
+          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          padding: '14px 0', WebkitTapHighlightColor: 'transparent',
+        }}>
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>The Health tab</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Daily logging, macro targets, cardio tracking, and week overview</div>
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
       </div>
     </SettingsSheet>
   );
@@ -342,8 +354,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
         {/* ─── Category navigation ─── */}
         <Frame style={{ padding: '0 14px' }}>
-          <NavRow label="How to…" onTap={() => setHowToSheet(true)} first />
-          <NavRow label="Changelog" hint={(window.WHATS_NEW || [])[0]?.id} onTap={() => setChangelogSheet(true)} accent />
+          <NavRow label="Changelog" hint={(window.WHATS_NEW || [])[0]?.id} onTap={() => setChangelogSheet(true)} accent first />
+          <NavRow label="How to…" onTap={() => setHowToSheet(true)} />
           {hasActiveUsersAccess && (
             <NavRow label="Active users" hint={activeCount > 0 ? `${activeCount} active` : null} onTap={() => setActiveUsersSheet(true)} />
           )}

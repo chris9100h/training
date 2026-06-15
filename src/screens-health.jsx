@@ -698,7 +698,7 @@ function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
           />
         </div>
         <div style={{ flex: 1 }} />
-        {onLog && <button onClick={onLog} style={{
+        {onLog && <button data-tour="health-log-btn" onClick={onLog} style={{
           height: 34, borderRadius: 4, border: 'none',
           background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
           color: '#0a0805', cursor: 'pointer', padding: '0 14px',
@@ -1036,7 +1036,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         <div style={{ padding: capturing ? '8px 16px 16px' : '8px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
           <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {cardOrder.map(id => cardEls[id] ? (
-              <div key={id} data-reorder-item="true">{cardEls[id]}</div>
+              <div key={id} data-reorder-item="true" data-tour={`health-card-${id}`}>{cardEls[id]}</div>
             ) : null)}
           </ReorderList>
         </div>
