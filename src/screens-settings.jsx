@@ -191,6 +191,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   );
   const [signupApproval, setSignupApproval] = useStateSet(null); // null = loading, bool = current
   const [recentSignups, setRecentSignups] = useStateSet([]);
+  const [signupsSheet, setSignupsSheet] = useStateSet(false);
   const [seenSignups, setSeenSignups] = useStateSet(() => {
     try { return new Set(JSON.parse(localStorage.getItem('logbook-seen-signups') || '[]')); } catch (_) { return new Set(); }
   });
@@ -638,28 +639,11 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 When on, new sign-ups land on a waiting screen until you approve them here. When off, new accounts are activated immediately. Existing pending users are unaffected.
               </div>
               {(() => {
-                const unseen = recentSignups.filter(u => !seenSignups.has(u.user_id));
+                const unseenCount = recentSignups.filter(u => !seenSignups.has(u.user_id)).length;
                 return (
-                  <div style={{ marginTop: 18 }}>
-                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>RECENT SIGN-UPS</div>
-                    {unseen.length === 0 ? (
-                      <div className="micro" style={{ color: UI.inkGhost }}>Nothing new — you're all caught up.</div>
-                    ) : unseen.map(u => (
-                      <div key={u.user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: `0.5px solid ${UI.hair}` }}>
-                        <div style={{ width: 32, height: 32, borderRadius: 16, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: UI.inkSoft }}>{(u.name || u.email || '?')[0].toUpperCase()}</span>
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</span>
-                            <span className="micro" style={{ flexShrink: 0, color: u.approved ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.75)' }}>{u.approved ? 'ACTIVE' : 'PENDING'}</span>
-                          </div>
-                          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email} · {fmtAgo(u.created_at)}</div>
-                        </div>
-                        <button onClick={() => markSignupSeen(u.user_id)} style={{ ...accentBtn, padding: '5px 10px' }}>Got it</button>
-                      </div>
-                    ))}
-                  </div>
+                  <Row label="Recent sign-ups">
+                    <button style={accentBtn} onClick={() => setSignupsSheet(true)}>{unseenCount > 0 ? `${unseenCount} new` : 'View'}</button>
+                  </Row>
                 );
               })()}
             </>
@@ -960,6 +944,35 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>Always train past that number. Push to failure or near-failure on each set. The algo only bumps weight when <em>all</em> sets hit the top of the range — so getting extra reps is how you earn the next weight.</div>
         </div>
         <Btn onClick={() => setProgDisclaimer(false)}>Got it</Btn>
+      </SettingsSheet>
+
+      {/* ══ Recent sign-ups sheet (admin) ══ */}
+      <SettingsSheet open={signupsSheet} onClose={() => setSignupsSheet(false)} title="Recent sign-ups">
+        {(() => {
+          const unseen = recentSignups.filter(u => !seenSignups.has(u.user_id));
+          if (unseen.length === 0) {
+            return <div className="micro" style={{ color: UI.inkGhost, padding: '4px 0 12px' }}>Nothing new — you're all caught up.</div>;
+          }
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+              {unseen.map((u, i) => (
+                <div key={u.user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 17, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, color: UI.inkSoft }}>{(u.name || u.email || '?')[0].toUpperCase()}</span>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</span>
+                      <span className="micro" style={{ flexShrink: 0, color: u.approved ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.75)' }}>{u.approved ? 'ACTIVE' : 'PENDING'}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email} · {fmtAgo(u.created_at)}</div>
+                  </div>
+                  <button onClick={() => markSignupSeen(u.user_id)} style={{ ...accentBtn, padding: '5px 10px' }}>Got it</button>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </SettingsSheet>
 
       {/* ══ Push notifications sheet ══ */}
