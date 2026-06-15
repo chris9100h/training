@@ -2208,17 +2208,11 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions) {
     const prevEnded = sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= prevWs && d < ws; });
     if (thisEnded.length) out.days_trained = thisEnded.length;
     if (thisEnded.length > 0 || prevEnded.length > 0) {
-      const sessionVol = s => {
-        if (s.aggVolume != null) return s.aggVolume;
-        return (s.entries || []).reduce((t, e) =>
-          t + (e.sets || []).filter(x => x.done && !x.warmup).reduce((sv, x) => {
-            const kg = x.kg || 0;
-            const reps = x.reps || ((x.reps_l || 0) + (x.reps_r || 0));
-            return sv + kg * reps;
-          }, 0), 0);
-      };
-      const thisVol = thisEnded.reduce((n, s) => n + sessionVol(s), 0);
-      const prevVol = prevEnded.reduce((n, s) => n + sessionVol(s), 0);
+      // Reuse the canonical totalVolume(): effReps = min(L,R) for unilateral
+      // sets (weaker side is the bottleneck) and the server-aggregate fallback
+      // for sessions windowed out of the boot load.
+      const thisVol = thisEnded.reduce((n, s) => n + totalVolume(s), 0);
+      const prevVol = prevEnded.reduce((n, s) => n + totalVolume(s), 0);
       const thisAvg = thisEnded.length ? thisVol / thisEnded.length : 0;
       const prevAvg = prevEnded.length ? prevVol / prevEnded.length : 0;
       const diff = (thisAvg > 0 || prevAvg > 0)

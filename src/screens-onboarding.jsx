@@ -974,12 +974,27 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
     let cancelled = false;
     let rafId = null;
     let attempts = 0;
+    let scrolled = false;
     const tryFind = () => {
       if (cancelled) return;
       const el = document.querySelector(`[data-tour="${step.target}"]`);
       if (el) {
         const r = el.getBoundingClientRect();
-        if (r.width > 0 && r.height > 0) { setTargetRect(r); return; }
+        if (r.width > 0 && r.height > 0) {
+          // Pull the target into a comfortable band once, so both the spotlight
+          // and its tooltip fit on screen — cards low on the Health screen would
+          // otherwise sit half behind the nav bar. Fixed nav tabs don't scroll,
+          // which is fine (their rect stays put).
+          const vh = window.innerHeight;
+          if (!scrolled && (r.top < 96 || r.bottom > vh - 200)) {
+            scrolled = true;
+            el.scrollIntoView({ block: 'center' });
+            retryRef.current = setTimeout(tryFind, 140);
+            return;
+          }
+          setTargetRect(r);
+          return;
+        }
       }
       attempts++;
       if (attempts < 30) { retryRef.current = setTimeout(tryFind, 80); }
