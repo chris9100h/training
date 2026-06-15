@@ -734,7 +734,6 @@ function TourCompleteScreen({ title, onDone }) {
   }, []);
   return (
     <div
-      onPointerDown={(e) => { e.preventDefault(); try { onDone(); } catch (_) {} }}
       style={{
         position: 'fixed', inset: 0, zIndex: 10000,
         background: 'linear-gradient(165deg, var(--accent-light) 0%, var(--accent) 48%, var(--accent-deep) 100%)',
@@ -754,9 +753,6 @@ function TourCompleteScreen({ title, onDone }) {
       </div>
       <div style={{ fontFamily: UI.fontUi, fontSize: 14.5, color: 'rgba(10,8,5,0.78)', fontWeight: 600, letterSpacing: '0.03em', maxWidth: 300, lineHeight: 1.5 }}>
         You're all set — go crush your next session.
-      </div>
-      <div style={{ marginTop: 6, fontFamily: UI.fontUi, fontSize: 11, color: 'rgba(10,8,5,0.5)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-        Tap to finish
       </div>
     </div>
   );
@@ -859,14 +855,6 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
           WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
         }} aria-label="Back">←</button>
       )}
-      <button onPointerDown={tap(onDone)} style={{
-        flex: 1, padding: compact ? '9px 0' : '11px 0', borderRadius: compact ? 4 : 6,
-        border: `1px solid ${UI.hairStrong}`, cursor: 'pointer',
-        background: 'transparent',
-        color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: compact ? 10 : 11, fontWeight: 600,
-        letterSpacing: '0.08em', textTransform: 'uppercase',
-        WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-      }}>Skip</button>
       <button onPointerDown={tap(advance)} style={{
         flex: 2, padding: compact ? '9px 0' : '11px 0', borderRadius: compact ? 4 : 6,
         border: 'none', cursor: 'pointer',
