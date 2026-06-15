@@ -163,10 +163,16 @@ window.TOURS.healthTab = [
     body: "Let's walk through the Health tab — your daily log for weight, nutrition, steps, and cardio.",
   },
   {
+    target: null,
+    title: 'Enable the Health tab',
+    body: 'The Health tab is hidden by default. Go to Settings → Health and toggle "Show Health tab" to pin it to the bottom navigation.',
+    visual: 'healthEnable',
+  },
+  {
     route: 'home',
     target: 'tab-health',
     title: 'The Health tab',
-    body: 'Track your body metrics and nutrition alongside your training. Everything in one place.',
+    body: 'Once enabled, the Health tab appears in the bottom nav. Tap it to open your daily log and charts.',
     placement: 'top',
   },
   {
@@ -191,7 +197,7 @@ window.TOURS.healthTab = [
   {
     target: null,
     title: 'Cardio Logging',
-    body: 'Log runs, rides, swims — any cardio activity. Duration, distance, pace, effort. Cardio minutes are charted over 1W / 1M / 3M views. Tap the running icon on any day to add a cardio entry.',
+    body: 'Log cardio from the Home screen — tap the golden CARDIO button at the bottom. Start a live timer or log manually. The Health tab shows your cardio minutes as a chart.',
     visual: 'healthCardio',
   },
   {
@@ -666,29 +672,54 @@ function TourVisualTrainWellDone() {
   );
 }
 
-function TourVisualHealthCardio() {
-  const rows = [
-    { type: 'Run', duration: '35 min', dist: '5.2 km', effort: 7 },
-    { type: 'Bike', duration: '48 min', dist: '18 km', effort: 5 },
-  ];
+function TourVisualHealthEnable() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {rows.map((r, i) => (
-        <div key={i} style={{
-          display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
-          background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6,
-        }}>
-          <i className="fa-solid fa-person-running" style={{ fontSize: 16, color: 'var(--accent)', width: 20, textAlign: 'center' }} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.ink }}>{r.type}</div>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{r.dist} · effort {r.effort}/10</div>
-          </div>
-          <span className="num" style={{ fontSize: 14, color: UI.inkSoft }}>{r.duration}</span>
+      <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+        <div style={{ padding: '8px 12px', borderBottom: `0.5px solid ${UI.hair}` }}>
+          <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.12em', color: UI.inkFaint }}>SETTINGS → HEALTH</span>
         </div>
-      ))}
-      <div style={{ display: 'flex', gap: 5, padding: '6px 2px' }}>
-        <span style={{ color: 'var(--accent)', fontSize: 16, lineHeight: 1, fontWeight: 300 }}>+</span>
-        <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.10em', fontWeight: 600, alignSelf: 'center' }}>LOG CARDIO</span>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '12px 14px', gap: 10 }}>
+          <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: UI.ink }}>Show Health tab</span>
+          <div style={{ width: 44, height: 26, borderRadius: 13, background: 'var(--accent)', position: 'relative', flexShrink: 0 }}>
+            <div style={{ position: 'absolute', right: 3, top: 3, width: 20, height: 20, borderRadius: '50%', background: '#0a0805' }} />
+          </div>
+        </div>
+      </div>
+      <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, padding: '0 2px' }}>
+        After enabling, the Health tab appears in the bottom navigation bar.
+      </div>
+    </div>
+  );
+}
+
+function TourVisualHealthCardio() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '0 2px' }}>Home screen — bottom of the page</div>
+      <div style={{
+        width: '100%', padding: '11px 16px',
+        background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+        border: '1px solid rgba(var(--accent-rgb),0.6)',
+        borderRadius: 8,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+      }}>
+        <i className="fa-solid fa-person-running" style={{ fontSize: 13, color: 'rgba(10,8,5,0.6)' }} />
+        <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
+      </div>
+      <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+        {[
+          { icon: 'fa-stopwatch', label: 'Start live', accent: true },
+          { icon: 'fa-pen', label: 'Log manually', accent: false },
+        ].map((item, i) => (
+          <div key={i} style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
+            borderBottom: i === 0 ? `0.5px solid ${UI.hair}` : 'none',
+          }}>
+            <i className={`fa-solid ${item.icon}`} style={{ fontSize: 12, color: item.accent ? 'var(--accent)' : UI.inkFaint, width: 14, textAlign: 'center' }} />
+            <span style={{ fontSize: 12, fontFamily: UI.fontUi, color: item.accent ? 'var(--accent)' : UI.inkSoft }}>{item.label}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -764,7 +795,7 @@ const TOUR_VISUALS = {
   trainSkip: TourVisualTrainSkip, trainEnd: TourVisualTrainEnd,
   trainFeel: TourVisualTrainFeel, trainWellDone: TourVisualTrainWellDone,
   healthLog: TourVisualHealthLog, healthWeek: TourVisualHealthWeek,
-  healthCardio: TourVisualHealthCardio,
+  healthCardio: TourVisualHealthCardio, healthEnable: TourVisualHealthEnable,
 };
 
 // ─── OnboardingPrompt ────────────────────────────────────────────────
