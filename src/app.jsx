@@ -326,6 +326,7 @@ function App() {
   const [onboardingState, setOnboardingState] = useStateA(null); // null | { phase:'prompt' } | { phase:'tour', tourKey }
   const onboardingChecked = useRefA(false);
   const [unitPromptOpen, setUnitPromptOpen] = useStateA(false);
+  const unitPicked                = useRefA(false); // user chose a unit this session — silences the reset watcher
   const retryTimer                = useRefA(null);  // one-shot retry after a failed sync
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
@@ -601,11 +602,13 @@ function App() {
         // login without a page reload), so without this a new/approved user
         // logging in after a previous 'ready' session would never be prompted.
         onboardingChecked.current = false;
+        unitPicked.current = false; // re-arm unit watcher for the new account
         setUserId(session.user.id);
         if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
         else loadData(session.user.id);
       } else if (event === 'SIGNED_OUT') {
         onboardingChecked.current = false;
+        unitPicked.current = false;
         // An offline SIGNED_OUT is almost always a failed token refresh, not a
         // real sign-out — never wipe the cache or drop to the login screen.
         if (!navigator.onLine) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
@@ -705,12 +708,15 @@ function App() {
   // SW-update check) and clear it locally when the server says null — the
   // picker effect above then fires. Stops polling once the unit is null.
   useEffectA(() => {
-    if (phase !== 'ready' || !userId || store?.settings?.unit == null) return;
+    if (phase !== 'ready' || !userId || store?.settings?.unit == null || unitPicked.current) return;
     const recheck = () => {
-      if (document.visibilityState !== 'visible') return;
+      // Don't fight a just-made local choice: the server is briefly still null
+      // until the pick syncs, which would otherwise reset us and re-open the
+      // picker in a loop. unitPicked latches that the user has decided.
+      if (document.visibilityState !== 'visible' || unitPicked.current) return;
       LB.supabase.from('zane_user_settings').select('unit').eq('user_id', userId).maybeSingle()
         .then(({ data, error }) => {
-          if (error || !data || data.unit != null) return;
+          if (error || !data || data.unit != null || unitPicked.current) return;
           setStore(s => (s && s.settings?.unit != null) ? { ...s, settings: { ...s.settings, unit: null } } : s);
         })
         .catch(() => {});
@@ -996,6 +1002,7 @@ function App() {
       {unitPromptOpen && window.Screens?.UnitPromptModal && (
         <window.Screens.UnitPromptModal
           onDone={(chosenUnit) => {
+            unitPicked.current = true; // latch before setStore so the reset watcher won't re-null
             setUnitPromptOpen(false);
             setStore(s => s ? { ...s, settings: { ...s.settings, unit: chosenUnit } } : s);
           }}
