@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.324',
+    title: 'Guided Tours & Unit Preference',
+    items: [
+      'New guided tours in Settings → How to… — interactive walkthroughs that navigate the real app and spotlight the exact elements.',
+      'Three guides available: create a training plan, do a workout, and a full tour of the Health tab.',
+      'Unit system prompt: on your next login, the app asks whether you train in kg/km or lbs/mi — one tap, saved immediately.',
+      'The registration form now includes the same choice so new accounts start with the right unit from day one.',
+    ],
+  },
+  {
     id: 'v2.276',
     title: 'Weight fill-down control',
     items: [
