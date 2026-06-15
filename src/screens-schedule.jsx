@@ -69,7 +69,7 @@ function PlanScreen({ store, setStore, go }) {
               borderRadius: 4, padding: '5px 10px', cursor: 'pointer',
               color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
             }}>Import</button>
-            <button onClick={() => go({ name: 'schedule-new' })} style={{
+            <button data-tour="plan-new-btn" onClick={() => go({ name: 'schedule-new' })} style={{
               width: 32, height: 32, borderRadius: 4,
               border: `1px solid ${UI.goldSoft}`, background: UI.goldFaint,
               color: UI.gold, cursor: 'pointer', fontSize: 20, lineHeight: 1,
@@ -1713,12 +1713,14 @@ function ScheduleNewScreen({ store, setStore, go }) {
     <Screen>
       <TopBar title="New plan" onBack={() => go({ name: 'plan' })} />
       <div style={{ padding: '22px 22px', display: 'flex', flexDirection: 'column', gap: 22 }}>
-        <Field label="Plan name">
-          <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. YEEZUSCREW" autoFocus />
-        </Field>
+        <div data-tour="schedule-name">
+          <Field label="Plan name">
+            <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. YEEZUSCREW" autoFocus />
+          </Field>
+        </div>
 
         <Field label="Type">
-          <div style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: 3 }}>
+          <div data-tour="schedule-mode" style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: 3 }}>
             {[
               { key: 'cycle',   label: 'Cycle',    sub: 'repeating N-day cycle' },
               { key: 'weekday', label: 'Weekdays', sub: 'fixed days of the week' },

@@ -830,8 +830,9 @@ function App() {
     return () => clearInterval(iv);
   }, [isCoachActive]);
 
-  // Exposed globally so Settings → How to… can launch any tour
-  window.__startTour = (tourKey) => setOnboardingState({ phase: 'tour', tourKey });
+  // Exposed globally so Settings → How to… can launch any tour.
+  // Also clears WhatsNew so it doesn't block the tour overlay (z-index).
+  window.__startTour = (tourKey) => { setWhatsNew(null); setOnboardingState({ phase: 'tour', tourKey }); };
 
   // helper for in-sheet "+ new exercise"
   window.__createExercise = (name) => {
