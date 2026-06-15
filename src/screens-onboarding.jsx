@@ -745,8 +745,13 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
 
   if (!step) return null;
 
-  // Shared button row
-  const BtnRow = ({ compact }) => (
+  // Shared button row. IMPORTANT: this is a render *helper* called as a plain
+  // function — never render it as <BtnRow/>. A component defined inside render
+  // gets a new identity every render, so React would unmount/remount the button
+  // subtree on each parent re-render (store sync, sync-status, realtime, …). A
+  // tap whose pointerdown→click straddles such a remount is silently dropped —
+  // that was the "visible buttons don't respond, must kill the app" bug.
+  const renderBtnRow = (compact) => (
     <div style={{ display: 'flex', gap: 8, marginTop: compact ? 0 : 4 }}>
       {stepIdx > 0 && (
         <button onClick={goBack} style={{
@@ -822,7 +827,7 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
           {/* Pinned footer — buttons are NEVER inside the scroll region, so they
               can't fall below the fold and trap the user on a tall step */}
           <div style={{ flexShrink: 0, padding: '12px 22px 22px', borderTop: `0.5px solid ${UI.hair}` }}>
-            <BtnRow compact={false} />
+            {renderBtnRow(false)}
           </div>
         </div>
       </div>
@@ -919,7 +924,7 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
         <div style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55, whiteSpace: 'pre-line' }}>
           {step.body}
         </div>
-        <BtnRow compact={true} />
+        {renderBtnRow(true)}
       </div>
     </>
   );
