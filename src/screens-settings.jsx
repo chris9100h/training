@@ -179,6 +179,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
+  const [unitPickerOpen, setUnitPickerOpen] = useStateSet(false);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
 
   useEffectSet(() => {
@@ -607,12 +608,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <Row label="Warmup sets in summary">
             <Toggle on={showWarmupInSummary} onToggle={() => { const n = !showWarmupInSummary; setShowWarmupInSummary(n); setStore(s => ({ ...s, settings: { ...s.settings, showWarmupInSummary: n } })); }} />
           </Row>
-          <Row label="Use lbs (pounds)">
-            <Toggle on={store.settings?.unit === 'lbs'} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, unit: s.settings?.unit === 'lbs' ? 'kg' : 'lbs' } }))} />
-          </Row>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-            Show weights in lbs instead of kg. Display label only — enter values directly in lbs (no conversion of existing numbers).
-          </div>
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setTrainingSheet(false)}>Done</Btn>
           </div>
@@ -641,6 +636,11 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <Row label="OLED black background">
             <Toggle on={darkMode === 'black'} onToggle={() => { const n = darkMode === 'black' ? 'dark' : 'black'; setDarkMode(n); localStorage.setItem('logbook-dark-mode', n); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: n } })); }} />
           </Row>
+          <Row label="Unit preference">
+            <button style={accentBtn} onClick={() => setUnitPickerOpen(true)}>
+              {store.settings?.unit === 'lbs' ? 'Imperial' : 'Metric'}
+            </button>
+          </Row>
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setAppearanceSheet(false)}>Done</Btn>
           </div>
@@ -663,6 +663,17 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
       {/* ══ Changelog Sheet ══ */}
       <ChangelogSheet open={changelogSheet} onClose={() => setChangelogSheet(false)} />
+
+      {/* ══ Unit picker modal ══ */}
+      {unitPickerOpen && window.Screens?.UnitPromptModal && (
+        <window.Screens.UnitPromptModal
+          onDone={(chosenUnit) => {
+            setUnitPickerOpen(false);
+            localStorage.setItem('logbook-unit-prompted', '1');
+            setStore(s => s ? { ...s, settings: { ...s.settings, unit: chosenUnit } } : s);
+          }}
+        />
+      )}
 
       {/* ══ Auto-end session sheet ══ */}
       <SettingsSheet open={timeoutSheet} onClose={() => setTimeoutSheet(false)} title="Auto-end session">
