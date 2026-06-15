@@ -641,9 +641,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
               {(() => {
                 const unseenCount = recentSignups.filter(u => !seenSignups.has(u.user_id)).length;
                 return (
-                  <Row label="Recent sign-ups">
-                    <button style={accentBtn} onClick={() => setSignupsSheet(true)}>{unseenCount > 0 ? `${unseenCount} new` : 'View'}</button>
-                  </Row>
+                  <>
+                    <Hairline style={{ margin: '14px 0' }} />
+                    <Row label="Recent sign-ups" first>
+                      <button style={accentBtn} onClick={() => setSignupsSheet(true)}>{unseenCount > 0 ? `${unseenCount} new` : 'View'}</button>
+                    </Row>
+                  </>
                 );
               })()}
             </>
