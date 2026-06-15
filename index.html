@@ -71,6 +71,14 @@
       box-shadow: none;
     }
   }
+  /* Installed PWA: #root (position:fixed) draws --bg; the body behind it is the
+     slightly darker --bg-body. On iOS, WebKit can momentarily inset/shift #root
+     below the status bar after a visualViewport change (keyboard), revealing the
+     body as a band behind the clock. Match the body to --bg there so the reveal
+     is invisible. (Browser/desktop keep the darker "phone frame" surround.) */
+  @media (display-mode: standalone) {
+    html, body { background: var(--bg); }
+  }
   * { box-sizing: border-box; }
   input[type=number]::-webkit-outer-spin-button,
   input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
@@ -244,6 +252,28 @@ window.applyDarkMode = function(key) {
   if (tc) tc.content = m.bg;
 };
 window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
+</script>
+<script>
+// iOS standalone PWA viewport guard.
+// Focusing a native input (e.g. the email/password fields on login, or an input
+// inside a bottom sheet) shrinks the visualViewport. WebKit can then leave our
+// position:fixed #root inset/shifted below the safe area — black bands top and
+// bottom that persist after the keyboard closes (most visible after a
+// logout→login). When nothing is focused (keyboard closed) re-pin the page to
+// the top so #root snaps back to full-screen. Guarded so it never fights the
+// keyboard scrolling a focused field into view.
+(function () {
+  var vv = window.visualViewport;
+  if (!vv) return;
+  var repin = function () {
+    var ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+    if (window.pageYOffset || window.pageXOffset || vv.offsetTop) window.scrollTo(0, 0);
+  };
+  vv.addEventListener('resize', repin);
+  vv.addEventListener('scroll', repin);
+  window.addEventListener('focusout', function () { setTimeout(repin, 50); });
+})();
 </script>
 <!-- React 18 — production builds: ~10x smaller and faster to parse than the
      development builds, with no dev-mode runtime overhead. -->

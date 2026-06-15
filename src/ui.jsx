@@ -552,7 +552,13 @@ function Sheet({ open, onClose, title, titleColor, children }) {
     const vv = window.visualViewport;
     if (!vv) return;
     const update = () => {
-      setKbHeight(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+      // Only treat the innerHeight↔visualViewport gap as keyboard height while a
+      // field is actually focused. Otherwise a persistent iOS viewport offset
+      // (the safe-area shift bug) would be misread as a keyboard, padding a black
+      // gap below the sheet.
+      const ae = document.activeElement;
+      const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
+      setKbHeight(typing ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0);
       setVvHeight(vv.height);
     };
     vv.addEventListener('resize', update);
