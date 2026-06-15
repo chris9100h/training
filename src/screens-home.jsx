@@ -919,11 +919,13 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
 // Keyed by lowercase email → image path (must also be listed in sw.js ASSETS).
 const TRAIN_BG_OVERRIDES = {
   'mikeapicelli777@gmail.com': 'icons/IMG_6389.png',
+  'office@btc-prime.biz': 'icons/IMG_6389.png',
 };
 
 function HomeScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const trainBg = TRAIN_BG_OVERRIDES[(store.user?.email || '').toLowerCase()] || 'icons/zane-logo.png';
+  const isCustomBg = trainBg !== 'icons/zane-logo.png';
   const today = LB.todaysDay(store);
   const sch = today?.schedule;
   const day = today?.day;
@@ -1452,7 +1454,9 @@ function HomeScreen({ store, setStore, go, userId }) {
     <Screen scroll={false} style={{ position: 'relative' }}>
       {/* Background ZANE watermark (per-user override via TRAIN_BG_OVERRIDES) */}
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
-        <img src={trainBg} style={{ width: '85%', maxWidth: 320, opacity: 0.04, filter: 'grayscale(1) brightness(3)', objectFit: 'contain' }} />
+        <img src={trainBg} style={isCustomBg
+          ? { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' }
+          : { width: '85%', maxWidth: 320, opacity: 0.04, filter: 'grayscale(1) brightness(3)', objectFit: 'contain' }} />
       </div>
 
       {/* Header */}
