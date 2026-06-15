@@ -6,6 +6,19 @@ const { useState: useStateSet, useEffect: useEffectSet, useRef: useRefSet } = Re
 
 const fmtSec = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+// Short "time since" label for the admin sign-up feed.
+const fmtAgo = (iso) => {
+  if (!iso) return '';
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+};
+
 function Toggle({ on, onToggle }) {
   return (
     <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
@@ -177,6 +190,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
     () => localStorage.getItem('logbook-active-users-access') === 'true'
   );
   const [signupApproval, setSignupApproval] = useStateSet(null); // null = loading, bool = current
+  const [recentSignups, setRecentSignups] = useStateSet([]);
+  const [seenSignups, setSeenSignups] = useStateSet(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('logbook-seen-signups') || '[]')); } catch (_) { return new Set(); }
+  });
   const [nowS, setNowS] = useStateSet(Date.now());
   const [importing, setImporting] = useStateSet(false);
   const [swVersion, setSwVersion] = useStateSet('');
@@ -226,6 +243,22 @@ function SettingsScreen({ store, setStore, go, userId }) {
     LB.supabase.rpc('get_signup_requires_approval').then(({ data, error }) => { if (mounted && !error) setSignupApproval(data !== false); }).catch(() => {});
     return () => { mounted = false; };
   }, [isAdmin]);
+
+  // Admin-only: recent sign-ups feed. Reloaded each time the Account sheet opens.
+  useEffectSet(() => {
+    if (!isAdmin || !accountSheet) return;
+    let mounted = true;
+    LB.supabase.rpc('get_recent_signups', { p_limit: 50 }).then(({ data, error }) => { if (mounted && !error) setRecentSignups(data || []); }).catch(() => {});
+    return () => { mounted = false; };
+  }, [isAdmin, accountSheet]);
+
+  const markSignupSeen = (uid) => {
+    setSeenSignups(prev => {
+      const next = new Set(prev); next.add(uid);
+      try { localStorage.setItem('logbook-seen-signups', JSON.stringify([...next])); } catch (_) {}
+      return next;
+    });
+  };
 
   const toggleSignupApproval = async () => {
     const next = !signupApproval;
@@ -604,6 +637,31 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
                 When on, new sign-ups land on a waiting screen until you approve them here. When off, new accounts are activated immediately. Existing pending users are unaffected.
               </div>
+              {(() => {
+                const unseen = recentSignups.filter(u => !seenSignups.has(u.user_id));
+                return (
+                  <div style={{ marginTop: 18 }}>
+                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>RECENT SIGN-UPS</div>
+                    {unseen.length === 0 ? (
+                      <div className="micro" style={{ color: UI.inkGhost }}>Nothing new — you're all caught up.</div>
+                    ) : unseen.map(u => (
+                      <div key={u.user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: `0.5px solid ${UI.hair}` }}>
+                        <div style={{ width: 32, height: 32, borderRadius: 16, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: UI.inkSoft }}>{(u.name || u.email || '?')[0].toUpperCase()}</span>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</span>
+                            <span className="micro" style={{ flexShrink: 0, color: u.approved ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.75)' }}>{u.approved ? 'ACTIVE' : 'PENDING'}</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email} · {fmtAgo(u.created_at)}</div>
+                        </div>
+                        <button onClick={() => markSignupSeen(u.user_id)} style={{ ...accentBtn, padding: '5px 10px' }}>Got it</button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </>
           )}
           <div style={{ marginTop: 24 }}>
