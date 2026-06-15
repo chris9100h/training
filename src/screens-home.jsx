@@ -919,7 +919,6 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
 // Keyed by lowercase email → image path (must also be listed in sw.js ASSETS).
 const TRAIN_BG_OVERRIDES = {
   'mikeapicelli777@gmail.com': 'icons/IMG_6389.png',
-  'office@btc-prime.biz': 'icons/IMG_6389.png',
 };
 
 function HomeScreen({ store, setStore, go, userId }) {
