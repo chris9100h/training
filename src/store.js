@@ -2186,7 +2186,7 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions) {
   const r1 = v => Math.round(v * 10) / 10;
   const out = {};
   const todayStr = todayISO();
-  const todayLogEntry = week.find(l => l.date === todayStr);
+  const todayLogEntry = dailyLogs.find(l => l.date === todayStr);
   if (todayLogEntry?.weight != null) out.weight_today = r1(todayLogEntry.weight);
   const weekW = avg(week, 'weight'); if (weekW != null) out.weight_avg_last_week = r1(weekW);
   const stepsLogs = week.filter(l => l.steps != null);
