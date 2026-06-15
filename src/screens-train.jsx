@@ -1278,19 +1278,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           Inside <Screen> (overflow:hidden), iOS WebKit clips position:fixed
           children to the screen box, capping the flash at the clock. */}
       {screenFlash && ReactDOM.createPortal(
-        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />,
+        <div style={{ position: 'fixed', top: 'calc(-1 * env(safe-area-inset-top, 0px))', left: 0, right: 0, bottom: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />,
         document.body
       )}
       {/* Block keyboard and content interaction while any overlay is visible */}
       {(improvedSet || regressionSet || newBestSet || !!progressionUnlocked) && ReactDOM.createPortal(
-        <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} />,
+        <div style={{ position: 'fixed', top: 'calc(-1 * env(safe-area-inset-top, 0px))', left: 0, right: 0, bottom: 0, zIndex: 100 }} />,
         document.body
       )}
 
       {/* New best (personal record) overlay */}
       {newBestSet && ReactDOM.createPortal(
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 155, pointerEvents: 'none',
+          position: 'fixed', top: 'calc(-1 * env(safe-area-inset-top, 0px))', left: 0, right: 0, bottom: 0, zIndex: 155, pointerEvents: 'none',
           background: 'rgb(8,6,3)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
@@ -1315,7 +1315,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {improvedSet && ReactDOM.createPortal(
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
+          position: 'fixed', top: 'calc(-1 * env(safe-area-inset-top, 0px))', left: 0, right: 0, bottom: 0, zIndex: 150, pointerEvents: 'none',
           background: 'rgb(8,6,3)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
@@ -1341,7 +1341,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* Regression overlay */}
       {regressionSet && ReactDOM.createPortal(
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
+          position: 'fixed', top: 'calc(-1 * env(safe-area-inset-top, 0px))', left: 0, right: 0, bottom: 0, zIndex: 150, pointerEvents: 'none',
           background: 'rgb(8,6,3)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
@@ -1366,7 +1366,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* Progression unlocked overlay */}
       {progressionUnlocked && ReactDOM.createPortal(
         <div onClick={() => { setProgressionUnlocked(null); if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); } }} style={{
-          position: 'fixed', inset: 0, zIndex: 160,
+          position: 'fixed', top: 'calc(-1 * env(safe-area-inset-top, 0px))', left: 0, right: 0, bottom: 0, zIndex: 160,
           background: 'rgb(8,6,3)',
           animation: 'improvedFade 4s ease forwards',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
