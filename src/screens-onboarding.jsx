@@ -754,7 +754,7 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
   const renderBtnRow = (compact) => (
     <div style={{ display: 'flex', gap: 8, marginTop: compact ? 0 : 4 }}>
       {stepIdx > 0 && (
-        <button onPointerUp={e => { e.preventDefault(); goBack(); }} style={{
+        <button onClick={goBack} style={{
           flex: '0 0 auto', padding: compact ? '9px 13px' : '11px 15px', borderRadius: compact ? 4 : 6,
           border: `1px solid ${UI.hairStrong}`, cursor: 'pointer',
           background: 'transparent',
@@ -762,7 +762,7 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
           WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
         }} aria-label="Back">←</button>
       )}
-      <button onPointerUp={e => { e.preventDefault(); onDone(); }} style={{
+      <button onClick={onDone} style={{
         flex: 1, padding: compact ? '9px 0' : '11px 0', borderRadius: compact ? 4 : 6,
         border: `1px solid ${UI.hairStrong}`, cursor: 'pointer',
         background: 'transparent',
@@ -770,7 +770,7 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
         letterSpacing: '0.08em', textTransform: 'uppercase',
         WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
       }}>Skip</button>
-      <button onPointerUp={e => { e.preventDefault(); advance(); }} style={{
+      <button onClick={advance} style={{
         flex: 2, padding: compact ? '9px 0' : '11px 0', borderRadius: compact ? 4 : 6,
         border: 'none', cursor: 'pointer',
         background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
@@ -784,77 +784,56 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
   const VisualComp = step.visual ? TOUR_VISUALS[step.visual] : null;
 
   // ── Centered modal (no target / fallback) ──
-  // Drive this off `step.target` directly, NOT only the async targetRect: a
-  // step that never has a target must show its buttons on the very first
-  // render. Otherwise a render where targetRect is still `undefined` would
-  // leave the user on the buttonless loading overlay with no way out (they'd
-  // have to kill the app). Spotlight steps still reach this via targetRect===null.
+  // Structure is intentionally identical to WhatsNewModal (a modal that works
+  // reliably in this app): a backdrop directly on the outer element, ONE
+  // scrolling card, buttons inside that card, plain onClick. The outer element
+  // is a tap-to-dismiss escape hatch; the card stops propagation so taps inside
+  // it never dismiss. No nested scroll regions / compositing layers / pointer
+  // hacks — those were what broke the buttons.
   if (!step.target || targetRect === null) {
     return (
-      <div style={{
-        // Above EVERY other app overlay (UpdateBanner is 9999) so nothing can
-        // cover the tour and swallow its taps.
+      <div onClick={onDone} style={{
         position: 'fixed', inset: 0, zIndex: 10000,
+        background: 'rgba(0,0,0,0.82)',
+        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 24,
+        padding: 24, overflowY: 'auto',
       }}>
-        {/* Backdrop is its own layer AND a guaranteed escape hatch: tapping the
-            dark area anywhere outside the card dismisses the tour. This means the
-            user can NEVER get trapped, regardless of why a card button might not
-            register a tap. It's a sibling (not an ancestor) of the card, so the
-            card's own buttons still hit-test correctly. */}
-        <div onPointerUp={e => { e.preventDefault(); onDone(); }} style={{
-          position: 'absolute', inset: 0,
-          background: 'rgba(0,0,0,0.82)',
-          backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-        }} />
-        <div style={{
-          position: 'relative', zIndex: 1,
-          width: '100%', maxWidth: 340,
-          maxHeight: 'calc(100dvh - 48px)',
+        <div onClick={e => e.stopPropagation()} style={{
+          width: '100%', maxWidth: 340, maxHeight: '88vh', overflowY: 'auto',
           background: UI.bgRaised,
           border: `1px solid ${UI.goldSoft}`,
           borderRadius: 6,
-          display: 'flex', flexDirection: 'column',
-          overflow: 'hidden',
+          padding: '24px 22px',
+          display: 'flex', flexDirection: 'column', gap: 12,
           boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
           animation: 'fadeUp 0.25s ease',
         }}>
-          {/* Scrollable content. NOTE: no -webkit-overflow-scrolling:touch — that
-              legacy momentum-scroll promotes this to its own iOS compositing
-              layer, which (only when it actually overflows, i.e. the tall last
-              step) swallows taps on the sibling footer below. That was the
-              "only the last modal's buttons are dead" bug. */}
-          <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '24px 22px 4px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
-            <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
-              {step.title}
-            </div>
-            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-              {step.body}
-            </div>
-            {VisualComp && (
-              <div style={{ marginTop: 2 }}>
-                <VisualComp />
-              </div>
-            )}
+          <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
+            {step.title}
           </div>
-          {/* Pinned footer — buttons are NEVER inside the scroll region */}
-          <div style={{ flexShrink: 0, padding: '12px 22px 22px', borderTop: `0.5px solid ${UI.hair}` }}>
-            {renderBtnRow(false)}
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+            {step.body}
           </div>
+          {VisualComp && (
+            <div style={{ marginTop: 2 }}>
+              <VisualComp />
+            </div>
+          )}
+          {renderBtnRow(false)}
         </div>
       </div>
     );
   }
 
   // ── Brief loading state while navigating / searching ──
+  // Tap-to-dismiss so a search that never resolves can't trap the user.
   if (targetRect === undefined) {
     return (
-      <div style={{
-        position: 'fixed', inset: 0, zIndex: 9994,
+      <div onClick={onDone} style={{
+        position: 'fixed', inset: 0, zIndex: 10000,
         background: 'rgba(0,0,0,0.35)',
-        pointerEvents: 'none',
       }} />
     );
   }
@@ -894,8 +873,8 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
 
   return (
     <>
-      {/* Intercept all background clicks */}
-      <div style={{ position: 'fixed', inset: 0, zIndex: 9995, pointerEvents: 'auto' }} onClick={e => e.stopPropagation()} />
+      {/* Tap the dimmed background to dismiss — guaranteed escape on every step */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 9995, pointerEvents: 'auto' }} onClick={onDone} />
 
       {/* Dark overlay via box-shadow (spotlight "hole") */}
       <div style={{
