@@ -828,52 +828,45 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
 
   const VisualComp = step.visual ? TOUR_VISUALS[step.visual] : null;
 
-  // ── Centered modal (no target / fallback) ──
-  // Structure is intentionally identical to WhatsNewModal (a modal that works
-  // reliably in this app): a backdrop directly on the outer element, ONE
-  // scrolling card, buttons inside that card, plain onClick. The outer element
-  // is a tap-to-dismiss escape hatch; the card stops propagation so taps inside
-  // it never dismiss. No nested scroll regions / compositing layers / pointer
-  // hacks — those were what broke the buttons.
+  // ── Centered (no target / fallback) → FULLSCREEN layout ──
+  // These steps have no on-screen spotlight, so we use the whole screen instead
+  // of a floating card: content scrolls in the middle, and the buttons are
+  // pinned to the very bottom EDGE of the viewport — the most reliable place to
+  // tap. No backdrop-filter, no card, no nested overlays.
   if (!step.target || targetRect === null) {
     return (
-      <div onClick={onDone} style={{
-        // NOTE: solid background, NO backdrop-filter. A full-screen backdrop blur
-        // recomposited over the modal's complex mockups can make the whole modal
-        // janky/unresponsive on weaker devices — that was the "modal reagiert
-        // nicht mehr" state. Solid dim looks the same and stays responsive.
+      <div style={{
         position: 'fixed', inset: 0, zIndex: 10000,
-        background: 'rgba(0,0,0,0.9)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 24,
+        background: 'var(--bg)',
+        display: 'flex', flexDirection: 'column',
       }}>
-        <div onClick={e => e.stopPropagation()} style={{
-          width: '100%', maxWidth: 340, maxHeight: '86vh',
-          background: UI.bgRaised,
-          border: `1px solid ${UI.goldSoft}`,
-          borderRadius: 6,
-          display: 'flex', flexDirection: 'column', overflow: 'hidden',
-          boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
-          animation: 'fadeUp 0.25s ease',
+        {/* Scrollable content */}
+        <div style={{
+          flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
+          padding: 'calc(env(safe-area-inset-top, 0px) + 30px) 26px 18px',
+          display: 'flex', flexDirection: 'column', gap: 16,
         }}>
-          {/* Only this middle region scrolls; the buttons below never move */}
-          <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '24px 22px 6px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
-            <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
-              {step.title}
-            </div>
-            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-              {step.body}
-            </div>
-            {VisualComp && (
-              <div style={{ marginTop: 2 }}>
-                <TourBoundary fallback={null}><VisualComp /></TourBoundary>
-              </div>
-            )}
+          <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 30, color: UI.ink, fontWeight: 400, lineHeight: 1.08 }}>
+            {step.title}
           </div>
-          <div style={{ flexShrink: 0, padding: '10px 22px 20px' }}>
-            {renderBtnRow(false)}
+          <div style={{ fontSize: 14, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+            {step.body}
           </div>
+          {VisualComp && (
+            <div style={{ marginTop: 4 }}>
+              <TourBoundary fallback={null}><VisualComp /></TourBoundary>
+            </div>
+          )}
+        </div>
+        {/* Buttons pinned to the bottom edge of the screen */}
+        <div style={{
+          flexShrink: 0,
+          padding: '14px 26px calc(env(safe-area-inset-bottom, 0px) + 20px)',
+          borderTop: `0.5px solid ${UI.hair}`,
+          background: UI.bgRaised,
+        }}>
+          {renderBtnRow(false)}
         </div>
       </div>
     );
