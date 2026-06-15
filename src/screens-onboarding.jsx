@@ -783,6 +783,24 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
     };
   }, [stepIdx, route.name]);
 
+  // GUARANTEED ESCAPE, independent of any in-tour button: the phone/browser Back
+  // button and the Escape key always close the tour. We push one history entry
+  // on mount so Back is captured here instead of navigating the app away.
+  const onDoneRef = useRefOB(onDone);
+  onDoneRef.current = onDone;
+  useEffectOB(() => {
+    const close = () => { try { onDoneRef.current && onDoneRef.current(); } catch (_) {} };
+    try { window.history.pushState({ zaneTour: true }, ''); } catch (_) {}
+    const onPop = () => close();
+    const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Backspace') close(); };
+    window.addEventListener('popstate', onPop);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, []);
+
   const advance = () => {
     if (isLast) { onDone(); } else { setStepIdx(i => i + 1); }
   };
@@ -796,10 +814,15 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
   // subtree on each parent re-render (store sync, sync-status, realtime, …). A
   // tap whose pointerdown→click straddles such a remount is silently dropped —
   // that was the "visible buttons don't respond, must kill the app" bug.
+  // Handlers fire on onPointerDown — NOT onClick. Proven this session: on this
+  // device a plain onClick button (the plate-calculator key) was completely dead
+  // while onPointerDown worked. The in-app keyboard uses the same pattern. Each
+  // button has exactly one handler, so there is no double-fire.
+  const tap = (fn) => (e) => { e.preventDefault(); e.stopPropagation(); fn(); };
   const renderBtnRow = (compact) => (
     <div style={{ display: 'flex', gap: 8, marginTop: compact ? 0 : 4 }}>
       {stepIdx > 0 && (
-        <button onClick={goBack} style={{
+        <button onPointerDown={tap(goBack)} style={{
           flex: '0 0 auto', padding: compact ? '9px 13px' : '11px 15px', borderRadius: compact ? 4 : 6,
           border: `1px solid ${UI.hairStrong}`, cursor: 'pointer',
           background: 'transparent',
@@ -807,7 +830,7 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
           WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
         }} aria-label="Back">←</button>
       )}
-      <button onClick={onDone} style={{
+      <button onPointerDown={tap(onDone)} style={{
         flex: 1, padding: compact ? '9px 0' : '11px 0', borderRadius: compact ? 4 : 6,
         border: `1px solid ${UI.hairStrong}`, cursor: 'pointer',
         background: 'transparent',
@@ -815,7 +838,7 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
         letterSpacing: '0.08em', textTransform: 'uppercase',
         WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
       }}>Skip</button>
-      <button onClick={advance} style={{
+      <button onPointerDown={tap(advance)} style={{
         flex: 2, padding: compact ? '9px 0' : '11px 0', borderRadius: compact ? 4 : 6,
         border: 'none', cursor: 'pointer',
         background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
