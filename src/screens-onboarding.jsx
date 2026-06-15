@@ -779,7 +779,12 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
   const VisualComp = step.visual ? TOUR_VISUALS[step.visual] : null;
 
   // ── Centered modal (no target / fallback) ──
-  if (targetRect === null) {
+  // Drive this off `step.target` directly, NOT only the async targetRect: a
+  // step that never has a target must show its buttons on the very first
+  // render. Otherwise a render where targetRect is still `undefined` would
+  // leave the user on the buttonless loading overlay with no way out (they'd
+  // have to kill the app). Spotlight steps still reach this via targetRect===null.
+  if (!step.target || targetRect === null) {
     return (
       <div style={{
         position: 'fixed', inset: 0, zIndex: 9998,
