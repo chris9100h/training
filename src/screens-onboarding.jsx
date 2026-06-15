@@ -174,7 +174,7 @@ window.TOURS.healthTab = [
     target: 'health-log-btn',
     title: 'Log your day',
     body: 'Tap LOG to open the daily entry sheet. Record weight, steps, calories, macros, and water for any day.',
-    placement: 'top',
+    placement: 'bottom',
   },
   {
     target: null,
@@ -189,10 +189,10 @@ window.TOURS.healthTab = [
     placement: 'bottom',
   },
   {
-    target: 'health-card-cardio',
+    target: null,
     title: 'Cardio Logging',
-    body: 'Log runs, rides, swims — any cardio activity. Duration, distance, pace feeling. Cardio minutes are charted over 1W / 1M / 3M views.',
-    placement: 'bottom',
+    body: 'Log runs, rides, swims — any cardio activity. Duration, distance, pace, effort. Cardio minutes are charted over 1W / 1M / 3M views. Tap the running icon on any day to add a cardio entry.',
+    visual: 'healthCardio',
   },
   {
     target: null,
@@ -666,6 +666,34 @@ function TourVisualTrainWellDone() {
   );
 }
 
+function TourVisualHealthCardio() {
+  const rows = [
+    { type: 'Run', duration: '35 min', dist: '5.2 km', effort: 7 },
+    { type: 'Bike', duration: '48 min', dist: '18 km', effort: 5 },
+  ];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {rows.map((r, i) => (
+        <div key={i} style={{
+          display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+          background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6,
+        }}>
+          <i className="fa-solid fa-person-running" style={{ fontSize: 16, color: 'var(--accent)', width: 20, textAlign: 'center' }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.ink }}>{r.type}</div>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{r.dist} · effort {r.effort}/10</div>
+          </div>
+          <span className="num" style={{ fontSize: 14, color: UI.inkSoft }}>{r.duration}</span>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 5, padding: '6px 2px' }}>
+        <span style={{ color: 'var(--accent)', fontSize: 16, lineHeight: 1, fontWeight: 300 }}>+</span>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.10em', fontWeight: 600, alignSelf: 'center' }}>LOG CARDIO</span>
+      </div>
+    </div>
+  );
+}
+
 function TourVisualHealthLog() {
   const field = (label, value, unit) => (
     <div style={{ display: 'flex', alignItems: 'center', padding: '8px 10px', borderBottom: `0.5px solid ${UI.hair}` }}>
@@ -736,6 +764,7 @@ const TOUR_VISUALS = {
   trainSkip: TourVisualTrainSkip, trainEnd: TourVisualTrainEnd,
   trainFeel: TourVisualTrainFeel, trainWellDone: TourVisualTrainWellDone,
   healthLog: TourVisualHealthLog, healthWeek: TourVisualHealthWeek,
+  healthCardio: TourVisualHealthCardio,
 };
 
 // ─── OnboardingPrompt ────────────────────────────────────────────────
