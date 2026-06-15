@@ -213,6 +213,85 @@ window.TOURS.healthTab = [
   },
 ];
 
+window.TOURS.coaching = [
+  {
+    target: null,
+    title: 'Coaching Tour',
+    body: "Coaching links a coach and a client inside the app — shared training data, weekly check-ins, macro targets, and a private message thread. Let's walk through both sides.",
+  },
+  {
+    target: null,
+    title: 'Enable the Coaching tab',
+    body: 'The Coaching tab is hidden until you need it. Open Settings → Coaching and turn on "Coaching tab" to pin it to the bottom navigation. It also appears automatically the moment a coaching relationship goes active.',
+    visual: 'coachEnable',
+  },
+  {
+    target: null,
+    title: 'Coach, client, or both',
+    body: 'You can coach others, be coached, or both at once. When you hold more than one role the tab shows a switcher across them: My Clients, My Coach, and Myself.',
+    visual: 'coachRoles',
+  },
+  {
+    target: null,
+    title: 'As a client: accept an invite',
+    body: "When a coach invites you, this request pops up next time you open the app. Accept and your coach can see your training, sessions and plans — and adjust them for you. Decline and nothing is shared.",
+    visual: 'coachInviteAccept',
+  },
+  {
+    target: null,
+    title: 'Your weekly check-in',
+    body: "Each week you fill in a short check-in — body weight, recovery markers like sleep and hunger, and how training went. If you use the Health tab, your daily logs prefill most of it automatically.",
+    visual: 'coachCheckin',
+  },
+  {
+    target: null,
+    title: 'Macros from your coach',
+    body: 'Your coach can set daily macro targets — separate numbers for training and rest days. They appear in your Coaching tab and feed straight into the Health tab adherence tracking.',
+    visual: 'coachMacros',
+  },
+  {
+    target: null,
+    title: 'Notes & messaging',
+    body: 'Every coaching relationship has a private thread. Coach and client leave notes on sessions, plans, or just talk — questions, cues, weekly feedback. Unread notes ping you on the home screen.',
+    visual: 'coachNotes',
+  },
+  {
+    target: null,
+    title: 'As a coach: invite a client',
+    body: 'Open the Coaching tab and tap the add-person icon. Enter the email of someone who already has an account — they get the invite the next time they open the app.',
+    visual: 'coachInvite',
+  },
+  {
+    target: null,
+    title: 'Your client dashboard',
+    body: "Each client is a card. You see who's training live right now, who has a check-in due, and who just submitted one. Tap a card to open their full profile.",
+    visual: 'coachClients',
+  },
+  {
+    target: null,
+    title: 'Review check-ins & trends',
+    body: "Inside a client, their check-in history becomes trend charts — weight, recovery markers, performance week over week. Spot a bad sleep streak or a stalling weight at a glance.",
+    visual: 'coachTrends',
+  },
+  {
+    target: null,
+    title: 'Customize the check-in form',
+    body: "The check-in form isn't fixed. Per client you can add, remove, or reorder fields in the schema builder — drop in a custom scale, a number, or a note field for exactly what you want to track.",
+    visual: 'coachSchema',
+  },
+  {
+    target: null,
+    title: 'Be your own coach',
+    body: 'No coach? Flip on "Be your own coach" in Settings → Coaching. You get the whole coach dashboard — trends, macros, check-ins and notes — pointed at your own training. Great for self-guided periodization.',
+    visual: 'coachSelf',
+  },
+  {
+    target: null,
+    title: "You're all set!",
+    body: 'Coach others, get coached, or run it solo — all from one tab. Find this tour again any time in Settings → How to…',
+  },
+];
+
 // ─── Inline visual mockups ───────────────────────────────────────────
 function TourVisualDays() {
   const rowStyle = {
@@ -786,6 +865,234 @@ function TourVisualHealthWeek() {
   );
 }
 
+// ─── Coaching tour visuals ───────────────────────────────────────────
+function TourVisualCoachEnable() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+        <div style={{ padding: '8px 12px', borderBottom: `0.5px solid ${UI.hair}` }}>
+          <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.12em', color: UI.inkFaint }}>SETTINGS → COACHING</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '12px 14px', gap: 10 }}>
+          <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: UI.ink }}>Coaching tab</span>
+          <div style={{ width: 44, height: 26, borderRadius: 13, background: 'var(--accent)', position: 'relative', flexShrink: 0 }}>
+            <div style={{ position: 'absolute', right: 3, top: 3, width: 20, height: 20, borderRadius: '50%', background: '#0a0805' }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualCoachRoles() {
+  const tabs = [
+    { label: 'My Clients', icon: 'fa-users', active: true },
+    { label: 'My Coach', icon: 'fa-person-chalkboard' },
+    { label: 'Myself', icon: 'fa-chart-line' },
+  ];
+  return (
+    <div style={{ display: 'flex', gap: 6 }}>
+      {tabs.map((t, i) => (
+        <div key={i} style={{
+          flex: 1, padding: '9px 4px', borderRadius: 6, textAlign: 'center',
+          background: t.active ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset,
+          border: `0.5px solid ${t.active ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+        }}>
+          <i className={`fa-solid ${t.icon}`} style={{ fontSize: 13, color: t.active ? 'var(--accent)' : UI.inkFaint }} />
+          <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.04em', color: t.active ? 'var(--accent)' : UI.inkFaint }}>{t.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualCoachInviteAccept() {
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span className="micro-gold" style={{ letterSpacing: '0.15em' }}>COACHING REQUEST</span>
+      <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 700, color: UI.ink }}>Coach Mike</div>
+      <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 6 }}>
+        wants to coach you. They'll be able to view your training, sessions and plans, and adjust them on your behalf.
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ flex: 1, padding: '9px 0', borderRadius: 6, textAlign: 'center', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.08em' }}>ACCEPT</div>
+        <div style={{ flex: 1, padding: '9px 0', borderRadius: 6, textAlign: 'center', background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.08em' }}>DECLINE</div>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualCoachCheckin() {
+  const marker = (label, val) => (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+        <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkSoft }}>{label}</span>
+        <span className="num" style={{ fontSize: 9, color: 'var(--accent)' }}>{val}/10</span>
+      </div>
+      <div style={{ display: 'flex', gap: 3 }}>
+        {Array.from({ length: 10 }, (_, i) => (
+          <div key={i} style={{ flex: 1, height: 5, borderRadius: 2, background: i < val ? 'var(--accent)' : UI.bgInset }} />
+        ))}
+      </div>
+    </div>
+  );
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 14px' }}>
+      <div style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.12em', color: UI.inkFaint, marginBottom: 10 }}>WEEK OF 08 – 14 JUN</div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <div style={{ flex: 1, background: UI.bgInset, borderRadius: 4, padding: '7px 9px' }}>
+          <div style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi }}>WEIGHT TODAY</div>
+          <div className="num" style={{ fontSize: 15, color: UI.ink }}>82.4</div>
+        </div>
+        <div style={{ flex: 1, background: UI.bgInset, borderRadius: 4, padding: '7px 9px' }}>
+          <div style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi }}>VS LAST WEEK</div>
+          <div style={{ fontSize: 13, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, marginTop: 2 }}>Improved</div>
+        </div>
+      </div>
+      {marker('Sleep', 8)}
+      {marker('Hunger', 4)}
+    </div>
+  );
+}
+
+function TourVisualCoachMacros() {
+  const day = (label, cal, p, c, f) => (
+    <div style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
+      <div style={{ fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: UI.inkFaint, marginBottom: 6 }}>{label}</div>
+      <div className="num" style={{ fontSize: 18, color: 'var(--accent)', fontWeight: 300 }}>{cal}<span style={{ fontSize: 9, color: UI.inkFaint }}> kcal</span></div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+        {[['P', p], ['C', c], ['F', f]].map(([k, v]) => (
+          <div key={k}>
+            <div style={{ fontSize: 8, color: UI.inkGhost, fontFamily: UI.fontUi }}>{k}</div>
+            <div className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{v}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      {day('TRAINING DAY', '2 600', '200', '300', '70')}
+      {day('REST DAY', '2 200', '200', '180', '70')}
+    </div>
+  );
+}
+
+function TourVisualCoachNotes() {
+  const bubble = (text, mine) => (
+    <div style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
+      <div style={{
+        maxWidth: '80%', padding: '8px 11px', borderRadius: 8,
+        background: mine ? 'var(--accent)' : UI.bgInset,
+        border: mine ? 'none' : `0.5px solid ${UI.hairStrong}`,
+        color: mine ? '#0a0805' : UI.inkSoft,
+        fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1.45,
+      }}>{text}</div>
+    </div>
+  );
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+      {bubble('Bench felt strong this week — added 2.5 kg.', false)}
+      {bubble('Nice. Hold the same load next session, then we deload.', true)}
+    </div>
+  );
+}
+
+function TourVisualCoachInvite() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.12em', color: UI.inkFaint }}>INVITE CLIENT</div>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '11px 13px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset }}>
+        <span style={{ fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft }}>client@email.com</span>
+      </div>
+      <div style={{ padding: '11px 0', borderRadius: 6, textAlign: 'center', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700 }}>Send Invite</div>
+    </div>
+  );
+}
+
+function TourVisualCoachClients() {
+  const card = (name, status, color, live) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 13px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${live ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}` }}>
+      <div style={{ width: 34, height: 34, borderRadius: 17, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' }}>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.inkSoft, fontWeight: 700 }}>{name[0]}</span>
+        {live && <div style={{ position: 'absolute', top: -1, right: -1, width: 10, height: 10, borderRadius: 5, background: 'var(--accent)', border: '2px solid var(--bg)' }} />}
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{name}</div>
+        <div style={{ fontSize: 9, color, fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>{status}</div>
+      </div>
+    </div>
+  );
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+      {card('Mike', 'TRAINING NOW', 'var(--accent)', true)}
+      {card('Sara', 'CHECK-IN DUE', 'rgba(var(--accent-rgb),0.7)', false)}
+    </div>
+  );
+}
+
+function TourVisualCoachTrends() {
+  const spark = (pts) => {
+    const w = 84, h = 26;
+    const max = Math.max(...pts), min = Math.min(...pts);
+    const range = max - min || 1;
+    const d = pts.map((p, i) => `${(i / (pts.length - 1) * w).toFixed(1)},${(h - (p - min) / range * h).toFixed(1)}`).join(' ');
+    return <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}><polyline points={d} fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  };
+  const row = (label, val, pts) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', background: UI.bgInset, borderRadius: 6 }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</div>
+        <div className="num" style={{ fontSize: 15, color: UI.ink }}>{val}</div>
+      </div>
+      {spark(pts)}
+    </div>
+  );
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+      {row('Body weight', '82.4 kg', [85, 84.4, 84, 83.3, 82.8, 82.4])}
+      {row('Sleep', '8 / 10', [6, 7, 6, 8, 7, 8])}
+    </div>
+  );
+}
+
+function TourVisualCoachSchema() {
+  const field = (label, type) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 11px', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4 }}>
+      <i className="fa-solid fa-grip-vertical" style={{ fontSize: 11, color: UI.inkGhost }} />
+      <span style={{ flex: 1, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft }}>{label}</span>
+      <span style={{ fontSize: 8, fontFamily: UI.fontUi, color: UI.inkFaint, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{type}</span>
+    </div>
+  );
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.12em', color: UI.inkFaint }}>CHECK-IN FORM · MARKERS</div>
+      {field('Sleep quality', 'scale')}
+      {field('Hunger', 'scale')}
+      {field('Weekly weight', 'number')}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 2px' }}>
+        <span style={{ color: 'var(--accent)', fontSize: 15, lineHeight: 1, fontWeight: 300 }}>+</span>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.08em', fontWeight: 600 }}>ADD FIELD</span>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualCoachSelf() {
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '12px 14px', gap: 10 }}>
+        <i className="fa-solid fa-chart-line" style={{ fontSize: 13, color: 'var(--accent)', width: 16, textAlign: 'center' }} />
+        <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: UI.ink }}>Be your own coach</span>
+        <div style={{ width: 44, height: 26, borderRadius: 13, background: 'var(--accent)', position: 'relative', flexShrink: 0 }}>
+          <div style={{ position: 'absolute', right: 3, top: 3, width: 20, height: 20, borderRadius: '50%', background: '#0a0805' }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TOUR_VISUALS = {
   days: TourVisualDays, exercises: TourVisualExercises, drag: TourVisualDrag,
   trainOverview: TourVisualTrainOverview, trainWarmup: TourVisualTrainWarmup,
@@ -796,6 +1103,12 @@ const TOUR_VISUALS = {
   trainFeel: TourVisualTrainFeel, trainWellDone: TourVisualTrainWellDone,
   healthLog: TourVisualHealthLog, healthWeek: TourVisualHealthWeek,
   healthCardio: TourVisualHealthCardio, healthEnable: TourVisualHealthEnable,
+  coachEnable: TourVisualCoachEnable, coachRoles: TourVisualCoachRoles,
+  coachInviteAccept: TourVisualCoachInviteAccept, coachCheckin: TourVisualCoachCheckin,
+  coachMacros: TourVisualCoachMacros, coachNotes: TourVisualCoachNotes,
+  coachInvite: TourVisualCoachInvite, coachClients: TourVisualCoachClients,
+  coachTrends: TourVisualCoachTrends, coachSchema: TourVisualCoachSchema,
+  coachSelf: TourVisualCoachSelf,
 };
 
 // ─── OnboardingPrompt ────────────────────────────────────────────────
