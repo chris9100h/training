@@ -390,6 +390,7 @@ const EQUIPMENT_TYPES = [
 ];
 
 function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
+  const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateL(initialName);
   const [selectedTags, setSelectedTags] = useStateL([]);
   const [category, setCategory] = useStateL(null);
@@ -406,8 +407,17 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
     onCreated?.(ex.id);
     onClose();
   };
+  // Guard against an accidental backdrop tap wiping a half-filled form.
+  const isDirty = () =>
+    name.trim() !== initialName.trim() || selectedTags.length > 0 || category != null ||
+    movementType !== 'bilateral' || noWeightReps || progressionReps != null || equipment !== 'barbell_dual';
+  const requestClose = async () => {
+    if (isDirty() && !await confirm('Your new exercise will be discarded.', { title: 'Leave without saving?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    onClose();
+  };
   return (
-    <Sheet open={true} onClose={onClose} title="New exercise">
+    <>
+    <Sheet open={true} onClose={requestClose} title="New exercise">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <Field label="Name">
           <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" autoFocus />
@@ -486,6 +496,8 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Create</Btn>
       </div>
     </Sheet>
+    {confirmEl}
+    </>
   );
 }
 
