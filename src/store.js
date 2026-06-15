@@ -2203,13 +2203,22 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions) {
     const prevEnded = sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= prevWs && d < ws; });
     if (thisEnded.length) out.days_trained = thisEnded.length;
     if (thisEnded.length > 0 || prevEnded.length > 0) {
-      const sessionDoneSets = s =>
-        s.aggDoneSets != null
-          ? s.aggDoneSets
-          : (s.entries || []).reduce((n, e) => n + (e.sets || []).filter(x => x.done && !x.warmup).length, 0);
-      const thisSets = thisEnded.reduce((n, s) => n + sessionDoneSets(s), 0);
-      const prevSets = prevEnded.reduce((n, s) => n + sessionDoneSets(s), 0);
-      const diff = thisSets !== prevSets ? Math.sign(thisSets - prevSets) : Math.sign(thisEnded.length - prevEnded.length);
+      const sessionVol = s => {
+        if (s.aggVolume != null) return s.aggVolume;
+        return (s.entries || []).reduce((t, e) =>
+          t + (e.sets || []).filter(x => x.done && !x.warmup).reduce((sv, x) => {
+            const kg = x.kg || 0;
+            const reps = x.reps || ((x.reps_l || 0) + (x.reps_r || 0));
+            return sv + kg * reps;
+          }, 0), 0);
+      };
+      const thisVol = thisEnded.reduce((n, s) => n + sessionVol(s), 0);
+      const prevVol = prevEnded.reduce((n, s) => n + sessionVol(s), 0);
+      const thisAvg = thisEnded.length ? thisVol / thisEnded.length : 0;
+      const prevAvg = prevEnded.length ? prevVol / prevEnded.length : 0;
+      const diff = (thisAvg > 0 || prevAvg > 0)
+        ? Math.sign(thisAvg - prevAvg)
+        : Math.sign(thisEnded.length - prevEnded.length);
       out.performance_vs_last_week = diff > 0 ? 'improved' : diff < 0 ? 'worse' : 'same';
     }
   }
