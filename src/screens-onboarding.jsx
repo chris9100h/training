@@ -84,26 +84,26 @@ window.TOURS.doWorkout = [
   },
   {
     target: null,
-    title: 'The Training Screen',
-    body: 'Exercise chips run across the top — tap any to jump to it. Below is the exercise card with your set rows: set number, last-time reference, weight, reps, done button, and a − to remove that set.',
-    visual: 'trainOverview',
-  },
-  {
-    target: null,
     title: 'Warmup Sets',
-    body: "Before your first working set, a warmup modal slides up. It shows each warmup set one at a time with the target weight and reps. Tap 'Check warmup set' to log it, or 'Skip' to jump straight to your working sets.",
+    body: "When you start, a warmup modal slides up first. It shows each warmup set one at a time with the target weight and reps. Tap 'Check warmup set' to log it, or 'Skip' to jump straight to your working sets.",
     visual: 'trainWarmup',
   },
   {
     target: null,
+    title: 'The Training Screen',
+    body: 'After the warmup you land here. Exercise chips run across the top — tap any to jump to it. Below is the exercise card with your set rows: set number, last-time reference, weight, reps, done button, and a − to remove that set.',
+    visual: 'trainOverview',
+  },
+  {
+    target: null,
     title: 'Logging a Set',
-    body: 'Tap a set row to activate it — the weight field gets a gold underline. Enter weight, tap the reps field, enter reps. The keyboard auto-advances between fields and can confirm the set in one tap.',
+    body: 'Tap a set row to activate it — the weight field gets a highlighted underline in your accent color. Enter weight, tap the reps field, enter reps. The keyboard auto-advances between fields and can confirm the set in one tap.',
     visual: 'trainLogSet',
   },
   {
     target: null,
     title: 'The Quick Keyboard',
-    body: 'The custom numpad sits at the bottom. ↓ / ↑ step the weight up or down by your equipment increment. The dumbbell icon opens the plate calculator. The tall gold button confirms the set.',
+    body: 'The custom numpad sits at the bottom. ↓ / ↑ step the weight up or down by your equipment increment. The dumbbell icon opens the plate calculator. The tall accent-colored button confirms the set.',
     visual: 'trainKeyboard',
   },
   {
@@ -224,8 +224,31 @@ function TourVisualDrag() {
   );
 }
 
+function TrainChips({ states }) {
+  // states: 'active' | 'done' | 'pending'
+  const labels = ['BENCH', 'INCLINE', 'TRICEP'];
+  return (
+    <div style={{ display: 'flex', gap: 6 }}>
+      {labels.map((c, i) => {
+        const st = states[i];
+        return (
+          <div key={c} style={{
+            padding: '5px 11px 4px', borderRadius: 4,
+            border: `1px solid ${st === 'active' ? 'var(--accent)' : st === 'done' ? UI.goldSoft : UI.hairStrong}`,
+            background: st === 'active' ? `rgba(var(--accent-rgb),0.08)` : st === 'done' ? `rgba(var(--accent-rgb),0.05)` : 'transparent',
+          }}>
+            <div style={{ fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em', color: st === 'active' ? 'var(--accent)' : st === 'done' ? UI.inkSoft : UI.inkFaint }}>{c}</div>
+            <div style={{ height: 3, marginTop: 3, display: 'flex', justifyContent: 'center' }}>
+              {st === 'done' && <div style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--accent)' }} />}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function TourVisualTrainOverview() {
-  const chips = ['BENCH', 'INCLINE', 'TRICEP'];
   const sets = [
     { label: '1', done: true },
     { label: '2', done: false, active: true },
@@ -233,16 +256,7 @@ function TourVisualTrainOverview() {
   ];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-      <div style={{ display: 'flex', gap: 5 }}>
-        {chips.map((c, i) => (
-          <div key={c} style={{
-            padding: '5px 10px', borderRadius: 999, fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.07em',
-            background: i === 0 ? 'var(--accent)' : i === 1 ? `rgba(var(--accent-rgb),0.15)` : UI.bgInset,
-            color: i === 0 ? '#0a0805' : i === 1 ? 'var(--accent)' : UI.inkFaint,
-            border: `0.5px solid ${i === 0 ? 'var(--accent)' : i === 1 ? 'rgba(var(--accent-rgb),0.3)' : UI.hairStrong}`,
-          }}>{c}</div>
-        ))}
-      </div>
+      <TrainChips states={['active', 'done', 'pending']} />
       <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
         <div style={{ padding: '7px 10px', borderBottom: `0.5px solid ${UI.hair}`, display: 'flex', alignItems: 'center' }}>
           <span style={{ fontFamily: UI.fontDisplay, fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', color: UI.ink, textTransform: 'uppercase', flex: 1 }}>Bench Press</span>
@@ -356,7 +370,7 @@ function TourVisualTrainKeyboard() {
             {k === null ? <i className="fa-solid fa-dumbbell" style={{ fontSize: 11, color: UI.inkSoft }} /> : k}
           </div>
         ))}
-        {/* CONFIRM — tall gold button spanning rows 1–4, column 4 */}
+        {/* CONFIRM — tall accent button spanning rows 1–4, column 4 */}
         <div style={{ gridRow: '1 / 5', gridColumn: 4, background: 'var(--accent)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <i className="fa-solid fa-check" style={{ fontSize: 15, color: '#0a0805' }} />
         </div>
@@ -375,36 +389,39 @@ function TourVisualTrainKeyboard() {
 }
 
 function TourVisualTrainPlates() {
-  const plateTypes = [
-    { kg: 20, color: '#1a5cb0', h: 52 },
-    { kg: 15, color: '#2a7a2a', h: 43 },
-    { kg: 10, color: '#b03030', h: 36 },
-    { kg: 5, color: '#c0a010', h: 29 },
-    { kg: 2.5, color: '#777', h: 22 },
+  // Per side for 90 kg dual = 45 → 25×1 + 20×1 (greedy, like the real calc)
+  const plates = [
+    { kg: 25, n: 1, color: '#c0392b', size: 50 },
+    { kg: 20, n: 1, color: '#2471a3', size: 46 },
   ];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', gap: 2, background: UI.bgInset, borderRadius: 4, padding: 2, alignSelf: 'center' }}>
-        {['DUAL', 'SINGLE'].map((t, i) => (
-          <div key={t} style={{ padding: '5px 14px', borderRadius: 3, background: i === 0 ? UI.bgCard : 'transparent', color: i === 0 ? UI.ink : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.07em', border: i === 0 ? `0.5px solid ${UI.hairStrong}` : 'none' }}>{t}</div>
+      <div style={{ display: 'flex', gap: 3, background: UI.bgInset, borderRadius: 4, padding: 3 }}>
+        {['Dual side', 'Single'].map((t, i) => (
+          <div key={t} style={{ flex: 1, textAlign: 'center', padding: '6px 0', borderRadius: 4, background: i === 0 ? 'var(--accent)' : 'transparent', color: i === 0 ? '#0a0805' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: i === 0 ? 600 : 400, letterSpacing: '0.06em' }}>{t}</div>
         ))}
       </div>
-      <div style={{ textAlign: 'center' }}>
-        <div className="num" style={{ fontSize: 30, color: UI.ink, fontWeight: 300 }}>80</div>
-        <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint, marginTop: 1, letterSpacing: '0.08em' }}>{UI.unit().toUpperCase()} — SELECT PLATES BELOW</div>
+      <div style={{ textAlign: 'center', position: 'relative' }}>
+        <span className="num" style={{ fontSize: 40, color: UI.ink, fontWeight: 300, letterSpacing: '-0.03em' }}>90</span>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, letterSpacing: '0.1em', marginLeft: 4 }}>{UI.unit().toUpperCase()}</span>
       </div>
-      <div style={{ display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'flex-end', padding: '4px 0' }}>
-        {plateTypes.map((p, i) => (
-          <div key={p.kg} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, opacity: i > 1 ? 0.35 : 1 }}>
-            <div style={{ width: Math.round(p.h * 0.52), height: p.h, borderRadius: Math.round(p.h * 0.28), background: p.color, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `inset 0 0 0 1.5px rgba(255,255,255,0.18)` }}>
-              <span style={{ fontSize: 7, fontFamily: UI.fontUi, fontWeight: 700, color: 'rgba(255,255,255,0.9)' }}>{p.kg}</span>
+      <div className="knurl" />
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, justifyContent: 'center' }}>
+        <span className="num" style={{ fontSize: 18, fontWeight: 300, color: 'var(--accent)' }}>45</span>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, letterSpacing: '0.12em' }}>{UI.unit().toUpperCase()} PER SIDE</span>
+      </div>
+      <div style={{ display: 'flex', gap: 18, justifyContent: 'center', alignItems: 'flex-end', paddingTop: 2 }}>
+        {plates.map(p => {
+          const hole = Math.round(p.size * 0.3);
+          return (
+            <div key={p.kg} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: p.size, height: p.size, borderRadius: '50%', background: p.color, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', boxShadow: `0 4px 16px rgba(0,0,0,0.5), 0 0 0 1.5px rgba(255,255,255,0.18)` }}>
+                <div style={{ position: 'absolute', width: hole, height: hole, borderRadius: '50%', background: 'var(--bg)', boxShadow: '0 0 0 1.5px rgba(255,255,255,0.18)' }} />
+              </div>
+              <span className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{p.kg} × {p.n}</span>
             </div>
-          </div>
-        ))}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <i className="fa-solid fa-circle-info" style={{ fontSize: 10, color: UI.inkGhost }} />
-        <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Tap plates to build your load — shows what goes on each side</span>
+          );
+        })}
       </div>
     </div>
   );
@@ -476,34 +493,16 @@ function TourVisualTrainNotes() {
 }
 
 function TourVisualTrainNav() {
-  const exs = [
-    { name: 'BENCH', state: 'done' },
-    { name: 'INCLINE', state: 'active' },
-    { name: 'TRICEP', state: 'pending' },
-  ];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', gap: 5 }}>
-        {exs.map((e) => (
-          <div key={e.name} style={{
-            padding: '5px 10px', borderRadius: 999, fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.07em',
-            background: e.state === 'active' ? 'var(--accent)' : e.state === 'done' ? `rgba(var(--accent-rgb),0.15)` : UI.bgInset,
-            color: e.state === 'active' ? '#0a0805' : e.state === 'done' ? 'var(--accent)' : UI.inkFaint,
-            border: `0.5px solid ${e.state === 'active' ? 'var(--accent)' : e.state === 'done' ? 'rgba(var(--accent-rgb),0.3)' : UI.hairStrong}`,
-            display: 'flex', alignItems: 'center', gap: 4,
-          }}>
-            {e.state === 'done' && <i className="fa-solid fa-check" style={{ fontSize: 7 }} />}
-            {e.name}
-          </div>
-        ))}
-      </div>
+      <TrainChips states={['done', 'active', 'pending']} />
       <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, padding: '8px 10px', display: 'flex', alignItems: 'center' }}>
         <span style={{ fontFamily: UI.fontDisplay, fontSize: 13, fontWeight: 700, color: UI.ink, textTransform: 'uppercase', flex: 1 }}>Incline DB</span>
         <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkGhost }}>0 / 3 done</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <i className="fa-solid fa-circle-info" style={{ fontSize: 10, color: UI.inkGhost }} />
-        <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>Tap a chip to jump to that exercise; done ones show a checkmark</span>
+        <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>Tap a chip to jump to that exercise; done ones show a dot below the name</span>
       </div>
     </div>
   );
@@ -742,12 +741,22 @@ function OnboardingTour({ tourKey, go, route, onDone }) {
   const advance = () => {
     if (isLast) { onDone(); } else { setStepIdx(i => i + 1); }
   };
+  const goBack = () => { if (stepIdx > 0) setStepIdx(i => i - 1); };
 
   if (!step) return null;
 
   // Shared button row
   const BtnRow = ({ compact }) => (
     <div style={{ display: 'flex', gap: 8, marginTop: compact ? 0 : 4 }}>
+      {stepIdx > 0 && (
+        <button onClick={goBack} style={{
+          flex: '0 0 auto', padding: compact ? '9px 13px' : '11px 15px', borderRadius: compact ? 4 : 6,
+          border: `1px solid ${UI.hairStrong}`, cursor: 'pointer',
+          background: 'transparent',
+          color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: compact ? 12 : 14, fontWeight: 600,
+          WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+        }} aria-label="Back">←</button>
+      )}
       <button onClick={onDone} style={{
         flex: 1, padding: compact ? '9px 0' : '11px 0', borderRadius: compact ? 4 : 6,
         border: `1px solid ${UI.hairStrong}`, cursor: 'pointer',
