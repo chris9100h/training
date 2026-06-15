@@ -31,10 +31,11 @@ function healthWindow(days) {
 const healthNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(String(v).replace(',', '.'));
 const healthInt = v => (v === '' || v == null || isNaN(parseInt(v, 10))) ? null : parseInt(v, 10);
 
-// Calories from macros: P×4 + C×4 + F×9. Returns null when no macro is set.
-function caloriesFromMacros(p, c, f) {
+// Calories from macros: P×4 + C×4 + F×9. With fiber given (net-carb mode),
+// carbs contribute (C − fiber)×4. Returns null when no macro is set.
+function caloriesFromMacros(p, c, f, fiber) {
   if (p == null && c == null && f == null) return null;
-  return (p || 0) * 4 + (c || 0) * 4 + (f || 0) * 9;
+  return (p || 0) * 4 + ((c || 0) - (fiber || 0)) * 4 + (f || 0) * 9;
 }
 
 function healthFmtDate(iso, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
@@ -240,12 +241,17 @@ function MacroLegend() {
 function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
   const manualCal = !!store.settings?.manualCalories;
-  const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', calories: '', water: '', note: '' };
+  const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', fiber: '', calories: '', water: '', note: '' };
   const [form, setForm] = useStateH(empty);
+  // Net-carb mode: adds a fiber field; calories become (P + C − fiber)×4 + F×9.
+  // Defaults to the user's global preference; an existing net-logged day (fiber
+  // set) re-opens in net mode regardless, so its fiber value is preserved.
+  const [netCarbs, setNetCarbs] = useStateH(!!store.settings?.netCarbs);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   useEffectH(() => {
     if (!open) return;
+    setNetCarbs(existing?.fiber != null ? true : !!store.settings?.netCarbs);
     if (existing) {
       setForm({
         weight: existing.weight != null ? String(existing.weight) : '',
@@ -253,6 +259,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
         protein: existing.protein != null ? String(existing.protein) : '',
         carbs: existing.carbs != null ? String(existing.carbs) : '',
         fat: existing.fat != null ? String(existing.fat) : '',
+        fiber: existing.fiber != null ? String(existing.fiber) : '',
         calories: existing.calories != null ? String(existing.calories) : '',
         water: existing.waterMl != null ? String(existing.waterMl) : '',
         note: existing.note || '',
@@ -265,12 +272,21 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
   const tooOld = !existing && daysBack > 14;
   const canSave = open && !inFuture && !tooOld;
 
-  const autoCals = caloriesFromMacros(healthInt(form.protein), healthInt(form.carbs), healthInt(form.fat));
+  const pVal = healthInt(form.protein), cVal = healthInt(form.carbs), fVal = healthInt(form.fat), fibVal = healthInt(form.fiber);
+  const netCarbsVal = (cVal != null && fibVal != null) ? Math.max(0, cVal - fibVal) : null;
+  // Net mode only auto-fills calories once protein/carbs/fat/fiber are all present;
+  // otherwise the calories field is manual. Total mode keeps the existing behaviour.
+  const netAllFilled = pVal != null && cVal != null && fVal != null && fibVal != null;
+  const autoCals = netCarbs
+    ? (netAllFilled ? caloriesFromMacros(pVal, cVal, fVal, fibVal) : null)
+    : caloriesFromMacros(pVal, cVal, fVal);
+  const caloriesManual = netCarbs ? !netAllFilled : manualCal;
 
   const save = () => {
     if (!canSave) return;
     const protein = healthInt(form.protein), carbs = healthInt(form.carbs), fat = healthInt(form.fat);
-    const calories = manualCal ? healthInt(form.calories) : caloriesFromMacros(protein, carbs, fat);
+    const fiber = netCarbs ? healthInt(form.fiber) : null;
+    const calories = caloriesManual ? healthInt(form.calories) : autoCals;
     const isTraining = LB.isLoggedTrainingDay(store.sessions, date);
     const { adherence, targetsSnap } = LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
     const log = {
@@ -278,13 +294,18 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
       date,
       weight: healthNum(form.weight),
       steps: healthInt(form.steps),
-      calories, protein, carbs, fat,
+      calories, protein, carbs, fat, fiber,
       waterMl: healthInt(form.water),
       note: form.note.trim() || null,
       adherence, targetsSnap,
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
-    setStore(s => ({ ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== date)] }));
+    setStore(s => ({
+      ...s,
+      // Remember the carb mode globally so the next day defaults to it.
+      settings: s.settings?.netCarbs === netCarbs ? s.settings : { ...s.settings, netCarbs },
+      dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== date)],
+    }));
     onClose();
   };
 
@@ -325,15 +346,39 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
         {numField('steps', 'Steps')}
       </div>
 
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>NUTRITION</div>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>NUTRITION</span>
+        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+          {[{ id: false, label: 'Total carbs' }, { id: true, label: 'Net carbs' }].map(o => (
+            <button key={String(o.id)} onClick={() => setNetCarbs(o.id)} style={{
+              padding: '4px 10px', cursor: 'pointer', border: 'none',
+              background: netCarbs === o.id ? 'var(--accent)' : 'transparent',
+              color: netCarbs === o.id ? '#0a0805' : UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.05em',
+              WebkitTapHighlightColor: 'transparent',
+            }}>{o.label}</button>
+          ))}
+        </div>
+      </div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         {numField('protein', 'Protein', 'g')}
         {numField('carbs', 'Carbs', 'g')}
         {numField('fat', 'Fat', 'g')}
       </div>
+      {netCarbs && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          {numField('fiber', 'Fiber', 'g')}
+          <div style={{ flex: 1 }}>
+            <div style={labelStyle}>Net carbs (g)</div>
+            <div style={{ ...inputStyle, color: netCarbsVal != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
+              {netCarbsVal != null ? netCarbsVal : '—'}
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{ marginBottom: 16 }}>
-        <div style={labelStyle}>Calories (kcal){manualCal ? '' : ' · from macros'}</div>
-        {manualCal
+        <div style={labelStyle}>Calories (kcal){caloriesManual ? '' : (netCarbs ? ' · net carbs' : ' · from macros')}</div>
+        {caloriesManual
           ? <input type="number" inputMode="decimal" placeholder="—" value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
           : <div style={{ ...inputStyle, color: autoCals != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
               {autoCals != null ? autoCals : '—'}

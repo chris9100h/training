@@ -222,6 +222,7 @@ async function importFromBackup(backup, userId) {
       equipment_config: sett.equipmentConfig ?? null,
       weight_fill_down: sett.weightFillDown ?? true,
       manual_calories: sett.manualCalories ?? false,
+      net_carbs: sett.netCarbs ?? false,
       show_warmup_in_summary: sett.showWarmupInSummary ?? false,
       show_coaching_tab: sett.showCoachingTab ?? false,
       be_your_own_coach: sett.beYourOwnCoach ?? false,
@@ -256,7 +257,7 @@ async function importFromBackup(backup, userId) {
         id: l.id, user_id: userId, date: l.date,
         weight: l.weight ?? null, steps: l.steps ?? null,
         calories: l.calories ?? null, protein: l.protein ?? null,
-        carbs: l.carbs ?? null, fat: l.fat ?? null,
+        carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
         water_ml: l.waterMl ?? null, note: l.note ?? null,
         adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
       }))
@@ -355,7 +356,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     // Daily health logs (weight / steps / macros / water) — one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, water_ml, note, adherence, targets_snap, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, adherence, targets_snap, created_at').eq('user_id', userId).order('date', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -475,7 +476,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       id: l.id, date: l.date,
       weight: l.weight ?? null, steps: l.steps ?? null,
       calories: l.calories ?? null, protein: l.protein ?? null,
-      carbs: l.carbs ?? null, fat: l.fat ?? null,
+      carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       waterMl: l.water_ml ?? null, note: l.note ?? null,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       createdAt: l.created_at,
@@ -508,6 +509,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         smartProgression: sett.smart_progression ?? false,
         weightFillDown: sett.weight_fill_down ?? true,
         manualCalories: sett.manual_calories ?? false,
+        netCarbs: sett.net_carbs ?? false,
         progressionRangeTop: sett.progression_range_top ?? 4,
         equipmentConfig: sett.equipment_config ?? {},
         reminderEnabled: sett.reminder_enabled ?? false,
@@ -782,7 +784,7 @@ async function syncStore(prev, next, userId) {
       id: l.id, user_id: userId, date: l.date,
       weight: l.weight ?? null, steps: l.steps ?? null,
       calories: l.calories ?? null, protein: l.protein ?? null,
-      carbs: l.carbs ?? null, fat: l.fat ?? null,
+      carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       water_ml: l.waterMl ?? null, note: l.note ?? null,
       adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
     }))));
@@ -816,6 +818,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.smartProgression   !== next.settings?.smartProgression   ||
     prev.settings?.weightFillDown     !== next.settings?.weightFillDown     ||
     prev.settings?.manualCalories     !== next.settings?.manualCalories     ||
+    prev.settings?.netCarbs           !== next.settings?.netCarbs           ||
     prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop ||
     JSON.stringify(prev.settings?.equipmentConfig) !== JSON.stringify(next.settings?.equipmentConfig) ||
     JSON.stringify(prev.customDayTypes) !== JSON.stringify(next.customDayTypes) ||
@@ -854,6 +857,7 @@ async function syncStore(prev, next, userId) {
       smart_progression: next.settings?.smartProgression ?? false,
       weight_fill_down: next.settings?.weightFillDown ?? true,
       manual_calories: next.settings?.manualCalories ?? false,
+      net_carbs: next.settings?.netCarbs ?? false,
       progression_range_top: next.settings?.progressionRangeTop ?? 4,
       equipment_config: next.settings?.equipmentConfig ?? {},
       custom_day_types: next.customDayTypes ?? [],

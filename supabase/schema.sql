@@ -101,6 +101,7 @@ CREATE TABLE public.zane_daily_logs (
   protein      integer,
   carbs        integer,
   fat          integer,
+  fiber        integer,
   water_ml     integer,
   note         text,
   adherence    numeric,
@@ -155,7 +156,9 @@ CREATE TABLE public.zane_user_settings (
   macro_targets jsonb,
   show_health_tab boolean NOT NULL DEFAULT false,
   weight_fill_down boolean NOT NULL DEFAULT true,
-  manual_calories boolean NOT NULL DEFAULT false
+  manual_calories boolean NOT NULL DEFAULT false,
+  onboarding_completed boolean DEFAULT false,
+  net_carbs boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE public.zane_pushover_active (
