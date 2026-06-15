@@ -1090,7 +1090,7 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
     return (
       <div style={{
         position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 10000,
-        background: 'rgba(0,0,0,0.35)', pointerEvents: 'none',
+        background: 'rgba(0,0,0,0.35)',
       }} />
     );
   }
@@ -1130,8 +1130,8 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
 
   return (
     <>
-      {/* Dark background — pointer events blocked so only the buttons dismiss the tour */}
-      <div style={{ position: 'fixed', inset: 0, zIndex: 9995, pointerEvents: 'none' }} />
+      {/* Full-screen intercept layer — blocks all taps reaching the app underneath */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 9995 }} />
 
       {/* Dark overlay via box-shadow (spotlight "hole") */}
       <div style={{
