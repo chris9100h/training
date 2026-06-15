@@ -775,12 +775,12 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
 
   const switchMode = async () => {
     if (!isWeekday) {
-      // Cycle → Weekday: days have no weekday assignment, must clear them
-      const hasDays = draft.days.some(d => d.items.length > 0);
-      const msg = hasDays
-        ? 'Switching to weekday mode requires clearing all days. Your exercises stay in the library.'
+      // Cycle → Weekday wipes the whole day structure (weekday plans start empty).
+      const dayCount = draft.days.length;
+      const msg = dayCount > 0
+        ? `This resets the plan structure: all ${dayCount} ${dayCount === 1 ? 'day' : 'days'} and their order are cleared, and you rebuild the week from scratch. Your exercises stay safe in the library.`
         : 'Switch this plan to weekday mode?';
-      if (!await confirm(msg, { title: 'Switch to Weekday mode?', ok: 'Switch' })) return;
+      if (!await confirm(msg, { title: 'Switch to Weekday mode?', ok: dayCount > 0 ? 'Reset & switch' : 'Switch', danger: dayCount > 0 })) return;
       setDraft(d => ({ ...d, mode: 'weekday', days: [] }));
     } else {
       // Weekday → Cycle: just strip weekday assignments, keep exercises
