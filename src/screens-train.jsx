@@ -29,14 +29,12 @@ function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }
 
   if (onActivate !== undefined) {
     return (
-      <input
-        type="text" readOnly inputMode="none"
-        autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
-        value={isKbActive ? kbRaw : fmt(value)}
+      <KbCell
+        text={isKbActive ? kbRaw : fmt(value)}
         placeholder="—"
         disabled={done}
-        style={{ ...style, caretColor: 'transparent', userSelect: 'none', ...(isKbActive ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
-        onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!done) onActivate(); }}
+        onActivate={onActivate}
+        style={{ ...style, ...(isKbActive ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
       />
     );
   }
@@ -59,6 +57,27 @@ function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }
         if (str === '' || !isNaN(num)) onChange(num ?? null);
       }}
     />
+  );
+}
+
+// Read-only value cell fed by the in-app keypad. Rendered as a <div>, never an
+// <input>, so iOS never attaches its AutoFill / QuickType accessory bar — these
+// fields take no native text entry (tapping opens the custom keyboard), so a
+// native control is never needed and only invites the autofill suggestion pill.
+function KbCell({ text, placeholder, style, disabled, onActivate }) {
+  const empty = text == null || text === '';
+  return (
+    <div
+      onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!disabled) onActivate?.(); }}
+      style={{
+        ...style,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        userSelect: 'none', WebkitUserSelect: 'none',
+        cursor: disabled || !onActivate ? 'default' : 'pointer',
+      }}
+    >
+      {empty ? <span style={{ color: UI.inkGhost }}>{placeholder}</span> : text}
+    </div>
   );
 }
 
@@ -135,17 +154,15 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
 
       {/* Weight input — large, centered */}
       <div style={{ position: 'relative', textAlign: 'center', marginBottom: 6 }}>
-        <input
-          type="text" inputMode="none" readOnly
-          value={raw} placeholder="0"
-          onPointerDown={e => e.preventDefault()}
+        <KbCell
+          text={raw}
+          placeholder="0"
           style={{
             background: 'transparent', border: 'none', outline: 'none',
             color: UI.ink, fontFamily: UI.fontNum, fontSize: 48, fontWeight: 300,
             letterSpacing: '-0.03em', textAlign: 'center',
-            width: '100%', boxSizing: 'border-box',
+            width: '100%',
             paddingBottom: 8,
-            caretColor: 'transparent', userSelect: 'none',
           }}
         />
         <span style={{
@@ -1716,35 +1733,32 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 {isUnilateral ? (
                   <div style={{ flex: 1, display: 'flex', gap: 4 }}>
                     <div style={{ flex: 1, textAlign: 'center' }}>
-                      <input readOnly type="text" inputMode="none"
-                        autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
-                        value={kbField?.setIdx === bgSetIdx && kbField?.field === 'repsL' ? kbRaw : (heroSet.repsL ?? '')}
+                      <KbCell
+                        text={kbField?.setIdx === bgSetIdx && kbField?.field === 'repsL' ? kbRaw : (heroSet.repsL ?? '')}
                         placeholder="—"
-                        style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === bgSetIdx && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
-                        onPointerDown={e => { e.preventDefault(); e.stopPropagation(); activateKb(bgSetIdx, 'repsL'); }}
+                        onActivate={() => activateKb(bgSetIdx, 'repsL')}
+                        style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, border: 'none', ...(kbField?.setIdx === bgSetIdx && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
                       />
                       <div className="micro" style={{ marginTop: 2 }}>LEFT</div>
                     </div>
                     <div style={{ fontSize: 22, color: UI.hair, fontFamily: UI.fontDisplay, fontWeight: 200, alignSelf: 'flex-start', marginTop: 10 }}>/</div>
                     <div style={{ flex: 1, textAlign: 'center' }}>
-                      <input readOnly type="text" inputMode="none"
-                        autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
-                        value={kbField?.setIdx === bgSetIdx && kbField?.field === 'repsR' ? kbRaw : (heroSet.repsR ?? '')}
+                      <KbCell
+                        text={kbField?.setIdx === bgSetIdx && kbField?.field === 'repsR' ? kbRaw : (heroSet.repsR ?? '')}
                         placeholder="—"
-                        style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === bgSetIdx && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
-                        onPointerDown={e => { e.preventDefault(); e.stopPropagation(); activateKb(bgSetIdx, 'repsR'); }}
+                        onActivate={() => activateKb(bgSetIdx, 'repsR')}
+                        style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, border: 'none', ...(kbField?.setIdx === bgSetIdx && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
                       />
                       <div className="micro" style={{ marginTop: 2 }}>RIGHT</div>
                     </div>
                   </div>
                 ) : (
                   <div style={{ flex: 1, textAlign: 'center' }}>
-                    <input readOnly type="text" inputMode="none"
-                      autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
-                      value={kbField?.setIdx === bgSetIdx && kbField?.field === 'reps' ? kbRaw : (heroSet.reps ?? '')}
+                    <KbCell
+                      text={kbField?.setIdx === bgSetIdx && kbField?.field === 'reps' ? kbRaw : (heroSet.reps ?? '')}
                       placeholder="—"
-                      style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, caretColor: 'transparent', border: 'none', ...(kbField?.setIdx === bgSetIdx && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
-                      onPointerDown={e => { e.preventDefault(); e.stopPropagation(); activateKb(bgSetIdx, 'reps'); }}
+                      onActivate={() => activateKb(bgSetIdx, 'reps')}
+                      style={{ background: 'transparent', outline: 'none', color: UI.gold, fontFamily: UI.fontNum, fontVariantNumeric: 'tabular-nums', fontSize: 44, fontWeight: 300, letterSpacing: '-0.02em', textAlign: 'center', width: '100%', padding: 0, border: 'none', ...(kbField?.setIdx === bgSetIdx && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
                     />
                     <div className="micro" style={{ marginTop: 2 }}>REPETITIONS</div>
                   </div>
@@ -1887,11 +1901,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
                     {!isNoWeightReps && (isUnilateral ? (
                       <>
-                        <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsL'); }} />
-                        <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'repsR'); }} />
+                        <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                        <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                       </>
                     ) : (
-                      <input readOnly type="text" inputMode="none" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} value={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), caretColor: 'transparent', ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!s.done && !s.skipped) activateKb(i, 'reps'); }} />
+                      <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                     ))}
 
                     <button
@@ -2332,7 +2346,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* ── Post-warmup rest overlay — full-screen dramatic countdown ────────── */}
       {postWarmupRest && (
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 61,
+          position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 61,
           background: 'rgb(8,6,3)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           padding: '0 32px',

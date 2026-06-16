@@ -259,7 +259,9 @@ async function importFromBackup(backup, userId) {
         calories: l.calories ?? null, protein: l.protein ?? null,
         carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
         water_ml: l.waterMl ?? null, note: l.note ?? null,
+        off_plan_note: l.offPlanNote ?? null,
         adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
+        daily_coach_fields: l.coachFields ?? null,
       }))
     ));
   }
@@ -356,7 +358,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     // Daily health logs (weight / steps / macros / water) — one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, adherence, targets_snap, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, created_at').eq('user_id', userId).order('date', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -478,7 +480,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       calories: l.calories ?? null, protein: l.protein ?? null,
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       waterMl: l.water_ml ?? null, note: l.note ?? null,
+      offPlanNote: l.off_plan_note ?? null,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
+      coachFields: l.daily_coach_fields ?? null,
       createdAt: l.created_at,
     })),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
@@ -786,7 +790,9 @@ async function syncStore(prev, next, userId) {
       calories: l.calories ?? null, protein: l.protein ?? null,
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       water_ml: l.waterMl ?? null, note: l.note ?? null,
+      off_plan_note: l.offPlanNote ?? null,
       adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
+      daily_coach_fields: l.coachFields ?? null,
     }))));
     if (removed.length) ops.push(_supabase.from('zane_daily_logs').delete().in('id', removed.map(l => l.id)));
   }
@@ -2177,7 +2183,7 @@ function dailyLogAdherence(log, targets, isTraining) {
 // check-in form field keys. weekStart = Monday ('YYYY-MM-DD'); the window is
 // [weekStart, weekStart+7). weight_avg_last_week comes from the prior week.
 // Returns null when there is nothing to prefill.
-function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions) {
+function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions, schema) {
   if (!dailyLogs?.length || !weekStart) return null;
   const ws = weekStart.slice(0, 10);
   const shift = (base, days) => { const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
@@ -2220,6 +2226,26 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions) {
         : Math.sign(thisEnded.length - prevEnded.length);
       out.performance_vs_last_week = diff > 0 ? 'improved' : diff < 0 ? 'worse' : 'same';
     }
+  }
+  const offPlanLines = week
+    .filter(l => l.offPlanNote && l.offPlanNote.trim())
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(l => {
+      const [y, m, d] = l.date.split('-');
+      return `${d}.${m}.${y} - ${l.offPlanNote.trim()}`;
+    });
+  if (offPlanLines.length) out.off_plan_notes = offPlanLines.join('\n');
+  if (schema) {
+    const numericTypes = new Set(['integer', 'decimal', 'stepper']);
+    schema.flatMap(s => s.fields || [])
+      .filter(f => f.show_in_health_log && numericTypes.has(f.type))
+      .forEach(f => {
+        const vals = week.map(l => l.coachFields?.[f.key]).filter(v => v != null && !isNaN(Number(v))).map(Number);
+        if (!vals.length) return;
+        const total = vals.reduce((s, v) => s + v, 0);
+        const agg = f.health_log_agg === 'sum' ? total : total / vals.length;
+        out[f.key] = f.type === 'decimal' ? r1(agg) : Math.round(agg);
+      });
   }
   return Object.keys(out).length ? { ...out, count: week.length } : null;
 }

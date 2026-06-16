@@ -238,16 +238,24 @@ function MacroLegend() {
 
 // ─── Daily log sheet ──────────────────────────────────────────────────────────
 
-function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
+function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema }) {
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
   const manualCal = !!store.settings?.manualCalories;
-  const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', fiber: '', calories: '', water: '', note: '' };
+  const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', fiber: '', calories: '', water: '', note: '', offPlanNote: '' };
   const [form, setForm] = useStateH(empty);
   // Net-carb mode: adds a fiber field; calories become (P + C − fiber)×4 + F×9.
   // Defaults to the user's global preference; an existing net-logged day (fiber
   // set) re-opens in net mode regardless, so its fiber value is preserved.
   const [netCarbs, setNetCarbs] = useStateH(!!store.settings?.netCarbs);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const coachFields = useMemoH(() => {
+    if (!activeCoachingSchema) return [];
+    const numericTypes = new Set(['integer', 'decimal', 'stepper']);
+    return activeCoachingSchema.flatMap(s => s.fields || []).filter(f => f.show_in_health_log && numericTypes.has(f.type));
+  }, [activeCoachingSchema]);
+  const [coachForm, setCoachForm] = useStateH({});
+  const setCoachVal = (k, v) => setCoachForm(f => ({ ...f, [k]: v }));
 
   useEffectH(() => {
     if (!open) return;
@@ -263,8 +271,15 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
         calories: existing.calories != null ? String(existing.calories) : '',
         water: existing.waterMl != null ? String(existing.waterMl) : '',
         note: existing.note || '',
+        offPlanNote: existing.offPlanNote || '',
       });
     } else setForm(empty);
+    const cf = {};
+    coachFields.forEach(f => {
+      const v = existing?.coachFields?.[f.key];
+      cf[f.key] = f.type === 'stepper' ? (v != null ? v : null) : (v != null ? String(v) : '');
+    });
+    setCoachForm(cf);
   }, [open, date, existing?.id]);
 
   const daysBack = healthDayDiff(date, LB.todayISO());
@@ -289,6 +304,11 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
     const calories = caloriesManual ? healthInt(form.calories) : autoCals;
     const isTraining = LB.isLoggedTrainingDay(store.sessions, date);
     const { adherence, targetsSnap } = LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
+    const savedCoachFields = {};
+    coachFields.forEach(f => {
+      const v = toResponse(f, coachForm[f.key]);
+      if (v != null) savedCoachFields[f.key] = v;
+    });
     const log = {
       id: existing?.id || LB.uid(),
       date,
@@ -298,6 +318,8 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
       waterMl: healthInt(form.water),
       note: form.note.trim() || null,
       adherence, targetsSnap,
+      offPlanNote: form.offPlanNote.trim() || null,
+      coachFields: Object.keys(savedCoachFields).length ? savedCoachFields : null,
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
     setStore(s => ({
@@ -397,10 +419,34 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
         ))}
       </div>
 
-      <div style={{ marginTop: 8, marginBottom: 18 }}>
+      <div style={{ marginTop: 8, marginBottom: 10 }}>
         <div style={labelStyle}>Note (optional)</div>
         <textarea rows={2} placeholder="…" value={form.note} onChange={e => set('note', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
       </div>
+
+      <div style={{ marginBottom: 18 }}>
+        <div style={labelStyle}>Off-plan note <span style={{ textTransform: 'none', fontWeight: 400, color: UI.inkGhost }}>(optional · prefills check-in)</span></div>
+        <textarea rows={2} placeholder="e.g. Birthday cake, 2 slices" value={form.offPlanNote} onChange={e => set('offPlanNote', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
+      </div>
+
+      {coachFields.length > 0 && (
+        <div style={{ marginBottom: 18, padding: '14px 14px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.05)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+          <div className="micro-gold" style={{ marginBottom: 12 }}>YOUR COACH WANTS TO KNOW</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {layoutRows(coachFields).map((row, ri) => (
+              row.length === 1
+                ? <div key={row[0].key}><FieldWidget field={row[0]} value={coachForm[row[0].key]} onChange={v => setCoachVal(row[0].key, v)} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} /></div>
+                : <div key={ri} style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                    {row.map(f => (
+                      <div key={f.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                        <FieldWidget field={f} value={coachForm[f.key]} onChange={v => setCoachVal(f.key, v)} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} />
+                      </div>
+                    ))}
+                  </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8 }}>
         {existing && (
@@ -534,6 +580,12 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
         {stat('Carbs', log?.carbs != null ? log.carbs : null, 'g')}
         {stat('Fat', log?.fat != null ? log.fat : null, 'g')}
       </div>
+      {log?.offPlanNote && (
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>OFF-PLAN</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{log.offPlanNote}</div>
+        </div>
+      )}
     </Card>
   );
 }
@@ -820,6 +872,21 @@ function HealthScreen({ store, setStore, go, userId }) {
     return () => { cancelled = true; };
   }, [coachingId]);
 
+  // Load the check-in schema for the active coaching relationship (real coach
+  // or self-coaching) so DailyLogSheet can show coach-configured daily fields.
+  const [activeCoachingSchema, setActiveCoachingSchema] = useStateH(null);
+  const activeClientCoachingId =
+    (store.coaching?.asClient?.status === 'active' ? store.coaching?.asClient?.id : null)
+    || store.coaching?.asSelf?.id || null;
+  useEffectH(() => {
+    if (!activeClientCoachingId) { setActiveCoachingSchema(null); return; }
+    let cancelled = false;
+    LB.loadCheckinSchema(activeClientCoachingId).then(schema => {
+      if (!cancelled) setActiveCoachingSchema(schema || store.settings?.defaultCheckinSchema || null);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeClientCoachingId]);
+
   const targets = LB.effectiveMacroTargets(store.settings?.macroTargets, coachingMacros);
   const fromCoach = !store.settings?.macroTargets && !!targets;
   const dailyLogs = store.dailyLogs || [];
@@ -1087,7 +1154,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       </div>
 
-      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} />
+      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} activeCoachingSchema={activeCoachingSchema} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
     </Screen>
   );

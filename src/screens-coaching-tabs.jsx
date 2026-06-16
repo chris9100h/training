@@ -977,7 +977,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           weekStart={formWeek}
           existing={target}
           prefill={!target ? LB.cardioWeekPrefill(store?.cardioLogs, formWeek, store?.settings?.unit) : undefined}
-          dailyPrefill={!target ? LB.dailyLogsWeekPrefill(store?.dailyLogs, formWeek, store?.sessions) : undefined}
+          dailyPrefill={!target ? LB.dailyLogsWeekPrefill(store?.dailyLogs, formWeek, store?.sessions, resolvedSchema) : undefined}
           onSaved={() => { setEditTarget(null); load(); }}
           schema={resolvedSchema}
         />

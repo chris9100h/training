@@ -1814,6 +1814,15 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const [capturing, setCapturing] = useStateL(false);
   const [feelOpen, setFeelOpen] = useStateL(false);
   const captureRef = useRefL(null);
+  // Screenshot watermark: VIPs get their home-screen background image instead
+  // of the default ZANE mark (TRAIN_BG_OVERRIDES lives in screens-home, loaded
+  // first → shared global scope). A real avatar isn't mirrored.
+  const _shotEmail = (store.user?.email || '').toLowerCase();
+  const _shotAdminPreview = _shotEmail === 'office@btc-prime.biz'
+    ? ({ mike: 'icons/IMG_6389.png', phoenix: 'icons/phoenix.png' })[localStorage.getItem('logbook-admin-bg-preview')]
+    : undefined;
+  const _shotLogo = _shotAdminPreview || TRAIN_BG_OVERRIDES[_shotEmail] || 'icons/zane-logo-2.png';
+  const _shotIsCustom = _shotLogo !== 'icons/zane-logo-2.png';
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
   // Sessions outside the boot window carry no entries — lazy-load them into
@@ -2188,7 +2197,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             })()}
           </div>
           {capturing && (
-            <img src="icons/zane-logo-2.png" style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, transform: 'scaleX(-1)' }} />
+            <img src={_shotLogo} style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
           )}
           {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 10 }} />}
         </div>
