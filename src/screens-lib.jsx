@@ -1818,7 +1818,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // of the default ZANE mark (TRAIN_BG_OVERRIDES lives in screens-home, loaded
   // first → shared global scope). A real avatar isn't mirrored.
   const _shotEmail = (store.user?.email || '').toLowerCase();
-  const _shotLogo = TRAIN_BG_OVERRIDES[_shotEmail] || 'icons/zane-logo-2.png';
+  const _shotAdminPreview = _shotEmail === 'office@btc-prime.biz'
+    ? ({ mike: 'icons/IMG_6389.png', phoenix: 'icons/phoenix.png' })[localStorage.getItem('logbook-admin-bg-preview')]
+    : undefined;
+  const _shotLogo = _shotAdminPreview || TRAIN_BG_OVERRIDES[_shotEmail] || 'icons/zane-logo-2.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo-2.png';
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
