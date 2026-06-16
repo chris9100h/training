@@ -439,11 +439,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const wIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
       const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
       const prevSet = wIdx >= 0 ? prevWorkingSets[wIdx] : undefined;
+      // Mirror buildSeedSets exactly: suggestion (weight bump) → base reps;
+      // smart progression without bump → prev+1; otherwise → prev.
+      const suggestion = LB.progressionSuggestion(store, entry.exId, session.dayId, entry.plannedReps, entry.plannedRepsPerSet, last);
       const lastReps = prevSet ? LB.effReps(prevSet) : null;
-      // Mirror buildSeedSets: smart progression prefills prev+1, otherwise prev
-      const refReps = lastReps != null
-        ? (store.settings?.smartProgression ? lastReps + 1 : lastReps)
-        : null;
+      const refReps = suggestion
+        ? (suggestion.reps ?? null)
+        : lastReps != null
+          ? (store.settings?.smartProgression ? lastReps + 1 : lastReps)
+          : null;
       if (refReps != null && refReps >= 4) {
         let loggedReps;
         if (isUnilateral) {
