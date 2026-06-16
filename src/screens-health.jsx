@@ -275,7 +275,10 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       });
     } else setForm(empty);
     const cf = {};
-    coachFields.forEach(f => { cf[f.key] = existing?.coachFields?.[f.key] != null ? String(existing.coachFields[f.key]) : ''; });
+    coachFields.forEach(f => {
+      const v = existing?.coachFields?.[f.key];
+      cf[f.key] = f.type === 'stepper' ? (v != null ? v : null) : (v != null ? String(v) : '');
+    });
     setCoachForm(cf);
   }, [open, date, existing?.id]);
 
@@ -303,10 +306,8 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     const { adherence, targetsSnap } = LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
     const savedCoachFields = {};
     coachFields.forEach(f => {
-      const raw = coachForm[f.key];
-      if (raw == null || raw === '') return;
-      const n = f.type === 'decimal' ? parseFloat(String(raw).replace(',', '.')) : parseInt(raw, 10);
-      if (!isNaN(n)) savedCoachFields[f.key] = n;
+      const v = toResponse(f, coachForm[f.key]);
+      if (v != null) savedCoachFields[f.key] = v;
     });
     const log = {
       id: existing?.id || LB.uid(),
@@ -429,14 +430,19 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       </div>
 
       {coachFields.length > 0 && (
-        <div style={{ marginBottom: 18, padding: '14px 14px 10px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.05)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+        <div style={{ marginBottom: 18, padding: '14px 14px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.05)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
           <div className="micro-gold" style={{ marginBottom: 12 }}>YOUR COACH WANTS TO KNOW</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {coachFields.map(f => (
-              <div key={f.key}>
-                <div style={labelStyle}>{f.label}{f.hint ? <span style={{ textTransform: 'none', fontWeight: 400 }}> · {f.hint}</span> : ''}{f.type === 'stepper' && f.min != null && f.max != null ? <span style={{ textTransform: 'none', fontWeight: 400 }}> ({f.min}–{f.max})</span> : ''}</div>
-                <input type="number" inputMode="decimal" placeholder="—" value={coachForm[f.key] || ''} onChange={e => setCoachVal(f.key, e.target.value)} style={inputStyle} />
-              </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {layoutRows(coachFields).map((row, ri) => (
+              row.length === 1
+                ? <div key={row[0].key}><FieldWidget field={row[0]} value={coachForm[row[0].key]} onChange={v => setCoachVal(row[0].key, v)} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} /></div>
+                : <div key={ri} style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                    {row.map(f => (
+                      <div key={f.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                        <FieldWidget field={f} value={coachForm[f.key]} onChange={v => setCoachVal(f.key, v)} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} />
+                      </div>
+                    ))}
+                  </div>
             ))}
           </div>
         </div>
