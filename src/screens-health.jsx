@@ -860,10 +860,12 @@ function HealthScreen({ store, setStore, go, userId }) {
     return () => { cancelled = true; };
   }, [coachingId]);
 
-  // Load the check-in schema for the active coaching relationship so
-  // DailyLogSheet can show coach-configured daily tracking fields.
+  // Load the check-in schema for the active coaching relationship (real coach
+  // or self-coaching) so DailyLogSheet can show coach-configured daily fields.
   const [activeCoachingSchema, setActiveCoachingSchema] = useStateH(null);
-  const activeClientCoachingId = store.coaching?.asClient?.status === 'active' ? store.coaching?.asClient?.id : null;
+  const activeClientCoachingId =
+    (store.coaching?.asClient?.status === 'active' ? store.coaching?.asClient?.id : null)
+    || store.coaching?.asSelf?.id || null;
   useEffectH(() => {
     if (!activeClientCoachingId) { setActiveCoachingSchema(null); return; }
     let cancelled = false;
