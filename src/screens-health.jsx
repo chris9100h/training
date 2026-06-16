@@ -241,7 +241,7 @@ function MacroLegend() {
 function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema }) {
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
   const manualCal = !!store.settings?.manualCalories;
-  const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', fiber: '', calories: '', water: '', note: '' };
+  const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', fiber: '', calories: '', water: '', note: '', offPlanNote: '' };
   const [form, setForm] = useStateH(empty);
   // Net-carb mode: adds a fiber field; calories become (P + C − fiber)×4 + F×9.
   // Defaults to the user's global preference; an existing net-logged day (fiber
@@ -271,6 +271,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         calories: existing.calories != null ? String(existing.calories) : '',
         water: existing.waterMl != null ? String(existing.waterMl) : '',
         note: existing.note || '',
+        offPlanNote: existing.offPlanNote || '',
       });
     } else setForm(empty);
     const cf = {};
@@ -316,6 +317,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       waterMl: healthInt(form.water),
       note: form.note.trim() || null,
       adherence, targetsSnap,
+      offPlanNote: form.offPlanNote.trim() || null,
       coachFields: Object.keys(savedCoachFields).length ? savedCoachFields : null,
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
@@ -416,9 +418,14 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         ))}
       </div>
 
-      <div style={{ marginTop: 8, marginBottom: 18 }}>
+      <div style={{ marginTop: 8, marginBottom: 10 }}>
         <div style={labelStyle}>Note (optional)</div>
         <textarea rows={2} placeholder="…" value={form.note} onChange={e => set('note', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
+      </div>
+
+      <div style={{ marginBottom: 18 }}>
+        <div style={labelStyle}>Off-plan note <span style={{ textTransform: 'none', fontWeight: 400, color: UI.inkGhost }}>(optional · prefills check-in)</span></div>
+        <textarea rows={2} placeholder="e.g. Birthday cake, 2 slices" value={form.offPlanNote} onChange={e => set('offPlanNote', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
       </div>
 
       {coachFields.length > 0 && (

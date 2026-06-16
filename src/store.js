@@ -259,6 +259,7 @@ async function importFromBackup(backup, userId) {
         calories: l.calories ?? null, protein: l.protein ?? null,
         carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
         water_ml: l.waterMl ?? null, note: l.note ?? null,
+        off_plan_note: l.offPlanNote ?? null,
         adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
         daily_coach_fields: l.coachFields ?? null,
       }))
@@ -357,7 +358,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     // Daily health logs (weight / steps / macros / water) — one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, adherence, targets_snap, daily_coach_fields, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, created_at').eq('user_id', userId).order('date', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -479,6 +480,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       calories: l.calories ?? null, protein: l.protein ?? null,
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       waterMl: l.water_ml ?? null, note: l.note ?? null,
+      offPlanNote: l.off_plan_note ?? null,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
       createdAt: l.created_at,
@@ -788,6 +790,7 @@ async function syncStore(prev, next, userId) {
       calories: l.calories ?? null, protein: l.protein ?? null,
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
       water_ml: l.waterMl ?? null, note: l.note ?? null,
+      off_plan_note: l.offPlanNote ?? null,
       adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
       daily_coach_fields: l.coachFields ?? null,
     }))));
@@ -2224,6 +2227,14 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions, schema) {
       out.performance_vs_last_week = diff > 0 ? 'improved' : diff < 0 ? 'worse' : 'same';
     }
   }
+  const offPlanLines = week
+    .filter(l => l.offPlanNote && l.offPlanNote.trim())
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(l => {
+      const [y, m, d] = l.date.split('-');
+      return `${d}.${m}.${y} - ${l.offPlanNote.trim()}`;
+    });
+  if (offPlanLines.length) out.off_plan_notes = offPlanLines.join('\n');
   if (schema) {
     const numericTypes = new Set(['integer', 'decimal', 'stepper']);
     schema.flatMap(s => s.fields || [])

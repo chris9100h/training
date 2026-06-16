@@ -114,6 +114,7 @@ CREATE TABLE public.zane_daily_logs (
   note         text,
   adherence          numeric,
   targets_snap       jsonb,
+  off_plan_note      text,
   daily_coach_fields jsonb,
   created_at         timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT zane_daily_logs_user_id_date_key UNIQUE (user_id, date)
