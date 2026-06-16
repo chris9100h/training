@@ -983,60 +983,108 @@ function CardioTypeDetailSheet({ type, logs, open, onClose }) {
 function WorkoutEffortSheet({ dayId, dayName, sessions, onClose }) {
   const FEEL_NUM = { easy: 1, good: 2, hard: 3, very_hard: 4, max: 5 };
   const FEEL_LBL = { 1: 'Easy', 2: 'Good', 3: 'Hard', 4: 'Very Hard', 5: 'Max' };
-  const points = [...sessions]
-    .filter(s => s.feel && s.ended && (dayId ? s.dayId === dayId : s.dayName === dayName))
-    .sort((a, b) => a.date.localeCompare(b.date))
+  const fmtDate = iso => { const d = new Date(iso + 'T12:00:00'); return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`; };
+
+  const filtered = [...sessions]
+    .filter(s => s.ended && (dayId ? s.dayId === dayId : s.dayName === dayName))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const effortPts = filtered
+    .filter(s => s.feel)
     .map(s => ({ date: s.date.slice(0, 10), value: FEEL_NUM[s.feel] }))
     .filter(p => p.value);
-  const n = points.length;
-  const W = 300, padL = 52, padR = 16, padTop = 36, padBottom = 26, plotH = 110;
+
+  const volumePts = filtered
+    .map(s => ({ date: s.date.slice(0, 10), value: LB.totalVolume(s) }))
+    .filter(p => p.value > 0);
+
+  const W = 300, padL = 52, padR = 16, padTop = 36, padBottom = 26, plotH = 100;
   const H = padTop + plotH + padBottom;
   const plotW = W - padL - padR;
-  const dom = UI.chartDomain(0, Math.max(...points.map(p => p.value), 5), { zeroFloor: true });
-  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
-  const xOf = i => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
-  const pts = points.map((p, i) => `${xOf(i).toFixed(1)},${yOf(p.value).toFixed(1)}`).join(' ');
-  const base = (padTop + plotH).toFixed(1);
-  const labelStep = Math.max(1, Math.round(n / 5));
-  const showLbl = i => i === n - 1 || i % labelStep === 0;
-  const fmtDate = s => { const d = new Date(s + 'T12:00:00'); return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`; };
+
+  const renderLine = (points, gridLines, fmtY) => {
+    const n = points.length;
+    const maxVal = Math.max(...points.map(p => p.value));
+    const dom = UI.chartDomain(0, maxVal, { zeroFloor: true });
+    const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
+    const xOf = i => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+    const pts = points.map((p, i) => `${xOf(i).toFixed(1)},${yOf(p.value).toFixed(1)}`).join(' ');
+    const base = (padTop + plotH).toFixed(1);
+    const labelStep = Math.max(1, Math.round(n / 5));
+    const showLbl = i => i === n - 1 || i % labelStep === 0;
+    return (
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+        {gridLines.map((lvl, gi) => (
+          <g key={gi}>
+            <line x1={padL} y1={yOf(lvl).toFixed(1)} x2={W - padR} y2={yOf(lvl).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
+            <text x={padL - 6} y={(yOf(lvl) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtY(lvl)}</text>
+          </g>
+        ))}
+        <line x1={padL} y1={padTop} x2={padL} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+        <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+        <polygon points={`${xOf(0).toFixed(1)},${base} ${pts} ${xOf(n - 1).toFixed(1)},${base}`} fill="rgba(var(--accent-rgb),0.12)" />
+        <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        {points.map((p, i) => {
+          const cx = xOf(i).toFixed(1), cy = yOf(p.value).toFixed(1);
+          const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+          return (
+            <g key={i}>
+              <circle cx={cx} cy={cy} r={i === n - 1 ? '3.5' : '2.5'} fill="var(--accent)" />
+              {showLbl(i) && <text x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtDate(p.date)}</text>}
+            </g>
+          );
+        })}
+      </svg>
+    );
+  };
+
+  const effortGridLines = [1, 2, 3, 4, 5];
+
+  const maxVol = volumePts.length ? Math.max(...volumePts.map(p => p.value)) : 0;
+  const volDom = volumePts.length ? UI.chartDomain(0, maxVol, { zeroFloor: true }) : null;
+  const volGridLines = volDom ? [0, Math.round(volDom.max / 2), Math.round(volDom.max)] : [];
+  const fmtVol = v => v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `${Math.round(v)}`;
+
+  const sectionLabel = (icon, text) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+      <i className={`fa-solid ${icon}`} style={{ fontSize: 10, color: 'var(--accent)' }} />
+      <span className="label" style={{ color: UI.inkSoft }}>{text}</span>
+    </div>
+  );
+
   const content = (
     <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 400, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
-      <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', padding: '20px 20px 44px', borderTop: `0.5px solid ${UI.hairStrong}`, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <i className="fa-solid fa-gauge-high" style={{ fontSize: 13, color: 'var(--accent)' }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{dayName} — Effort</span>
-          </div>
+      <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 20px 0', flexShrink: 0 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{dayName}</span>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, fontSize: 18, lineHeight: 1 }}>
             <i className="fa-solid fa-xmark" />
           </button>
         </div>
-        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
-          {[1, 2, 3, 4, 5].map(lvl => (
-            <g key={`g${lvl}`}>
-              <line x1={padL} y1={yOf(lvl).toFixed(1)} x2={W - padR} y2={yOf(lvl).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
-              <text x={padL - 6} y={(yOf(lvl) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{FEEL_LBL[lvl]}</text>
-            </g>
-          ))}
-          <line x1={padL} y1={padTop} x2={padL} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
-          <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
-          <polygon points={`${xOf(0).toFixed(1)},${base} ${pts} ${xOf(n - 1).toFixed(1)},${base}`} fill={`rgba(var(--accent-rgb),0.12)`} />
-          <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-          {points.map((p, i) => {
-            const cx = xOf(i).toFixed(1);
-            const cy = yOf(p.value).toFixed(1);
-            const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
-            return (
-              <g key={i}>
-                <circle cx={cx} cy={cy} r={i === n - 1 ? '3.5' : '2.5'} fill="var(--accent)" />
-                {showLbl(i) && <text x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtDate(p.date)}</text>}
-              </g>
-            );
-          })}
-        </svg>
-        <div style={{ marginTop: 6, textAlign: 'center' }}>
-          <span className="micro" style={{ color: UI.inkFaint }}>{n} SESSION{n !== 1 ? 'S' : ''} WITH EFFORT RATING</span>
+        <div style={{ overflowY: 'auto', padding: '20px 20px 44px' }}>
+          {sectionLabel('fa-gauge-high', 'EFFORT OVER TIME')}
+          {effortPts.length > 0
+            ? renderLine(effortPts, effortGridLines, v => FEEL_LBL[v])
+            : <div style={{ textAlign: 'center', padding: '12px 0 4px', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>No effort ratings yet</div>
+          }
+          {effortPts.length > 0 && (
+            <div style={{ marginTop: 6, textAlign: 'center' }}>
+              <span className="micro" style={{ color: UI.inkFaint }}>{effortPts.length} SESSION{effortPts.length !== 1 ? 'S' : ''} WITH EFFORT RATING</span>
+            </div>
+          )}
+
+          <div style={{ height: 0.5, background: UI.hair, margin: '20px 0' }} />
+
+          {sectionLabel('fa-dumbbell', 'VOLUME OVER TIME')}
+          {volumePts.length > 0
+            ? renderLine(volumePts, volGridLines, fmtVol)
+            : <div style={{ textAlign: 'center', padding: '12px 0 4px', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>No volume data</div>
+          }
+          {volumePts.length > 0 && (
+            <div style={{ marginTop: 6, textAlign: 'center' }}>
+              <span className="micro" style={{ color: UI.inkFaint }}>{volumePts.length} SESSION{volumePts.length !== 1 ? 'S' : ''} · {UI.unit().toUpperCase()}</span>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1475,6 +1523,14 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
     return counts;
   }, [sessions]);
 
+  const daySessionCounts = useMemoL(() => {
+    const counts = {};
+    sessions.forEach(s => {
+      if (s.ended) { const k = s.dayId || s.dayName; counts[k] = (counts[k] || 0) + 1; }
+    });
+    return counts;
+  }, [sessions]);
+
   const filteredSessions = useMemoL(() => {
     let s = sessions;
     if (planFilter) s = s.filter(x => x.scheduleId === planFilter);
@@ -1560,14 +1616,16 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                     {(() => {
                       const ek = s.dayId || s.dayName;
                       const hasEffort = (dayEffortCounts[ek] || 0) >= 3;
+                      const hasVolume = (daySessionCounts[ek] || 0) >= 3;
+                      const hasCharts = hasEffort || hasVolume;
                       return (
                         <div
                           className="display"
                           style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                          onClick={hasEffort ? e => { e.stopPropagation(); setEffortChart({ dayId: s.dayId, dayName: s.dayName }); } : undefined}
+                          onClick={hasCharts ? e => { e.stopPropagation(); setEffortChart({ dayId: s.dayId, dayName: s.dayName }); } : undefined}
                         >
                           {s.dayName}
-                          {hasEffort && <i className="fa-solid fa-chart-line" style={{ fontSize: 10, color: UI.gold }} />}
+                          {hasCharts && <i className="fa-solid fa-chart-line" style={{ fontSize: 10, color: UI.gold }} />}
                         </div>
                       );
                     })()}
