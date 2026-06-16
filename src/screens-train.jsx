@@ -439,7 +439,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const wIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
       const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
       const prevSet = wIdx >= 0 ? prevWorkingSets[wIdx] : undefined;
-      const refReps = prevSet ? LB.effReps(prevSet) : null;
+      const lastReps = prevSet ? LB.effReps(prevSet) : null;
+      // Mirror buildSeedSets: smart progression prefills prev+1, otherwise prev
+      const refReps = lastReps != null
+        ? (store.settings?.smartProgression ? lastReps + 1 : lastReps)
+        : null;
       if (refReps != null && refReps >= 4) {
         let loggedReps;
         if (isUnilateral) {
