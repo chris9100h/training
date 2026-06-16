@@ -83,7 +83,7 @@ self.addEventListener('fetch', e => {
     // App shell: stale-while-revalidate — serve cache instantly, refresh in background
     e.respondWith(
       caches.match(e.request).then(cached => {
-        const network = fetch(e.request).then(res => {
+        const network = fetch(new Request(e.request, { cache: 'reload' })).then(res => {
           if (res.ok) {
             const clone = res.clone();
             caches.open(CACHE).then(c => c.put(e.request, clone));
