@@ -78,7 +78,7 @@ function PlanScreen({ store, setStore, go }) {
           </div>
         }
       />
-      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'lib', label: 'Library', icon: 'fa-book' }]}
+      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'lib', label: 'Exercises', icon: 'fa-book' }]}
         active="plan" onChange={() => go({ name: 'lib' })} />
       <div style={{ padding: '14px 22px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {store.schedules.length === 0 && (
@@ -778,7 +778,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       // Cycle → Weekday wipes the whole day structure (weekday plans start empty).
       const dayCount = draft.days.length;
       const msg = dayCount > 0
-        ? `This resets the plan structure: all ${dayCount} ${dayCount === 1 ? 'day' : 'days'} and their order are cleared, and you rebuild the week from scratch. Your exercises stay safe in the library.`
+        ? `This resets the plan structure: all ${dayCount} ${dayCount === 1 ? 'day' : 'days'} and their order are cleared, and you rebuild the week from scratch. Your exercises stay safe in the exercise library.`
         : 'Switch this plan to weekday mode?';
       if (!await confirm(msg, { title: 'Switch to Weekday mode?', ok: dayCount > 0 ? 'Reset & switch' : 'Switch', danger: dayCount > 0 })) return;
       setDraft(d => ({ ...d, mode: 'weekday', days: [] }));

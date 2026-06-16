@@ -52,7 +52,7 @@ window.TOURS = {
     {
       target: null,
       title: 'Fill each day with exercises',
-      body: 'Tap a day to open it, then add exercises. Search your library, create a new one, or pick from recents. Set planned sets and reps for each.',
+      body: 'Tap a day to open it, then add exercises. Search your exercise library, create a new one, or pick from recents. Set planned sets and reps for each.',
       visual: 'exercises',
     },
     {

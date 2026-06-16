@@ -925,7 +925,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
             );
           })}
         </div>
-        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 16 }}>Set equipment categories on exercises in the Library. Individual overrides can be set per exercise.</div>
+        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 16 }}>Set equipment categories on exercises in the exercise library. Individual overrides can be set per exercise.</div>
         <Btn style={{ width: '100%' }} onClick={() => setProgConfigOpen(false)}>Done</Btn>
       </SettingsSheet>
 

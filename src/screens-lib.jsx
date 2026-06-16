@@ -140,8 +140,8 @@ function LibraryScreen({ store, setStore, go }) {
 
   return (
     <Screen>
-      <TopBar title="Library" right={topBarRight} />
-      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'lib', label: 'Library', icon: 'fa-book' }]}
+      <TopBar title="Exercises" right={topBarRight} />
+      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'lib', label: 'Exercises', icon: 'fa-book' }]}
         active="lib" onChange={() => go({ name: 'plan' })} />
 
       {/* Tab strip */}
