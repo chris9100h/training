@@ -248,6 +248,6 @@ Seit v2.085 lädt der Boot **konstant viele Sets**, unabhängig vom Account-Alte
 
 PWA, erreichbar unter `/training/`. Service Worker in `sw.js`.
 
-**Bei jedem Commit die SW-Cache-Version in `sw.js` um 1 erhöhen** (erste Zeile: `const CACHE = 'zane-vX.XXX'`). Das stellt sicher, dass Nutzer nach einem Deploy automatisch frische Assets bekommen. Format `zane-vMAJOR.MINOR`, fortlaufend hochgezählt (z.B. `zane-v2.077` → `zane-v2.078` → `zane-v2.079`).
+**SW-Cache-Version (`const CACHE = 'zane-vX.XXX'` in `sw.js`) nur auf ausdrückliche Aufforderung erhöhen.** Nicht automatisch bei jedem Commit — mit vielen aktiven Usern würde jedes kleinste Code-Update einen Update-Banner auslösen. Format `zane-vMAJOR.MINOR`, fortlaufend hochgezählt (z.B. `zane-v2.350` → `zane-v2.351`).
 
-**Nach jedem Cache-Bump die neue Versionsnummer im Chat melden** — z.B. „SW-Cache → zane-v1.922".
+**Nach einem Cache-Bump die neue Versionsnummer im Chat melden** — z.B. „SW-Cache → zane-v2.351".
