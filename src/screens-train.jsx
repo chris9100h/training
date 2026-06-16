@@ -437,10 +437,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // (smart progression target if active, else last session's reps).
     if (!bypassOutlierCheck && !entry.sets[setIdx]?.warmup) {
       const wIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
-      const progressionRef = progressionTargetForSet(wIdx);
       const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
       const prevSet = wIdx >= 0 ? prevWorkingSets[wIdx] : undefined;
-      const refReps = progressionRef ?? (prevSet ? LB.effReps(prevSet) : null);
+      const refReps = prevSet ? LB.effReps(prevSet) : null;
       if (refReps != null && refReps >= 4) {
         let loggedReps;
         if (isUnilateral) {
