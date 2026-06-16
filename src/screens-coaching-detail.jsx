@@ -615,6 +615,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
       hint: f.hint || '', min: f.min != null ? String(f.min) : '1', max: f.max != null ? String(f.max) : '10',
       rows: f.rows != null ? String(f.rows) : '2',
       options: f.options ? JSON.parse(JSON.stringify(f.options)) : [], labeled: !!f.labeled, isNew: false,
+      show_in_health_log: !!f.show_in_health_log, health_log_agg: f.health_log_agg || 'avg',
     });
     setEditCtx({ sectionIdx: sIdx, fieldIdx: fIdx });
     setHelpTip(null);
@@ -622,7 +623,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
   };
 
   const openAddField = (sIdx) => {
-    setFieldDraft({ key: '', label: '', type: 'integer', width: 'full', required: false, direction: null, icon: '', unit: '', hint: '', min: '1', max: '10', rows: '2', options: [], labeled: false, isNew: true });
+    setFieldDraft({ key: '', label: '', type: 'integer', width: 'full', required: false, direction: null, icon: '', unit: '', hint: '', min: '1', max: '10', rows: '2', options: [], labeled: false, isNew: true, show_in_health_log: false, health_log_agg: 'avg' });
     setEditCtx({ sectionIdx: sIdx, fieldIdx: null });
     setHelpTip(null);
     setView('edit-field');
@@ -664,6 +665,10 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     if (fd.hint.trim()) f.hint = fd.hint.trim();
     if (fd.type === 'stepper') { f.min = parseInt(fd.min) || 1; f.max = parseInt(fd.max) || 10; }
     if (fd.type === 'text') f.rows = parseInt(fd.rows) || 2;
+    if (['integer', 'decimal', 'stepper'].includes(fd.type) && fd.show_in_health_log) {
+      f.show_in_health_log = true;
+      f.health_log_agg = fd.health_log_agg || 'avg';
+    }
     if (fd.type === 'choice') {
       // Each option stores its own text as the value; the position gives the
       // rank used for trends (see the direction hint in the editor). Empty
@@ -870,6 +875,29 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
               ))}
             </div>
           </div>
+
+          {['integer', 'decimal', 'stepper'].includes(fd.type) && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px 14px', borderRadius: 6, background: fd.show_in_health_log ? `rgba(var(--accent-rgb),0.06)` : UI.bgInset, border: `0.5px solid ${fd.show_in_health_log ? `rgba(var(--accent-rgb),0.25)` : UI.hair}` }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ ...lbl, marginBottom: 3 }}>Track daily in health log</div>
+                  <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, lineHeight: 1.4 }}>
+                    Client logs this field daily — weekly aggregate prefills the check-in
+                  </div>
+                </div>
+                {renderToggle(fd.show_in_health_log, () => set('show_in_health_log', !fd.show_in_health_log))}
+              </div>
+              {fd.show_in_health_log && (
+                <div>
+                  <div style={{ ...lbl, marginBottom: 6 }}>Aggregate as</div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => set('health_log_agg', 'avg')} style={segBtn(fd.health_log_agg === 'avg')}>Average</button>
+                    <button onClick={() => set('health_log_agg', 'sum')} style={segBtn(fd.health_log_agg === 'sum')}>Sum</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div>
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>

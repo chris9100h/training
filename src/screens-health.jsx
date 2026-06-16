@@ -238,7 +238,7 @@ function MacroLegend() {
 
 // ─── Daily log sheet ──────────────────────────────────────────────────────────
 
-function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
+function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema }) {
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
   const manualCal = !!store.settings?.manualCalories;
   const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', fiber: '', calories: '', water: '', note: '' };
@@ -248,6 +248,14 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
   // set) re-opens in net mode regardless, so its fiber value is preserved.
   const [netCarbs, setNetCarbs] = useStateH(!!store.settings?.netCarbs);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const coachFields = useMemoH(() => {
+    if (!activeCoachingSchema) return [];
+    const numericTypes = new Set(['integer', 'decimal', 'stepper']);
+    return activeCoachingSchema.flatMap(s => s.fields || []).filter(f => f.show_in_health_log && numericTypes.has(f.type));
+  }, [activeCoachingSchema]);
+  const [coachForm, setCoachForm] = useStateH({});
+  const setCoachVal = (k, v) => setCoachForm(f => ({ ...f, [k]: v }));
 
   useEffectH(() => {
     if (!open) return;
@@ -265,6 +273,9 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
         note: existing.note || '',
       });
     } else setForm(empty);
+    const cf = {};
+    coachFields.forEach(f => { cf[f.key] = existing?.coachFields?.[f.key] != null ? String(existing.coachFields[f.key]) : ''; });
+    setCoachForm(cf);
   }, [open, date, existing?.id]);
 
   const daysBack = healthDayDiff(date, LB.todayISO());
@@ -289,6 +300,13 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
     const calories = caloriesManual ? healthInt(form.calories) : autoCals;
     const isTraining = LB.isLoggedTrainingDay(store.sessions, date);
     const { adherence, targetsSnap } = LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
+    const savedCoachFields = {};
+    coachFields.forEach(f => {
+      const raw = coachForm[f.key];
+      if (raw == null || raw === '') return;
+      const n = f.type === 'decimal' ? parseFloat(String(raw).replace(',', '.')) : parseInt(raw, 10);
+      if (!isNaN(n)) savedCoachFields[f.key] = n;
+    });
     const log = {
       id: existing?.id || LB.uid(),
       date,
@@ -298,6 +316,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
       waterMl: healthInt(form.water),
       note: form.note.trim() || null,
       adherence, targetsSnap,
+      coachFields: Object.keys(savedCoachFields).length ? savedCoachFields : null,
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
     setStore(s => ({
@@ -401,6 +420,20 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets }) {
         <div style={labelStyle}>Note (optional)</div>
         <textarea rows={2} placeholder="…" value={form.note} onChange={e => set('note', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
       </div>
+
+      {coachFields.length > 0 && (
+        <div style={{ marginBottom: 18, padding: '14px 14px 10px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.05)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+          <div className="micro-gold" style={{ marginBottom: 12 }}>YOUR COACH WANTS TO KNOW</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {coachFields.map(f => (
+              <div key={f.key}>
+                <div style={labelStyle}>{f.label}{f.hint ? <span style={{ textTransform: 'none', fontWeight: 400 }}> · {f.hint}</span> : ''}{f.type === 'stepper' && f.min != null && f.max != null ? <span style={{ textTransform: 'none', fontWeight: 400 }}> ({f.min}–{f.max})</span> : ''}</div>
+                <input type="number" inputMode="decimal" placeholder="—" value={coachForm[f.key] || ''} onChange={e => setCoachVal(f.key, e.target.value)} style={inputStyle} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8 }}>
         {existing && (
@@ -820,6 +853,19 @@ function HealthScreen({ store, setStore, go, userId }) {
     return () => { cancelled = true; };
   }, [coachingId]);
 
+  // Load the check-in schema for the active coaching relationship so
+  // DailyLogSheet can show coach-configured daily tracking fields.
+  const [activeCoachingSchema, setActiveCoachingSchema] = useStateH(null);
+  const activeClientCoachingId = store.coaching?.asClient?.status === 'active' ? store.coaching?.asClient?.id : null;
+  useEffectH(() => {
+    if (!activeClientCoachingId) { setActiveCoachingSchema(null); return; }
+    let cancelled = false;
+    LB.loadCheckinSchema(activeClientCoachingId).then(schema => {
+      if (!cancelled) setActiveCoachingSchema(schema || store.settings?.defaultCheckinSchema || null);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeClientCoachingId]);
+
   const targets = LB.effectiveMacroTargets(store.settings?.macroTargets, coachingMacros);
   const fromCoach = !store.settings?.macroTargets && !!targets;
   const dailyLogs = store.dailyLogs || [];
@@ -1087,7 +1133,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       </div>
 
-      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} />
+      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} activeCoachingSchema={activeCoachingSchema} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
     </Screen>
   );
