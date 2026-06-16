@@ -419,7 +419,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return (st.kg < prevSet.kg && rA <= rB) || (st.kg === prevSet.kg && rA < rB);
   };
 
-  const completeSet = (setIdx) => {
+  const completeSet = (setIdx, bypassOutlierCheck = false) => {
     // Unlock AudioContext on this user gesture so the rest-timer beep works on iOS
     // even when the tempo feature is disabled (only other init path).
     try {
@@ -431,6 +431,41 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const kb = kbFieldRef.current;
     const rawRef = kbRawRef.current;
     _log(`completeSet(${setIdx}) kb=${kb?.field ?? 'none'} raw='${rawRef}'`);
+
+    // ── Rep outlier check ────────────────────────────────────────────────────
+    // Warn when logged reps are implausibly low vs planned (e.g. typed "1"
+    // instead of "14"). Threshold: logged < planned/3, planned >= 4.
+    if (!bypassOutlierCheck && !entry.sets[setIdx]?.warmup) {
+      const wIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
+      const perSet = entry.plannedRepsPerSet;
+      const plannedRepsForSet = (perSet && perSet.length > 1)
+        ? (perSet[wIdx] ?? perSet[perSet.length - 1])
+        : (entry.plannedReps ?? null);
+      if (plannedRepsForSet != null && plannedRepsForSet >= 4) {
+        let loggedReps;
+        if (isUnilateral) {
+          const lVal = (kb?.field === 'repsL' && kb?.setIdx === setIdx)
+            ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.repsL || 0)
+            : (session.entries[exIdx]?.sets[setIdx]?.repsL || 0);
+          const rVal = (kb?.field === 'repsR' && kb?.setIdx === setIdx)
+            ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.repsR || 0)
+            : (session.entries[exIdx]?.sets[setIdx]?.repsR || 0);
+          loggedReps = (lVal > 0 && rVal > 0) ? Math.min(lVal, rVal) : (lVal || rVal);
+        } else {
+          loggedReps = (kb?.field === 'reps' && kb?.setIdx === setIdx)
+            ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.reps || 0)
+            : (session.entries[exIdx]?.sets[setIdx]?.reps || 0);
+        }
+        if (loggedReps > 0 && loggedReps < plannedRepsForSet / 3) {
+          kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+          setKbField(null); setKbRaw(''); setKbFresh(false);
+          setRepOutlierConfirm({ setIdx, loggedReps, plannedReps: plannedRepsForSet });
+          return;
+        }
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
     setKbField(null); setKbRaw(''); setKbFresh(false);
     armKbShield();
@@ -884,6 +919,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [swapOpen, setSwapOpen] = useStateT(false);
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
+  const [repOutlierConfirm, setRepOutlierConfirm] = useStateT(null);
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
@@ -1399,6 +1435,34 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(201,169,97,0.8)' }}>{progressionUnlocked.nextKg}{UI.unit()}</span>
           </div>
           <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, letterSpacing: '0.12em' }}>{progressionUnlocked.exName}</span>
+        </div>,
+        document.body
+      )}
+
+      {/* Rep outlier confirmation */}
+      {repOutlierConfirm && ReactDOM.createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 500, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }}>
+          <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, padding: '20px 20px 44px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <i className="fa-solid fa-triangle-exclamation" style={{ color: UI.gold, fontSize: 14 }} />
+              <span style={{ fontWeight: 700, fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>Only {repOutlierConfirm.loggedReps} {repOutlierConfirm.loggedReps === 1 ? 'rep' : 'reps'}?</span>
+            </div>
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 22 }}>
+              {entry.name} — {repOutlierConfirm.loggedReps} logged, {repOutlierConfirm.plannedReps} planned
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <Btn kind="ghost" style={{ flex: 1 }} onClick={() => {
+                const s = repOutlierConfirm.setIdx;
+                setRepOutlierConfirm(null);
+                activateKb(s, isUnilateral ? 'repsL' : 'reps');
+              }}>No, fix it</Btn>
+              <Btn style={{ flex: 1 }} onClick={() => {
+                const s = repOutlierConfirm.setIdx;
+                setRepOutlierConfirm(null);
+                completeSet(s, true);
+              }}>Yes, {repOutlierConfirm.loggedReps} {repOutlierConfirm.loggedReps === 1 ? 'rep' : 'reps'}</Btn>
+            </div>
+          </div>
         </div>,
         document.body
       )}
