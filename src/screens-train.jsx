@@ -433,15 +433,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     _log(`completeSet(${setIdx}) kb=${kb?.field ?? 'none'} raw='${rawRef}'`);
 
     // ── Rep outlier check ────────────────────────────────────────────────────
-    // Warn when logged reps are implausibly low vs planned (e.g. typed "1"
-    // instead of "14"). Threshold: logged < planned/3, planned >= 4.
+    // Warn when logged reps are implausibly low vs the pre-filled value
+    // (smart progression target if active, else last session's reps).
     if (!bypassOutlierCheck && !entry.sets[setIdx]?.warmup) {
       const wIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
-      const perSet = entry.plannedRepsPerSet;
-      const plannedRepsForSet = (perSet && perSet.length > 1)
-        ? (perSet[wIdx] ?? perSet[perSet.length - 1])
-        : (entry.plannedReps ?? null);
-      if (plannedRepsForSet != null && plannedRepsForSet >= 4) {
+      const progressionRef = progressionTargetForSet(wIdx);
+      const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
+      const prevSet = wIdx >= 0 ? prevWorkingSets[wIdx] : undefined;
+      const refReps = progressionRef ?? (prevSet ? LB.effReps(prevSet) : null);
+      if (refReps != null && refReps >= 4) {
         let loggedReps;
         if (isUnilateral) {
           const lVal = (kb?.field === 'repsL' && kb?.setIdx === setIdx)
@@ -456,10 +456,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.reps || 0)
             : (session.entries[exIdx]?.sets[setIdx]?.reps || 0);
         }
-        if (loggedReps > 0 && loggedReps < plannedRepsForSet / 3) {
+        if (loggedReps > 0 && loggedReps < refReps / 3) {
           kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
           setKbField(null); setKbRaw(''); setKbFresh(false);
-          setRepOutlierConfirm({ setIdx, loggedReps, plannedReps: plannedRepsForSet });
+          setRepOutlierConfirm({ setIdx, loggedReps, refReps });
           return;
         }
       }
@@ -1448,7 +1448,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <span style={{ fontWeight: 700, fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>Only {repOutlierConfirm.loggedReps} {repOutlierConfirm.loggedReps === 1 ? 'rep' : 'reps'}?</span>
             </div>
             <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 22 }}>
-              {entry.name} — {repOutlierConfirm.loggedReps} logged, {repOutlierConfirm.plannedReps} planned
+              {entry.name} — {repOutlierConfirm.loggedReps} logged, {repOutlierConfirm.refReps} expected
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
               <Btn kind="ghost" style={{ flex: 1 }} onClick={() => {
