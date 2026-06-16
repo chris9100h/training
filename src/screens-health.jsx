@@ -580,6 +580,12 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
         {stat('Carbs', log?.carbs != null ? log.carbs : null, 'g')}
         {stat('Fat', log?.fat != null ? log.fat : null, 'g')}
       </div>
+      {log?.offPlanNote && (
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>OFF-PLAN</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{log.offPlanNote}</div>
+        </div>
+      )}
     </Card>
   );
 }
