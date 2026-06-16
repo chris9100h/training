@@ -2332,7 +2332,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* ── Post-warmup rest overlay — full-screen dramatic countdown ────────── */}
       {postWarmupRest && (
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 61,
+          position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 61,
           background: 'rgb(8,6,3)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           padding: '0 32px',
