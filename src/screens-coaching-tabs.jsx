@@ -421,6 +421,8 @@ function MarkerRow({ label, value, onChange, readOnly }) {
 
 function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false }) {
   const [open, setOpen] = useStateC(defaultOpen);
+  const [exportMode, setExportMode] = useStateC(null); // null | 'pick' | 'exporting'
+  const cardRef = useRefC(null);
   const sections = schema || CHECKIN_DEFAULT_SCHEMA;
   const responses = ci.responses || {};
   const has = v => v != null && v !== '';
@@ -458,8 +460,64 @@ function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit
   const schemaKeys = new Set(sections.flatMap(s => (s.fields || []).map(f => f.key)));
   const extraKeys = Object.keys(responses).filter(k => !schemaKeys.has(k) && has(responses[k]));
 
+  const buildText = () => {
+    const lines = [`Week of ${fmtWeek(ci.weekStart)}`];
+    sections.forEach(section => {
+      const fields = (section.fields || []).filter(f => has(responses[f.key]));
+      if (!fields.length) return;
+      const headLabel = section.label.toUpperCase() + (section.sectionHint ? ` (${section.sectionHint})` : '');
+      lines.push('', headLabel);
+      fields.forEach(f => {
+        const v = responses[f.key];
+        if (f.type === 'stepper') lines.push(`${f.label}: ${v}/${f.max ?? 10}`);
+        else if (f.type === 'text') lines.push(`${f.label.toUpperCase()}`, String(v));
+        else lines.push(`${f.label}: ${fmtValue(f, v)}`);
+      });
+    });
+    if (extraKeys.length) {
+      lines.push('', 'ADDITIONAL');
+      extraKeys.forEach(k => lines.push(`${k.replace(/_/g, ' ')}: ${responses[k]}`));
+    }
+    return lines.join('\n');
+  };
+
+  const doExportText = async () => {
+    const text = buildText();
+    if (navigator.share) { try { await navigator.share({ text }); } catch (_) {} }
+    else { try { await navigator.clipboard.writeText(text); } catch (_) {} }
+    setExportMode(null);
+  };
+
+  const doExportImage = async () => {
+    if (!cardRef.current) return;
+    setExportMode('exporting');
+    const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
+    if (!html2canvas) { setExportMode(null); return; }
+    try {
+      const el = cardRef.current;
+      const canvas = await html2canvas(el, {
+        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#0f0e0b',
+        scale: 2, useCORS: true, logging: false,
+        height: el.scrollHeight, windowHeight: el.scrollHeight,
+      });
+      canvas.toBlob(async (blob) => {
+        const filename = `checkin-${ci.weekStart}.png`;
+        const file = new File([blob], filename, { type: 'image/png' });
+        if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) && navigator.share && navigator.canShare?.({ files: [file] })) {
+          try { await navigator.share({ files: [file] }); } catch (_) {}
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+      }, 'image/png');
+    } finally { setExportMode(null); }
+  };
+
   return (
-    <div style={embedded ? { overflow: 'hidden' } : { background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+    <div ref={cardRef} style={embedded ? { overflow: 'hidden' } : { background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
       <button
         onClick={() => setOpen(o => !o)}
         style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', gap: 12 }}
@@ -547,21 +605,34 @@ function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit
             </div>
           )}
 
-          {/* Edit / delete (only in the client/self view, which passes the handlers) */}
-          {(onEdit || onDelete) && (
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 12, borderTop: `0.5px solid ${UI.hair}` }}>
-              {onDelete && (
-                <button onClick={onDelete}
-                  style={{ background: confirmingDelete ? 'rgba(var(--danger-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${confirmingDelete ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', fontSize: 12, color: confirmingDelete ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                  {confirmingDelete ? 'Confirm?' : 'Delete'}
-                </button>
-              )}
-              {onEdit && (
-                <button onClick={onEdit}
-                  style={{ background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.4)', borderRadius: 6, padding: '8px 18px', fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Edit</button>
-              )}
-            </div>
-          )}
+          {/* Actions row — export always visible, edit/delete when handlers are present */}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 12, borderTop: `0.5px solid ${UI.hair}` }}>
+            {onDelete && (
+              <button onClick={onDelete}
+                style={{ background: confirmingDelete ? 'rgba(var(--danger-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${confirmingDelete ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', fontSize: 12, color: confirmingDelete ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                {confirmingDelete ? 'Confirm?' : 'Delete'}
+              </button>
+            )}
+            {onEdit && (
+              <button onClick={onEdit}
+                style={{ background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.4)', borderRadius: 6, padding: '8px 18px', fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Edit</button>
+            )}
+            {exportMode === 'pick' ? (
+              <>
+                <button onClick={() => setExportMode(null)}
+                  style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Cancel</button>
+                <button onClick={doExportText}
+                  style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Text</button>
+                <button onClick={doExportImage}
+                  style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Image</button>
+              </>
+            ) : (
+              <button onClick={() => setExportMode('pick')} disabled={exportMode === 'exporting'}
+                style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: exportMode === 'exporting' ? UI.inkFaint : UI.ink, fontFamily: UI.fontUi, cursor: exportMode === 'exporting' ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                {exportMode === 'exporting' ? '…' : <i className="fa-solid fa-share-from-square" />}
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
