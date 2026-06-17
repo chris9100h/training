@@ -198,9 +198,21 @@ window.onunhandledrejection = function(e) {
   d.style.display = 'block';
   d.textContent += '[PROMISE] ' + (e.reason?.message || e.reason) + '\n\n';
 };
-// Fallback: if React never mounts after 6s, show diagnostic info
+// Fallback: if React never mounts after 6s, show diagnostic info.
+// If a new SW is waiting, auto-send SKIP_WAITING and reload — this breaks
+// the deadlock where a broken SW serves bad files and React never mounts,
+// which means the update banner never shows and the new SW never activates.
 setTimeout(function() {
   if (!document.getElementById('root').children.length) {
+    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.getRegistration().then(function(reg) {
+        if (reg && reg.waiting) {
+          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          setTimeout(function() { window.location.reload(); }, 500);
+          return;
+        }
+      });
+    }
     var d = document.getElementById('err');
     d.style.display = 'block';
     d.textContent += '[TIMEOUT] React did not mount.\n';
