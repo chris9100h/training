@@ -920,6 +920,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
 const TRAIN_BG_OVERRIDES = {
   'mikeapicelli777@gmail.com': 'icons/IMG_6389.png',
   'mb2489@protonmail.com':     'icons/phoenix.png',
+  'test@test.com':             'icons/phoenix.png',
 };
 
 function HomeScreen({ store, setStore, go, userId }) {
