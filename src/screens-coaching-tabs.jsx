@@ -419,7 +419,7 @@ function MarkerRow({ label, value, onChange, readOnly }) {
   );
 }
 
-function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false }) {
+function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false }) {
   const [open, setOpen] = useStateC(defaultOpen);
   const [exportMode, setExportMode] = useStateC(null); // null | 'pick' | 'exporting'
   const cardRef = useRefC(null);
@@ -460,6 +460,14 @@ function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit
   const schemaKeys = new Set(sections.flatMap(s => (s.fields || []).map(f => f.key)));
   const extraKeys = Object.keys(responses).filter(k => !schemaKeys.has(k) && has(responses[k]));
 
+  const weightDelta = (() => {
+    const cur = parseFloat(responses.weight_avg_last_week);
+    const prev = parseFloat(prevCi?.responses?.weight_avg_last_week);
+    if (isNaN(cur) || isNaN(prev)) return null;
+    return Math.round((cur - prev) * 100) / 100;
+  })();
+  const fmtDelta = d => (d >= 0 ? '+' : '') + d.toFixed(2).replace('.', ',') + ' ' + UI.unit();
+
   const buildText = () => {
     const lines = [`Week of ${fmtWeek(ci.weekStart)}`];
     sections.forEach(section => {
@@ -471,7 +479,10 @@ function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit
         const v = responses[f.key];
         if (f.type === 'stepper') lines.push(`${f.label}: ${v}/${f.max ?? 10}`);
         else if (f.type === 'text') lines.push(`${f.label.toUpperCase()}`, String(v));
-        else lines.push(`${f.label}: ${fmtValue(f, v)}`);
+        else {
+          const base = `${f.label}: ${fmtValue(f, v)}`;
+          lines.push(f.key === 'weight_avg_last_week' && weightDelta != null ? `${base} (${fmtDelta(weightDelta)} to previous week)` : base);
+        }
       });
     });
     if (extraKeys.length) {
@@ -552,7 +563,7 @@ function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit
               if (kind === 'pill') {
                 blocks.push(
                   <div key={`p-${items[0].key}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-                    {items.map(f => <StatPill key={f.key} label={f.label} value={fmtValue(f, responses[f.key])} />)}
+                    {items.map(f => <StatPill key={f.key} label={f.label} value={fmtValue(f, responses[f.key])} delta={f.key === 'weight_avg_last_week' ? weightDelta : undefined} />)}
                   </div>
                 );
               } else {
@@ -639,10 +650,13 @@ function CheckInCard({ ci, schema, defaultOpen = false, embedded = false, onEdit
   );
 }
 
-function StatPill({ label, value }) {
+function StatPill({ label, value, delta }) {
   return (
     <div style={{ background: UI.bgRaised, borderRadius: 6, padding: '7px 10px', border: `0.5px solid ${UI.hair}` }}>
-      <div className="num" style={{ fontSize: 15, color: UI.ink, fontWeight: 300 }}>{value}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+        <div className="num" style={{ fontSize: 15, color: UI.ink, fontWeight: 300 }}>{value}</div>
+        {delta != null && <div className="num" style={{ fontSize: 10, color: UI.inkSoft }}>{delta >= 0 ? '+' : ''}{delta.toFixed(2).replace('.', ',')}</div>}
+      </div>
       <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', marginTop: 1 }}>{label}</div>
     </div>
   );
@@ -1096,7 +1110,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           </div>
         )}
         {thisWeek ? (
-          <CheckInCard ci={thisWeek} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} />
+          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} />
         ) : null}
 
         {past.length > 0 && (
@@ -1117,7 +1131,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               <div style={{ paddingLeft: 16 }}>
                 {past.map(ci => (
                   <div key={ci.id} style={{ borderTop: `0.5px solid ${UI.hair}` }}>
-                    <CheckInCard ci={ci} schema={resolvedSchema} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
+                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
                   </div>
                 ))}
               </div>
