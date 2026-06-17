@@ -199,6 +199,7 @@ async function importFromBackup(backup, userId) {
       active_schedule_id: backup.activeScheduleId ?? null,
       cycle_index: backup.cycleIndex ?? 0,
       cycle_start_date: backup.cycleStartDate ?? null,
+      week_plan_start_date: backup.weekPlanStartDate ?? null,
       last_advanced_date: backup.lastAdvancedDate ?? null,
       in_progress_session_id: backup.inProgress ?? null,
       unit: sett.unit ?? null,
@@ -229,6 +230,7 @@ async function importFromBackup(backup, userId) {
       session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
       macro_targets: sett.macroTargets ?? null,
       show_health_tab: sett.showHealthTab ?? false,
+      onboarding_completed: sett.onboardingCompleted ?? false,
     })),
   ].filter(Boolean));
   // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
@@ -265,6 +267,31 @@ async function importFromBackup(backup, userId) {
       }))
     ));
   }
+}
+
+// Builds a complete export object for backup. Unlike JSON.stringify(store), this
+// fetches ALL session entries from the DB (no boot-window restriction) so older
+// sessions are fully preserved. Strips server-derived and relational fields that
+// have no meaning in a backup (exerciseBests, coaching, nextReminderAt).
+async function exportBackup(store, userId) {
+  const { data: allEntryRows } = await _supabase
+    .from('zane_session_entries')
+    .select('*, sets:zane_sets(*)')
+    .eq('user_id', userId)
+    .order('entry_idx');
+  const bySession = {};
+  for (const e of (allEntryRows || [])) {
+    if (!bySession[e.session_id]) bySession[e.session_id] = [];
+    bySession[e.session_id].push(e);
+  }
+  const { exerciseBests, coaching, nextReminderAt, ...rest } = store;
+  return {
+    ...rest,
+    sessions: store.sessions.map(s => ({
+      ...s,
+      entries: bySession[s.id] ? mapEntryRows(bySession[s.id]) : s.entries,
+    })),
+  };
 }
 
 // ─── SETUP NEW USER ──────────────────────────────────────────────────────
@@ -1693,16 +1720,34 @@ function diffSchedule(before, after, exercises) {
   if (removed.length) lines.push(`Days removed: ${removed.map(d => d.name).join(', ')}`);
   const renamed = shared.filter(d => beforeById[d.id].name !== d.name).map(d => `${beforeById[d.id].name} → ${d.name}`);
   if (renamed.length) lines.push(`Days renamed: ${renamed.join(', ')}`);
-  const exAdded = [], exRemoved = [];
+  const fmtSetsReps = (item) => {
+    const s = item.plannedSets ?? '?';
+    const rps = item.plannedRepsPerSet;
+    const r = rps && rps.length > 1 ? `[${rps.join(',')}]` : (item.plannedReps ?? null);
+    return r != null ? `${s}×${r}` : `${s} sets`;
+  };
+  const exAdded = [], exRemoved = [], exChanged = [];
   for (const afterDay of shared) {
     const beforeDay = beforeById[afterDay.id];
-    const bKeys = new Set((beforeDay.items || []).map(i => i.exId).filter(Boolean));
-    const aKeys = new Set((afterDay.items  || []).map(i => i.exId).filter(Boolean));
-    (afterDay.items  || []).filter(i => i.exId && !bKeys.has(i.exId)).forEach(i => exAdded.push(`${exName(i.exId)} (${afterDay.name})`));
-    (beforeDay.items || []).filter(i => i.exId && !aKeys.has(i.exId)).forEach(i => exRemoved.push(`${exName(i.exId)} (${beforeDay.name})`));
+    const bItems = beforeDay.items || [];
+    const aItems = afterDay.items  || [];
+    const bByExId = Object.fromEntries(bItems.filter(i => i.exId).map(i => [i.exId, i]));
+    const aByExId = Object.fromEntries(aItems.filter(i => i.exId).map(i => [i.exId, i]));
+    aItems.filter(i => i.exId && !bByExId[i.exId]).forEach(i => exAdded.push(`${exName(i.exId)} (${afterDay.name})`));
+    bItems.filter(i => i.exId && !aByExId[i.exId]).forEach(i => exRemoved.push(`${exName(i.exId)} (${beforeDay.name})`));
+    aItems.filter(i => i.exId && bByExId[i.exId]).forEach(ai => {
+      const bi = bByExId[ai.exId];
+      const setsChanged = (bi.plannedSets ?? null) !== (ai.plannedSets ?? null);
+      const repsChanged = JSON.stringify(bi.plannedRepsPerSet ?? null) !== JSON.stringify(ai.plannedRepsPerSet ?? null)
+        || (bi.plannedReps ?? null) !== (ai.plannedReps ?? null);
+      if (setsChanged || repsChanged) {
+        exChanged.push(`${exName(ai.exId)} (${afterDay.name}): ${fmtSetsReps(bi)} → ${fmtSetsReps(ai)}`);
+      }
+    });
   }
   if (exAdded.length)   lines.push(`Exercises added: ${exAdded.join(', ')}`);
   if (exRemoved.length) lines.push(`Exercises removed: ${exRemoved.join(', ')}`);
+  exChanged.forEach(c => lines.push(c));
   return lines.length > 0 ? lines.join('\n') : null;
 }
 
@@ -2254,7 +2299,7 @@ window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, fnFetch,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
-  signIn, signUp, signOut, deleteAllData, importFromBackup, validateBackup,
+  signIn, signUp, signOut, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,

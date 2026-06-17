@@ -951,8 +951,8 @@ function HealthScreen({ store, setStore, go, userId }) {
   }, [dailyLogs, tf]);
 
   const avg = (arr, key) => { const vs = arr.map(d => d[key]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
-  const wLatest = weightSeries.data.filter(d => d.value != null).sort((a, b) => b.date.localeCompare(a.date))[0];
-  const weightHeadline = wLatest ? `${wLatest.value}${UI.unit()}` : null;
+  const weightAvgRaw = avg(weightSeries.data, 'value');
+  const weightAvg = weightAvgRaw != null ? Math.round(weightAvgRaw * 10) / 10 : null;
   const stepsAvg = avg(stepsSeries.data, 'value');
   const adhAvg = avg(adhSeries.data, 'value');
   const cardioTotal = cardioSeries.data.reduce((s, d) => s + (d.value || 0), 0);
@@ -1097,7 +1097,7 @@ function HealthScreen({ store, setStore, go, userId }) {
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} hasTargets={!!effectiveTargets} />,
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
-        headline={weightHeadline} sub={weightHeadline ? 'latest' : null}>
+        headline={weightAvg != null ? `${weightAvg}${UI.unit()}` : null} sub={weightAvg != null ? 'avg' : null}>
         <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}`} />
       </HealthChartCard>
     ),

@@ -198,18 +198,31 @@ window.onunhandledrejection = function(e) {
   d.style.display = 'block';
   d.textContent += '[PROMISE] ' + (e.reason?.message || e.reason) + '\n\n';
 };
-// Fallback: if React never mounts after 6s, show diagnostic info
-setTimeout(function() {
-  if (!document.getElementById('root').children.length) {
-    var d = document.getElementById('err');
-    d.style.display = 'block';
-    d.textContent += '[TIMEOUT] React did not mount.\n';
-    d.textContent += 'window.LB: ' + typeof window.LB + '\n';
-    d.textContent += 'window.supabase: ' + typeof window.supabase + '\n';
-    d.textContent += 'window.Screens: ' + JSON.stringify(Object.keys(window.Screens||{})) + '\n';
-    d.textContent += 'window.React: ' + typeof window.React + '\n';
-    d.textContent += 'window.Screen: ' + typeof window.Screen + '\n';
-  }
+// Fallback: if React never mounts after 6s, show diagnostic info.
+// If a new SW is waiting, auto-send SKIP_WAITING and reload — this breaks
+// the deadlock where a broken SW serves bad files and React never mounts,
+// which means the update banner never shows and the new SW never activates.
+setTimeout(async function() {
+  if (document.getElementById('root').children.length) return;
+  // If a new SW is waiting, skip it immediately and reload — breaks the deadlock
+  // where a broken SW serves bad files so React never mounts and the update
+  // banner never appears.
+  try {
+    var reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    if (reg && reg.waiting) {
+      reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      setTimeout(function() { window.location.reload(); }, 400);
+      return;
+    }
+  } catch(e) {}
+  var d = document.getElementById('err');
+  d.style.display = 'block';
+  d.textContent += '[TIMEOUT] React did not mount.\n';
+  d.textContent += 'window.LB: ' + typeof window.LB + '\n';
+  d.textContent += 'window.supabase: ' + typeof window.supabase + '\n';
+  d.textContent += 'window.Screens: ' + JSON.stringify(Object.keys(window.Screens||{})) + '\n';
+  d.textContent += 'window.React: ' + typeof window.React + '\n';
+  d.textContent += 'window.Screen: ' + typeof window.Screen + '\n';
 }, 6000);
 </script>
 
@@ -217,10 +230,14 @@ setTimeout(function() {
 window.ACCENT_PALETTE = {
   gold:   { hex: '#c9a961', light: '#e5c97e', deep: '#8b6f3d', rgb: '201,169,97',  label: 'Gold'   },
   copper: { hex: '#c47828', light: '#d9964a', deep: '#8a5010', rgb: '196,120,40',  label: 'Copper' },
-  pink:   { hex: '#c9699a', light: '#de8fb8', deep: '#8b3f65', rgb: '201,105,154', label: 'Pink'   },
-  green:  { hex: '#7ab05a', light: '#9bcc7a', deep: '#4e7a38', rgb: '122,176,90',  label: 'Green'  },
-  blue:   { hex: '#5b9bd5', light: '#7db5e8', deep: '#2e6499', rgb: '91,155,213',  label: 'Blue'   },
+  orange: { hex: '#d9733a', light: '#ed9560', deep: '#a34a18', rgb: '217,115,58',  label: 'Orange' },
   red:    { hex: '#c96060', light: '#e08080', deep: '#8b3535', rgb: '201,96,96',   label: 'Red'    },
+  pink:   { hex: '#c9699a', light: '#de8fb8', deep: '#8b3f65', rgb: '201,105,154', label: 'Pink'   },
+  violet: { hex: '#9b6dd4', light: '#b88fe8', deep: '#6840a0', rgb: '155,109,212', label: 'Violet' },
+  indigo: { hex: '#6272d4', light: '#8090e8', deep: '#3a49a0', rgb: '98,114,212',  label: 'Indigo' },
+  blue:   { hex: '#5b9bd5', light: '#7db5e8', deep: '#2e6499', rgb: '91,155,213',  label: 'Blue'   },
+  teal:   { hex: '#4aab97', light: '#6dc4b4', deep: '#277a6a', rgb: '74,171,151',  label: 'Teal'   },
+  green:  { hex: '#7ab05a', light: '#9bcc7a', deep: '#4e7a38', rgb: '122,176,90',  label: 'Green'  },
 };
 window.applyAccentColor = function(key) {
   var c = window.ACCENT_PALETTE[key] || window.ACCENT_PALETTE.gold;

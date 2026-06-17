@@ -583,7 +583,7 @@ function Sheet({ open, onClose, title, titleColor, children }) {
         boxShadow: '0 -16px 48px rgba(0,0,0,0.6)',
         padding: `16px 22px ${kbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
         animation: 'sheet-up 0.22s ease',
-        maxHeight: kbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto',
+        maxHeight: kbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
       }}>
         <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 2, margin: '0 auto 16px' }} />
         {title && (
@@ -836,6 +836,19 @@ function Field({ label, children, style = {} }) {
 
 function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...rest }) {
   const [focus, setFocus] = React.useState(false);
+  const inputRef = React.useRef(null);
+  const savedSel = React.useRef(null);
+  const handleChange = (e) => {
+    savedSel.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
+    onChange(e.target.value);
+  };
+  React.useLayoutEffect(() => {
+    const sel = savedSel.current;
+    savedSel.current = null;
+    if (sel && sel.start != null && inputRef.current && document.activeElement === inputRef.current) {
+      try { inputRef.current.setSelectionRange(sel.start, sel.end); } catch(e) {}
+    }
+  });
   return (
     <div style={{
       borderBottom: `1px solid ${focus ? UI.gold : UI.hairStrong}`,
@@ -843,7 +856,8 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
       padding: '8px 0',
     }}>
       <input
-        value={value} onChange={e => onChange(e.target.value)}
+        ref={inputRef}
+        value={value} onChange={handleChange}
         type={type} placeholder={placeholder} autoFocus={autoFocus}
         onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
         {...rest}

@@ -16,6 +16,29 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.363',
+    title: 'Colors, typing & plan history fixes',
+    items: [
+      '4 new accent colors: Orange, Violet, Teal, Indigo — now 10 total in a tidy 2-row grid.',
+      'Text cursor no longer jumps to the end when you edit mid-word in any input field.',
+      'Versioned plans: the day strip and classic cycle view now show the correct day names and dates for past cycles, even when an older version had a different number of days per cycle.',
+      'Past plan versions now have an "Edit start date" button — fix a wrong start date in place, without creating a copy.',
+      'Custom day type names no longer have a character limit.',
+      'Fixed a crash that could leave the app stuck on an error screen after loading.',
+    ],
+  },
+  {
+    id: 'v2.352',
+    title: 'Health & History Charts',
+    items: [
+      'Tap a workout day in History to see two charts: Effort over time and the new Volume over time — spot training trends and load progression at a glance.',
+      'The weight chart in the Health tab now shows your average across the selected timeframe instead of just the latest value.',
+      'The Health tab\'s Today card now shows your daily off-plan note at a glance — no need to open the log entry to see it.',
+      'If your coach has configured daily tracking fields, you can now log them directly in the Health tab. When you submit your weekly check-in, each field is automatically summarised — averaged or totalled, depending on how your coach set it up.',
+      'The "Exercises" tab (previously "Library") in the Plan tab is now easier to find by name.',
+    ],
+  },
+  {
     id: 'v2.324',
     title: 'Guided Tours & Unit Preference',
     items: [

@@ -40,15 +40,17 @@ function PlanScreen({ store, setStore, go }) {
             newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null });
           }
         });
+        const remapDays = (days) => (days || []).map(d => ({
+          ...d,
+          id: LB.uid(),
+          items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })),
+        }));
         const sch = {
           ...data.schedule,
           id: LB.uid(),
           archived: false,
-          days: (data.schedule.days || []).map(d => ({
-            ...d,
-            id: LB.uid(),
-            items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })),
-          })),
+          days: remapDays(data.schedule.days),
+          versions: (data.schedule.versions || []).map(v => ({ ...v, days: remapDays(v.days) })),
         };
         setStore(s => ({ ...s, exercises: [...s.exercises, ...newExercises], schedules: [...s.schedules, sch] }));
         go({ name: 'plan-view', scheduleId: sch.id, fromPlan: true });
@@ -78,7 +80,7 @@ function PlanScreen({ store, setStore, go }) {
           </div>
         }
       />
-      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'lib', label: 'Library', icon: 'fa-book' }]}
+      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'lib', label: 'Exercises', icon: 'fa-book' }]}
         active="plan" onChange={() => go({ name: 'lib' })} />
       <div style={{ padding: '14px 22px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {store.schedules.length === 0 && (
@@ -221,6 +223,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
 
   const [reactivateSheet, setReactivateSheet] = useStateS(false);
   const [reactivateDate, setReactivateDate] = useStateS('');
+  const [editingStartDate, setEditingStartDate] = useStateS(false);
+  const [editStartDateVal, setEditStartDateVal] = useStateS('');
 
   React.useEffect(() => {
     const row = chipRowRef.current;
@@ -298,9 +302,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
 
   const exportPlan = () => {
     const exIds = new Set();
-    sch.days.forEach(d => d.items.forEach(it => { if (it.exId) exIds.add(it.exId); }));
+    versionDays.forEach(d => d.items.forEach(it => { if (it.exId) exIds.add(it.exId); }));
     const exercises = store.exercises.filter(e => exIds.has(e.id));
-    const payload = { type: 'zane-plan', version: 1, schedule: sch, exercises };
+    const payload = { type: 'zane-plan', version: 1, schedule: { name: sch.name, days: versionDays }, exercises };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -308,6 +312,20 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
     a.download = `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // Directly change the validFrom of the selected past version.
+  const doEditStartDate = (newDate) => {
+    if (!newDate || !selectedVersion) return;
+    const newVersions = LB.dedupeVersionsByDate(
+      (sch.versions || []).map(v => v.validFrom === selectedVersion.validFrom ? { ...v, validFrom: newDate } : v)
+    ).sort((a, b) => b.validFrom.localeCompare(a.validFrom));
+    setStore(s => ({
+      ...s,
+      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, versions: newVersions } : x),
+    }));
+    setEditingStartDate(false);
+    setEditStartDateVal('');
   };
 
   // Reactivate the version being viewed: snapshot its days as a new version
@@ -445,13 +463,35 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
             {banner}
           </div>
         )}
-        {status === 'PAST' && (
-          <button onClick={() => setReactivateSheet(true)} style={{
-            alignSelf: 'center', background: 'transparent', border: `1px solid ${UI.goldSoft}`,
-            borderRadius: 4, padding: '6px 14px', cursor: 'pointer', color: UI.gold,
-            fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
-            WebkitTapHighlightColor: 'transparent',
-          }}>Reactivate this version</button>
+        {status === 'PAST' && !editingStartDate && (
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+            <button onClick={() => setReactivateSheet(true)} style={{
+              background: 'transparent', border: `1px solid ${UI.goldSoft}`,
+              borderRadius: 4, padding: '6px 14px', cursor: 'pointer', color: UI.gold,
+              fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+              WebkitTapHighlightColor: 'transparent',
+            }}>Reactivate this version</button>
+            <button onClick={() => { setEditStartDateVal(selectedVersion.validFrom); setEditingStartDate(true); }} style={{
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 4, padding: '6px 14px', cursor: 'pointer', color: UI.inkSoft,
+              fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+              WebkitTapHighlightColor: 'transparent',
+            }}>Edit start date</button>
+          </div>
+        )}
+        {status === 'PAST' && editingStartDate && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${editStartDateVal ? UI.goldSoft : UI.hairStrong}` }}>
+              <input
+                type="date"
+                value={editStartDateVal}
+                onChange={e => setEditStartDateVal(e.target.value)}
+                style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: editStartDateVal ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
+              />
+            </div>
+            <Btn disabled={!editStartDateVal || editStartDateVal === selectedVersion.validFrom} onClick={() => doEditStartDate(editStartDateVal)} style={{ flexShrink: 0 }}>Save</Btn>
+            <button onClick={() => { setEditingStartDate(false); setEditStartDateVal(''); }} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', padding: '0 4px', WebkitTapHighlightColor: 'transparent' }}>×</button>
+          </div>
         )}
       </div>
     );
@@ -778,7 +818,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       // Cycle → Weekday wipes the whole day structure (weekday plans start empty).
       const dayCount = draft.days.length;
       const msg = dayCount > 0
-        ? `This resets the plan structure: all ${dayCount} ${dayCount === 1 ? 'day' : 'days'} and their order are cleared, and you rebuild the week from scratch. Your exercises stay safe in the library.`
+        ? `This resets the plan structure: all ${dayCount} ${dayCount === 1 ? 'day' : 'days'} and their order are cleared, and you rebuild the week from scratch. Your exercises stay safe in the exercise library.`
         : 'Switch this plan to weekday mode?';
       if (!await confirm(msg, { title: 'Switch to Weekday mode?', ok: dayCount > 0 ? 'Reset & switch' : 'Switch', danger: dayCount > 0 })) return;
       setDraft(d => ({ ...d, mode: 'weekday', days: [] }));
@@ -1084,7 +1124,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick, onImport }) {
           <input
             autoFocus
             value={newName}
-            onChange={(e) => setNewName(e.target.value.toUpperCase().slice(0, 12))}
+            onChange={(e) => setNewName(e.target.value.toUpperCase())}
             onKeyDown={(e) => e.key === 'Enter' && createCustom()}
             placeholder="e.g. PUSH1"
             style={{
@@ -1653,7 +1693,7 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
             style={{ cursor: 'pointer' }}>{m}</Pill>
         ))}
       </div>
-      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', maxHeight: 240, overflow: 'auto' }}>
+      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', maxHeight: 240, overflow: 'auto', overscrollBehavior: 'contain' }}>
         {list.map((e, ei) => (
           <React.Fragment key={e.id}>
           <button onClick={() => onPick(e.id)} style={{
