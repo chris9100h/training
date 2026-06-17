@@ -756,7 +756,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
       <SettingsSheet open={appearanceSheet} onClose={() => setAppearanceSheet(false)} title="Appearance">
         <div>
           <div className="micro" style={{ marginBottom: 10 }}>Accent color</div>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 14, alignItems: 'flex-end' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px 0', marginBottom: 14 }}>
             {Object.entries(window.ACCENT_PALETTE).map(([key, c]) => {
               const active = (store.settings?.accentColor ?? 'copper') === key;
               return (
