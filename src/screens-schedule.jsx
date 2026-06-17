@@ -221,6 +221,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
 
   const [reactivateSheet, setReactivateSheet] = useStateS(false);
   const [reactivateDate, setReactivateDate] = useStateS('');
+  const [editingStartDate, setEditingStartDate] = useStateS(false);
+  const [editStartDateVal, setEditStartDateVal] = useStateS('');
 
   React.useEffect(() => {
     const row = chipRowRef.current;
@@ -308,6 +310,20 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
     a.download = `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // Directly change the validFrom of the selected past version.
+  const doEditStartDate = (newDate) => {
+    if (!newDate || !selectedVersion) return;
+    const newVersions = LB.dedupeVersionsByDate(
+      (sch.versions || []).map(v => v.validFrom === selectedVersion.validFrom ? { ...v, validFrom: newDate } : v)
+    ).sort((a, b) => b.validFrom.localeCompare(a.validFrom));
+    setStore(s => ({
+      ...s,
+      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, versions: newVersions } : x),
+    }));
+    setEditingStartDate(false);
+    setEditStartDateVal('');
   };
 
   // Reactivate the version being viewed: snapshot its days as a new version
@@ -445,13 +461,35 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
             {banner}
           </div>
         )}
-        {status === 'PAST' && (
-          <button onClick={() => setReactivateSheet(true)} style={{
-            alignSelf: 'center', background: 'transparent', border: `1px solid ${UI.goldSoft}`,
-            borderRadius: 4, padding: '6px 14px', cursor: 'pointer', color: UI.gold,
-            fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
-            WebkitTapHighlightColor: 'transparent',
-          }}>Reactivate this version</button>
+        {status === 'PAST' && !editingStartDate && (
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+            <button onClick={() => setReactivateSheet(true)} style={{
+              background: 'transparent', border: `1px solid ${UI.goldSoft}`,
+              borderRadius: 4, padding: '6px 14px', cursor: 'pointer', color: UI.gold,
+              fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+              WebkitTapHighlightColor: 'transparent',
+            }}>Reactivate this version</button>
+            <button onClick={() => { setEditStartDateVal(selectedVersion.validFrom); setEditingStartDate(true); }} style={{
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 4, padding: '6px 14px', cursor: 'pointer', color: UI.inkSoft,
+              fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+              WebkitTapHighlightColor: 'transparent',
+            }}>Edit start date</button>
+          </div>
+        )}
+        {status === 'PAST' && editingStartDate && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${editStartDateVal ? UI.goldSoft : UI.hairStrong}` }}>
+              <input
+                type="date"
+                value={editStartDateVal}
+                onChange={e => setEditStartDateVal(e.target.value)}
+                style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: editStartDateVal ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
+              />
+            </div>
+            <Btn disabled={!editStartDateVal || editStartDateVal === selectedVersion.validFrom} onClick={() => doEditStartDate(editStartDateVal)} style={{ flexShrink: 0 }}>Save</Btn>
+            <button onClick={() => { setEditingStartDate(false); setEditStartDateVal(''); }} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', padding: '0 4px', WebkitTapHighlightColor: 'transparent' }}>×</button>
+          </div>
         )}
       </div>
     );
@@ -1084,7 +1122,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick, onImport }) {
           <input
             autoFocus
             value={newName}
-            onChange={(e) => setNewName(e.target.value.toUpperCase().slice(0, 12))}
+            onChange={(e) => setNewName(e.target.value.toUpperCase())}
             onKeyDown={(e) => e.key === 'Enter' && createCustom()}
             placeholder="e.g. PUSH1"
             style={{

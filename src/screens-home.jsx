@@ -914,6 +914,36 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
   );
 }
 
+// Given a 1-indexed cycle number, returns the start Date of that cycle for a
+// versioned schedule. Uses the same arithmetic as getCycleNumForDate (inverted).
+function getCycleStartForNum(sch, cycleNum) {
+  if (!sch?.versions?.length || cycleNum < 1) return null;
+  const sorted = [...sch.versions].sort((a, b) => a.validFrom.localeCompare(b.validFrom));
+  let totalPriorCycles = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const v = sorted[i];
+    const nextV = sorted[i + 1];
+    const daysLen = (v.days || []).length;
+    if (!daysLen) continue;
+    if (nextV) {
+      const vStart = new Date(v.validFrom + 'T12:00:00');
+      const vEnd = new Date(nextV.validFrom + 'T12:00:00');
+      const daysInVersion = Math.round((vEnd - vStart) / 86400000);
+      const cyclesInVersion = Math.floor((daysInVersion - 1) / daysLen) + 1;
+      if (totalPriorCycles + cyclesInVersion >= cycleNum) {
+        const cycleOffset = cycleNum - totalPriorCycles - 1;
+        return new Date(vStart.getTime() + cycleOffset * daysLen * 86400000);
+      }
+      totalPriorCycles += cyclesInVersion;
+    } else {
+      const cycleOffset = cycleNum - totalPriorCycles - 1;
+      const vStartDate = new Date(v.validFrom + 'T12:00:00');
+      return new Date(vStartDate.getTime() + cycleOffset * daysLen * 86400000);
+    }
+  }
+  return null;
+}
+
 // ─── HOME ─────────────────────────────────────────────────────────────
 // Per-user override for the faint background figure on the main screen.
 // Keyed by lowercase email → image path (must also be listed in sw.js ASSETS).
@@ -1012,6 +1042,9 @@ function HomeScreen({ store, setStore, go, userId }) {
       const startMondayMs = trueStart.getTime() - startWd * 86400000 - oldestDayCount * 86400000;
       return Math.round((startMondayMs - currentMondayMs) / (7 * 86400000));
     }
+    if (sch?.versions?.length && store.cycleStartDate) {
+      return -(LB.getCycleNumForDate(sch, new Date().toISOString().slice(0, 10)));
+    }
     return -(currentCycleNum + 1);
   })();
   const goBack = () => {
@@ -1072,6 +1105,23 @@ function HomeScreen({ store, setStore, go, userId }) {
         };
       });
     }
+    // Versioned classic cycle view: each weekOffset step = one version-aware cycle.
+    if (sch.versions?.length && store.cycleStartDate) {
+      const todayISO = new Date().toISOString().slice(0, 10);
+      const currentCN = LB.getCycleNumForDate(sch, todayISO);
+      const targetCN = currentCN + weekOffset;
+      if (targetCN < 1) return [];
+      const cycleStart = getCycleStartForNum(sch, targetCN);
+      if (!cycleStart) return [];
+      cycleStart.setHours(12, 0, 0, 0);
+      const targetDays = LB.getPlanDaysForDate(sch, cycleStart.toISOString().slice(0, 10));
+      const anchor = LB.parseDate(store.cycleStartDate);
+      return targetDays.map((d, i) => {
+        const date = new Date(cycleStart.getTime() + i * 86400000);
+        const daysFromStart = Math.round((date - anchor) / 86400000);
+        return { ...d, slotIdx: i, date, daysFromStart, isToday: weekOffset === 0 && i === dayIdx };
+      });
+    }
     return sch.days.map((d, i) => {
       const daysFromToday = weekOffset * dayCount + i - dayIdx;
       const date = new Date(); date.setDate(date.getDate() + daysFromToday);
@@ -1089,6 +1139,10 @@ function HomeScreen({ store, setStore, go, userId }) {
       const sel = week.find(d => d.weekday === selectedWd);
       return sel?._dayData ?? { id: 'rest-virtual', name: 'REST', items: [] };
     }
+    if (sch.versions?.length && week.length) {
+      const clampedSlot = Math.min(selectedSlot, week.length - 1);
+      return week[clampedSlot] ?? sch.days[0];
+    }
     return sch.days[selectedSlot] ?? sch.days[0];
   }, [weekdayMode, cycleWeekView, sch, selectedWd, selectedSlot, day, week]);
 
@@ -1097,11 +1151,15 @@ function HomeScreen({ store, setStore, go, userId }) {
     d.setHours(12, 0, 0, 0);
     if (weekdayMode || cycleWeekView) {
       d.setDate(d.getDate() + selectedWd - todayWd + weekOffset * 7);
+    } else if (week.length && week[0]?.daysFromStart != null) {
+      // Versioned classic cycle view: use the slot's actual calendar date.
+      const clampedSlot = Math.min(selectedSlot, week.length - 1);
+      return week[clampedSlot]?.date ?? d;
     } else {
       d.setDate(d.getDate() + weekOffset * dayCount + selectedSlot - dayIdx);
     }
     return d;
-  }, [weekdayMode, cycleWeekView, selectedWd, todayWd, weekOffset, selectedSlot, dayIdx, dayCount]);
+  }, [weekdayMode, cycleWeekView, selectedWd, todayWd, weekOffset, selectedSlot, dayIdx, dayCount, week]);
 
   const isViewingToday = weekOffset === 0 && ((weekdayMode || cycleWeekView) ? selectedWd === todayWd : selectedSlot === dayIdx);
   const isActiveRest = !activeDay?.items?.length;
@@ -1142,9 +1200,9 @@ function HomeScreen({ store, setStore, go, userId }) {
       const dfs = Math.round((monday - start) / 86400000);
       return `CYCLE ${Math.floor(dfs / dayCount) + 1}`;
     }
-    if (sch?.versions?.length) {
-      const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + weekOffset * dayCount);
-      return `CYCLE ${LB.getCycleNumForDate(sch, d.toISOString().slice(0, 10))}`;
+    if (sch?.versions?.length && store.cycleStartDate) {
+      const currentCN = LB.getCycleNumForDate(sch, new Date().toISOString().slice(0, 10));
+      return `CYCLE ${Math.max(1, currentCN + weekOffset)}`;
     }
     const cycleNum = currentCycleNum + weekOffset + 1;
     return `CYCLE ${cycleNum}`;
@@ -1278,6 +1336,8 @@ function HomeScreen({ store, setStore, go, userId }) {
       const sel = week.find(d => d.weekday === selectedWd);
       return sel?.daysFromStart != null && (completedCyclePos?.has(sel.daysFromStart) ?? false);
     }
+    const sel = week[Math.min(selectedSlot, week.length - 1)];
+    if (sel?.daysFromStart != null) return completedCyclePos?.has(sel.daysFromStart) ?? false;
     const pos = (currentCycleNum + weekOffset) * dayCount + selectedSlot;
     return completedCyclePos?.has(pos) ?? false;
   }, [isActiveRest, weekdayMode, cycleWeekView, sessionDate, completedDateKeys, completedCyclePos, week, selectedWd, currentCycleNum, weekOffset, dayCount, selectedSlot]);
@@ -1575,7 +1635,8 @@ function HomeScreen({ store, setStore, go, userId }) {
         {/* day strip */}
         <div style={{ flexShrink: 0, display: 'flex', gap: 4 }}>
           {week.map((d, i) => {
-            const isSelected = (weekdayMode || cycleWeekView) ? i === selectedWd : i === selectedSlot;
+            const clampedSlot = Math.min(selectedSlot, week.length - 1);
+            const isSelected = (weekdayMode || cycleWeekView) ? i === selectedWd : i === clampedSlot;
             const r = !d.items?.length;
             const slotLabel = weekdayMode
               ? WEEKDAYS[i]
@@ -1585,16 +1646,13 @@ function HomeScreen({ store, setStore, go, userId }) {
               if (weekdayMode) {
                 const slotKey = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
                 isCompleted = completedDateKeys?.has(slotKey) ?? false;
-              } else if (cycleWeekView) {
-                isCompleted = d.daysFromStart != null && (completedCyclePos?.has(d.daysFromStart) ?? false);
               } else {
-                // Use the slot's actual calendar offset from cycleStartDate — identical
-                // to how completedCyclePos was built. The formula (cycleNum*dayCount+i)
-                // breaks when the plan has versions with different day counts because
-                // currentCycleNum divides by the current dayCount, not the historical one.
-                const dfs = store.cycleStartDate
-                  ? Math.round((d.date - LB.parseDate(store.cycleStartDate)) / 86400000)
-                  : (currentCycleNum + weekOffset) * dayCount + i;
+                // daysFromStart is set for both cycleWeekView and versioned classic cycle view.
+                const dfs = d.daysFromStart != null
+                  ? d.daysFromStart
+                  : store.cycleStartDate
+                    ? Math.round((d.date - LB.parseDate(store.cycleStartDate)) / 86400000)
+                    : (currentCycleNum + weekOffset) * dayCount + i;
                 isCompleted = completedCyclePos?.has(dfs) ?? false;
               }
             }
