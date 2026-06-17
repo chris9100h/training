@@ -1588,8 +1588,14 @@ function HomeScreen({ store, setStore, go, userId }) {
               } else if (cycleWeekView) {
                 isCompleted = d.daysFromStart != null && (completedCyclePos?.has(d.daysFromStart) ?? false);
               } else {
-                const pos = (currentCycleNum + weekOffset) * dayCount + i;
-                isCompleted = completedCyclePos?.has(pos) ?? false;
+                // Use the slot's actual calendar offset from cycleStartDate — identical
+                // to how completedCyclePos was built. The formula (cycleNum*dayCount+i)
+                // breaks when the plan has versions with different day counts because
+                // currentCycleNum divides by the current dayCount, not the historical one.
+                const dfs = store.cycleStartDate
+                  ? Math.round((d.date - LB.parseDate(store.cycleStartDate)) / 86400000)
+                  : (currentCycleNum + weekOffset) * dayCount + i;
+                isCompleted = completedCyclePos?.has(dfs) ?? false;
               }
             }
             const dateKey = d.date.toISOString().slice(0, 10);
