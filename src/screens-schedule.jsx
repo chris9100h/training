@@ -40,15 +40,17 @@ function PlanScreen({ store, setStore, go }) {
             newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null });
           }
         });
+        const remapDays = (days) => (days || []).map(d => ({
+          ...d,
+          id: LB.uid(),
+          items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })),
+        }));
         const sch = {
           ...data.schedule,
           id: LB.uid(),
           archived: false,
-          days: (data.schedule.days || []).map(d => ({
-            ...d,
-            id: LB.uid(),
-            items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })),
-          })),
+          days: remapDays(data.schedule.days),
+          versions: (data.schedule.versions || []).map(v => ({ ...v, days: remapDays(v.days) })),
         };
         setStore(s => ({ ...s, exercises: [...s.exercises, ...newExercises], schedules: [...s.schedules, sch] }));
         go({ name: 'plan-view', scheduleId: sch.id, fromPlan: true });
@@ -300,7 +302,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
 
   const exportPlan = () => {
     const exIds = new Set();
-    sch.days.forEach(d => d.items.forEach(it => { if (it.exId) exIds.add(it.exId); }));
+    const allDays = [...(sch.days || []), ...(sch.versions || []).flatMap(v => v.days || [])];
+    allDays.forEach(d => d.items.forEach(it => { if (it.exId) exIds.add(it.exId); }));
     const exercises = store.exercises.filter(e => exIds.has(e.id));
     const payload = { type: 'zane-plan', version: 1, schedule: sch, exercises };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
