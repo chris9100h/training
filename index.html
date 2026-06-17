@@ -202,26 +202,27 @@ window.onunhandledrejection = function(e) {
 // If a new SW is waiting, auto-send SKIP_WAITING and reload — this breaks
 // the deadlock where a broken SW serves bad files and React never mounts,
 // which means the update banner never shows and the new SW never activates.
-setTimeout(function() {
-  if (!document.getElementById('root').children.length) {
-    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-      navigator.serviceWorker.getRegistration().then(function(reg) {
-        if (reg && reg.waiting) {
-          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-          setTimeout(function() { window.location.reload(); }, 500);
-          return;
-        }
-      });
+setTimeout(async function() {
+  if (document.getElementById('root').children.length) return;
+  // If a new SW is waiting, skip it immediately and reload — breaks the deadlock
+  // where a broken SW serves bad files so React never mounts and the update
+  // banner never appears.
+  try {
+    var reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    if (reg && reg.waiting) {
+      reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      setTimeout(function() { window.location.reload(); }, 400);
+      return;
     }
-    var d = document.getElementById('err');
-    d.style.display = 'block';
-    d.textContent += '[TIMEOUT] React did not mount.\n';
-    d.textContent += 'window.LB: ' + typeof window.LB + '\n';
-    d.textContent += 'window.supabase: ' + typeof window.supabase + '\n';
-    d.textContent += 'window.Screens: ' + JSON.stringify(Object.keys(window.Screens||{})) + '\n';
-    d.textContent += 'window.React: ' + typeof window.React + '\n';
-    d.textContent += 'window.Screen: ' + typeof window.Screen + '\n';
-  }
+  } catch(e) {}
+  var d = document.getElementById('err');
+  d.style.display = 'block';
+  d.textContent += '[TIMEOUT] React did not mount.\n';
+  d.textContent += 'window.LB: ' + typeof window.LB + '\n';
+  d.textContent += 'window.supabase: ' + typeof window.supabase + '\n';
+  d.textContent += 'window.Screens: ' + JSON.stringify(Object.keys(window.Screens||{})) + '\n';
+  d.textContent += 'window.React: ' + typeof window.React + '\n';
+  d.textContent += 'window.Screen: ' + typeof window.Screen + '\n';
 }, 6000);
 </script>
 
