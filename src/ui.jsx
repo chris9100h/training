@@ -843,10 +843,11 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
     onChange(e.target.value);
   };
   React.useLayoutEffect(() => {
-    if (savedSel.current && inputRef.current && document.activeElement === inputRef.current) {
-      inputRef.current.setSelectionRange(savedSel.current.start, savedSel.current.end);
-    }
+    const sel = savedSel.current;
     savedSel.current = null;
+    if (sel && sel.start != null && inputRef.current && document.activeElement === inputRef.current) {
+      try { inputRef.current.setSelectionRange(sel.start, sel.end); } catch(e) {}
+    }
   });
   return (
     <div style={{
