@@ -836,6 +836,18 @@ function Field({ label, children, style = {} }) {
 
 function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...rest }) {
   const [focus, setFocus] = React.useState(false);
+  const inputRef = React.useRef(null);
+  const savedSel = React.useRef(null);
+  const handleChange = (e) => {
+    savedSel.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
+    onChange(e.target.value);
+  };
+  React.useLayoutEffect(() => {
+    if (savedSel.current && inputRef.current && document.activeElement === inputRef.current) {
+      inputRef.current.setSelectionRange(savedSel.current.start, savedSel.current.end);
+    }
+    savedSel.current = null;
+  });
   return (
     <div style={{
       borderBottom: `1px solid ${focus ? UI.gold : UI.hairStrong}`,
@@ -843,7 +855,8 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
       padding: '8px 0',
     }}>
       <input
-        value={value} onChange={e => onChange(e.target.value)}
+        ref={inputRef}
+        value={value} onChange={handleChange}
         type={type} placeholder={placeholder} autoFocus={autoFocus}
         onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
         {...rest}
