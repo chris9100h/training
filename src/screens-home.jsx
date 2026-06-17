@@ -1110,7 +1110,21 @@ function HomeScreen({ store, setStore, go, userId }) {
       const todayISO = new Date().toISOString().slice(0, 10);
       const currentCN = LB.getCycleNumForDate(sch, todayISO);
       const targetCN = currentCN + weekOffset;
-      if (targetCN < 1) return [];
+      // targetCN <= 0 → pre-plan buffer: show oldest version's days shifted back
+      if (targetCN <= 0) {
+        const sorted = [...sch.versions].sort((a, b) => a.validFrom.localeCompare(b.validFrom));
+        const oldest = sorted[0];
+        const oldestDays = oldest?.days || sch.days;
+        const oldestLen = oldestDays.length || 1;
+        const planStart = new Date(oldest.validFrom + 'T12:00:00');
+        const bufferStart = new Date(planStart.getTime() + (targetCN - 1) * oldestLen * 86400000);
+        const anchor = LB.parseDate(store.cycleStartDate);
+        return oldestDays.map((d, i) => {
+          const date = new Date(bufferStart.getTime() + i * 86400000);
+          const daysFromStart = Math.round((date - anchor) / 86400000);
+          return { ...d, slotIdx: i, date, daysFromStart, isToday: false };
+        });
+      }
       const cycleStart = getCycleStartForNum(sch, targetCN);
       if (!cycleStart) return [];
       cycleStart.setHours(12, 0, 0, 0);
@@ -1202,7 +1216,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     }
     if (sch?.versions?.length && store.cycleStartDate) {
       const currentCN = LB.getCycleNumForDate(sch, new Date().toISOString().slice(0, 10));
-      return `CYCLE ${Math.max(1, currentCN + weekOffset)}`;
+      return `CYCLE ${Math.max(0, currentCN + weekOffset)}`;
     }
     const cycleNum = currentCycleNum + weekOffset + 1;
     return `CYCLE ${cycleNum}`;
