@@ -199,6 +199,7 @@ async function importFromBackup(backup, userId) {
       active_schedule_id: backup.activeScheduleId ?? null,
       cycle_index: backup.cycleIndex ?? 0,
       cycle_start_date: backup.cycleStartDate ?? null,
+      week_plan_start_date: backup.weekPlanStartDate ?? null,
       last_advanced_date: backup.lastAdvancedDate ?? null,
       in_progress_session_id: backup.inProgress ?? null,
       unit: sett.unit ?? null,
@@ -229,6 +230,7 @@ async function importFromBackup(backup, userId) {
       session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
       macro_targets: sett.macroTargets ?? null,
       show_health_tab: sett.showHealthTab ?? false,
+      onboarding_completed: sett.onboardingCompleted ?? false,
     })),
   ].filter(Boolean));
   // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
@@ -265,6 +267,31 @@ async function importFromBackup(backup, userId) {
       }))
     ));
   }
+}
+
+// Builds a complete export object for backup. Unlike JSON.stringify(store), this
+// fetches ALL session entries from the DB (no boot-window restriction) so older
+// sessions are fully preserved. Strips server-derived and relational fields that
+// have no meaning in a backup (exerciseBests, coaching, nextReminderAt).
+async function exportBackup(store, userId) {
+  const { data: allEntryRows } = await _supabase
+    .from('zane_session_entries')
+    .select('*, sets:zane_sets(*)')
+    .eq('user_id', userId)
+    .order('entry_idx');
+  const bySession = {};
+  for (const e of (allEntryRows || [])) {
+    if (!bySession[e.session_id]) bySession[e.session_id] = [];
+    bySession[e.session_id].push(e);
+  }
+  const { exerciseBests, coaching, nextReminderAt, ...rest } = store;
+  return {
+    ...rest,
+    sessions: store.sessions.map(s => ({
+      ...s,
+      entries: bySession[s.id] ? mapEntryRows(bySession[s.id]) : s.entries,
+    })),
+  };
 }
 
 // ─── SETUP NEW USER ──────────────────────────────────────────────────────
@@ -2272,7 +2299,7 @@ window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, fnFetch,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
-  signIn, signUp, signOut, deleteAllData, importFromBackup, validateBackup,
+  signIn, signUp, signOut, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,

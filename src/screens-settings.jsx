@@ -355,8 +355,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const toggleReminder = () => { const next = !reminderEnabled; setReminderEnabled(next); setStore(s => ({ ...s, settings: { ...s.settings, reminderEnabled: next } })); };
   const updateReminderTime = (val) => { setReminderTime(val); setStore(s => ({ ...s, settings: { ...s.settings, reminderTime: val } })); };
   const saveNickname = () => { const t = nickname.trim(); if (!t || t === store.user?.name) return; setStore(s => ({ ...s, user: { ...s.user, name: t } })); };
-  const exportData = (filename) => {
-    const blob = new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' });
+  const exportData = async (filename) => {
+    const backup = await LB.exportBackup(store, userId);
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename || `zane-${LB.todayISO()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   const importData = () => {
@@ -370,7 +371,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
       const backupDate = latestSession ? new Date(latestSession.ended).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }) : 'unknown date';
       const ok = await confirm(`This backup contains data up to ${backupDate}. Your current data will be downloaded first, then replaced.`, { title: 'Restore backup?', ok: 'Restore', danger: true });
       if (!ok) return;
-      exportData(`zane-before-import-${LB.todayISO()}.json`); setImporting(true);
+      await exportData(`zane-before-import-${LB.todayISO()}.json`); setImporting(true);
       try { await LB.importFromBackup(backup, userId); LB.clearLocal(userId); window.location.reload(); }
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
     }; input.click();
