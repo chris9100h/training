@@ -1653,7 +1653,7 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
             style={{ cursor: 'pointer' }}>{m}</Pill>
         ))}
       </div>
-      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', maxHeight: 240, overflow: 'auto' }}>
+      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', maxHeight: 240, overflow: 'auto', overscrollBehavior: 'contain' }}>
         {list.map((e, ei) => (
           <React.Fragment key={e.id}>
           <button onClick={() => onPick(e.id)} style={{

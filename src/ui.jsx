@@ -583,7 +583,7 @@ function Sheet({ open, onClose, title, titleColor, children }) {
         boxShadow: '0 -16px 48px rgba(0,0,0,0.6)',
         padding: `16px 22px ${kbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
         animation: 'sheet-up 0.22s ease',
-        maxHeight: kbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto',
+        maxHeight: kbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
       }}>
         <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 2, margin: '0 auto 16px' }} />
         {title && (
