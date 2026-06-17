@@ -302,10 +302,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
 
   const exportPlan = () => {
     const exIds = new Set();
-    const allDays = [...(sch.days || []), ...(sch.versions || []).flatMap(v => v.days || [])];
-    allDays.forEach(d => d.items.forEach(it => { if (it.exId) exIds.add(it.exId); }));
+    versionDays.forEach(d => d.items.forEach(it => { if (it.exId) exIds.add(it.exId); }));
     const exercises = store.exercises.filter(e => exIds.has(e.id));
-    const payload = { type: 'zane-plan', version: 1, schedule: sch, exercises };
+    const payload = { type: 'zane-plan', version: 1, schedule: { name: sch.name, days: versionDays }, exercises };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
