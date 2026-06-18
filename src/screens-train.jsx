@@ -1304,11 +1304,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       for (let k = sessionIdx - 1; k >= 0; k--) {
         if (!session.entries[k].isCardio) { insertAfterExId = session.entries[k].exId; break; }
       }
+      // Find the superset partner name (if linked)
+      let supersetWithName = null;
+      if (e.supersetGroup) {
+        const partner = session.entries.find((se, j) => j !== sessionIdx && se.supersetGroup === e.supersetGroup);
+        if (partner) supersetWithName = partner.name;
+      }
       diffs.push({
         type: 'added', name: e.name, exId: e.exId,
         insertAfterExId,
         sets: e.sets.filter(s => !s.warmup).length,
         supersetGroup: e.supersetGroup || null,
+        supersetWithName,
       });
     });
 
@@ -2427,7 +2434,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               ) : d.type === 'added' ? (
                 <>
                   <span style={{ color: UI.inkFaint, fontSize: 14 }}>＋</span>
-                  <span style={{ color: UI.inkSoft }}><strong style={{ color: UI.ink }}>{d.name}</strong>{' added'}</span>
+                  <span style={{ color: UI.inkSoft }}>
+                    <strong style={{ color: UI.ink }}>{d.name}</strong>{' added'}
+                    {d.supersetWithName && <span>{' · superset with '}<strong style={{ color: UI.ink }}>{d.supersetWithName}</strong></span>}
+                  </span>
                 </>
               ) : (
                 <>
