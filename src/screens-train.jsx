@@ -2043,9 +2043,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {isNoWeightReps ? (
             <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 4px 6px' }}>
               <button onClick={addSet} style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: UI.inkSoft, fontSize: 16, lineHeight: 1, padding: 0,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', width: 18,
+                width: 20, height: 20, borderRadius: 3,
+                background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+                color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>+</button>
             </div>
           ) : (
@@ -2068,8 +2069,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               )}
               <div />
               <button onClick={addSet} style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: UI.inkSoft, fontSize: 16, lineHeight: 1, padding: 0,
+                width: 20, height: 20, borderRadius: 3,
+                background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+                color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>+</button>
             </div>
