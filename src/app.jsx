@@ -607,6 +607,7 @@ function App() {
         // logging in after a previous 'ready' session would never be prompted.
         onboardingChecked.current = false;
         unitPicked.current = false; // re-arm unit watcher for the new account
+        recoveryInProgress.current = false; // clear so loadData can complete after a password reset
         setUserId(session.user.id);
         if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
         else loadData(session.user.id);
