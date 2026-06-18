@@ -1384,7 +1384,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       .map((_, i) => (matched[i] ? sessionPlanEntries.indexOf(matched[i]) : -1))
       .filter(pos => pos !== -1);
     if (sessionPositions.some((pos, k) => k > 0 && pos < sessionPositions[k - 1])) {
-      diffs.push({ type: 'reorder' });
+      const moves = planItems
+        .map((_, i) => {
+          if (!matched[i]) return null;
+          const from = i + 1;
+          const to = sessionPlanEntries.indexOf(matched[i]) + 1;
+          return from !== to ? { name: matched[i].name, from, to } : null;
+        })
+        .filter(Boolean);
+      diffs.push({ type: 'reorder', moves });
     }
 
     return diffs;
@@ -2485,8 +2493,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 </>
               ) : d.type === 'reorder' ? (
                 <>
-                  <span style={{ color: UI.goldLight, fontSize: 14 }}>⇅</span>
-                  <span style={{ color: UI.inkSoft }}>Exercise order changed</span>
+                  <span style={{ color: UI.goldLight, fontSize: 14, alignSelf: 'flex-start', marginTop: 1 }}>⇅</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {d.moves.map((m, mi) => (
+                      <span key={mi} style={{ color: UI.inkSoft }}>
+                        <strong style={{ color: UI.ink }}>{m.name}</strong>
+                        {` · ${m.from} → ${m.to}`}
+                      </span>
+                    ))}
+                  </div>
                 </>
               ) : (
                 <>
