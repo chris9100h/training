@@ -822,6 +822,60 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     row.scrollLeft = target;
   }, [exIdx]);
 
+  // chip drag-to-reorder
+  const chipDragRef = useRefT({ from: null, over: null, dragging: false, startX: 0, startY: 0, pointerId: null, wasDrag: false });
+  const [chipDrag, setChipDrag] = useStateT(null);
+  useEffectT(() => {
+    const d = chipDragRef.current;
+    const onMove = e => {
+      if (d.from === null || e.pointerId !== d.pointerId) return;
+      const dx = e.clientX - d.startX, dy = e.clientY - d.startY;
+      if (!d.dragging) {
+        if (Math.abs(dy) > 8) { d.from = null; return; }
+        if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.2) d.dragging = true;
+        else return;
+      }
+      e.preventDefault();
+      const row = chipRowRef.current;
+      if (!row) return;
+      const chips = [...row.querySelectorAll('[data-chip-idx]')];
+      let overIdx = d.from;
+      for (const chip of chips) {
+        const r = chip.getBoundingClientRect();
+        if (e.clientX < r.left + r.width / 2) { overIdx = parseInt(chip.dataset.chipIdx); break; }
+        overIdx = parseInt(chip.dataset.chipIdx);
+      }
+      if (overIdx !== d.over) { d.over = overIdx; setChipDrag({ from: d.from, over: overIdx }); }
+    };
+    const onUp = e => {
+      if (d.from === null || e.pointerId !== d.pointerId) return;
+      if (d.dragging && d.over !== null && d.over !== d.from) {
+        const from = d.from, to = d.over;
+        updateSession(sess => {
+          const entries = [...sess.entries];
+          const [moved] = entries.splice(from, 1);
+          entries.splice(to, 0, moved);
+          let idx = sess.currentExIdx || 0;
+          if (idx === from) idx = to;
+          else if (from < to && idx > from && idx <= to) idx--;
+          else if (from > to && idx >= to && idx < from) idx++;
+          return { ...sess, entries, currentExIdx: idx };
+        });
+        d.wasDrag = true;
+      }
+      d.from = null; d.over = null; d.dragging = false; d.pointerId = null;
+      setChipDrag(null);
+    };
+    document.addEventListener('pointermove', onMove, { passive: false });
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+    return () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+    };
+  }, []);
+
   // rest timer — persisted in session so navigation doesn't kill it
   const [restStart, setRestStart] = useStateT(() => session.restStart ?? null);
   const [restDuration, setRestDuration] = useStateT(() => session.restDuration ?? null);
@@ -1747,16 +1801,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const active = i === exIdx;
           const nextE = session.entries[i + 1];
           const linkedToNext = e.supersetGroup && e.supersetGroup === nextE?.supersetGroup;
+          const isDragging = chipDrag?.from === i;
+          const isDropTarget = chipDrag !== null && chipDrag.over === i && !isDragging;
           const chip = (
             <button key={`chip-${i}`}
-              onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
+              data-chip-idx={i}
+              onPointerDown={e => {
+                chipDragRef.current.wasDrag = false;
+                Object.assign(chipDragRef.current, { from: i, over: i, dragging: false, startX: e.clientX, startY: e.clientY, pointerId: e.pointerId });
+              }}
+              onClick={() => {
+                if (chipDragRef.current.wasDrag) { chipDragRef.current.wasDrag = false; return; }
+                updateSession(sess => ({ ...sess, currentExIdx: i }));
+              }}
               style={{
                 flexShrink: 0, maxWidth: 110,
                 padding: '5px 11px 4px', borderRadius: 4,
-                border: `1px solid ${active ? UI.gold : done ? UI.goldSoft : UI.hairStrong}`,
+                border: `1px solid ${isDropTarget ? UI.gold : active ? UI.gold : done ? UI.goldSoft : UI.hairStrong}`,
                 background: active ? UI.goldFaint : done ? 'rgba(201,169,97,0.05)' : 'transparent',
-                cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                transition: 'all 0.15s',
+                cursor: chipDrag ? 'grabbing' : 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+                transition: 'opacity 0.1s',
+                opacity: isDragging ? 0.35 : 1,
               }}>
               <div style={{
                 fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em',
