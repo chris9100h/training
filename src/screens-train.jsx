@@ -1268,24 +1268,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const schedule = store.schedules?.find(s => s.id === session.scheduleId);
     const day = schedule?.days?.find(d => d.id === session.dayId);
     if (!day) return [];
-    // Strip ad-hoc additions — they have no plan counterpart
-    const planEntries = session.entries.filter(e => !e.isCardio && !e.addedDuringSession);
-    const planExIds = new Set((day.items || []).map(it => it.exId));
-    return (day.items || []).reduce((acc, planItem, i) => {
-      const entry = planEntries[i];
-      if (!entry) return acc; // exercise was removed from session — no plan update
-      if (entry.exId === planItem.exId) {
-        // same exercise — check set count
-        const newSets = entry.sets.filter(s => !s.warmup).length;
-        if (newSets !== planItem.sets) {
-          acc.push({ type: 'sets', idx: i, exName: entry.name, oldSets: planItem.sets, newSets });
-        }
-      } else if (!planExIds.has(entry.exId)) {
-        // different exercise AND it's not elsewhere in the plan → intentional swap
+    // Iterate by session-entry index (preserves alignment with day.items for mixed
+    // cardio+strength days). Skip cardio entries and exercises added ad-hoc.
+    return session.entries.reduce((acc, entry, i) => {
+      const planItem = (day.items || [])[i];
+      if (!planItem || entry.isCardio || entry.addedDuringSession) return acc;
+      if (entry.exId !== planItem.exId) {
         const oldEx = LB.findExercise(store, planItem.exId);
         acc.push({ type: 'swap', idx: i, oldName: oldEx?.name || '?', newName: entry.name, newExId: entry.exId });
+      } else if (entry.sets.filter(s => !s.warmup).length !== planItem.sets) {
+        const newSets = entry.sets.filter(s => !s.warmup).length;
+        acc.push({ type: 'sets', idx: i, exName: entry.name, oldSets: planItem.sets, newSets });
       }
-      // if entry.exId IS in the plan → it just shifted position (due to a remove above) — skip
       return acc;
     }, []);
   };
@@ -2368,27 +2362,33 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* exercise add picker */}
       {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
 
-      {/* superset linking modal — also determines insert position */}
+      {/* superset modal — step 1: ask yes/no; step 2: pick exercise to link */}
       {addSupersetData && (
-        <Sheet open={true} onClose={() => confirmAdd(null)} title="Link to superset?">
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <button onClick={() => confirmAdd(null)} style={{
-              padding: '14px 0', textAlign: 'left', background: 'none', border: 'none',
-              borderBottom: `1px solid ${UI.hair}`, cursor: 'pointer',
-              fontFamily: UI.fontUi, fontSize: 14, color: UI.inkSoft,
-              WebkitTapHighlightColor: 'transparent',
-            }}>Solo — no superset</button>
-            {session.entries.map((e, i) => (
-              <button key={i} onClick={() => confirmAdd(i)} style={{
-                padding: '14px 0', textAlign: 'left', background: 'none', border: 'none',
-                borderBottom: `1px solid ${UI.hair}`, cursor: 'pointer',
-                WebkitTapHighlightColor: 'transparent',
-              }}>
-                <span className="micro" style={{ display: 'block', marginBottom: 3, color: UI.inkFaint }}>EX {String(i + 1).padStart(2, '0')}</span>
-                <span style={{ fontFamily: UI.fontDisplay, fontSize: 15, color: UI.ink }}>{e.name}</span>
-              </button>
-            ))}
-          </div>
+        <Sheet open={true} onClose={() => confirmAdd(null)} title="Add exercise">
+          {!addSupersetData.picking ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.inkSoft, lineHeight: 1.5 }}>
+                Add as part of a superset?
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn kind="ghost" onClick={() => confirmAdd(null)} style={{ flex: 1 }}>Solo</Btn>
+                <Btn onClick={() => setAddSupersetData(d => ({ ...d, picking: true }))} style={{ flex: 1 }}>Superset</Btn>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {session.entries.map((e, i) => (
+                <button key={i} onClick={() => confirmAdd(i)} style={{
+                  padding: '14px 0', textAlign: 'left', background: 'none', border: 'none',
+                  borderBottom: `1px solid ${UI.hair}`, cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <span className="micro" style={{ display: 'block', marginBottom: 3, color: UI.inkFaint }}>EX {String(i + 1).padStart(2, '0')}</span>
+                  <span style={{ fontFamily: UI.fontDisplay, fontSize: 15, color: UI.ink }}>{e.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </Sheet>
       )}
 
