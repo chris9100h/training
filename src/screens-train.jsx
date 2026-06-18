@@ -2009,30 +2009,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 )}
               </div>}
 
-              {/* Big confirm button */}
-              <div style={{ marginTop: 12, padding: '0 18px' }}>
-                <button
-                  data-complete-btn
-                  onPointerDown={e => { e.stopPropagation(); }}
-                  onClick={() => {
-                    if (currentSetIdx < 0) return;
-                    completeSet(currentSetIdx);
-                  }}
-                  disabled={warmupSetsRemaining || postWarmupRest || (!isNoWeightReps && (heroSet.kg == null || (!(kbField?.setIdx === bgSetIdx && kbField?.field !== 'kg') && (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps))))}
-                  style={{
-                    width: '100%', minHeight: 44,
-                    background: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-                    border: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? `1px solid ${UI.hairStrong}` : `1px solid var(--accent-deep)`,
-                    color: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? UI.inkFaint : '#0a0805',
-                    borderRadius: 6,
-                    fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em', textTransform: 'uppercase',
-                    cursor: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? 'default' : 'pointer',
-                    boxShadow: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? 'none' : '0 8px 30px rgba(var(--accent-rgb),0.30)',
-                    WebkitTapHighlightColor: 'transparent',
-                  }}>
-                  ✓ Check set
-                </button>
-              </div>
             </div>
           </BracketFrame>
         )}
