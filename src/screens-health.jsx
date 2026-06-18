@@ -540,6 +540,8 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
   );
   const adh = log?.adherence;
   const showAdh = dayTarget != null || adh != null;
+  const isPerfect = adh != null && adh >= 97;
+  const verdict = adh == null ? null : adh >= 97 ? 'PERFECT' : adh >= 90 ? 'STRONG' : adh >= 75 ? 'ON TRACK' : 'OFF TRACK';
   const badge = (icon, label, alpha) => (
     <span style={{ display: 'flex', alignItems: 'center', gap: 4, background: `rgba(var(--accent-rgb),${alpha})`, border: `0.5px solid rgba(var(--accent-rgb),${alpha * 2})`, borderRadius: 4, padding: '3px 7px' }}>
       <i className={`fa-solid ${icon}`} style={{ fontSize: 9, color: 'var(--accent)' }} />
@@ -565,12 +567,14 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
       )}
       {showAdh && (
         <div style={{ marginBottom: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
-            <span className="micro" style={{ color: UI.inkFaint }}>MACRO ADHERENCE</span>
-            <span className="num" style={{ fontSize: 13, color: adh != null ? adherenceColor(adh) : UI.inkGhost }}>{adh != null ? `${adh}%` : '—'}</span>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 5 }}>
+            <span className={isPerfect ? 'perfect-week-pulse num' : 'num'} style={{ fontSize: 30, color: adh != null ? adherenceColor(adh) : UI.inkGhost, fontWeight: 300, lineHeight: 1 }}>{adh != null ? `${adh}%` : '—'}</span>
+            {verdict && <span className={isPerfect ? 'perfect-week-pulse' : ''} style={{ fontSize: 12, color: adherenceColor(adh), fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.08em' }}>{verdict}</span>}
+            <span style={{ flex: 1 }} />
+            <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase' }}>macro adherence</span>
           </div>
-          <div style={{ height: 7, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
-            {adh != null && <div style={{ width: `${Math.min(100, adh)}%`, height: '100%', background: adherenceColor(adh), transition: 'width 0.3s' }} />}
+          <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
+            {adh != null && <div style={{ width: `${Math.min(100, adh)}%`, height: '100%', background: adherenceColor(adh) }} />}
           </div>
         </div>
       )}
