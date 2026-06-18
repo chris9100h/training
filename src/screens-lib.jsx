@@ -478,10 +478,18 @@ function MuscleSelector({ value, onChange }) {
   );
 }
 
-// SVG knurl for use inside html2canvas — repeating-linear-gradient doesn't render there
+// SVG knurl for use inside html2canvas — repeating-linear-gradient doesn't render there.
+// useLayoutEffect resolves width="100%" to a pixel value before html2canvas serializes
+// the SVG as a data URL (where percentage widths lose their containing block context).
 function SvgKnurl({ style }) {
+  const ref = useRefL(null);
+  React.useLayoutEffect(() => {
+    if (!ref.current) return;
+    const w = Math.round(ref.current.getBoundingClientRect().width);
+    if (w > 0) ref.current.setAttribute('width', w);
+  }, []);
   return (
-    <svg width="100%" height="3" style={{ display: 'block', flexShrink: 0, overflow: 'hidden', ...style }}>
+    <svg ref={ref} width="100%" height="3" style={{ display: 'block', overflow: 'hidden', ...style }}>
       {Array.from({ length: 100 }, (_, i) => {
         const x = (i - 1) * 5.2;
         return <line key={i} x1={x} y1="3" x2={x + 1.73} y2="0" stroke="rgba(236,228,208,0.20)" strokeWidth="1.5" />;
