@@ -2410,7 +2410,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             })()}
           </div>
           {capturing && (
-            <img src={_shotLogo} style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
+            <img src={_shotLogo} style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, zIndex: 1, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
           )}
           {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 10 }} />}
         </div>
