@@ -2198,15 +2198,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </div>
 
           {!isCardio && (
-            <div style={{ display: 'flex', marginTop: 2 }}>
+            <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
               <button onClick={addSet} style={{
-                flex: 1, padding: '9px 0', background: 'transparent', border: 'none',
+                flex: 1, padding: '9px 0', background: 'transparent',
+                border: '1px solid var(--accent)', borderRadius: 6,
                 color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
                 letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
               }}>+ ADD SET</button>
               {entry.sets.filter(s => !s.warmup).length > 1 && (
                 <button onClick={removeLastSet} style={{
-                  flex: 1, padding: '9px 0', background: 'transparent', border: 'none',
+                  flex: 1, padding: '9px 0', background: 'transparent',
+                  border: `1px solid ${UI.danger}`, borderRadius: 6,
                   color: UI.danger, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
                   letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                 }}>− REMOVE SET</button>
