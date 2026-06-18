@@ -2185,7 +2185,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         fontSize: s.skipped ? 12 : 14, fontWeight: 700,
                         color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
                         opacity: !s.done && !s.skipped && !isNoWeightReps && (s.kg == null || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
-                        flexShrink: 0,
+                        flexShrink: 0, justifySelf: 'center',
                         WebkitTapHighlightColor: 'transparent',
                       }}>{s.skipped ? '×' : '✓'}</button>
 
