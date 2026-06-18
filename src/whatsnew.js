@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.368',
+    title: 'Training screen: set controls redesigned',
+    items: [
+      'Add Set, Remove Set, and Check All are now three clearly labelled buttons at the bottom of the set list — no more hunting for a small icon',
+      'Removed the duplicate Check Set button from the hero — the footer button is all you need',
+      'Cleaner layout with more breathing room for your sets',
+    ],
+  },
+  {
     id: 'v2.364',
     title: 'Bodyweight exercises & mid-session edits',
     items: [
