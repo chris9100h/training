@@ -302,7 +302,11 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     const protein = healthInt(form.protein), carbs = healthInt(form.carbs), fat = healthInt(form.fat);
     const fiber = netCarbs ? healthInt(form.fiber) : null;
     const calories = caloriesManual ? healthInt(form.calories) : autoCals;
-    const isTraining = LB.isLoggedTrainingDay(store.sessions, date);
+    // Today = treat as training if planned (assume the user will train).
+    // Past days = only training if a session was actually done.
+    const isTraining = date === LB.todayISO()
+      ? !!LB.plannedTrainingDay(store, date)
+      : LB.isLoggedTrainingDay(store.sessions, date);
     const { adherence, targetsSnap } = LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
     const savedCoachFields = {};
     coachFields.forEach(f => {
@@ -905,6 +909,34 @@ function HealthScreen({ store, setStore, go, userId }) {
     try { localStorage.setItem('logbook-health-targets', JSON.stringify(targets)); } catch {}
     if (targets !== cachedTargets) setCachedTargets(targets);
   }, [targets]);
+
+  // Retroactive heal: if a past planned training day has no session, its daily log
+  // was saved with training targets but those macros were never earned — correct to rest.
+  useEffectH(() => {
+    if (!effectiveTargets) return;
+    const today = LB.todayISO();
+    const dayOf = s => s.date ? s.date.slice(0, 10) : null;
+    const sessionDates = new Set((store.sessions || []).filter(s => s.ended).map(dayOf).filter(Boolean));
+    const restTarget = LB.dayTargetFromMacros(effectiveTargets, false);
+    if (!restTarget) return;
+    const toHeal = (store.dailyLogs || []).filter(l =>
+      l.date < today &&
+      l.targetsSnap?.dayType === 'training' &&
+      !sessionDates.has(l.date) &&
+      !!LB.plannedTrainingDay(store, l.date)
+    );
+    if (!toHeal.length) return;
+    const healDates = new Set(toHeal.map(l => l.date));
+    const restSnap = { ...restTarget, dayType: 'rest' };
+    setStore(s => ({
+      ...s,
+      dailyLogs: s.dailyLogs.map(l => {
+        if (!healDates.has(l.date)) return l;
+        const adherence = LB.macroAdherence({ protein: l.protein, carbs: l.carbs, fat: l.fat }, restTarget);
+        return adherence != null ? { ...l, adherence, targetsSnap: restSnap } : l;
+      }),
+    }));
+  }, [store.sessions, store.dailyLogs, effectiveTargets]);
 
   // Windowed series builder for the charts. The x-range is tightened to the
   // actual logged days inside the window (not the full timeframe) so a sparse
