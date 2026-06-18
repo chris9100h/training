@@ -478,6 +478,18 @@ function MuscleSelector({ value, onChange }) {
   );
 }
 
+// SVG knurl for use inside html2canvas — repeating-linear-gradient doesn't render there
+function SvgKnurl({ style }) {
+  return (
+    <svg width="100%" height="3" style={{ display: 'block', flexShrink: 0, overflow: 'hidden', ...style }}>
+      {Array.from({ length: 100 }, (_, i) => {
+        const x = (i - 1) * 5.2;
+        return <line key={i} x1={x} y1="3" x2={x + 1.73} y2="0" stroke="rgba(236,228,208,0.20)" strokeWidth="1.5" />;
+      })}
+    </svg>
+  );
+}
+
 function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '' }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateL(initialName);
@@ -2262,7 +2274,15 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               ))}
             </div>
           )}
-          <Bezel>EXERCISES</Bezel>
+          {capturing ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 4px' }}>
+              <SvgKnurl style={{ flex: 1 }} />
+              <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.20em', color: UI.inkFaint, textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap' }}>EXERCISES</span>
+              <SvgKnurl style={{ flex: 1 }} />
+            </div>
+          ) : (
+            <Bezel>EXERCISES</Bezel>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
             {(() => {
               // Group entries: consecutive entries with the same supersetGroup are bundled
@@ -2356,7 +2376,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       </div>
                     </div>
                   ) : renderEntry(g.entry, g.idx)}
-                  {gi < groups.length - 1 && (capturing ? <div className="knurl" style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
+                  {gi < groups.length - 1 && (capturing ? <SvgKnurl style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
                 </div>
               ));
             })()}
