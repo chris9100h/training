@@ -2038,21 +2038,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         )}
 
         {/* All sets list — hidden for cardio */}
-        {!isCardio && <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
-            <span className="micro">{warmupCount > 0 && warmupActive ? 'WARMUP' : 'ALL SETS'}</span>
-            <button onClick={checkAllSets} disabled={anyMissingData && !allWorkingDone} style={{
-              padding: '4px 10px', borderRadius: 4,
-              background: allWorkingDone ? UI.goldFaint : 'transparent',
-              border: `1px solid ${allWorkingDone ? UI.goldSoft : UI.hair}`,
-              color: allWorkingDone ? UI.gold : UI.inkFaint,
-              fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
-              fontFamily: UI.fontUi, fontWeight: 500,
-              cursor: anyMissingData && !allWorkingDone ? 'default' : 'pointer',
-              opacity: anyMissingData && !allWorkingDone ? 0.3 : 1,
-            }}>{allWorkingDone ? '✓ All' : 'All ✓'}</button>
-          </div>
-
+        {!isCardio && <div style={{ paddingTop: 12 }}>
           {isNoWeightReps ? (
             <div style={{ height: 6 }} />
           ) : (
@@ -2212,6 +2198,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                 }}>− REMOVE SET</button>
               )}
+              <button
+                onClick={checkAllSets}
+                disabled={allWorkingDone || (anyMissingData && !allWorkingDone)}
+                style={{
+                  flex: 1, padding: '9px 0', background: allWorkingDone ? UI.goldFaint : 'transparent',
+                  border: `1px solid ${allWorkingDone ? UI.goldSoft : anyMissingData ? UI.hair : UI.hairStrong}`, borderRadius: 6,
+                  color: allWorkingDone ? UI.gold : anyMissingData ? UI.inkGhost : UI.inkFaint,
+                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
+                  letterSpacing: '0.1em', cursor: allWorkingDone || anyMissingData ? 'default' : 'pointer',
+                  opacity: anyMissingData && !allWorkingDone ? 0.35 : 1,
+                  WebkitTapHighlightColor: 'transparent',
+                }}>✓ ALL</button>
             </div>
           )}
 
