@@ -613,14 +613,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const addSet = () => {
+    const bwKg = exercise?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => {
         if (i !== exIdx) return e;
         const last = e.sets[e.sets.length - 1];
         const newSet = isUnilateral
-          ? { kg: last?.kg ?? null, repsL: last?.repsL ?? null, repsR: last?.repsR ?? null, done: false }
-          : { kg: last?.kg ?? null, reps: last?.reps ?? null, done: false };
+          ? { kg: last?.kg ?? bwKg ?? null, repsL: last?.repsL ?? null, repsR: last?.repsR ?? null, done: false }
+          : { kg: last?.kg ?? bwKg ?? null, reps: last?.reps ?? null, done: false };
         return { ...e, sets: [...e.sets, newSet] };
       }),
     }));
@@ -924,6 +925,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [planDiffOpen, setPlanDiffOpen] = useStateT(false);
   const [planDiff, setPlanDiff] = useStateT([]);
   const [swapOpen, setSwapOpen] = useStateT(false);
+  const [addOpen, setAddOpen] = useStateT(false);
+  const [addSupersetData, setAddSupersetData] = useStateT(null); // { newIdx } | null
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
   const [repOutlierConfirm, setRepOutlierConfirm] = useStateT(null);
@@ -1192,21 +1195,156 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setSwapOpen(false);
   };
 
+  const doAdd = (newExId) => {
+    setAddOpen(false);
+    // Defer insertion until the user picks a superset (or solo) —
+    // that choice determines where the new exercise is placed.
+    setAddSupersetData({ newExId });
+  };
+
+  // Called from the superset modal: targetIdx = null → solo (insert after current),
+  // targetIdx = i → link with entry i and insert right after it.
+  const confirmAdd = (targetIdx) => {
+    const { newExId } = addSupersetData;
+    setAddSupersetData(null);
+    setStore(s => {
+      const sess = s.sessions.find(x => x.id === session.id);
+      if (!sess) return s;
+      const newEx = LB.findExercise(s, newExId);
+      const isUni = newEx?.movement_type === 'unilateral';
+      const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
+      const last = LB.bestRecentEntry(s, newExId, session.dayId);
+      const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
+      const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+      const currentIdx = sess.currentExIdx || 0;
+      const insertIdx = targetIdx !== null ? targetIdx + 1 : currentIdx + 1;
+      const group = targetIdx !== null
+        ? (sess.entries[targetIdx]?.supersetGroup || LB.uid())
+        : null;
+      const newEntry = {
+        exId: newExId,
+        name: newEx?.name || newExId,
+        plannedSets: 3,
+        plannedReps: null,
+        plannedRepsPerSet: null,
+        sets: seedSets,
+        note: '',
+        supersetGroup: group,
+        addedDuringSession: true,
+      };
+      const withNew = [
+        ...sess.entries.slice(0, insertIdx),
+        newEntry,
+        ...sess.entries.slice(insertIdx),
+      ];
+      // If linking, propagate the group to the target entry too
+      const finalEntries = targetIdx !== null
+        ? withNew.map((e, i) => i === targetIdx ? { ...e, supersetGroup: group } : e)
+        : withNew;
+      // Keep the user on the same exercise — only adjust index if insertion shifts it
+      const newCurrentIdx = insertIdx <= currentIdx ? currentIdx + 1 : currentIdx;
+      return {
+        ...s,
+        sessions: s.sessions.map(x => x.id !== session.id ? x : {
+          ...x,
+          entries: finalEntries,
+          currentExIdx: newCurrentIdx,
+        }),
+      };
+    });
+  };
+
+  const removeExercise = async () => {
+    if (session.entries.length <= 1) return;
+    if (!await confirm(`Remove "${entry.name}" from this session?`, { ok: 'Remove', danger: true })) return;
+    updateSession(sess => {
+      const newEntries = sess.entries.filter((_, i) => i !== exIdx);
+      const newIdx = exIdx >= newEntries.length ? newEntries.length - 1 : exIdx;
+      return { ...sess, entries: newEntries, currentExIdx: Math.max(0, newIdx) };
+    });
+  };
+
   const computePlanDiff = () => {
     const schedule = store.schedules?.find(s => s.id === session.scheduleId);
     const day = schedule?.days?.find(d => d.id === session.dayId);
     if (!day) return [];
-    return session.entries.reduce((acc, entry, i) => {
-      const planItem = day.items[i];
-      if (!planItem || entry.isCardio) return acc;
-      if (entry.exId !== planItem.exId) {
-        const oldEx = LB.findExercise(store, planItem.exId);
-        acc.push({ type: 'swap', idx: i, oldName: oldEx?.name || '?', newName: entry.name, newExId: entry.exId });
-      } else if (entry.sets.filter(s => !s.warmup).length !== planItem.sets) {
-        acc.push({ type: 'sets', idx: i, exName: entry.name, oldSets: planItem.sets, newSets: entry.sets.filter(s => !s.warmup).length });
+
+    // Non-cardio plan items, keeping the original day.items index for applyPlanAndFinish
+    const planItems = (day.items || [])
+      .map((item, originalIdx) => ({ item, originalIdx }))
+      .filter(({ item }) => LB.findExercise(store, item.exId)?.movement_type !== 'cardio');
+
+    // Session entries that correspond to the original plan (no ad-hoc additions, no cardio)
+    const sessionPlanEntries = session.entries.filter(e => !e.isCardio && !e.addedDuringSession);
+    const addedEntries = session.entries.filter(e => e.addedDuringSession);
+
+    // Greedy match plan items to session entries by exId (preserves correct pairing
+    // even when exercises were inserted or removed, shifting indices)
+    const usedJ = new Set();
+    const matched = new Array(planItems.length).fill(null); // planItems[i] → sessionEntry | null
+    for (let i = 0; i < planItems.length; i++) {
+      for (let j = 0; j < sessionPlanEntries.length; j++) {
+        if (!usedJ.has(j) && sessionPlanEntries[j].exId === planItems[i].item.exId) {
+          matched[i] = sessionPlanEntries[j];
+          usedJ.add(j);
+          break;
+        }
       }
-      return acc;
-    }, []);
+    }
+    const unmatchedPlanItems = planItems.filter((_, i) => !matched[i]);
+    const unmatchedSessionEntries = sessionPlanEntries.filter((_, j) => !usedJ.has(j));
+
+    const diffs = [];
+
+    // Ad-hoc additions — store position context so applyPlanAndFinish can insert them
+    session.entries.forEach((e, sessionIdx) => {
+      if (!e.addedDuringSession) return;
+      // Find the nearest non-cardio entry before this one to use as insertion anchor
+      let insertAfterExId = null;
+      for (let k = sessionIdx - 1; k >= 0; k--) {
+        if (!session.entries[k].isCardio) { insertAfterExId = session.entries[k].exId; break; }
+      }
+      // Find the superset partner name (if linked)
+      let supersetWithName = null;
+      if (e.supersetGroup) {
+        const partner = session.entries.find((se, j) => j !== sessionIdx && se.supersetGroup === e.supersetGroup);
+        if (partner) supersetWithName = partner.name;
+      }
+      diffs.push({
+        type: 'added', name: e.name, exId: e.exId,
+        insertAfterExId,
+        sets: e.sets.filter(s => !s.warmup).length,
+        supersetGroup: e.supersetGroup || null,
+        supersetWithName,
+      });
+    });
+
+    // Set count changes for matched exercises
+    planItems.forEach(({ item, originalIdx }, i) => {
+      if (!matched[i]) return;
+      const newSets = matched[i].sets.filter(s => !s.warmup).length;
+      if (newSets !== item.sets) {
+        diffs.push({ type: 'sets', idx: originalIdx, exName: matched[i].name, oldSets: item.sets, newSets });
+      }
+    });
+
+    // Swaps: pair each unmatched plan item with the unmatched session entry at the same relative position
+    const swapCount = Math.min(unmatchedPlanItems.length, unmatchedSessionEntries.length);
+    for (let k = 0; k < swapCount; k++) {
+      const { item, originalIdx } = unmatchedPlanItems[k];
+      const entry = unmatchedSessionEntries[k];
+      const oldEx = LB.findExercise(store, item.exId);
+      diffs.push({ type: 'swap', idx: originalIdx, oldName: oldEx?.name || '?', newName: entry.name, newExId: entry.exId });
+    }
+
+    // Removed: plan items with no session counterpart and no swap partner
+    for (let k = swapCount; k < unmatchedPlanItems.length; k++) {
+      const { item, originalIdx } = unmatchedPlanItems[k];
+      const oldEx = LB.findExercise(store, item.exId);
+      diffs.push({ type: 'removed', name: oldEx?.name || '?', exId: item.exId, originalIdx });
+    }
+
+    return diffs;
   };
 
   const tryFinish = () => {
@@ -1233,12 +1371,34 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const schedule = store.schedules?.find(s => s.id === session.scheduleId);
     const day = schedule?.days?.find(d => d.id === session.dayId);
     if (schedule && day) {
-      const newItems = day.items.map((item, i) => {
-        const diff = planDiff.find(d => d.idx === i);
+      // 1. Apply swaps and set-count changes (positional, by originalIdx)
+      let newItems = day.items.map((item, i) => {
+        const diff = planDiff.find(d => (d.type === 'swap' || d.type === 'sets') && d.idx === i);
         if (!diff) return item;
-        if (diff.type === 'swap') return { ...item, exId: session.entries[i].exId };
-        if (diff.type === 'sets') return { ...item, sets: session.entries[i].sets.filter(s => !s.warmup).length };
+        if (diff.type === 'swap') return { ...item, exId: diff.newExId };
+        if (diff.type === 'sets') return { ...item, sets: diff.newSets };
         return item;
+      });
+      // 2. Remove exercises skipped during training
+      const removedExIds = new Set(planDiff.filter(d => d.type === 'removed').map(d => d.exId));
+      newItems = newItems.filter(item => !removedExIds.has(item.exId));
+      // 3. Insert ad-hoc exercises (process in session order so chained insertions work)
+      for (const diff of planDiff.filter(d => d.type === 'added')) {
+        const newItem = { exId: diff.exId, sets: diff.sets, reps: null, repsPerSet: null, supersetGroup: diff.supersetGroup };
+        const afterIdx = diff.insertAfterExId
+          ? newItems.findIndex(it => it.exId === diff.insertAfterExId)
+          : -1;
+        const insertAt = afterIdx >= 0 ? afterIdx + 1 : newItems.length;
+        newItems = [...newItems.slice(0, insertAt), newItem, ...newItems.slice(insertAt)];
+      }
+      // 4. Sync supersetGroup for plan exercises that got linked to a new exercise
+      const sessionGroups = new Map();
+      session.entries.filter(e => !e.isCardio && !e.addedDuringSession)
+        .forEach(e => sessionGroups.set(e.exId, e.supersetGroup || null));
+      newItems = newItems.map(it => {
+        if (!sessionGroups.has(it.exId)) return it;
+        const sg = sessionGroups.get(it.exId);
+        return sg !== (it.supersetGroup || null) ? { ...it, supersetGroup: sg } : it;
       });
       setStore(s => ({
         ...s,
@@ -1880,25 +2040,42 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             }}>{allWorkingDone ? '✓ All' : 'All ✓'}</button>
           </div>
 
-          {!isNoWeightReps && <div style={{
-            display: 'grid',
-            gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
-            gap: 8, alignItems: 'baseline',
-            padding: '0 4px 6px',
-          }}>
-            <div />
-            <span className="micro" style={{ color: UI.inkFaint }}>Last time</span>
-            <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{UI.unit()}</span>
-            {isUnilateral ? (
-              <>
-                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>L</span>
-                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>R</span>
-              </>
-            ) : (
-              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{store.settings?.smartProgression ? 'Reps (min)' : 'Reps'}</span>
-            )}
-            <div /><div />
-          </div>}
+          {isNoWeightReps ? (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 4px 6px' }}>
+              <button onClick={addSet} style={{
+                width: 20, height: 20, borderRadius: 3,
+                background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+                color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>+</button>
+            </div>
+          ) : (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
+              gap: 8, alignItems: 'baseline',
+              padding: '0 4px 6px',
+            }}>
+              <div />
+              <span className="micro" style={{ color: UI.inkFaint }}>Last time</span>
+              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{UI.unit()}</span>
+              {isUnilateral ? (
+                <>
+                  <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>L</span>
+                  <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>R</span>
+                </>
+              ) : (
+                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{store.settings?.smartProgression ? 'Reps (min)' : 'Reps'}</span>
+              )}
+              <div />
+              <button onClick={addSet} style={{
+                width: 20, height: 20, borderRadius: 3,
+                background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+                color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>+</button>
+            </div>
+          )}
           <div className="knurl" style={{ marginBottom: 2 }} />
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -2029,18 +2206,24 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
           {/* Add set / swap / note — shown for all exercises, + and tempo hidden for cardio */}
           <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-            {!isCardio && <button onClick={addSet} style={{
-              width: 32, height: 32, borderRadius: 4,
-              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-              color: UI.inkSoft, fontSize: 18, lineHeight: 1, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>+</button>}
             {!isCardio && <button onClick={swapExercise} style={{
               width: 32, height: 32, borderRadius: 4,
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>⇄</button>}
+            {!isCardio && <button onClick={() => setAddOpen(true)} style={{
+              width: 32, height: 32, borderRadius: 4,
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>⊕</button>}
+            {session.entries.length > 1 && <button onClick={removeExercise} style={{
+              width: 32, height: 32, borderRadius: 4,
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>✕</button>}
             {!isCardio && store.settings?.tempoEnabled && (
               <button onClick={() => tempoActive ? stopTempo() : startTempo()} style={{
                 borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
@@ -2241,8 +2424,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {/* plan diff */}
-      <Sheet open={planDiffOpen} onClose={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} title="Update plan?">
-        <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>Changes vs. plan:</div>
+      <Sheet open={planDiffOpen} onClose={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} title="Session changes">
+        <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>vs. plan:</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
           {planDiff.map((d, i) => (
             <div key={i} style={{
@@ -2254,23 +2437,69 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <span style={{ color: UI.goldLight, fontSize: 14 }}>⇄</span>
                   <span><span style={{ color: UI.inkSoft }}>{d.oldName}</span>{' → '}<strong>{d.newName}</strong></span>
                 </>
-              ) : (
+              ) : d.type === 'sets' ? (
                 <>
                   <span style={{ color: UI.goldLight, fontSize: 14 }}>≡</span>
                   <span><strong>{d.exName}</strong>{': '}<span style={{ color: UI.inkSoft }}>{d.oldSets}</span>{' → '}<strong>{d.newSets} sets</strong></span>
+                </>
+              ) : d.type === 'added' ? (
+                <>
+                  <span style={{ color: UI.inkFaint, fontSize: 14 }}>＋</span>
+                  <span style={{ color: UI.inkSoft }}>
+                    <strong style={{ color: UI.ink }}>{d.name}</strong>{' added'}
+                    {d.supersetWithName && <span>{' · superset with '}<strong style={{ color: UI.ink }}>{d.supersetWithName}</strong></span>}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span style={{ color: UI.inkFaint, fontSize: 14 }}>−</span>
+                  <span style={{ color: UI.inkSoft }}><strong style={{ color: UI.ink }}>{d.name}</strong>{' removed'}</span>
                 </>
               )}
             </div>
           ))}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn kind="ghost" onClick={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} style={{ flex: 1 }}>No</Btn>
-          <Btn onClick={() => { setPlanDiffOpen(false); applyPlanAndFinish(); }} style={{ flex: 2 }}>Yes, update</Btn>
+          <Btn kind="ghost" onClick={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} style={{ flex: 1 }}>Leave plan</Btn>
+          <Btn onClick={() => { setPlanDiffOpen(false); applyPlanAndFinish(); }} style={{ flex: 2 }}>Update plan</Btn>
         </div>
       </Sheet>
 
       {/* exercise swap picker */}
       {swapOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSwapOpen(false)} onPick={doSwap} />}
+
+      {/* exercise add picker */}
+      {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
+
+      {/* superset modal — step 1: ask yes/no; step 2: pick exercise to link */}
+      {addSupersetData && (
+        <Sheet open={true} onClose={() => confirmAdd(null)} title="Add exercise">
+          {!addSupersetData.picking ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.inkSoft, lineHeight: 1.5 }}>
+                Add as part of a superset?
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn kind="ghost" onClick={() => confirmAdd(null)} style={{ flex: 1 }}>Solo</Btn>
+                <Btn onClick={() => setAddSupersetData(d => ({ ...d, picking: true }))} style={{ flex: 1 }}>Superset</Btn>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {session.entries.map((e, i) => (
+                <button key={i} onClick={() => confirmAdd(i)} style={{
+                  padding: '14px 0', textAlign: 'left', background: 'none', border: 'none',
+                  borderBottom: `1px solid ${UI.hair}`, cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <span className="micro" style={{ display: 'block', marginBottom: 3, color: UI.inkFaint }}>EX {String(i + 1).padStart(2, '0')}</span>
+                  <span style={{ fontFamily: UI.fontDisplay, fontSize: 15, color: UI.ink }}>{e.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </Sheet>
+      )}
 
       {/* rest timer modal */}
       <Sheet open={restModalOpen} onClose={() => setRestModalOpen(false)} title="Rest">

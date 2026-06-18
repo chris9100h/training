@@ -302,7 +302,11 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     const protein = healthInt(form.protein), carbs = healthInt(form.carbs), fat = healthInt(form.fat);
     const fiber = netCarbs ? healthInt(form.fiber) : null;
     const calories = caloriesManual ? healthInt(form.calories) : autoCals;
-    const isTraining = LB.isLoggedTrainingDay(store.sessions, date);
+    // Today = treat as training if planned (assume the user will train).
+    // Past days = only training if a session was actually done.
+    const isTraining = date === LB.todayISO()
+      ? !!LB.plannedTrainingDay(store, date)
+      : LB.isLoggedTrainingDay(store.sessions, date);
     const { adherence, targetsSnap } = LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
     const savedCoachFields = {};
     coachFields.forEach(f => {
@@ -525,7 +529,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 
 // ─── Today / selected-day metrics card ────────────────────────────────────────
 
-function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, hasTargets }) {
+function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, dayTarget }) {
   const stat = (label, value, unit) => (
     <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
       <div className="num" style={{ fontSize: 22, color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300 }}>
@@ -535,7 +539,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
     </div>
   );
   const adh = log?.adherence;
-  const showAdh = hasTargets || adh != null;
+  const showAdh = dayTarget != null || adh != null;
   const badge = (icon, label, alpha) => (
     <span style={{ display: 'flex', alignItems: 'center', gap: 4, background: `rgba(var(--accent-rgb),${alpha})`, border: `0.5px solid rgba(var(--accent-rgb),${alpha * 2})`, borderRadius: 4, padding: '3px 7px' }}>
       <i className={`fa-solid ${icon}`} style={{ fontSize: 9, color: 'var(--accent)' }} />
@@ -573,13 +577,22 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
       <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
         {stat('Weight', log?.weight != null ? log.weight : null, UI.unit())}
         {stat('Steps', log?.steps != null ? log.steps.toLocaleString() : null)}
-        {stat('Calories', log?.calories != null ? log.calories : null, 'kcal')}
+        {stat('Calories', log?.calories != null ? log.calories : null)}
       </div>
       <div style={{ display: 'flex', gap: 12 }}>
         {stat('Protein', log?.protein != null ? log.protein : null, 'g')}
         {stat('Carbs', log?.carbs != null ? log.carbs : null, 'g')}
         {stat('Fat', log?.fat != null ? log.fat : null, 'g')}
       </div>
+      {dayTarget && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0 12px', marginTop: 6, paddingTop: 6, borderTop: `0.5px solid ${UI.hair}` }}>
+          {[dayTarget.protein, dayTarget.carbs, dayTarget.fat].map((v, i) => (
+            <div key={i} style={{ textAlign: 'center' }}>
+              <span className="num" style={{ fontSize: 10, color: UI.inkGhost }}>{v != null ? v : '—'}<span style={{ fontSize: 8 }}>g</span></span>
+            </div>
+          ))}
+        </div>
+      )}
       {log?.offPlanNote && (
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>OFF-PLAN</div>
@@ -594,7 +607,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
 // ─── This-week overview card (Mon–Sun averages + verdict) ─────────────────────
 
 function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
-  const { from, to, periodDays, daysLogged, trainingsDone, trainingsPlanned, cardioMinutes, cardioSessions,
+  const { from, to, periodDays, daysLogged, trainingsDone, trainingsPlanned, trainingDaysInPeriod, cardioMinutes, cardioSessions,
     weight, steps, stepsSum, calories, protein, carbs, fat, water, adherence,
     snapTgtCal, snapTgtProt, snapTgtCarb, snapTgtFat } = stats;
   const r = v => v == null ? null : Math.round(v);
@@ -604,9 +617,9 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
   const isPerfect = adherence != null && adherence >= 97;
   const trainingPct = trainingsPlanned > 0 ? Math.min(100, (trainingsDone / trainingsPlanned) * 100) : (trainingsDone > 0 ? 100 : 0);
 
-  // 1W: plan-weighted current targets. 1M/3M: persisted targetsSnap avg (historically correct).
+  // 1W: plan-weighted current targets (full week incl. future days). 1M/3M: persisted targetsSnap avg.
   const totalDays = periodDays || 7;
-  const tDays = trainingsPlanned || 0, rDays = totalDays - tDays;
+  const tDays = trainingDaysInPeriod || 0, rDays = totalDays - tDays;
   const planTgt = (tk, rk) => targets ? Math.round(((targets[tk] || 0) * tDays + (targets[rk] || 0) * rDays) / totalDays) : null;
   const tgtCal  = tf !== '1W' ? snapTgtCal  : planTgt('caloriesTraining', 'caloriesRest');
   const tgtProt = tf !== '1W' ? snapTgtProt : planTgt('proteinTraining',  'proteinRest');
@@ -700,15 +713,18 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
         {cell('Fat', r(fat), 'g')}
       </div>
       {tgtCal != null && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 8px', marginTop: 6, paddingTop: 6, borderTop: `0.5px solid ${UI.hair}` }}>
-          {[{v: tgtCal, u: 'kcal'}, {v: tgtProt, u: 'g'}, {v: tgtCarb, u: 'g'}, {v: tgtFat, u: 'g'}].map(({v, u}, i) => (
-            <div key={i} style={{ textAlign: 'center' }}>
-              <span className="num" style={{ fontSize: 10, color: UI.inkGhost }}>
-                {v != null ? v : '—'}<span style={{ fontSize: 8 }}>{u}</span>
-              </span>
-            </div>
-          ))}
-        </div>
+        <>
+          <div style={{ height: '0.5px', background: UI.hairStrong, margin: '6px 0' }} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 8px' }}>
+            {[{v: tgtCal, u: 'kcal'}, {v: tgtProt, u: 'g'}, {v: tgtCarb, u: 'g'}, {v: tgtFat, u: 'g'}].map(({v, u}, i) => (
+              <div key={i} style={{ textAlign: 'center' }}>
+                <span className="num" style={{ fontSize: 10, color: UI.inkGhost }}>
+                  {v != null ? v : '—'}<span style={{ fontSize: 8 }}>{u}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </Card>
   );
@@ -906,6 +922,34 @@ function HealthScreen({ store, setStore, go, userId }) {
     if (targets !== cachedTargets) setCachedTargets(targets);
   }, [targets]);
 
+  // Retroactive heal: if a past planned training day has no session, its daily log
+  // was saved with training targets but those macros were never earned — correct to rest.
+  useEffectH(() => {
+    if (!effectiveTargets) return;
+    const today = LB.todayISO();
+    const dayOf = s => s.date ? s.date.slice(0, 10) : null;
+    const sessionDates = new Set((store.sessions || []).filter(s => s.ended).map(dayOf).filter(Boolean));
+    const restTarget = LB.dayTargetFromMacros(effectiveTargets, false);
+    if (!restTarget) return;
+    const toHeal = (store.dailyLogs || []).filter(l =>
+      l.date < today &&
+      l.targetsSnap?.dayType === 'training' &&
+      !sessionDates.has(l.date) &&
+      !!LB.plannedTrainingDay(store, l.date)
+    );
+    if (!toHeal.length) return;
+    const healDates = new Set(toHeal.map(l => l.date));
+    const restSnap = { ...restTarget, dayType: 'rest' };
+    setStore(s => ({
+      ...s,
+      dailyLogs: s.dailyLogs.map(l => {
+        if (!healDates.has(l.date)) return l;
+        const adherence = LB.macroAdherence({ protein: l.protein, carbs: l.carbs, fat: l.fat }, restTarget);
+        return adherence != null ? { ...l, adherence, targetsSnap: restSnap } : l;
+      }),
+    }));
+  }, [store.sessions, store.dailyLogs, effectiveTargets]);
+
   // Windowed series builder for the charts. The x-range is tightened to the
   // actual logged days inside the window (not the full timeframe) so a sparse
   // window doesn't leave most of the chart empty — 80 of 90 days fills the chart.
@@ -998,8 +1042,16 @@ function HealthScreen({ store, setStore, go, userId }) {
     const inPeriod = dailyLogs.filter(l => l.date >= from && l.date <= to);
     const avgK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
     const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
-    const trainingsDone = (store.sessions || []).filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= from && d <= to; }).length;
+    const sessionDatesInPeriod = new Set((store.sessions || []).filter(s => s.ended).map(s => dayOf(s)).filter(d => d && d >= from && d <= to));
+    const trainingsDone = sessionDatesInPeriod.size;
     const trainingsPlanned = allDays.filter(d => d <= today && LB.plannedTrainingDay(store, d)).length;
+    // Training days for macro target avg: future planned days count as training (not yet missed),
+    // past planned days only count if a session was actually done (missed = rest day, no earned macros).
+    const trainingDaysInPeriod = allDays.filter(d => {
+      if (!LB.plannedTrainingDay(store, d)) return false;
+      if (d < today) return sessionDatesInPeriod.has(d);
+      return true;
+    }).length;
     const periodCardio = (store.cardioLogs || []).filter(l => l.date >= from && l.date <= to);
     // Historical target avg from persisted targetsSnap (correct even after target changes).
     // Only used for 1M/3M; 1W falls back to plan-weighted current targets in the card.
@@ -1007,7 +1059,7 @@ function HealthScreen({ store, setStore, go, userId }) {
     const avgSnap = k => withSnap.length ? Math.round(withSnap.reduce((s, l) => s + (l.targetsSnap[k] || 0), 0) / withSnap.length) : null;
     return {
       from, to, periodDays, daysLogged: inPeriod.length,
-      trainingsDone, trainingsPlanned,
+      trainingsDone, trainingsPlanned, trainingDaysInPeriod,
       cardioMinutes: periodCardio.reduce((s, l) => s + (l.durationMinutes || 0), 0),
       cardioSessions: periodCardio.length,
       weight: avgK('weight'), steps: avgK('steps'),
@@ -1092,9 +1144,11 @@ function HealthScreen({ store, setStore, go, userId }) {
   const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
   const trainedSelected = LB.isLoggedTrainingDay(store.sessions, selectedDate);
   const cardioSelected = (store.cardioLogs || []).some(l => l.date === selectedDate);
+  const dayIsTraining = trainedSelected || (selectedDate >= today && !!LB.plannedTrainingDay(store, selectedDate));
+  const selectedDayTarget = LB.dayTargetFromMacros(effectiveTargets, dayIsTraining);
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
-    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} hasTargets={!!effectiveTargets} />,
+    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} />,
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
         headline={weightAvg != null ? `${weightAvg}${UI.unit()}` : null} sub={weightAvg != null ? 'avg' : null}>
@@ -1264,14 +1318,20 @@ function HealthClientLogs({ clientStore }) {
     const inPeriod = logs.filter(l => l.date >= from && l.date <= to);
     const avgK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
     const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
-    const trainingsDone = (clientStore?.sessions || []).filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= from && d <= to; }).length;
+    const sessionDatesInPeriod = new Set((clientStore?.sessions || []).filter(s => s.ended).map(s => dayOf(s)).filter(d => d && d >= from && d <= to));
+    const trainingsDone = sessionDatesInPeriod.size;
     const trainingsPlanned = allDays.filter(d => d <= today && LB.plannedTrainingDay(clientStore || {}, d)).length;
+    const trainingDaysInPeriod = allDays.filter(d => {
+      if (!LB.plannedTrainingDay(clientStore || {}, d)) return false;
+      if (d < today) return sessionDatesInPeriod.has(d);
+      return true;
+    }).length;
     const periodCardio = (clientStore?.cardioLogs || []).filter(l => l.date >= from && l.date <= to);
     const withSnap = tf !== '1W' ? inPeriod.filter(l => l.targetsSnap) : [];
     const avgSnap = k => withSnap.length ? Math.round(withSnap.reduce((s, l) => s + (l.targetsSnap[k] || 0), 0) / withSnap.length) : null;
     return {
       from, to, periodDays, daysLogged: inPeriod.length,
-      trainingsDone, trainingsPlanned,
+      trainingsDone, trainingsPlanned, trainingDaysInPeriod,
       cardioMinutes: periodCardio.reduce((s, l) => s + (l.durationMinutes || 0), 0),
       cardioSessions: periodCardio.length,
       weight: avgK('weight'), steps: avgK('steps'),
@@ -1302,7 +1362,7 @@ function HealthClientLogs({ clientStore }) {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={null} tf={tf} setTf={setTf} />,
     today: (
       <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)}
-        dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} hasTargets={false} />
+        dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={null} />
     ),
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}

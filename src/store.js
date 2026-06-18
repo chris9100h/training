@@ -1163,9 +1163,17 @@ function calcBlended(startedAt, avgDurSec, avgSetsTotal, setsDone, setsTotal, no
   return { remainingMin: Math.round(remainingSec / 60), progress };
 }
 
+// Returns the most recent logged bodyweight from daily logs, or null.
+function latestBodyweight(store) {
+  const logs = (store.dailyLogs || []).filter(l => l.weight != null);
+  if (!logs.length) return null;
+  return logs.slice().sort((a, b) => b.date.localeCompare(a.date))[0].weight;
+}
+
 // Compute the seed-sets array when starting/logging a session for a planned item.
 // Honors smart-progression suggestions and falls back to last-session values.
-function buildSeedSets(it, last, suggestion, isUni, smartProgression) {
+// bodyweightKg: prefill kg with this value when kg would otherwise be null (for bodyweight exercises).
+function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweightKg = null) {
   const workingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
   const repsPerSet = it.repsPerSet;
   return Array.from({ length: it.sets }).map((_, i) => {
@@ -1178,17 +1186,17 @@ function buildSeedSets(it, last, suggestion, isUni, smartProgression) {
     }
     if (smartProgression && prev) {
       return isUni
-        ? { kg: prev.kg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
-        : { kg: prev.kg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
+        ? { kg: prev.kg ?? bodyweightKg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
+        : { kg: prev.kg ?? bodyweightKg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
     }
     if (!prev && targetReps != null) {
       return isUni
-        ? { kg: null, repsL: targetReps, repsR: targetReps, done: false }
-        : { kg: null, reps: targetReps, done: false };
+        ? { kg: bodyweightKg ?? null, repsL: targetReps, repsR: targetReps, done: false }
+        : { kg: bodyweightKg ?? null, reps: targetReps, done: false };
     }
     return isUni
-      ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
-      : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
+      ? { kg: prev?.kg ?? bodyweightKg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
+      : { kg: prev?.kg ?? bodyweightKg ?? null, reps: prev?.reps ?? null, done: false };
   });
 }
 
@@ -2185,19 +2193,25 @@ function dayTargetFromMacros(m, isTraining) {
   return { protein: protein ?? null, carbs: carbs ?? null, fat: fat ?? null, calories: calories ?? null };
 }
 
-// Macro adherence as a 0–100 %, defined as the average per-macro closeness to
-// target across protein/carbs/fat. Per macro: clamp(1 − |actual − target| /
-// target, 0, 1). Calories are deliberately NOT part of the score — macros are
-// the goal. Returns null unless all three macros AND their targets are present.
+// Macro adherence as a 0–100 %, defined as the calorie-weighted average of
+// per-macro closeness scores. Per macro: clamp(1 − |actual − target| / target,
+// 0, 1). Each macro's weight = its caloric share of the target day (protein/
+// carbs × 4 kcal/g, fat × 9 kcal/g) — so a small fat target counts less than
+// a large carb target, proportionally to its caloric significance.
+// Returns null unless all three macros AND their targets are present.
 function macroAdherence(actual, target) {
   if (!actual || !target) return null;
-  const scores = [];
+  const kcalPer = { protein: 4, carbs: 4, fat: 9 };
+  const entries = [];
   for (const k of ['protein', 'carbs', 'fat']) {
     const t = target[k]; const a = actual[k];
     if (t == null || t <= 0 || a == null) return null;
-    scores.push(Math.max(0, 1 - Math.abs(a - t) / t));
+    entries.push({ score: Math.max(0, 1 - Math.abs(a - t) / t), kcal: t * kcalPer[k] });
   }
-  return Math.round((scores.reduce((s, v) => s + v, 0) / scores.length) * 100);
+  const totalKcal = entries.reduce((s, e) => s + e.kcal, 0);
+  if (totalKcal <= 0) return null;
+  const weighted = entries.reduce((s, e) => s + e.score * (e.kcal / totalKcal), 0);
+  return Math.round(weighted * 100);
 }
 
 // Effective macro targets for the user's OWN health screen: their personal
@@ -2303,7 +2317,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
-  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
+  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover,

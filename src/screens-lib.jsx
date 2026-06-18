@@ -311,7 +311,7 @@ function LibraryScreen({ store, setStore, go }) {
         </div>
       )}
 
-      {creating && <ExerciseCreator onClose={() => setCreating(false)} setStore={setStore} />}
+      {creating && <ExerciseCreator onClose={() => setCreating(false)} store={store} setStore={setStore} />}
 
       {filtersOpen && (
         <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
@@ -382,6 +382,7 @@ const EXERCISE_SIZES = [['big','Big'],['medium','Medium'],['small','Small']];
 
 const EQUIPMENT_TYPES = [
   { key: 'no_equipment',   label: 'No equipment' },
+  { key: 'bodyweight',     label: 'Bodyweight' },
   { key: 'barbell_dual',   label: 'Dual plates' },
   { key: 'barbell_single', label: 'Single plate' },
   { key: 'cable',          label: 'Cable' },
@@ -389,7 +390,122 @@ const EQUIPMENT_TYPES = [
   { key: 'dumbbell',       label: 'Dumbbell' },
 ];
 
-function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
+const _chevronDown = (
+  <svg width="10" height="6" viewBox="0 0 10 6" fill="none" style={{ flexShrink: 0 }}>
+    <path d="M1 1l4 4 4-4" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+const _checkmark = (
+  <svg width="12" height="9" viewBox="0 0 12 9" fill="none" style={{ flexShrink: 0 }}>
+    <path d="M1 4.5l3.5 3.5 6.5-7.5" stroke={UI.gold} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
+function InlineSelect({ value, onChange, options, placeholder = '— Select —' }) {
+  const [open, setOpen] = useStateL(false);
+  const current = options.find(o => o.key === (value || ''));
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button onClick={() => setOpen(v => !v)} style={{
+        width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '10px 12px', borderRadius: open ? '6px 6px 0 0' : 6,
+        background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`,
+        cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 14,
+        color: current ? UI.ink : UI.inkFaint,
+        WebkitTapHighlightColor: 'transparent', textAlign: 'left', gap: 8,
+      }}>
+        <span style={{ flex: 1 }}>{current?.label ?? placeholder}</span>
+        <div style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>{_chevronDown}</div>
+      </button>
+      {open && (
+        <div style={{ border: `1px solid ${UI.hairStrong}`, borderTop: 'none', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
+          {options.map((opt, i) => (
+            <button key={opt.key} onClick={() => { onChange(opt.key); setOpen(false); }} style={{
+              width: '100%', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              background: opt.key === value ? `rgba(var(--accent-rgb),0.1)` : UI.bgRaised,
+              color: opt.key === value ? UI.gold : UI.ink,
+              border: 'none', borderTop: `1px solid ${UI.hair}`,
+              cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 14, textAlign: 'left',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <span>{opt.label}</span>
+              {opt.key === value && _checkmark}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MuscleSelector({ value, onChange }) {
+  const [open, setOpen] = useStateL(false);
+  const label = value.length === 0 ? '— Select muscles —' : value.join(', ');
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button onClick={() => setOpen(v => !v)} style={{
+        width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '10px 12px', borderRadius: open ? '6px 6px 0 0' : 6,
+        background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`,
+        cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 14,
+        color: value.length ? UI.ink : UI.inkFaint,
+        WebkitTapHighlightColor: 'transparent', gap: 8,
+      }}>
+        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}>{label}</span>
+        <div style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>{_chevronDown}</div>
+      </button>
+      {open && (
+        <div style={{ border: `1px solid ${UI.hairStrong}`, borderTop: 'none', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
+          {MUSCLES.map((m, i) => {
+            const sel = value.includes(m);
+            return (
+              <button key={m} onClick={() => onChange(sel ? value.filter(x => x !== m) : [...value, m])} style={{
+                width: '100%', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: sel ? `rgba(var(--accent-rgb),0.1)` : UI.bgRaised,
+                color: sel ? UI.gold : UI.ink,
+                border: 'none', borderTop: i > 0 ? `1px solid ${UI.hair}` : 'none',
+                cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 14, textAlign: 'left',
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                <span>{m}</span>
+                {sel && _checkmark}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// SVG knurl for use inside html2canvas — repeating-linear-gradient doesn't render there.
+// useLayoutEffect resolves width="100%" to a pixel value before html2canvas serializes
+// the SVG as a data URL (where percentage widths lose their containing block context).
+function SvgKnurl({ style }) {
+  const ref = useRefL(null);
+  React.useLayoutEffect(() => {
+    if (!ref.current) return;
+    const w = Math.round(ref.current.getBoundingClientRect().width);
+    if (w > 0) ref.current.setAttribute('width', w);
+  }, []);
+  return (
+    <svg ref={ref} width="100%" height="3" style={{ display: 'block', overflow: 'hidden', ...style }}>
+      {Array.from({ length: 100 }, (_, i) => {
+        const x = (i - 1) * 5.2;
+        return <line key={i} x1={x} y1="3" x2={x + 1.73} y2="0" stroke="rgba(236,228,208,0.20)" strokeWidth="1.5" />;
+      })}
+    </svg>
+  );
+}
+
+// Canvas placeholder for between-exercise knurl dividers in screenshot mode.
+// takeScreenshot draws into these imperatively right before html2canvas runs,
+// so timing is guaranteed regardless of when React flushes the re-render.
+function KnurlCanvas({ style }) {
+  return <canvas data-knurl="1" style={{ display: 'block', width: '100%', height: 3, ...style }} />;
+}
+
+function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '' }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateL(initialName);
   const [selectedTags, setSelectedTags] = useStateL([]);
@@ -399,7 +515,15 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
   const [equipment, setEquipment] = useStateL('barbell_dual');
   const [progressionReps, setProgressionReps] = useStateL(null);
   const [showSizeInfo, setShowSizeInfo] = useStateL(false);
+  const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
+  const handleEquipmentChange = (key) => {
+    setEquipment(key || 'no_equipment');
+    if (key === 'bodyweight' && !store?.settings?.showHealthTab) {
+      setStore(s => ({ ...s, settings: { ...s.settings, showHealthTab: true } }));
+      setShowBodyweightHint(true);
+    }
+  };
   const save = () => {
     if (!name.trim()) return;
     const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: noWeightReps, equipment: equipment || null, note: '', progression_reps: progressionReps ?? null };
@@ -424,12 +548,7 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
         </Field>
         <div>
           <span className="label">Muscle group</span>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-            {MUSCLES.map(m => (
-              <Pill key={m} gold={selectedTags.includes(m)} onClick={() => toggleTag(m)}
-                style={{ cursor: 'pointer' }}>{m}</Pill>
-            ))}
-          </div>
+          <MuscleSelector value={selectedTags} onChange={setSelectedTags} />
         </div>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -459,11 +578,7 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
         </div>
         <div>
           <span className="label">Equipment</span>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-            {EQUIPMENT_TYPES.map(({ key, label }) => (
-              <Pill key={key} gold={equipment === key} onClick={() => setEquipment(key)} style={{ cursor: 'pointer' }}>{label}</Pill>
-            ))}
-          </div>
+          <InlineSelect value={equipment} onChange={handleEquipmentChange} options={EQUIPMENT_TYPES} />
         </div>
         <div>
           <span className="label">Movement type</span>
@@ -496,6 +611,16 @@ function ExerciseCreator({ onClose, setStore, onCreated, initialName = '' }) {
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Create</Btn>
       </div>
     </Sheet>
+    {showBodyweightHint && (
+      <Sheet open={true} onClose={() => setShowBodyweightHint(false)} title="Health tab activated">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ fontSize: 14, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
+            The <strong style={{ color: UI.ink }}>Health</strong> tab is now active. Tap it in the bottom nav, then tap <strong style={{ color: UI.ink }}>Log</strong> to record your weight — it'll be pre-filled automatically when you train bodyweight exercises.
+          </div>
+          <Btn onClick={() => setShowBodyweightHint(false)}>OK</Btn>
+        </div>
+      </Sheet>
+    )}
     {confirmEl}
     </>
   );
@@ -525,6 +650,14 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
   const [showSizeInfoEdit, setShowSizeInfoEdit] = useStateL(false);
+  const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
+  const handleEditEquipmentChange = (key) => {
+    setEditEquipment(key || null);
+    if (key === 'bodyweight' && !store.settings?.showHealthTab) {
+      setStore(s => ({ ...s, settings: { ...s.settings, showHealthTab: true } }));
+      setShowBodyweightHint(true);
+    }
+  };
 
   const advanceQueue = () => {
     if (editQueue.length > 0) {
@@ -663,12 +796,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             </Field>
             <div>
               <span className="label">Muscle group</span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                {MUSCLES.map(m => (
-                  <Pill key={m} gold={editTags.includes(m)} onClick={() => toggleEditTag(m)}
-                    style={{ cursor: 'pointer' }}>{m}</Pill>
-                ))}
-              </div>
+              <MuscleSelector value={editTags} onChange={setEditTags} />
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -698,11 +826,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             </div>
             <div>
               <span className="label">Equipment</span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                {EQUIPMENT_TYPES.map(({ key, label }) => (
-                  <Pill key={key} gold={editEquipment === key} onClick={() => setEditEquipment(k => k === key ? null : key)} style={{ cursor: 'pointer' }}>{label}</Pill>
-                ))}
-              </div>
+              <InlineSelect value={editEquipment} onChange={handleEditEquipmentChange} options={EQUIPMENT_TYPES} />
             </div>
             <div>
               <span className="label">Movement type</span>
@@ -848,6 +972,16 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
           </div>
         </div>
       </div>}
+      {showBodyweightHint && (
+        <Sheet open={true} onClose={() => setShowBodyweightHint(false)} title="Health tab activated">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ fontSize: 14, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
+              The <strong style={{ color: UI.ink }}>Health</strong> tab is now active. Tap it in the bottom nav, then tap <strong style={{ color: UI.ink }}>Log</strong> to record your weight — it'll be pre-filled automatically when you train bodyweight exercises.
+            </div>
+            <Btn onClick={() => setShowBodyweightHint(false)}>OK</Btn>
+          </div>
+        </Sheet>
+      )}
       {confirmEl}
     </Screen>
   );
@@ -1984,6 +2118,19 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     scrollParent.style.height = 'auto';
     scrollParent.style.minHeight = 'auto';
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    // Draw knurl dividers imperatively — canvas elements placed by KnurlCanvas
+    // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
+    captureRef.current.querySelectorAll('canvas[data-knurl]').forEach(c => {
+      const w = c.parentElement ? c.parentElement.offsetWidth : 320;
+      if (!w) return;
+      c.width = w; c.height = 3;
+      const ctx = c.getContext('2d');
+      ctx.strokeStyle = 'rgba(236,228,208,0.20)';
+      ctx.lineWidth = 1.5;
+      for (let x = -2; x < w + 6; x += 5.2) {
+        ctx.beginPath(); ctx.moveTo(x, 3); ctx.lineTo(x + 1.73, 0); ctx.stroke();
+      }
+    });
     try {
       const el = captureRef.current;
       const canvas = await html2canvas(el, {
@@ -2155,7 +2302,15 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               ))}
             </div>
           )}
-          <Bezel>EXERCISES</Bezel>
+          {capturing ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 4px' }}>
+              <SvgKnurl style={{ flex: 1 }} />
+              <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.20em', color: UI.inkFaint, textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap' }}>EXERCISES</span>
+              <SvgKnurl style={{ flex: 1 }} />
+            </div>
+          ) : (
+            <Bezel>EXERCISES</Bezel>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
             {(() => {
               // Group entries: consecutive entries with the same supersetGroup are bundled
@@ -2249,13 +2404,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       </div>
                     </div>
                   ) : renderEntry(g.entry, g.idx)}
-                  {gi < groups.length - 1 && <Hairline style={{ marginTop: 14 }} />}
+                  {gi < groups.length - 1 && (capturing ? <KnurlCanvas style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
                 </div>
               ));
             })()}
           </div>
           {capturing && (
-            <img src={_shotLogo} style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
+            <img src={_shotLogo} style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, zIndex: 1, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
           )}
           {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 10 }} />}
         </div>

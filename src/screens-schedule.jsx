@@ -387,7 +387,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
         const isUni = !!ex?.unilateral;
         const last = LB.bestRecentEntry(store, it.exId, day.id);
         const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps);
-        const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression);
+        const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+        const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
         return (
           <Frame key={k} style={{ padding: '12px 16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
@@ -1723,6 +1724,7 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
       {creatingNew !== null && (
         <window.Screens.ExerciseCreator
           initialName={creatingNew}
+          store={store}
           setStore={setStore}
           onCreated={(id) => { onPick(id); }}
           onClose={() => setCreatingNew(null)}
