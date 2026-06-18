@@ -135,7 +135,7 @@ function LoginScreen() {
     if (!e2 || loading) return;
     setLoading(true); setError('');
     try {
-      await LB.resetPassword(e2, window.location.href.split('#')[0]);
+      await LB.resetPassword(e2, 'https://zane-wo.com/');
       setResetSent(true);
     } catch (e) {
       setError(e.message || 'Failed to send reset link');
