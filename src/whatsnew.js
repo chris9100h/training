@@ -20,7 +20,7 @@ window.WHATS_NEW = [
     title: 'Bodyweight exercises & mid-session edits',
     items: [
       'New "Bodyweight" equipment type — assign it to pull-ups, dips, push-ups etc. Your logged body weight (Health tab) auto-fills as the seed weight, and warmup percentages are skipped.',
-      'Dropdowns in the exercise creator & editor — equipment and muscle groups are now picked from a list instead of typed freehand.',
+      'Dropdowns in the exercise creator & editor — equipment and muscle groups are now picked from a list instead of selecting a chip. Level up in tidiness.',
       'Add an exercise mid-session — new ⊕ button inserts an exercise right after your current one, seeds sets from history, and lets you optionally link it to another session exercise as a superset.',
       'Remove a wrongly added exercise — the ✕ button removes it from the session with one confirmation tap.',
       'Smarter end-of-session plan update — the diff prompt now correctly recognises added and removed exercises instead of showing false swap messages, and "Update plan" can permanently write those changes into your plan — including superset links.',
