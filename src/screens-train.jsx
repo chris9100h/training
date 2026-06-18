@@ -1268,20 +1268,62 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const schedule = store.schedules?.find(s => s.id === session.scheduleId);
     const day = schedule?.days?.find(d => d.id === session.dayId);
     if (!day) return [];
-    // Iterate by session-entry index (preserves alignment with day.items for mixed
-    // cardio+strength days). Skip cardio entries and exercises added ad-hoc.
-    return session.entries.reduce((acc, entry, i) => {
-      const planItem = (day.items || [])[i];
-      if (!planItem || entry.isCardio || entry.addedDuringSession) return acc;
-      if (entry.exId !== planItem.exId) {
-        const oldEx = LB.findExercise(store, planItem.exId);
-        acc.push({ type: 'swap', idx: i, oldName: oldEx?.name || '?', newName: entry.name, newExId: entry.exId });
-      } else if (entry.sets.filter(s => !s.warmup).length !== planItem.sets) {
-        const newSets = entry.sets.filter(s => !s.warmup).length;
-        acc.push({ type: 'sets', idx: i, exName: entry.name, oldSets: planItem.sets, newSets });
+
+    // Non-cardio plan items, keeping the original day.items index for applyPlanAndFinish
+    const planItems = (day.items || [])
+      .map((item, originalIdx) => ({ item, originalIdx }))
+      .filter(({ item }) => LB.findExercise(store, item.exId)?.movement_type !== 'cardio');
+
+    // Session entries that correspond to the original plan (no ad-hoc additions, no cardio)
+    const sessionPlanEntries = session.entries.filter(e => !e.isCardio && !e.addedDuringSession);
+    const addedEntries = session.entries.filter(e => e.addedDuringSession);
+
+    // Greedy match plan items to session entries by exId (preserves correct pairing
+    // even when exercises were inserted or removed, shifting indices)
+    const usedJ = new Set();
+    const matched = new Array(planItems.length).fill(null); // planItems[i] → sessionEntry | null
+    for (let i = 0; i < planItems.length; i++) {
+      for (let j = 0; j < sessionPlanEntries.length; j++) {
+        if (!usedJ.has(j) && sessionPlanEntries[j].exId === planItems[i].item.exId) {
+          matched[i] = sessionPlanEntries[j];
+          usedJ.add(j);
+          break;
+        }
       }
-      return acc;
-    }, []);
+    }
+    const unmatchedPlanItems = planItems.filter((_, i) => !matched[i]);
+    const unmatchedSessionEntries = sessionPlanEntries.filter((_, j) => !usedJ.has(j));
+
+    const diffs = [];
+
+    // Ad-hoc additions (display only — no plan update)
+    addedEntries.forEach(e => diffs.push({ type: 'added', name: e.name }));
+
+    // Set count changes for matched exercises
+    planItems.forEach(({ item, originalIdx }, i) => {
+      if (!matched[i]) return;
+      const newSets = matched[i].sets.filter(s => !s.warmup).length;
+      if (newSets !== item.sets) {
+        diffs.push({ type: 'sets', idx: originalIdx, exName: matched[i].name, oldSets: item.sets, newSets });
+      }
+    });
+
+    // Swaps: pair each unmatched plan item with the unmatched session entry at the same relative position
+    const swapCount = Math.min(unmatchedPlanItems.length, unmatchedSessionEntries.length);
+    for (let k = 0; k < swapCount; k++) {
+      const { item, originalIdx } = unmatchedPlanItems[k];
+      const entry = unmatchedSessionEntries[k];
+      const oldEx = LB.findExercise(store, item.exId);
+      diffs.push({ type: 'swap', idx: originalIdx, oldName: oldEx?.name || '?', newName: entry.name, newExId: entry.exId });
+    }
+
+    // Removed: plan items with no session counterpart and no swap partner
+    for (let k = swapCount; k < unmatchedPlanItems.length; k++) {
+      const oldEx = LB.findExercise(store, unmatchedPlanItems[k].item.exId);
+      diffs.push({ type: 'removed', name: oldEx?.name || '?' });
+    }
+
+    return diffs;
   };
 
   const tryFinish = () => {
@@ -2328,8 +2370,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {/* plan diff */}
-      <Sheet open={planDiffOpen} onClose={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} title="Update plan?">
-        <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>Changes vs. plan:</div>
+      <Sheet open={planDiffOpen} onClose={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} title="Session changes">
+        <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>vs. plan:</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
           {planDiff.map((d, i) => (
             <div key={i} style={{
@@ -2341,18 +2383,30 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <span style={{ color: UI.goldLight, fontSize: 14 }}>⇄</span>
                   <span><span style={{ color: UI.inkSoft }}>{d.oldName}</span>{' → '}<strong>{d.newName}</strong></span>
                 </>
-              ) : (
+              ) : d.type === 'sets' ? (
                 <>
                   <span style={{ color: UI.goldLight, fontSize: 14 }}>≡</span>
                   <span><strong>{d.exName}</strong>{': '}<span style={{ color: UI.inkSoft }}>{d.oldSets}</span>{' → '}<strong>{d.newSets} sets</strong></span>
+                </>
+              ) : d.type === 'added' ? (
+                <>
+                  <span style={{ color: UI.inkFaint, fontSize: 14 }}>＋</span>
+                  <span style={{ color: UI.inkSoft }}><strong style={{ color: UI.ink }}>{d.name}</strong>{' added'}</span>
+                </>
+              ) : (
+                <>
+                  <span style={{ color: UI.inkFaint, fontSize: 14 }}>−</span>
+                  <span style={{ color: UI.inkSoft }}><strong style={{ color: UI.ink }}>{d.name}</strong>{' removed'}</span>
                 </>
               )}
             </div>
           ))}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn kind="ghost" onClick={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} style={{ flex: 1 }}>No</Btn>
-          <Btn onClick={() => { setPlanDiffOpen(false); applyPlanAndFinish(); }} style={{ flex: 2 }}>Yes, update</Btn>
+          <Btn kind="ghost" onClick={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} style={{ flex: 1 }}>Leave plan</Btn>
+          {planDiff.some(d => d.type === 'swap' || d.type === 'sets') && (
+            <Btn onClick={() => { setPlanDiffOpen(false); applyPlanAndFinish(); }} style={{ flex: 2 }}>Update plan</Btn>
+          )}
         </div>
       </Sheet>
 
