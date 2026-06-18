@@ -1296,8 +1296,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     const diffs = [];
 
-    // Ad-hoc additions (display only — no plan update)
-    addedEntries.forEach(e => diffs.push({ type: 'added', name: e.name }));
+    // Ad-hoc additions — store position context so applyPlanAndFinish can insert them
+    session.entries.forEach((e, sessionIdx) => {
+      if (!e.addedDuringSession) return;
+      // Find the nearest non-cardio entry before this one to use as insertion anchor
+      let insertAfterExId = null;
+      for (let k = sessionIdx - 1; k >= 0; k--) {
+        if (!session.entries[k].isCardio) { insertAfterExId = session.entries[k].exId; break; }
+      }
+      diffs.push({
+        type: 'added', name: e.name, exId: e.exId,
+        insertAfterExId,
+        sets: e.sets.filter(s => !s.warmup).length,
+        supersetGroup: e.supersetGroup || null,
+      });
+    });
 
     // Set count changes for matched exercises
     planItems.forEach(({ item, originalIdx }, i) => {
@@ -1319,8 +1332,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     // Removed: plan items with no session counterpart and no swap partner
     for (let k = swapCount; k < unmatchedPlanItems.length; k++) {
-      const oldEx = LB.findExercise(store, unmatchedPlanItems[k].item.exId);
-      diffs.push({ type: 'removed', name: oldEx?.name || '?' });
+      const { item, originalIdx } = unmatchedPlanItems[k];
+      const oldEx = LB.findExercise(store, item.exId);
+      diffs.push({ type: 'removed', name: oldEx?.name || '?', exId: item.exId, originalIdx });
     }
 
     return diffs;
@@ -1350,13 +1364,26 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const schedule = store.schedules?.find(s => s.id === session.scheduleId);
     const day = schedule?.days?.find(d => d.id === session.dayId);
     if (schedule && day) {
-      const newItems = day.items.map((item, i) => {
-        const diff = planDiff.find(d => d.idx === i);
+      // 1. Apply swaps and set-count changes (positional, by originalIdx)
+      let newItems = day.items.map((item, i) => {
+        const diff = planDiff.find(d => (d.type === 'swap' || d.type === 'sets') && d.idx === i);
         if (!diff) return item;
         if (diff.type === 'swap') return { ...item, exId: diff.newExId };
         if (diff.type === 'sets') return { ...item, sets: diff.newSets };
         return item;
       });
+      // 2. Remove exercises skipped during training
+      const removedExIds = new Set(planDiff.filter(d => d.type === 'removed').map(d => d.exId));
+      newItems = newItems.filter(item => !removedExIds.has(item.exId));
+      // 3. Insert ad-hoc exercises (process in session order so chained insertions work)
+      for (const diff of planDiff.filter(d => d.type === 'added')) {
+        const newItem = { exId: diff.exId, sets: diff.sets, reps: null, repsPerSet: null, supersetGroup: diff.supersetGroup };
+        const afterIdx = diff.insertAfterExId
+          ? newItems.findIndex(it => it.exId === diff.insertAfterExId)
+          : -1;
+        const insertAt = afterIdx >= 0 ? afterIdx + 1 : newItems.length;
+        newItems = [...newItems.slice(0, insertAt), newItem, ...newItems.slice(insertAt)];
+      }
       setStore(s => ({
         ...s,
         schedules: s.schedules.map(sch => sch.id === schedule.id ? {
@@ -2404,9 +2431,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} style={{ flex: 1 }}>Leave plan</Btn>
-          {planDiff.some(d => d.type === 'swap' || d.type === 'sets') && (
-            <Btn onClick={() => { setPlanDiffOpen(false); applyPlanAndFinish(); }} style={{ flex: 2 }}>Update plan</Btn>
-          )}
+          <Btn onClick={() => { setPlanDiffOpen(false); applyPlanAndFinish(); }} style={{ flex: 2 }}>Update plan</Btn>
         </div>
       </Sheet>
 
