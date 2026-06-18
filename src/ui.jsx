@@ -1182,7 +1182,7 @@ function attachDragReorderH(container, getCb, options) {
       state.dropLine.className = 'reorder-drop-line-h';
       document.body.appendChild(state.dropLine);
     }
-    const r = container.getBoundingClientRect();
+    const r = state.src.getBoundingClientRect();
     state.dropLine.style.top = r.top + 'px';
     state.dropLine.style.height = r.height + 'px';
     state.dropLine.style.left = (x - 1) + 'px';
