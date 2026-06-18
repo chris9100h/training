@@ -925,6 +925,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [planDiffOpen, setPlanDiffOpen] = useStateT(false);
   const [planDiff, setPlanDiff] = useStateT([]);
   const [swapOpen, setSwapOpen] = useStateT(false);
+  const [addOpen, setAddOpen] = useStateT(false);
+  const [addSupersetData, setAddSupersetData] = useStateT(null); // { newIdx } | null
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
   const [repOutlierConfirm, setRepOutlierConfirm] = useStateT(null);
@@ -1191,6 +1193,42 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       };
     });
     setSwapOpen(false);
+  };
+
+  const doAdd = (newExId) => {
+    setAddOpen(false);
+    const insertIdx = exIdx + 1;
+    setStore(s => {
+      const newEx = LB.findExercise(s, newExId);
+      const isUni = newEx?.movement_type === 'unilateral';
+      const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
+      const last = LB.bestRecentEntry(s, newExId, session.dayId);
+      const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
+      const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+      const newEntry = {
+        exId: newExId,
+        name: newEx?.name || newExId,
+        plannedSets: 3,
+        plannedReps: null,
+        plannedRepsPerSet: null,
+        sets: seedSets,
+        note: '',
+        supersetGroup: null,
+      };
+      return {
+        ...s,
+        sessions: s.sessions.map(x => x.id !== session.id ? x : {
+          ...x,
+          entries: [
+            ...x.entries.slice(0, insertIdx),
+            newEntry,
+            ...x.entries.slice(insertIdx),
+          ],
+          currentExIdx: insertIdx,
+        }),
+      };
+    });
+    setAddSupersetData({ newIdx: insertIdx });
   };
 
   const computePlanDiff = () => {
@@ -2042,6 +2080,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>⇄</button>}
+            {!isCardio && <button onClick={() => setAddOpen(true)} style={{
+              width: 32, height: 32, borderRadius: 4,
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>⊕</button>}
             {!isCardio && store.settings?.tempoEnabled && (
               <button onClick={() => tempoActive ? stopTempo() : startTempo()} style={{
                 borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
@@ -2272,6 +2316,52 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* exercise swap picker */}
       {swapOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSwapOpen(false)} onPick={doSwap} />}
+
+      {/* exercise add picker */}
+      {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
+
+      {/* superset linking modal — shown after adding a new exercise */}
+      {addSupersetData && (
+        <Sheet open={true} onClose={() => setAddSupersetData(null)} title="Link to superset?">
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <button onClick={() => setAddSupersetData(null)} style={{
+              padding: '14px 0', textAlign: 'left', background: 'none', border: 'none',
+              borderBottom: `1px solid ${UI.hair}`, cursor: 'pointer',
+              fontFamily: UI.fontUi, fontSize: 14, color: UI.inkSoft,
+              WebkitTapHighlightColor: 'transparent',
+            }}>Solo — no superset</button>
+            {session.entries.map((e, i) => {
+              if (i === addSupersetData.newIdx) return null;
+              return (
+                <button key={i} onClick={() => {
+                  const { newIdx } = addSupersetData;
+                  setStore(s => {
+                    const liveEntry = s.sessions.find(x => x.id === session.id)?.entries[i];
+                    const group = liveEntry?.supersetGroup || LB.uid();
+                    return {
+                      ...s,
+                      sessions: s.sessions.map(x => x.id !== session.id ? x : {
+                        ...x,
+                        entries: x.entries.map((e2, j) =>
+                          (j === newIdx || j === i) ? { ...e2, supersetGroup: group } : e2
+                        ),
+                      }),
+                    };
+                  });
+                  setAddSupersetData(null);
+                }} style={{
+                  padding: '14px 0', textAlign: 'left', background: 'none', border: 'none',
+                  borderBottom: `1px solid ${UI.hair}`, cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <span className="micro" style={{ display: 'block', marginBottom: 3, color: UI.inkFaint }}>EX {String(i + 1).padStart(2, '0')}</span>
+                  <span style={{ fontFamily: UI.fontDisplay, fontSize: 15, color: UI.ink }}>{e.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Sheet>
+      )}
 
       {/* rest timer modal */}
       <Sheet open={restModalOpen} onClose={() => setRestModalOpen(false)} title="Rest">
