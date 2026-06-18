@@ -401,7 +401,7 @@ const _checkmark = (
   </svg>
 );
 
-function InlineSelect({ value, onChange, options, placeholder = '— None —' }) {
+function InlineSelect({ value, onChange, options, placeholder = '— Select —' }) {
   const [open, setOpen] = useStateL(false);
   const current = options.find(o => o.key === (value || ''));
   return (
@@ -419,16 +419,6 @@ function InlineSelect({ value, onChange, options, placeholder = '— None —' }
       </button>
       {open && (
         <div style={{ border: `1px solid ${UI.hairStrong}`, borderTop: 'none', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
-          <button onClick={() => { onChange(null); setOpen(false); }} style={{
-            width: '100%', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            background: !value ? `rgba(var(--accent-rgb),0.1)` : UI.bgRaised,
-            color: !value ? UI.gold : UI.inkFaint,
-            border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 14, textAlign: 'left',
-            WebkitTapHighlightColor: 'transparent',
-          }}>
-            <span>{placeholder}</span>
-            {!value && _checkmark}
-          </button>
           {options.map((opt, i) => (
             <button key={opt.key} onClick={() => { onChange(opt.key); setOpen(false); }} style={{
               width: '100%', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -598,10 +588,9 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
       <Sheet open={true} onClose={() => setShowBodyweightHint(false)} title="Health tab activated">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ fontSize: 14, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
-            The <strong style={{ color: UI.ink }}>Health</strong> tab is now active. Log your bodyweight there and it'll be pre-filled automatically when you train bodyweight exercises.
+            The <strong style={{ color: UI.ink }}>Health</strong> tab is now active. Tap it in the bottom nav, then tap <strong style={{ color: UI.ink }}>Log</strong> to record your weight — it'll be pre-filled automatically when you train bodyweight exercises.
           </div>
-          <Btn onClick={() => { setShowBodyweightHint(false); window.__startTour?.('healthTab'); }}>Show Guide</Btn>
-          <Btn kind="ghost" onClick={() => setShowBodyweightHint(false)}>OK</Btn>
+          <Btn onClick={() => setShowBodyweightHint(false)}>OK</Btn>
         </div>
       </Sheet>
     )}
@@ -960,10 +949,9 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
         <Sheet open={true} onClose={() => setShowBodyweightHint(false)} title="Health tab activated">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ fontSize: 14, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
-              The <strong style={{ color: UI.ink }}>Health</strong> tab is now active. Log your bodyweight there and it'll be pre-filled automatically when you train bodyweight exercises.
+              The <strong style={{ color: UI.ink }}>Health</strong> tab is now active. Tap it in the bottom nav, then tap <strong style={{ color: UI.ink }}>Log</strong> to record your weight — it'll be pre-filled automatically when you train bodyweight exercises.
             </div>
-            <Btn onClick={() => { setShowBodyweightHint(false); window.__startTour?.('healthTab'); }}>Show Guide</Btn>
-            <Btn kind="ghost" onClick={() => setShowBodyweightHint(false)}>OK</Btn>
+            <Btn onClick={() => setShowBodyweightHint(false)}>OK</Btn>
           </div>
         </Sheet>
       )}
@@ -2368,7 +2356,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       </div>
                     </div>
                   ) : renderEntry(g.entry, g.idx)}
-                  {gi < groups.length - 1 && <Hairline style={{ marginTop: 14 }} />}
+                  {gi < groups.length - 1 && (capturing ? <div className="knurl" style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
                 </div>
               ));
             })()}

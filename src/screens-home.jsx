@@ -1439,6 +1439,16 @@ function HomeScreen({ store, setStore, go, userId }) {
         ? (week.find(d => d.weekday === selectedWd)?.daysFromStart ?? null)
         : (currentCycleNum + weekOffset) * dayCount + selectedSlot;
     const firstWorkingKg = entries[0]?.sets[0]?.kg ?? null;
+    const firstEx = LB.findExercise(store, activeDay.items[0]?.exId);
+    if (firstEx?.equipment === 'bodyweight') {
+      const session = {
+        id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
+        date: sessionDate.toISOString(), startedAt: new Date().toISOString(), entries, currentExIdx: 0, cyclePos,
+      };
+      setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+      go({ name: 'train', sessionId: session.id });
+      return;
+    }
     setWarmupPromptData({ entries, cyclePos, firstWorkingKg, firstName: entries[0]?.name || '?' });
   };
 
