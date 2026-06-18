@@ -707,7 +707,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
           : cell('Steps (avg)', steps != null ? r(steps).toLocaleString() : null)}
         {cell(cardioSessions ? `Cardio (${cardioSessions}×)` : 'Cardio', cardioMinutes ? cardioMinutes : null, 'min')}
         {cell('Water', water != null ? (Math.round(water / 100) / 10) : null, 'L')}
-        {cell('Calories', r(calories), 'kcal')}
+        {cell('Calories', r(calories))}
         {cell('Protein', r(protein), 'g')}
         {cell('Carbs', r(carbs), 'g')}
         {cell('Fat', r(fat), 'g')}
