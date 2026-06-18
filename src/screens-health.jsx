@@ -529,7 +529,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 
 // ─── Today / selected-day metrics card ────────────────────────────────────────
 
-function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, hasTargets }) {
+function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, dayTarget }) {
   const stat = (label, value, unit) => (
     <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
       <div className="num" style={{ fontSize: 22, color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300 }}>
@@ -539,7 +539,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
     </div>
   );
   const adh = log?.adherence;
-  const showAdh = hasTargets || adh != null;
+  const showAdh = dayTarget != null || adh != null;
   const badge = (icon, label, alpha) => (
     <span style={{ display: 'flex', alignItems: 'center', gap: 4, background: `rgba(var(--accent-rgb),${alpha})`, border: `0.5px solid rgba(var(--accent-rgb),${alpha * 2})`, borderRadius: 4, padding: '3px 7px' }}>
       <i className={`fa-solid ${icon}`} style={{ fontSize: 9, color: 'var(--accent)' }} />
@@ -577,13 +577,22 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
       <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
         {stat('Weight', log?.weight != null ? log.weight : null, UI.unit())}
         {stat('Steps', log?.steps != null ? log.steps.toLocaleString() : null)}
-        {stat('Calories', log?.calories != null ? log.calories : null, 'kcal')}
+        {stat('Calories', log?.calories != null ? log.calories : null)}
       </div>
       <div style={{ display: 'flex', gap: 12 }}>
         {stat('Protein', log?.protein != null ? log.protein : null, 'g')}
         {stat('Carbs', log?.carbs != null ? log.carbs : null, 'g')}
         {stat('Fat', log?.fat != null ? log.fat : null, 'g')}
       </div>
+      {dayTarget && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0 12px', marginTop: 6, paddingTop: 6, borderTop: `0.5px solid ${UI.hair}` }}>
+          {[dayTarget.protein, dayTarget.carbs, dayTarget.fat].map((v, i) => (
+            <div key={i} style={{ textAlign: 'center' }}>
+              <span className="num" style={{ fontSize: 10, color: UI.inkGhost }}>{v != null ? v : '—'}<span style={{ fontSize: 8 }}>g</span></span>
+            </div>
+          ))}
+        </div>
+      )}
       {log?.offPlanNote && (
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>OFF-PLAN</div>
@@ -1132,9 +1141,11 @@ function HealthScreen({ store, setStore, go, userId }) {
   const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
   const trainedSelected = LB.isLoggedTrainingDay(store.sessions, selectedDate);
   const cardioSelected = (store.cardioLogs || []).some(l => l.date === selectedDate);
+  const dayIsTraining = trainedSelected || (selectedDate === today && !!LB.plannedTrainingDay(store, selectedDate));
+  const selectedDayTarget = LB.dayTargetFromMacros(effectiveTargets, dayIsTraining);
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
-    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} hasTargets={!!effectiveTargets} />,
+    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} />,
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
         headline={weightAvg != null ? `${weightAvg}${UI.unit()}` : null} sub={weightAvg != null ? 'avg' : null}>
@@ -1348,7 +1359,7 @@ function HealthClientLogs({ clientStore }) {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={null} tf={tf} setTf={setTf} />,
     today: (
       <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)}
-        dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} hasTargets={false} />
+        dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={null} />
     ),
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
