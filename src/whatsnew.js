@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.369',
+    title: 'Drag to reorder exercises',
+    items: [
+      'Long-press any exercise chip during a session to drag it to a new position — works on touch and desktop',
+      'The session summary detects reorders and shows exactly which exercise moved where; "Update plan" saves the new order',
+      'Exercise and muscle group dropdowns are now sorted alphabetically',
+    ],
+  },
+  {
     id: 'v2.368',
     title: 'Training screen: set controls redesigned',
     items: [
