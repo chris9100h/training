@@ -495,7 +495,7 @@ function Label({ children, style = {} }) {
 }
 
 // ─── Constants ──────────────────────────────────────────────────────
-const MUSCLES = ['Chest','Back','Shoulders','Biceps','Triceps','Abs','Quads','Hamstrings','Glutes','Calves','Forearms'];
+const MUSCLES = ['Abs','Back','Biceps','Calves','Chest','Forearms','Glutes','Hamstrings','Quads','Shoulders','Triceps'];
 const WEEKDAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const WEEKDAYS_FULL = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
