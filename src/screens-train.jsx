@@ -1377,6 +1377,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       diffs.push({ type: 'removed', name: oldEx?.name || '?', exId: item.exId, originalIdx });
     }
 
+    // Reorder: check if matched plan items appear in a different relative order in the session.
+    // Uses only the exercises that were matched by ID (ignores adds/removes) so those
+    // shifts never produce false positives.
+    const sessionPositions = planItems
+      .map((_, i) => (matched[i] ? sessionPlanEntries.indexOf(matched[i]) : -1))
+      .filter(pos => pos !== -1);
+    if (sessionPositions.some((pos, k) => k > 0 && pos < sessionPositions[k - 1])) {
+      diffs.push({ type: 'reorder' });
+    }
+
     return diffs;
   };
 
@@ -1415,7 +1425,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // 2. Remove exercises skipped during training
       const removedExIds = new Set(planDiff.filter(d => d.type === 'removed').map(d => d.exId));
       newItems = newItems.filter(item => !removedExIds.has(item.exId));
-      // 3. Insert ad-hoc exercises (process in session order so chained insertions work)
+      // 3. Reorder remaining plan items to match session order
+      if (planDiff.some(d => d.type === 'reorder')) {
+        const sessionOrder = session.entries
+          .filter(e => !e.isCardio && !e.addedDuringSession)
+          .map(e => e.exId);
+        newItems.sort((a, b) => {
+          const ai = sessionOrder.indexOf(a.exId);
+          const bi = sessionOrder.indexOf(b.exId);
+          if (ai === -1 && bi === -1) return 0;
+          if (ai === -1) return 1;
+          if (bi === -1) return -1;
+          return ai - bi;
+        });
+      }
+      // 4. Insert ad-hoc exercises (process in session order so chained insertions work)
       for (const diff of planDiff.filter(d => d.type === 'added')) {
         const newItem = { exId: diff.exId, sets: diff.sets, reps: null, repsPerSet: null, supersetGroup: diff.supersetGroup };
         const afterIdx = diff.insertAfterExId
@@ -1424,7 +1448,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const insertAt = afterIdx >= 0 ? afterIdx + 1 : newItems.length;
         newItems = [...newItems.slice(0, insertAt), newItem, ...newItems.slice(insertAt)];
       }
-      // 4. Sync supersetGroup for plan exercises that got linked to a new exercise
+      // 5. Sync supersetGroup for plan exercises that got linked to a new exercise
       const sessionGroups = new Map();
       session.entries.filter(e => !e.isCardio && !e.addedDuringSession)
         .forEach(e => sessionGroups.set(e.exId, e.supersetGroup || null));
@@ -2458,6 +2482,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     <strong style={{ color: UI.ink }}>{d.name}</strong>{' added'}
                     {d.supersetWithName && <span>{' · superset with '}<strong style={{ color: UI.ink }}>{d.supersetWithName}</strong></span>}
                   </span>
+                </>
+              ) : d.type === 'reorder' ? (
+                <>
+                  <span style={{ color: UI.goldLight, fontSize: 14 }}>⇅</span>
+                  <span style={{ color: UI.inkSoft }}>Exercise order changed</span>
                 </>
               ) : (
                 <>
