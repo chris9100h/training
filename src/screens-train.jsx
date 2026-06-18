@@ -2040,25 +2040,40 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             }}>{allWorkingDone ? '✓ All' : 'All ✓'}</button>
           </div>
 
-          {!isNoWeightReps && <div style={{
-            display: 'grid',
-            gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
-            gap: 8, alignItems: 'baseline',
-            padding: '0 4px 6px',
-          }}>
-            <div />
-            <span className="micro" style={{ color: UI.inkFaint }}>Last time</span>
-            <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{UI.unit()}</span>
-            {isUnilateral ? (
-              <>
-                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>L</span>
-                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>R</span>
-              </>
-            ) : (
-              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{store.settings?.smartProgression ? 'Reps (min)' : 'Reps'}</span>
-            )}
-            <div /><div />
-          </div>}
+          {isNoWeightReps ? (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 4px 6px' }}>
+              <button onClick={addSet} style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: UI.inkSoft, fontSize: 16, lineHeight: 1, padding: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', width: 18,
+              }}>+</button>
+            </div>
+          ) : (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
+              gap: 8, alignItems: 'baseline',
+              padding: '0 4px 6px',
+            }}>
+              <div />
+              <span className="micro" style={{ color: UI.inkFaint }}>Last time</span>
+              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{UI.unit()}</span>
+              {isUnilateral ? (
+                <>
+                  <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>L</span>
+                  <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>R</span>
+                </>
+              ) : (
+                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{store.settings?.smartProgression ? 'Reps (min)' : 'Reps'}</span>
+              )}
+              <div />
+              <button onClick={addSet} style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: UI.inkSoft, fontSize: 16, lineHeight: 1, padding: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>+</button>
+            </div>
+          )}
           <div className="knurl" style={{ marginBottom: 2 }} />
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -2189,12 +2204,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
           {/* Add set / swap / note — shown for all exercises, + and tempo hidden for cardio */}
           <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-            {!isCardio && <button onClick={addSet} style={{
-              width: 32, height: 32, borderRadius: 4,
-              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-              color: UI.inkSoft, fontSize: 18, lineHeight: 1, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>+</button>}
             {!isCardio && <button onClick={swapExercise} style={{
               width: 32, height: 32, borderRadius: 4,
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
