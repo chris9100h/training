@@ -594,7 +594,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
 // ─── This-week overview card (Mon–Sun averages + verdict) ─────────────────────
 
 function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
-  const { from, to, periodDays, daysLogged, trainingsDone, trainingsPlanned, cardioMinutes, cardioSessions,
+  const { from, to, periodDays, daysLogged, trainingsDone, trainingsPlanned, trainingDaysInPeriod, cardioMinutes, cardioSessions,
     weight, steps, stepsSum, calories, protein, carbs, fat, water, adherence,
     snapTgtCal, snapTgtProt, snapTgtCarb, snapTgtFat } = stats;
   const r = v => v == null ? null : Math.round(v);
@@ -604,9 +604,9 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
   const isPerfect = adherence != null && adherence >= 97;
   const trainingPct = trainingsPlanned > 0 ? Math.min(100, (trainingsDone / trainingsPlanned) * 100) : (trainingsDone > 0 ? 100 : 0);
 
-  // 1W: plan-weighted current targets. 1M/3M: persisted targetsSnap avg (historically correct).
+  // 1W: plan-weighted current targets (full week incl. future days). 1M/3M: persisted targetsSnap avg.
   const totalDays = periodDays || 7;
-  const tDays = trainingsPlanned || 0, rDays = totalDays - tDays;
+  const tDays = trainingDaysInPeriod || 0, rDays = totalDays - tDays;
   const planTgt = (tk, rk) => targets ? Math.round(((targets[tk] || 0) * tDays + (targets[rk] || 0) * rDays) / totalDays) : null;
   const tgtCal  = tf !== '1W' ? snapTgtCal  : planTgt('caloriesTraining', 'caloriesRest');
   const tgtProt = tf !== '1W' ? snapTgtProt : planTgt('proteinTraining',  'proteinRest');
@@ -1000,6 +1000,9 @@ function HealthScreen({ store, setStore, go, userId }) {
     const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
     const trainingsDone = (store.sessions || []).filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= from && d <= to; }).length;
     const trainingsPlanned = allDays.filter(d => d <= today && LB.plannedTrainingDay(store, d)).length;
+    // Full-week training day count (incl. future days) — used for macro target avg so future
+    // training days aren't treated as rest days just because they haven't happened yet.
+    const trainingDaysInPeriod = allDays.filter(d => LB.plannedTrainingDay(store, d)).length;
     const periodCardio = (store.cardioLogs || []).filter(l => l.date >= from && l.date <= to);
     // Historical target avg from persisted targetsSnap (correct even after target changes).
     // Only used for 1M/3M; 1W falls back to plan-weighted current targets in the card.
@@ -1007,7 +1010,7 @@ function HealthScreen({ store, setStore, go, userId }) {
     const avgSnap = k => withSnap.length ? Math.round(withSnap.reduce((s, l) => s + (l.targetsSnap[k] || 0), 0) / withSnap.length) : null;
     return {
       from, to, periodDays, daysLogged: inPeriod.length,
-      trainingsDone, trainingsPlanned,
+      trainingsDone, trainingsPlanned, trainingDaysInPeriod,
       cardioMinutes: periodCardio.reduce((s, l) => s + (l.durationMinutes || 0), 0),
       cardioSessions: periodCardio.length,
       weight: avgK('weight'), steps: avgK('steps'),
@@ -1266,12 +1269,13 @@ function HealthClientLogs({ clientStore }) {
     const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
     const trainingsDone = (clientStore?.sessions || []).filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= from && d <= to; }).length;
     const trainingsPlanned = allDays.filter(d => d <= today && LB.plannedTrainingDay(clientStore || {}, d)).length;
+    const trainingDaysInPeriod = allDays.filter(d => LB.plannedTrainingDay(clientStore || {}, d)).length;
     const periodCardio = (clientStore?.cardioLogs || []).filter(l => l.date >= from && l.date <= to);
     const withSnap = tf !== '1W' ? inPeriod.filter(l => l.targetsSnap) : [];
     const avgSnap = k => withSnap.length ? Math.round(withSnap.reduce((s, l) => s + (l.targetsSnap[k] || 0), 0) / withSnap.length) : null;
     return {
       from, to, periodDays, daysLogged: inPeriod.length,
-      trainingsDone, trainingsPlanned,
+      trainingsDone, trainingsPlanned, trainingDaysInPeriod,
       cardioMinutes: periodCardio.reduce((s, l) => s + (l.durationMinutes || 0), 0),
       cardioSessions: periodCardio.length,
       weight: avgK('weight'), steps: avgK('steps'),
