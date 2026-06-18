@@ -998,11 +998,16 @@ function HealthScreen({ store, setStore, go, userId }) {
     const inPeriod = dailyLogs.filter(l => l.date >= from && l.date <= to);
     const avgK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
     const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
-    const trainingsDone = (store.sessions || []).filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= from && d <= to; }).length;
+    const sessionDatesInPeriod = new Set((store.sessions || []).filter(s => s.ended).map(s => dayOf(s)).filter(d => d && d >= from && d <= to));
+    const trainingsDone = sessionDatesInPeriod.size;
     const trainingsPlanned = allDays.filter(d => d <= today && LB.plannedTrainingDay(store, d)).length;
-    // Full-week training day count (incl. future days) — used for macro target avg so future
-    // training days aren't treated as rest days just because they haven't happened yet.
-    const trainingDaysInPeriod = allDays.filter(d => LB.plannedTrainingDay(store, d)).length;
+    // Training days for macro target avg: future planned days count as training (not yet missed),
+    // past planned days only count if a session was actually done (missed = rest day, no earned macros).
+    const trainingDaysInPeriod = allDays.filter(d => {
+      if (!LB.plannedTrainingDay(store, d)) return false;
+      if (d < today) return sessionDatesInPeriod.has(d);
+      return true;
+    }).length;
     const periodCardio = (store.cardioLogs || []).filter(l => l.date >= from && l.date <= to);
     // Historical target avg from persisted targetsSnap (correct even after target changes).
     // Only used for 1M/3M; 1W falls back to plan-weighted current targets in the card.
@@ -1267,9 +1272,14 @@ function HealthClientLogs({ clientStore }) {
     const inPeriod = logs.filter(l => l.date >= from && l.date <= to);
     const avgK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
     const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
-    const trainingsDone = (clientStore?.sessions || []).filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= from && d <= to; }).length;
+    const sessionDatesInPeriod = new Set((clientStore?.sessions || []).filter(s => s.ended).map(s => dayOf(s)).filter(d => d && d >= from && d <= to));
+    const trainingsDone = sessionDatesInPeriod.size;
     const trainingsPlanned = allDays.filter(d => d <= today && LB.plannedTrainingDay(clientStore || {}, d)).length;
-    const trainingDaysInPeriod = allDays.filter(d => LB.plannedTrainingDay(clientStore || {}, d)).length;
+    const trainingDaysInPeriod = allDays.filter(d => {
+      if (!LB.plannedTrainingDay(clientStore || {}, d)) return false;
+      if (d < today) return sessionDatesInPeriod.has(d);
+      return true;
+    }).length;
     const periodCardio = (clientStore?.cardioLogs || []).filter(l => l.date >= from && l.date <= to);
     const withSnap = tf !== '1W' ? inPeriod.filter(l => l.targetsSnap) : [];
     const avgSnap = k => withSnap.length ? Math.round(withSnap.reduce((s, l) => s + (l.targetsSnap[k] || 0), 0) / withSnap.length) : null;
