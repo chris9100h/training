@@ -359,13 +359,21 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.dayTargetFromMacros({ proteinTraining: null, carbsTraining: null, fatTraining: null }, true), null);
   });
 
-  test('macroAdherence: 100% on target, averages P/C/F, ignores calories, null if incomplete', () => {
+  test('macroAdherence: 100% on target, calorie-weighted, null if incomplete', () => {
     const t = { protein: 200, carbs: 250, fat: 70 };
     assert.strictEqual(LB.macroAdherence({ protein: 200, carbs: 250, fat: 70 }, t), 100);
-    // protein 10% off, carbs/fat perfect → (0.9+1+1)/3 = 0.9667 → 97
+    // protein 10% off, carbs/fat perfect
+    // kcal: P=800, C=1000, F=630 → total=2430
+    // weighted: (0.9×800 + 1×1000 + 1×630)/2430 = 2350/2430 ≈ 0.9670 → 97
     assert.strictEqual(LB.macroAdherence({ protein: 180, carbs: 250, fat: 70 }, t), 97);
-    // way over clamps the per-macro score at 0 (never negative)
+    // protein 0 (score=0), carbs/fat perfect: (0×800 + 1×1000 + 1×630)/2430 = 1630/2430 ≈ 0.6708 → 67
     assert.strictEqual(LB.macroAdherence({ protein: 0, carbs: 250, fat: 70 }, t), 67);
+    // calorie-weighting: small fat target (50g) has less impact than equal-weight would give
+    // t2: P=150g(600kcal,24%), C=350g(1400kcal,57%), F=50g(450kcal,18%) → total=2450
+    // 10g fat over (score=0.8): (1×600 + 1×1400 + 0.8×450)/2450 = 2360/2450 ≈ 0.9633 → 96
+    // equal-weight would give (1+1+0.8)/3 = 0.9333 → 93 — calorie-weighting is fairer
+    const t2 = { protein: 150, carbs: 350, fat: 50 };
+    assert.strictEqual(LB.macroAdherence({ protein: 150, carbs: 350, fat: 60 }, t2), 96);
     assert.strictEqual(LB.macroAdherence({ protein: 200, carbs: null, fat: 70 }, t), null);
     assert.strictEqual(LB.macroAdherence({ protein: 200, carbs: 250, fat: 70 }, null), null);
   });

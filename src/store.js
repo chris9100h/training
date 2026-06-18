@@ -2193,19 +2193,25 @@ function dayTargetFromMacros(m, isTraining) {
   return { protein: protein ?? null, carbs: carbs ?? null, fat: fat ?? null, calories: calories ?? null };
 }
 
-// Macro adherence as a 0–100 %, defined as the average per-macro closeness to
-// target across protein/carbs/fat. Per macro: clamp(1 − |actual − target| /
-// target, 0, 1). Calories are deliberately NOT part of the score — macros are
-// the goal. Returns null unless all three macros AND their targets are present.
+// Macro adherence as a 0–100 %, defined as the calorie-weighted average of
+// per-macro closeness scores. Per macro: clamp(1 − |actual − target| / target,
+// 0, 1). Each macro's weight = its caloric share of the target day (protein/
+// carbs × 4 kcal/g, fat × 9 kcal/g) — so a small fat target counts less than
+// a large carb target, proportionally to its caloric significance.
+// Returns null unless all three macros AND their targets are present.
 function macroAdherence(actual, target) {
   if (!actual || !target) return null;
-  const scores = [];
+  const kcalPer = { protein: 4, carbs: 4, fat: 9 };
+  const entries = [];
   for (const k of ['protein', 'carbs', 'fat']) {
     const t = target[k]; const a = actual[k];
     if (t == null || t <= 0 || a == null) return null;
-    scores.push(Math.max(0, 1 - Math.abs(a - t) / t));
+    entries.push({ score: Math.max(0, 1 - Math.abs(a - t) / t), kcal: t * kcalPer[k] });
   }
-  return Math.round((scores.reduce((s, v) => s + v, 0) / scores.length) * 100);
+  const totalKcal = entries.reduce((s, e) => s + e.kcal, 0);
+  if (totalKcal <= 0) return null;
+  const weighted = entries.reduce((s, e) => s + e.score * (e.kcal / totalKcal), 0);
+  return Math.round(weighted * 100);
 }
 
 // Effective macro targets for the user's OWN health screen: their personal
