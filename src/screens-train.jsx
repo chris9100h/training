@@ -2105,7 +2105,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   )}
                   <div data-kb-row={i} style={{
                     display: 'grid',
-                    gridTemplateColumns: isNoWeightReps ? '28px 1fr 28px 18px' : (isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px'),
+                    gridTemplateColumns: isNoWeightReps ? '28px 1fr 28px' : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px'),
                     gap: 8, alignItems: 'center',
                     padding: '10px 4px',
                     opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
@@ -2189,7 +2189,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         WebkitTapHighlightColor: 'transparent',
                       }}>{s.skipped ? '×' : '✓'}</button>
 
-                    <span />
                   </div>
                   {i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) && <div className="knurl" />}
                 </React.Fragment>
