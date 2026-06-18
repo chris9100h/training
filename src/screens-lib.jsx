@@ -498,6 +498,13 @@ function SvgKnurl({ style }) {
   );
 }
 
+// Canvas placeholder for between-exercise knurl dividers in screenshot mode.
+// takeScreenshot draws into these imperatively right before html2canvas runs,
+// so timing is guaranteed regardless of when React flushes the re-render.
+function KnurlCanvas({ style }) {
+  return <canvas data-knurl="1" style={{ display: 'block', width: '100%', height: 3, ...style }} />;
+}
+
 function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '' }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateL(initialName);
@@ -2111,6 +2118,19 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     scrollParent.style.height = 'auto';
     scrollParent.style.minHeight = 'auto';
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    // Draw knurl dividers imperatively — canvas elements placed by KnurlCanvas
+    // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
+    captureRef.current.querySelectorAll('canvas[data-knurl]').forEach(c => {
+      const w = c.parentElement ? c.parentElement.offsetWidth : 320;
+      if (!w) return;
+      c.width = w; c.height = 3;
+      const ctx = c.getContext('2d');
+      ctx.strokeStyle = 'rgba(236,228,208,0.20)';
+      ctx.lineWidth = 1.5;
+      for (let x = -2; x < w + 6; x += 5.2) {
+        ctx.beginPath(); ctx.moveTo(x, 3); ctx.lineTo(x + 1.73, 0); ctx.stroke();
+      }
+    });
     try {
       const el = captureRef.current;
       const canvas = await html2canvas(el, {
@@ -2384,7 +2404,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       </div>
                     </div>
                   ) : renderEntry(g.entry, g.idx)}
-                  {gi < groups.length - 1 && (capturing ? <SvgKnurl style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
+                  {gi < groups.length - 1 && (capturing ? <KnurlCanvas style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
                 </div>
               ));
             })()}
