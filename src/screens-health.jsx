@@ -613,7 +613,8 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
   const r = v => v == null ? null : Math.round(v);
   const range = `${healthFmtDate(from, { day: 'numeric', month: 'short' })} – ${healthFmtDate(to, { day: 'numeric', month: 'short' })}`;
   const periodLabel = tf === '1W' ? 'THIS WEEK' : tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS';
-  const verdict = adherence == null ? null : adherence >= 97 ? 'PERFECT WEEK' : adherence >= 90 ? 'STRONG WEEK' : adherence >= 75 ? 'ON TRACK' : 'OFF TRACK';
+  const periodWord = tf === '1W' ? 'WEEK' : tf === '1M' ? '30 DAYS' : '3 MONTHS';
+  const verdict = adherence == null ? null : adherence >= 97 ? `PERFECT ${periodWord}` : adherence >= 90 ? `STRONG ${periodWord}` : adherence >= 75 ? 'ON TRACK' : 'OFF TRACK';
   const isPerfect = adherence != null && adherence >= 97;
   const trainingPct = trainingsPlanned > 0 ? Math.min(100, (trainingsDone / trainingsPlanned) * 100) : (trainingsDone > 0 ? 100 : 0);
 
