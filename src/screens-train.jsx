@@ -637,6 +637,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }));
   };
 
+  const removeLastSet = async () => {
+    const workingSets = entry.sets.map((s, i) => ({ s, i })).filter(({ s }) => !s.warmup);
+    if (workingSets.length <= 1) return;
+    const last = workingSets[workingSets.length - 1];
+    if (!await confirm(`Remove set ${workingSets.length}?`, { ok: 'Remove', danger: true })) return;
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((e, i) => i === exIdx
+        ? { ...e, sets: e.sets.filter((_, k) => k !== last.i) }
+        : e),
+    }));
+  };
+
   const setNote = (note) => {
     updateSession(sess => ({
       ...sess,
@@ -2041,18 +2054,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </div>
 
           {isNoWeightReps ? (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 4px 6px' }}>
-              <button onClick={addSet} style={{
-                width: 20, height: 20, borderRadius: 3,
-                background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-                color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>+</button>
-            </div>
+            <div style={{ height: 6 }} />
           ) : (
             <div style={{
               display: 'grid',
-              gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
+              gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px',
               gap: 8, alignItems: 'baseline',
               padding: '0 4px 6px',
             }}>
@@ -2068,12 +2074,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{store.settings?.smartProgression ? 'Reps (min)' : 'Reps'}</span>
               )}
               <div />
-              <button onClick={addSet} style={{
-                width: 20, height: 20, borderRadius: 3,
-                background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-                color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>+</button>
             </div>
           )}
           <div className="knurl" style={{ marginBottom: 2 }} />
@@ -2189,12 +2189,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         WebkitTapHighlightColor: 'transparent',
                       }}>{s.skipped ? '×' : '✓'}</button>
 
-                    {!s.warmup && !s.done && entry.sets.length > 1 ? (
-                      <button onClick={() => removeSet(i)} style={{
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        color: UI.danger, fontSize: 16, lineHeight: 1, padding: 0, opacity: 0.6,
-                      }}>−</button>
-                    ) : <span />}
+                    <span />
                   </div>
                   {i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) && <div className="knurl" />}
                 </React.Fragment>
@@ -2202,9 +2197,26 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             })}
           </div>
 
+          {!isCardio && (
+            <div style={{ display: 'flex', marginTop: 2 }}>
+              <button onClick={addSet} style={{
+                flex: 1, padding: '9px 0', background: 'transparent', border: 'none',
+                color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
+                letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              }}>+ ADD SET</button>
+              {entry.sets.filter(s => !s.warmup).length > 1 && (
+                <button onClick={removeLastSet} style={{
+                  flex: 1, padding: '9px 0', background: 'transparent', border: 'none',
+                  color: UI.danger, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
+                  letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                }}>− REMOVE SET</button>
+              )}
+            </div>
+          )}
+
         </div>}
 
-          {/* Add set / swap / note — shown for all exercises, + and tempo hidden for cardio */}
+          {/* swap / add exercise / remove exercise / tempo / note */}
           <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
             {!isCardio && <button onClick={swapExercise} style={{
               width: 32, height: 32, borderRadius: 4,
