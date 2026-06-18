@@ -1163,9 +1163,17 @@ function calcBlended(startedAt, avgDurSec, avgSetsTotal, setsDone, setsTotal, no
   return { remainingMin: Math.round(remainingSec / 60), progress };
 }
 
+// Returns the most recent logged bodyweight from daily logs, or null.
+function latestBodyweight(store) {
+  const logs = (store.dailyLogs || []).filter(l => l.weight != null);
+  if (!logs.length) return null;
+  return logs.slice().sort((a, b) => b.date.localeCompare(a.date))[0].weight;
+}
+
 // Compute the seed-sets array when starting/logging a session for a planned item.
 // Honors smart-progression suggestions and falls back to last-session values.
-function buildSeedSets(it, last, suggestion, isUni, smartProgression) {
+// bodyweightKg: prefill kg with this value when kg would otherwise be null (for bodyweight exercises).
+function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweightKg = null) {
   const workingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
   const repsPerSet = it.repsPerSet;
   return Array.from({ length: it.sets }).map((_, i) => {
@@ -1178,17 +1186,17 @@ function buildSeedSets(it, last, suggestion, isUni, smartProgression) {
     }
     if (smartProgression && prev) {
       return isUni
-        ? { kg: prev.kg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
-        : { kg: prev.kg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
+        ? { kg: prev.kg ?? bodyweightKg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
+        : { kg: prev.kg ?? bodyweightKg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
     }
     if (!prev && targetReps != null) {
       return isUni
-        ? { kg: null, repsL: targetReps, repsR: targetReps, done: false }
-        : { kg: null, reps: targetReps, done: false };
+        ? { kg: bodyweightKg ?? null, repsL: targetReps, repsR: targetReps, done: false }
+        : { kg: bodyweightKg ?? null, reps: targetReps, done: false };
     }
     return isUni
-      ? { kg: prev?.kg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
-      : { kg: prev?.kg ?? null, reps: prev?.reps ?? null, done: false };
+      ? { kg: prev?.kg ?? bodyweightKg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
+      : { kg: prev?.kg ?? bodyweightKg ?? null, reps: prev?.reps ?? null, done: false };
   });
 }
 
@@ -2303,7 +2311,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
-  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, inferCurrentExIdx, calcBlended,
+  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover,

@@ -613,14 +613,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const addSet = () => {
+    const bwKg = exercise?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => {
         if (i !== exIdx) return e;
         const last = e.sets[e.sets.length - 1];
         const newSet = isUnilateral
-          ? { kg: last?.kg ?? null, repsL: last?.repsL ?? null, repsR: last?.repsR ?? null, done: false }
-          : { kg: last?.kg ?? null, reps: last?.reps ?? null, done: false };
+          ? { kg: last?.kg ?? bwKg ?? null, repsL: last?.repsL ?? null, repsR: last?.repsR ?? null, done: false }
+          : { kg: last?.kg ?? bwKg ?? null, reps: last?.reps ?? null, done: false };
         return { ...e, sets: [...e.sets, newSet] };
       }),
     }));
