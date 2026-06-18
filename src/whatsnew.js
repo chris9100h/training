@@ -16,6 +16,14 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.371',
+    title: 'Forgot your password?',
+    items: [
+      'A "Forgot password?" link now appears below the login button — tap it, enter your email, and you\'ll receive a reset link within seconds.',
+      'The link takes you straight to a password reset screen where you can set a new password and log back in immediately.',
+    ],
+  },
+  {
     id: 'v2.369',
     title: 'Drag to reorder exercises',
     items: [
