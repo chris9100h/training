@@ -315,6 +315,7 @@ function App() {
   const isTokenFlow = useRefA(
     window.location.hash.includes('type=invite') || window.location.hash.includes('type=recovery')
   );
+  const isRecoveryFlow = useRefA(window.location.hash.includes('type=recovery'));
   const [store, setStore]         = useStateA(null);
   const [userId, setUserId]       = useStateA(null);
   const [route, setRoute]         = useStateA({ name: 'home' });
@@ -895,7 +896,7 @@ function App() {
 
   if (phase === 'init' || phase === 'loading') return <LoadingScreen />;
   if (phase === 'unauthed') return <window.Screens.LoginScreen />;
-  if (phase === 'invite') return <window.Screens.SetPasswordScreen onDone={() => loadData(userId)} />;
+  if (phase === 'invite') return <window.Screens.SetPasswordScreen isRecovery={isRecoveryFlow.current} onDone={() => loadData(userId)} />;
   if (phase === 'pending') return <window.Screens.PendingApprovalScreen onSignOut={() => LB.signOut()} />;
   if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 

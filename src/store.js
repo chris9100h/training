@@ -133,6 +133,11 @@ async function signOut() {
   await _supabase.auth.signOut();
 }
 
+async function resetPassword(email, redirectTo) {
+  const { error } = await _supabase.auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) throw error;
+}
+
 async function deleteAllData(userId) {
   await Promise.all([
     unwrap(_supabase.from('zane_sessions').delete().eq('user_id', userId)),
@@ -2313,7 +2318,7 @@ window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, fnFetch,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
-  signIn, signUp, signOut, deleteAllData, exportBackup, importFromBackup, validateBackup,
+  signIn, signUp, signOut, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
