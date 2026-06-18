@@ -713,15 +713,18 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
         {cell('Fat', r(fat), 'g')}
       </div>
       {tgtCal != null && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 8px', marginTop: 6, paddingTop: 6, borderTop: `0.5px solid ${UI.hair}` }}>
-          {[{v: tgtCal, u: 'kcal'}, {v: tgtProt, u: 'g'}, {v: tgtCarb, u: 'g'}, {v: tgtFat, u: 'g'}].map(({v, u}, i) => (
-            <div key={i} style={{ textAlign: 'center' }}>
-              <span className="num" style={{ fontSize: 10, color: UI.inkGhost }}>
-                {v != null ? v : '—'}<span style={{ fontSize: 8 }}>{u}</span>
-              </span>
-            </div>
-          ))}
-        </div>
+        <>
+          <div style={{ height: '0.5px', background: UI.hairStrong, margin: '6px 0' }} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 8px' }}>
+            {[{v: tgtCal, u: 'kcal'}, {v: tgtProt, u: 'g'}, {v: tgtCarb, u: 'g'}, {v: tgtFat, u: 'g'}].map(({v, u}, i) => (
+              <div key={i} style={{ textAlign: 'center' }}>
+                <span className="num" style={{ fontSize: 10, color: UI.inkGhost }}>
+                  {v != null ? v : '—'}<span style={{ fontSize: 8 }}>{u}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </Card>
   );
