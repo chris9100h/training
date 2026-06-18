@@ -839,10 +839,13 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
   const inputRef = React.useRef(null);
   const savedSel = React.useRef(null);
   const handleChange = (e) => {
-    savedSel.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
+    if (type !== 'password') {
+      try { savedSel.current = { start: e.target.selectionStart, end: e.target.selectionEnd }; } catch(_) {}
+    }
     onChange(e.target.value);
   };
   React.useLayoutEffect(() => {
+    if (type === 'password') return;
     const sel = savedSel.current;
     savedSel.current = null;
     if (sel && sel.start != null && inputRef.current && document.activeElement === inputRef.current) {
