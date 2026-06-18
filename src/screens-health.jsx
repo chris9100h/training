@@ -1144,7 +1144,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
   const trainedSelected = LB.isLoggedTrainingDay(store.sessions, selectedDate);
   const cardioSelected = (store.cardioLogs || []).some(l => l.date === selectedDate);
-  const dayIsTraining = trainedSelected || (selectedDate === today && !!LB.plannedTrainingDay(store, selectedDate));
+  const dayIsTraining = trainedSelected || (selectedDate >= today && !!LB.plannedTrainingDay(store, selectedDate));
   const selectedDayTarget = LB.dayTargetFromMacros(effectiveTargets, dayIsTraining);
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
