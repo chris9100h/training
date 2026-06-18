@@ -1384,6 +1384,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const insertAt = afterIdx >= 0 ? afterIdx + 1 : newItems.length;
         newItems = [...newItems.slice(0, insertAt), newItem, ...newItems.slice(insertAt)];
       }
+      // 4. Sync supersetGroup for plan exercises that got linked to a new exercise
+      const sessionGroups = new Map();
+      session.entries.filter(e => !e.isCardio && !e.addedDuringSession)
+        .forEach(e => sessionGroups.set(e.exId, e.supersetGroup || null));
+      newItems = newItems.map(it => {
+        if (!sessionGroups.has(it.exId)) return it;
+        const sg = sessionGroups.get(it.exId);
+        return sg !== (it.supersetGroup || null) ? { ...it, supersetGroup: sg } : it;
+      });
       setStore(s => ({
         ...s,
         schedules: s.schedules.map(sch => sch.id === schedule.id ? {
