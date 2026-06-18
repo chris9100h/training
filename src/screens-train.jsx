@@ -1377,22 +1377,35 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       diffs.push({ type: 'removed', name: oldEx?.name || '?', exId: item.exId, originalIdx });
     }
 
-    // Reorder: check if matched plan items appear in a different relative order in the session.
-    // Uses only the exercises that were matched by ID (ignores adds/removes) so those
-    // shifts never produce false positives.
-    const sessionPositions = planItems
-      .map((_, i) => (matched[i] ? sessionPlanEntries.indexOf(matched[i]) : -1))
-      .filter(pos => pos !== -1);
-    if (sessionPositions.some((pos, k) => k > 0 && pos < sessionPositions[k - 1])) {
-      const moves = planItems
-        .map((_, i) => {
-          if (!matched[i]) return null;
-          const from = i + 1;
-          const to = sessionPlanEntries.indexOf(matched[i]) + 1;
-          return from !== to ? { name: matched[i].name, from, to } : null;
+    // Reorder: detect exercises that were intentionally moved (not just shifted by
+    // a neighbour's drag). Strategy: find the Longest Increasing Subsequence of
+    // session positions — those exercises kept their relative order and were NOT
+    // dragged. Everything outside the LIS was explicitly moved by the user.
+    const matchedPairs = planItems
+      .map((_, i) => matched[i] ? { planIdx: i, sessPos: sessionPlanEntries.indexOf(matched[i]) } : null)
+      .filter(Boolean);
+    if (matchedPairs.some((p, k) => k > 0 && p.sessPos < matchedPairs[k - 1].sessPos)) {
+      // O(n²) LIS with parent-tracking — fine for typical plan sizes (<20 items)
+      const sp = matchedPairs.map(p => p.sessPos);
+      const dp = new Array(sp.length).fill(1);
+      const parent = new Array(sp.length).fill(-1);
+      let maxLen = 1, maxEnd = 0;
+      for (let i = 1; i < sp.length; i++) {
+        for (let j = 0; j < i; j++) {
+          if (sp[j] < sp[i] && dp[j] + 1 > dp[i]) { dp[i] = dp[j] + 1; parent[i] = j; }
+        }
+        if (dp[i] > maxLen) { maxLen = dp[i]; maxEnd = i; }
+      }
+      const lisSet = new Set();
+      for (let cur = maxEnd; cur !== -1; cur = parent[cur]) lisSet.add(cur);
+      const moves = matchedPairs
+        .map((p, k) => lisSet.has(k) ? null : {
+          name: matched[p.planIdx].name,
+          from: p.planIdx + 1,
+          to: p.sessPos + 1,
         })
         .filter(Boolean);
-      diffs.push({ type: 'reorder', moves });
+      if (moves.length) diffs.push({ type: 'reorder', moves });
     }
 
     return diffs;
