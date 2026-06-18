@@ -2505,17 +2505,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   </span>
                 </>
               ) : d.type === 'reorder' ? (
-                <>
-                  <span style={{ color: UI.goldLight, fontSize: 14, alignSelf: 'flex-start', marginTop: 1 }}>⇅</span>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                    {d.moves.map((m, mi) => (
-                      <span key={mi} style={{ color: UI.inkSoft }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, width: '100%' }}>
+                  {d.moves.map((m, mi) => (
+                    <div key={mi} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ color: UI.goldLight, fontSize: 14 }}>⇅</span>
+                      <span style={{ color: UI.inkSoft }}>
                         <strong style={{ color: UI.ink }}>{m.name}</strong>
                         {` · ${m.from} → ${m.to}`}
                       </span>
-                    ))}
-                  </div>
-                </>
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <>
                   <span style={{ color: UI.inkFaint, fontSize: 14 }}>−</span>
