@@ -1422,7 +1422,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 <>
                   <div className="micro" style={{ color: UI.inkFaint }}>Enter the 6-digit code from your Pushover notification</div>
                   <input value={codeInput} onChange={e => setCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="123456" inputMode="numeric" style={inputStyle} />
+                    placeholder="000000" inputMode="numeric" maxLength={6} autoFocus
+                    style={{ ...inputStyle, fontSize: 20, letterSpacing: '0.3em', textAlign: 'center' }} />
                   <div style={{ display: 'flex', gap: 8 }}>
                     <Btn kind="ghost" onClick={() => { setPushoverStep('entering-key'); setCodeInput(''); setPendingCode(''); }}>Back</Btn>
                     <Btn onClick={verifyCode} disabled={codeInput.length !== 6} style={{ flex: 1 }}>Verify</Btn>
