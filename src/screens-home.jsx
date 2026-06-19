@@ -1487,10 +1487,29 @@ function HomeScreen({ store, setStore, go, userId }) {
     return m;
   }, [store.skips]);
 
+  const statusPeriodModeFor = useMemo(() => {
+    const periods = store.statusPeriods || [];
+    return (date) => {
+      const ts = date.getTime();
+      const p = periods.find(p => {
+        const start = new Date(p.startedAt).getTime();
+        const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
+        return ts >= start && ts <= end;
+      });
+      return p ? p.mode : null;
+    };
+  }, [store.statusPeriods]);
+
   const selectedDateSkip = useMemo(() => {
     if (isViewingToday || isFutureSlot) return null;
     return skipsMap.get(sessionDate.toISOString().slice(0, 10)) ?? null;
   }, [isViewingToday, isFutureSlot, skipsMap, sessionDate]);
+
+  const selectedDayStatusMode = useMemo(() => {
+    if (isFutureSlot) return null;
+    if (isViewingToday) return store.statusMode ?? null;
+    return statusPeriodModeFor(sessionDate);
+  }, [isViewingToday, isFutureSlot, store.statusMode, statusPeriodModeFor, sessionDate]);
 
   const selectedDayCardioLogs = useMemo(() => {
     const dateKey = sessionDate.toISOString().slice(0, 10);
@@ -1811,15 +1830,17 @@ function HomeScreen({ store, setStore, go, userId }) {
             const planStartStr = oldestVersionStart
               || (weekdayMode ? store.weekPlanStartDate : store.cycleStartDate);
             const isBeforePlanStart = planStartStr ? d.date < LB.parseDate(planStartStr) : false;
-            const isMissed = !r && isPast && !isCompleted && !skipsMap.has(dateKey) && !isBeforePlanStart;
+            const statusDayMode = isPast ? statusPeriodModeFor(d.date) : null;
+            const isMissed = !r && isPast && !isCompleted && !skipsMap.has(dateKey) && !isBeforePlanStart && !statusDayMode;
             const isSkipped = !r && isPast && !isCompleted && skipsMap.has(dateKey);
+            const isStatusDay = !r && isPast && !!statusDayMode && !isCompleted;
             return (
               <div key={d.id ?? i}
                 onClick={() => (weekdayMode || cycleWeekView) ? setSelectedWd(i) : setSelectedSlot(i)}
                 style={{
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
-                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isSkipped ? 'rgba(160,160,160,0.07)' : 'transparent',
-                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(var(--danger-rgb),0.4)' : isSkipped ? 'rgba(160,160,160,0.3)' : d.isToday ? UI.hairStrong : UI.hair}`,
+                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isStatusDay ? 'rgba(var(--accent-rgb),0.06)' : isSkipped ? 'rgba(160,160,160,0.07)' : 'transparent',
+                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(var(--danger-rgb),0.4)' : isStatusDay ? 'rgba(var(--accent-rgb),0.25)' : isSkipped ? 'rgba(160,160,160,0.3)' : d.isToday ? UI.hairStrong : UI.hair}`,
                   borderRadius: 4, cursor: 'pointer',
                   minHeight: 56,
                 }}>
@@ -1833,7 +1854,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                     </>
                   ) : slotLabel}
                 </div>
-                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: r ? UI.inkFaint : isSelected ? UI.gold : isMissed ? UI.danger : isSkipped ? UI.inkFaint : UI.ink, letterSpacing: '0.06em' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: r ? UI.inkFaint : isSelected ? UI.gold : isMissed ? UI.danger : isStatusDay ? 'var(--accent)' : isSkipped ? UI.inkFaint : UI.ink, letterSpacing: '0.06em' }}>
                   {r ? '—' : d.name.slice(0, 4)}
                 </div>
                 <div style={{ height: 12, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1844,6 +1865,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                   )}
                   {isMissed && !isSelected && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.danger }} />}
                   {isSkipped && !isSelected && <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1 }}>—</span>}
+                  {isStatusDay && !isSelected && <i className={`fa-solid ${statusDayMode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach'}`} style={{ fontSize: 7, color: 'var(--accent)', opacity: 0.7 }} />}
                   {isSelected && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold }} />}
                 </div>
               </div>
@@ -1885,10 +1907,10 @@ function HomeScreen({ store, setStore, go, userId }) {
           <BracketFrame style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: 28 }}>
             <div className="micro" style={{ marginBottom: 12 }}>{cardLabel}</div>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 56, fontWeight: 900, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.inkSoft, lineHeight: 0.9, marginBottom: 14 }}>
-              {store.statusMode === 'sick' ? 'SICK.' : store.statusMode === 'vacation' ? 'AWAY.' : 'RECOVER.'}
+              {selectedDayStatusMode === 'sick' ? 'SICK.' : selectedDayStatusMode === 'vacation' ? 'AWAY.' : 'RECOVER.'}
             </div>
             <div style={{ fontSize: 13, color: UI.inkFaint, marginBottom: 22, maxWidth: 220 }}>
-              {store.statusMode === 'sick' ? 'Rest up. Training can still be logged.' : store.statusMode === 'vacation' ? 'Enjoy it. Training can still be logged.' : 'Recovery is part of the plan.'}
+              {selectedDayStatusMode === 'sick' ? 'Rest up. Training can still be logged.' : selectedDayStatusMode === 'vacation' ? 'Enjoy it. Training can still be logged.' : 'Recovery is part of the plan.'}
             </div>
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
               <Btn kind="ghost" onClick={() => go({ name: 'plan-view' })} style={{ flex: 1 }}>View plan</Btn>
@@ -1910,10 +1932,10 @@ function HomeScreen({ store, setStore, go, userId }) {
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
             {/* Fixed: label, name, stats, CTAs */}
             <div style={{ flexShrink: 0, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 4 }}>
-            <div className="micro-gold" style={{ marginBottom: store.statusMode && isViewingToday ? 2 : 6 }}>{cardLabel}</div>
-            {store.statusMode && isViewingToday && (
+            <div className="micro-gold" style={{ marginBottom: selectedDayStatusMode ? 2 : 6 }}>{cardLabel}</div>
+            {selectedDayStatusMode && (
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>
-                {store.statusMode === 'sick' ? 'Sick mode active' : 'Vacation mode active'}
+                {selectedDayStatusMode === 'sick' ? 'Sick mode active' : 'Vacation mode active'}
               </div>
             )}
             <FitText

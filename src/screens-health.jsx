@@ -891,7 +891,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   const handleSetStatus = async (mode, startDateStr = null) => {
     const current = store.statusMode ?? null;
     const startedAt = startDateStr
-      ? new Date(startDateStr + 'T00:00:00').toISOString()
+      ? new Date(startDateStr + 'T12:00:00').toISOString()
       : new Date().toISOString();
     const modeChanged = mode !== current;
     if (!modeChanged && !startDateStr) return;
