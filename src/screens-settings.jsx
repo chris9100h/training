@@ -1641,7 +1641,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
       </SettingsSheet>
 
       {/* ══ Admin sheet ══ */}
-      <SettingsSheet open={adminSheet} onClose={() => setAdminSheet(false)} title=”Admin”>
+      <SettingsSheet open={adminSheet} onClose={() => setAdminSheet(false)} title={'Admin'}>
         {(() => {
           const unseenCount = recentSignups.filter(u => !seenSignups.has(u.user_id)).length;
           const adminUnread = supportInbox.reduce((sum, t) => sum + Number(t.unread_count || 0), 0);
