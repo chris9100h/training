@@ -693,7 +693,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
     try {
       const { error } = await LB.supabase.auth.updateUser({ email: trimmed });
       if (error) { setEmailMsg({ text: error.message || 'Failed to update email', ok: false }); }
-      else { setEmailMsg({ text: `Confirmation link sent to ${trimmed} — check your inbox and click the link to complete the change`, ok: true }); }
+      else { setEmailMsg({ text: `Confirmation links sent to both your current and new address — click the link in each inbox to complete the change`, ok: true }); }
     } catch (e) {
       setEmailMsg({ text: e.message || 'Something went wrong', ok: false });
     } finally {
