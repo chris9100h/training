@@ -154,6 +154,134 @@ function ChangelogSheet({ open, onClose }) {
   );
 }
 
+// ─── PASSKEY SHEET ───────────────────────────────────────────────────
+function PasskeySheet({ open, onClose }) {
+  const [passkeys, setPasskeys] = useStateSet([]);
+  const [loadingList, setLoadingList] = useStateSet(false);
+  const [adding, setAdding] = useStateSet(false);
+  const [deletingId, setDeletingId] = useStateSet(null);
+  const [error, setError] = useStateSet('');
+  const [successMsg, setSuccessMsg] = useStateSet('');
+
+  const flash = (msg, isError = false) => {
+    if (isError) setError(msg); else setSuccessMsg(msg);
+    setTimeout(() => { setError(''); setSuccessMsg(''); }, 3500);
+  };
+
+  const loadPasskeys = async () => {
+    setLoadingList(true);
+    try {
+      const list = await LB.listPasskeys();
+      setPasskeys(list);
+    } catch (e) {
+      flash(e.message || 'Failed to load passkeys', true);
+    } finally {
+      setLoadingList(false);
+    }
+  };
+
+  useEffectSet(() => {
+    if (open) loadPasskeys();
+    else { setPasskeys([]); setError(''); setSuccessMsg(''); }
+  }, [open]);
+
+  const handleAdd = async () => {
+    if (adding) return;
+    setAdding(true); setError('');
+    try {
+      await LB.registerPasskey();
+      flash('Passkey added!');
+      loadPasskeys();
+    } catch (e) {
+      flash(e.message || 'Failed to add passkey', true);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (deletingId) return;
+    setDeletingId(id);
+    try {
+      await LB.deletePasskey(id);
+      setPasskeys(prev => prev.filter(p => p.id !== id));
+      flash('Passkey removed');
+    } catch (e) {
+      flash(e.message || 'Failed to remove passkey', true);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const fmtDate = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  return (
+    <SettingsSheet open={open} onClose={onClose} title="Passkeys">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+        <button onClick={handleAdd} disabled={adding} style={{
+          width: '100%', padding: '12px 0', borderRadius: 6,
+          background: 'rgba(var(--accent-rgb),0.10)', border: '0.5px solid rgba(var(--accent-rgb),0.25)',
+          color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+          cursor: adding ? 'default' : 'pointer', opacity: adding ? 0.6 : 1,
+          WebkitTapHighlightColor: 'transparent',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          {adding ? 'Adding…' : 'Add passkey for this device'}
+        </button>
+
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 8, marginBottom: 20, lineHeight: 1.5 }}>
+          Each device needs its own passkey — Face ID, Touch ID or device PIN.
+        </div>
+
+        {(error || successMsg) && (
+          <div style={{ fontSize: 12, color: error ? UI.danger : UI.gold, fontFamily: UI.fontUi, marginBottom: 12, padding: '8px 12px', background: error ? 'rgba(var(--danger-rgb),0.06)' : 'rgba(var(--accent-rgb),0.08)', borderRadius: 6 }}>
+            {error || successMsg}
+          </div>
+        )}
+
+        {loadingList ? (
+          <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '16px 0' }}>Loading…</div>
+        ) : passkeys.length === 0 ? (
+          <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '16px 0' }}>No passkeys registered yet</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Registered passkeys</div>
+            {passkeys.map((pk, i) => (
+              <React.Fragment key={pk.id}>
+                {i > 0 && <div className="knurl" />}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0' }}>
+                  <div>
+                    <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500 }}>
+                      {pk.friendly_name || 'Passkey'}
+                    </div>
+                    <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>
+                      Added {fmtDate(pk.created_at)}
+                    </div>
+                  </div>
+                  <button onClick={() => handleDelete(pk.id)} disabled={!!deletingId} style={{
+                    background: 'rgba(var(--danger-rgb),0.08)', border: '0.5px solid rgba(var(--danger-rgb),0.2)',
+                    color: UI.danger, borderRadius: 6, padding: '5px 12px',
+                    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                    cursor: deletingId ? 'default' : 'pointer', opacity: deletingId === pk.id ? 0.5 : 1,
+                    WebkitTapHighlightColor: 'transparent', flexShrink: 0,
+                  }}>
+                    {deletingId === pk.id ? '…' : 'Remove'}
+                  </button>
+                </div>
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+      </div>
+    </SettingsSheet>
+  );
+}
+
 // ─── SETTINGS ────────────────────────────────────────────────────────
 function SettingsScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
@@ -208,8 +336,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [testPickerOpen, setTestPickerOpen] = useStateSet(false);
   const [pushSheet, setPushSheet] = useStateSet(false);
   const [reminderSheet, setReminderSheet] = useStateSet(false);
-  const [passkeyLoading, setPasskeyLoading] = useStateSet(false);
-  const [passkeyMsg, setPasskeyMsg] = useStateSet('');
+  const [passkeySheet, setPasskeySheet] = useStateSet(false);
   const [reminderEnabled, setReminderEnabled] = useStateSet(() => store.settings?.reminderEnabled ?? false);
   const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
@@ -660,27 +787,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <Hairline style={{ margin: '14px 0' }} />
           {typeof window !== 'undefined' && window.PublicKeyCredential && (
             <>
-              <Row label="Passkeys">
-                <button style={accentBtn} disabled={passkeyLoading} onClick={async () => {
-                  setPasskeyLoading(true); setPasskeyMsg('');
-                  try {
-                    await LB.registerPasskey();
-                    setPasskeyMsg('Passkey added!');
-                  } catch (e) {
-                    setPasskeyMsg(e.message || 'Failed to add passkey');
-                  } finally {
-                    setPasskeyLoading(false);
-                    setTimeout(() => setPasskeyMsg(''), 4000);
-                  }
-                }}>{passkeyLoading ? 'Adding…' : 'Add passkey'}</button>
-              </Row>
-              {passkeyMsg ? (
-                <div style={{ fontSize: 11, color: passkeyMsg.includes('!') ? UI.gold : UI.danger, fontFamily: UI.fontUi, marginTop: 6 }}>{passkeyMsg}</div>
-              ) : (
-                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-                  Register this device for passwordless sign-in using Face ID, Touch ID or your device PIN.
-                </div>
-              )}
+              <NavRow label="Passkeys" onTap={() => setPasskeySheet(true)} />
               <Hairline style={{ margin: '14px 0' }} />
             </>
           )}
@@ -695,6 +802,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </div>
         </div>
       </SettingsSheet>
+
+      {/* ══ Passkey Sheet ══ */}
+      <PasskeySheet open={passkeySheet} onClose={() => setPasskeySheet(false)} />
 
       {/* ══ Admin Sheet ══ */}
       <SettingsSheet open={adminSheet} onClose={() => setAdminSheet(false)} title="Admin">

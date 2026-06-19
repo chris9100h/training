@@ -146,6 +146,17 @@ async function registerPasskey() {
   return data;
 }
 
+async function listPasskeys() {
+  const { data, error } = await _supabase.auth.passkey.list();
+  if (error) throw error;
+  return data || [];
+}
+
+async function deletePasskey(passkeyId) {
+  const { error } = await _supabase.auth.passkey.delete({ passkeyId });
+  if (error) throw error;
+}
+
 async function resetPassword(email, redirectTo) {
   const { error } = await _supabase.auth.resetPasswordForEmail(email, { redirectTo });
   if (error) throw error;
@@ -2331,7 +2342,7 @@ window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, fnFetch,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
-  signIn, signUp, signOut, signInWithPasskey, registerPasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
+  signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
