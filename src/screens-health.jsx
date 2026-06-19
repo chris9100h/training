@@ -1242,7 +1242,7 @@ function HealthScreen({ store, setStore, go, userId }) {
             {store.statusMode === 'sick' ? 'SICK MODE' : store.statusMode === 'vacation' ? 'VACATION MODE' : 'STATUS'}
           </span>
           {['sick', 'vacation', null].map(mode => (
-            <button key={String(mode)} onClick={() => handleSetStatus(mode)} style={{
+            <button key={String(mode)} onClick={() => handleSetStatus(mode, mode && selectedDate < today ? selectedDate : null)} style={{
               background: store.statusMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised) : 'transparent',
               border: `0.5px solid ${store.statusMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong) : UI.hairStrong}`,
               borderRadius: 4, padding: '4px 9px', cursor: 'pointer', fontFamily: UI.fontUi,
