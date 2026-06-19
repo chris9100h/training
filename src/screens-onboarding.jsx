@@ -292,6 +292,60 @@ window.TOURS.coaching = [
   },
 ];
 
+window.TOURS.installPwaIos = [
+  {
+    target: null,
+    title: 'Install on iPhone — Step 1',
+    body: 'Open Zane in Safari — the default iOS browser. Chrome and Firefox cannot install apps on iPhone.',
+    visual: 'pwaIosSafari',
+  },
+  {
+    target: null,
+    title: 'Tap the Share button',
+    body: 'At the bottom of Safari, tap the Share button — the square with an arrow pointing up.',
+    visual: 'pwaIosShare',
+  },
+  {
+    target: null,
+    title: 'Tap "Add to Home Screen"',
+    body: 'Scroll through the share sheet and tap "Add to Home Screen". If you don\'t see it, scroll the bottom row of app icons.',
+    visual: 'pwaIosAddToHome',
+  },
+  {
+    target: null,
+    title: 'Tap "Add"',
+    body: 'Confirm the name and tap "Add" in the top-right corner. Zane appears on your home screen instantly — no App Store needed.',
+    visual: 'pwaIosAdd',
+  },
+];
+
+window.TOURS.installPwaAndroid = [
+  {
+    target: null,
+    title: 'Install on Android — Step 1',
+    body: 'Open Zane in Chrome — the default Android browser. Chrome gives the best installation experience.',
+    visual: 'pwaAndroidChrome',
+  },
+  {
+    target: null,
+    title: 'Open the menu',
+    body: 'Tap the three-dot menu in the top-right corner of Chrome.',
+    visual: 'pwaAndroidMenu',
+  },
+  {
+    target: null,
+    title: 'Tap "Add to Home screen"',
+    body: 'Find and tap "Add to Home screen" in the menu. On some Chrome versions it may say "Install app".',
+    visual: 'pwaAndroidAddToHome',
+  },
+  {
+    target: null,
+    title: 'Tap "Install"',
+    body: 'A dialog appears with the Zane icon and name. Tap "Install" — done. Zane opens like a native app from now on.',
+    visual: 'pwaAndroidInstall',
+  },
+];
+
 // ─── Inline visual mockups ───────────────────────────────────────────
 function TourVisualDays() {
   const rowStyle = {
@@ -1093,6 +1147,252 @@ function TourVisualCoachSelf() {
   );
 }
 
+// ─── PWA install visuals (iOS) ───────────────────────────────────────
+
+function TourVisualPwaIosSafari() {
+  return (
+    <div style={{ background: '#1c1c1e', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3a3a3c' }}>
+      <div style={{ background: '#2c2c2e', padding: '8px 10px' }}>
+        <div style={{ background: '#3a3a3c', borderRadius: 10, padding: '5px 10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+          <i className="fa-solid fa-lock" style={{ fontSize: 8, color: '#8e8e93' }} />
+          <span style={{ fontSize: 11, color: '#ebebf5', fontFamily: UI.fontUi }}>training.zane.app</span>
+        </div>
+      </div>
+      <div style={{ padding: '10px 12px', background: UI.bgCard }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{ fontSize: 13, fontWeight: 900, color: '#0a0805', fontFamily: UI.fontDisplay }}>Z</span>
+          </div>
+          <span style={{ fontSize: 12, fontFamily: UI.fontUi, fontWeight: 600, color: UI.ink }}>ZANE</span>
+          <span style={{ marginLeft: 'auto', fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, background: '#2c4a2c', padding: '2px 6px', borderRadius: 4 }}>Safari</span>
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {['TRAIN', 'PLAN', 'HEALTH'].map(t => (
+            <div key={t} style={{ flex: 1, background: UI.bgInset, borderRadius: 4, padding: '5px 0', textAlign: 'center' }}>
+              <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.06em' }}>{t}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ background: '#2c2c2e', borderTop: '0.5px solid #3a3a3c', padding: '7px 10px 6px', display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3a3a3c" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3a3a3c" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8e8e93" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8e8e93" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8e8e93" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="8" height="8" rx="1"/><rect x="14" y="7" width="8" height="8" rx="1"/><path d="M6 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/></svg>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualPwaIosShare() {
+  return (
+    <div style={{ background: '#1c1c1e', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3a3a3c' }}>
+      <div style={{ background: '#2c2c2e', padding: '8px 10px' }}>
+        <div style={{ background: '#3a3a3c', borderRadius: 10, padding: '5px 10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+          <i className="fa-solid fa-lock" style={{ fontSize: 8, color: '#8e8e93' }} />
+          <span style={{ fontSize: 11, color: '#ebebf5', fontFamily: UI.fontUi }}>training.zane.app</span>
+        </div>
+      </div>
+      <div style={{ padding: '10px 12px', background: UI.bgCard, opacity: 0.4 }}>
+        <div style={{ height: 44, background: UI.bgInset, borderRadius: 4 }} />
+      </div>
+      <div style={{ background: '#2c2c2e', borderTop: '0.5px solid #3a3a3c', padding: '6px 10px', display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3a3a3c" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3a3a3c" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        <div style={{ padding: '5px 6px', borderRadius: 6, background: 'rgba(var(--accent-rgb),0.15)', border: '1.5px solid var(--accent)' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+        </div>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8e8e93" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8e8e93" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="8" height="8" rx="1"/><rect x="14" y="7" width="8" height="8" rx="1"/><path d="M6 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/></svg>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualPwaIosAddToHome() {
+  return (
+    <div style={{ background: '#1c1c1e', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3a3a3c' }}>
+      <div style={{ background: '#2c2c2e', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <span style={{ fontSize: 15, fontWeight: 900, color: '#0a0805', fontFamily: UI.fontDisplay }}>Z</span>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: '#ebebf5', fontFamily: UI.fontUi, fontWeight: 600 }}>Zane</div>
+          <div style={{ fontSize: 9, color: '#8e8e93', fontFamily: UI.fontUi }}>training.zane.app</div>
+        </div>
+      </div>
+      <div style={{ background: '#2c2c2e', padding: '6px 10px', display: 'flex', gap: 10, borderTop: '0.5px solid #3a3a3c' }}>
+        {[{ icon: 'fa-message', color: '#32c759' }, { icon: 'fa-envelope', color: '#0a84ff' }, { icon: 'fa-copy', color: '#636366' }].map((item, i) => (
+          <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 8, background: item.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <i className={`fa-solid ${item.icon}`} style={{ fontSize: 14, color: '#fff' }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ background: '#2c2c2e', borderTop: '0.5px solid #3a3a3c' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'rgba(var(--accent-rgb),0.12)', borderLeft: '2.5px solid var(--accent)' }}>
+          <div style={{ width: 28, height: 28, borderRadius: 6, background: '#48484a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#ebebf5" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          </div>
+          <span style={{ fontSize: 12, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600 }}>Add to Home Screen</span>
+        </div>
+        <div style={{ height: 0.5, background: '#3a3a3c' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px' }}>
+          <div style={{ width: 28, height: 28, borderRadius: 6, background: '#48484a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <i className="fa-regular fa-bookmark" style={{ fontSize: 11, color: '#8e8e93' }} />
+          </div>
+          <span style={{ fontSize: 12, color: '#8e8e93', fontFamily: UI.fontUi }}>Add Bookmark</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualPwaIosAdd() {
+  return (
+    <div style={{ background: '#1c1c1e', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3a3a3c' }}>
+      <div style={{ background: '#2c2c2e', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 12, color: '#0a84ff', fontFamily: UI.fontUi }}>Cancel</span>
+        <span style={{ fontSize: 13, color: '#ebebf5', fontFamily: UI.fontUi, fontWeight: 600 }}>Add to Home Screen</span>
+        <div style={{ background: 'var(--accent)', borderRadius: 6, padding: '3px 10px' }}>
+          <span style={{ fontSize: 12, color: '#0a0805', fontFamily: UI.fontUi, fontWeight: 700 }}>Add</span>
+        </div>
+      </div>
+      <div style={{ padding: '16px', background: '#2c2c2e', borderTop: '0.5px solid #3a3a3c', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+        <div style={{ width: 52, height: 52, borderRadius: 12, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.5)' }}>
+          <span style={{ fontSize: 24, fontWeight: 900, color: '#0a0805', fontFamily: UI.fontDisplay }}>Z</span>
+        </div>
+        <div style={{ background: '#3a3a3c', borderRadius: 8, padding: '5px 0', width: '60%', textAlign: 'center' }}>
+          <span style={{ fontSize: 12, color: '#ebebf5', fontFamily: UI.fontUi }}>Zane</span>
+        </div>
+        <div style={{ fontSize: 10, color: '#8e8e93', fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.4, maxWidth: 200 }}>
+          An icon will be added to your Home Screen so you can quickly access this website.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── PWA install visuals (Android) ──────────────────────────────────
+
+function TourVisualPwaAndroidChrome() {
+  return (
+    <div style={{ background: '#202124', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3c4043' }}>
+      <div style={{ background: '#292a2d', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ flex: 1, background: '#3c4043', borderRadius: 20, padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <i className="fa-solid fa-lock" style={{ fontSize: 8, color: '#9aa0a6' }} />
+          <span style={{ fontSize: 11, color: '#e8eaed', fontFamily: UI.fontUi, flex: 1 }}>training.zane.app</span>
+          <span style={{ fontSize: 9, color: '#9aa0a6', fontFamily: UI.fontUi, background: '#1a3a5c', padding: '2px 6px', borderRadius: 4 }}>Chrome</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '3px' }}>
+          {[0,1,2].map(i => <div key={i} style={{ width: 3, height: 3, borderRadius: '50%', background: '#9aa0a6' }} />)}
+        </div>
+      </div>
+      <div style={{ padding: '10px 12px', background: UI.bgCard }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{ fontSize: 13, fontWeight: 900, color: '#0a0805', fontFamily: UI.fontDisplay }}>Z</span>
+          </div>
+          <span style={{ fontSize: 12, fontFamily: UI.fontUi, fontWeight: 600, color: UI.ink }}>ZANE</span>
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {['TRAIN', 'PLAN', 'HEALTH'].map(t => (
+            <div key={t} style={{ flex: 1, background: UI.bgInset, borderRadius: 4, padding: '5px 0', textAlign: 'center' }}>
+              <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.06em' }}>{t}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualPwaAndroidMenu() {
+  return (
+    <div style={{ background: '#202124', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3c4043' }}>
+      <div style={{ background: '#292a2d', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ flex: 1, background: '#3c4043', borderRadius: 20, padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <i className="fa-solid fa-lock" style={{ fontSize: 8, color: '#9aa0a6' }} />
+          <span style={{ fontSize: 11, color: '#e8eaed', fontFamily: UI.fontUi }}>training.zane.app</span>
+        </div>
+        <div style={{ padding: '5px 6px', borderRadius: 6, background: 'rgba(var(--accent-rgb),0.15)', border: '1.5px solid var(--accent)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {[0,1,2].map(i => <div key={i} style={{ width: 3, height: 3, borderRadius: '50%', background: 'var(--accent)' }} />)}
+          </div>
+        </div>
+      </div>
+      <div style={{ padding: '10px 12px', background: UI.bgCard, opacity: 0.4 }}>
+        <div style={{ height: 44, background: UI.bgInset, borderRadius: 4 }} />
+      </div>
+    </div>
+  );
+}
+
+function TourVisualPwaAndroidAddToHome() {
+  const items = [
+    { icon: 'fa-plus', label: 'New tab' },
+    { icon: 'fa-mobile-screen-button', label: 'Add to Home screen', accent: true },
+    { icon: 'fa-bookmark', label: 'Bookmarks' },
+    { icon: 'fa-clock-rotate-left', label: 'History' },
+  ];
+  return (
+    <div style={{ background: '#202124', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3c4043' }}>
+      <div style={{ background: '#292a2d', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ flex: 1, background: '#3c4043', borderRadius: 20, padding: '5px 10px' }}>
+          <span style={{ fontSize: 11, color: '#e8eaed', fontFamily: UI.fontUi }}>training.zane.app</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '3px' }}>
+          {[0,1,2].map(i => <div key={i} style={{ width: 3, height: 3, borderRadius: '50%', background: '#9aa0a6' }} />)}
+        </div>
+      </div>
+      <div style={{ background: '#292a2d', margin: '2px 4px 4px', borderRadius: 6, overflow: 'hidden', border: '0.5px solid #3c4043' }}>
+        {items.map((item, i) => (
+          <div key={item.label}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', background: item.accent ? 'rgba(var(--accent-rgb),0.12)' : 'transparent', borderLeft: item.accent ? '2.5px solid var(--accent)' : '2.5px solid transparent' }}>
+              <i className={`fa-solid ${item.icon}`} style={{ fontSize: 12, color: item.accent ? 'var(--accent)' : '#9aa0a6', width: 14, textAlign: 'center' }} />
+              <span style={{ fontSize: 12, color: item.accent ? 'var(--accent)' : '#e8eaed', fontFamily: UI.fontUi, fontWeight: item.accent ? 600 : 400 }}>{item.label}</span>
+            </div>
+            {i < items.length - 1 && <div style={{ height: 0.5, background: '#3c4043', marginLeft: 38 }} />}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TourVisualPwaAndroidInstall() {
+  return (
+    <div style={{ background: '#202124', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3c4043' }}>
+      <div style={{ padding: '10px 12px', background: UI.bgCard, opacity: 0.35 }}>
+        <div style={{ height: 44, background: UI.bgInset, borderRadius: 4 }} />
+      </div>
+      <div style={{ background: '#292a2d', margin: '0 8px 8px', borderRadius: 8, overflow: 'hidden', border: '0.5px solid #3c4043' }}>
+        <div style={{ padding: '14px 16px 10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+            <div style={{ width: 38, height: 38, borderRadius: 8, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <span style={{ fontSize: 17, fontWeight: 900, color: '#0a0805', fontFamily: UI.fontDisplay }}>Z</span>
+            </div>
+            <div>
+              <div style={{ fontSize: 13, color: '#e8eaed', fontFamily: UI.fontUi, fontWeight: 600 }}>Add Zane to Home screen?</div>
+              <div style={{ fontSize: 10, color: '#9aa0a6', fontFamily: UI.fontUi, marginTop: 1 }}>training.zane.app</div>
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '0 12px 12px' }}>
+          <div style={{ padding: '6px 14px' }}>
+            <span style={{ fontSize: 12, color: '#9aa0a6', fontFamily: UI.fontUi }}>Cancel</span>
+          </div>
+          <div style={{ padding: '6px 14px', borderRadius: 4, background: 'var(--accent)' }}>
+            <span style={{ fontSize: 12, color: '#0a0805', fontFamily: UI.fontUi, fontWeight: 700 }}>Install</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TOUR_VISUALS = {
   days: TourVisualDays, exercises: TourVisualExercises, drag: TourVisualDrag,
   trainOverview: TourVisualTrainOverview, trainWarmup: TourVisualTrainWarmup,
@@ -1109,6 +1409,10 @@ const TOUR_VISUALS = {
   coachInvite: TourVisualCoachInvite, coachClients: TourVisualCoachClients,
   coachTrends: TourVisualCoachTrends, coachSchema: TourVisualCoachSchema,
   coachSelf: TourVisualCoachSelf,
+  pwaIosSafari: TourVisualPwaIosSafari, pwaIosShare: TourVisualPwaIosShare,
+  pwaIosAddToHome: TourVisualPwaIosAddToHome, pwaIosAdd: TourVisualPwaIosAdd,
+  pwaAndroidChrome: TourVisualPwaAndroidChrome, pwaAndroidMenu: TourVisualPwaAndroidMenu,
+  pwaAndroidAddToHome: TourVisualPwaAndroidAddToHome, pwaAndroidInstall: TourVisualPwaAndroidInstall,
 };
 
 // ─── OnboardingPrompt ────────────────────────────────────────────────

@@ -63,58 +63,82 @@ function SettingsSheet(props) {
 
 // ─── HOW TO SHEET ────────────────────────────────────────────────────
 function HowToSheet({ open, onClose }) {
+  const [osPickerOpen, setOsPickerOpen] = useStateSet(false);
+  const handleClose = () => { onClose(); setOsPickerOpen(false); };
+  const btnStyle = {
+    width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    padding: '14px 0', WebkitTapHighlightColor: 'transparent',
+  };
+  const chevron = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>;
   return (
-    <SettingsSheet open={open} onClose={onClose} title="How to…">
-      <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
-        <button onClick={() => { onClose(); window.__startTour?.('createPlan'); }} style={{
-          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          padding: '14px 0', WebkitTapHighlightColor: 'transparent',
-        }}>
-          <div style={{ textAlign: 'left' }}>
-            <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Create a plan &amp; exercise</div>
-            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Guided tour of plan creation and the training loop</div>
+    <>
+      <SettingsSheet open={open} onClose={handleClose} title="How to…">
+        <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+          <button onClick={() => { onClose(); window.__startTour?.('createPlan'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Create a plan &amp; exercise</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Guided tour of plan creation and the training loop</div>
+            </div>
+            {chevron}
+          </button>
+          <div className="knurl" />
+          <button onClick={() => { onClose(); window.__startTour?.('doWorkout'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Do a workout</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Logging sets, keyboard, plate calc, navigation and ending a session</div>
+            </div>
+            {chevron}
+          </button>
+          <div className="knurl" />
+          <button onClick={() => { onClose(); window.__startTour?.('healthTab'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Use the Health tab</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Daily logging, macro targets, cardio tracking, and week overview</div>
+            </div>
+            {chevron}
+          </button>
+          <div className="knurl" />
+          <button onClick={() => { onClose(); window.__startTour?.('coaching'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Be a coach / client</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Invites, weekly check-ins, macros and notes — coach and client side</div>
+            </div>
+            {chevron}
+          </button>
+          <div className="knurl" />
+          <button onClick={() => setOsPickerOpen(true)} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Install as app</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Add Zane to your home screen — works on iPhone and Android</div>
+            </div>
+            {chevron}
+          </button>
+        </div>
+      </SettingsSheet>
+      <SettingsSheet open={osPickerOpen && open} onClose={() => setOsPickerOpen(false)} title="Install as app">
+        <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+          <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, padding: '4px 0 12px' }}>
+            Which device are you installing on?
           </div>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
-        <div className="knurl" />
-        <button onClick={() => { onClose(); window.__startTour?.('doWorkout'); }} style={{
-          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          padding: '14px 0', WebkitTapHighlightColor: 'transparent',
-        }}>
-          <div style={{ textAlign: 'left' }}>
-            <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Do a workout</div>
-            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Logging sets, keyboard, plate calc, navigation and ending a session</div>
-          </div>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
-        <div className="knurl" />
-        <button onClick={() => { onClose(); window.__startTour?.('healthTab'); }} style={{
-          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          padding: '14px 0', WebkitTapHighlightColor: 'transparent',
-        }}>
-          <div style={{ textAlign: 'left' }}>
-            <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Use the Health tab</div>
-            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Daily logging, macro targets, cardio tracking, and week overview</div>
-          </div>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
-        <div className="knurl" />
-        <button onClick={() => { onClose(); window.__startTour?.('coaching'); }} style={{
-          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          padding: '14px 0', WebkitTapHighlightColor: 'transparent',
-        }}>
-          <div style={{ textAlign: 'left' }}>
-            <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Be a coach / client</div>
-            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Invites, weekly check-ins, macros and notes — coach and client side</div>
-          </div>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
-      </div>
-    </SettingsSheet>
+          <button onClick={() => { setOsPickerOpen(false); onClose(); window.__startTour?.('installPwaIos'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>iPhone / iPad</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Safari → Share button → Add to Home Screen</div>
+            </div>
+            {chevron}
+          </button>
+          <div className="knurl" />
+          <button onClick={() => { setOsPickerOpen(false); onClose(); window.__startTour?.('installPwaAndroid'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Android</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Chrome → three-dot menu → Add to Home screen</div>
+            </div>
+            {chevron}
+          </button>
+        </div>
+      </SettingsSheet>
+    </>
   );
 }
 
