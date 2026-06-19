@@ -456,7 +456,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       .neq('author_id', userId)
       .not('coaching_id', 'like', 'support_%'),
     // Real coaching row (for check-in requests) — exclude self-coaching and support rows.
-    isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).neq('id', `support_${userId}`).maybeSingle(),
+    isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).not('id', 'like', 'support_%').maybeSingle(),
     // Self-coaching row (coach_id = client_id), if the user is their own coach
     isCoachLoad ? null : _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
     // Cardio quick-logs — all records for the user (typically < a few hundred rows)
@@ -467,16 +467,14 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Sick/vacation history periods — used for missed-workout stats and training adherence.
     // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
     _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
-    // Support chat row (if one exists for this user)
-    isCoachLoad ? null : _supabase.from('zane_coaching').select('id, support_status, support_category').eq('id', `support_${userId}`).maybeSingle(),
-    // Support unread count — notes from admin not yet read by user
-    isCoachLoad ? null : _supabase.from('zane_coaching_notes').select('*', { count: 'exact', head: true }).eq('coaching_id', `support_${userId}`).neq('author_id', userId).is('read_at', null),
+    // Support tickets — user's own ticket list, newest activity first
+    isCoachLoad ? null : _supabase.rpc('get_user_support_chats'),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, dailyLogsRes, statusPeriodsRes,
-         supportRowRes, supportUnreadRes] = await Promise.all(queries);
+         supportTicketsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -678,10 +676,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         createdAt: n.created_at,
       })),
     },
-    supportCoachingId: supportRowRes?.data?.id || null,
-    supportStatus: supportRowRes?.data?.support_status || null,
-    supportCategory: supportRowRes?.data?.support_category || null,
-    supportUnread: supportUnreadRes?.count || 0,
+    supportTickets: (supportTicketsRes?.data || []).map(t => ({
+      coachingId: t.coaching_id,
+      status: t.support_status,
+      category: t.support_category,
+      createdAt: t.created_at,
+      lastMessageAt: t.last_message_at,
+      lastMessageBody: t.last_message_body,
+      unreadCount: Number(t.unread_count || 0),
+    })),
+    supportUnread: (supportTicketsRes?.data || []).reduce((s, t) => s + Number(t.unread_count || 0), 0),
   };
   if (!isCoachLoad) await autoArchiveMissedDays(userId, result);
   return result;
