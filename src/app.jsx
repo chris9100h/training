@@ -776,6 +776,16 @@ function App() {
       (note) => {
         setStore(s => {
           if (!s?.coaching) return s;
+          if (note.coachingId?.startsWith('support_')) {
+            // Route support-chat replies to the support unread badge, not the coaching banner.
+            // Own support chat (admin replied to me) → increment badge.
+            // Someone else's support chat (admin sees a user's message) → ignore Realtime;
+            // admin refreshes the inbox by opening it.
+            if (note.coachingId === `support_${userId}`) {
+              return { ...s, supportUnread: (s.supportUnread || 0) + 1 };
+            }
+            return s;
+          }
           if ((s.coaching.unreadNotes || []).some(n => n.id === note.id)) return s;
           return {
             ...s,

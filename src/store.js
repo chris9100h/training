@@ -454,7 +454,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
       .is('read_at', null)
       .neq('author_id', userId)
-      .neq('coaching_id', `support_${userId}`),
+      .not('coaching_id', 'like', 'support_%'),
     // Real coaching row (for check-in requests) — exclude self-coaching and support rows.
     isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).neq('id', `support_${userId}`).maybeSingle(),
     // Self-coaching row (coach_id = client_id), if the user is their own coach

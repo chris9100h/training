@@ -507,6 +507,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
     return () => { mounted = false; };
   }, [isAdmin, accountSheet]);
 
+  // Admin-only: load support inbox on mount so the badge is populated immediately.
+  useEffectSet(() => {
+    if (!isAdmin) return;
+    LB.supabase.rpc('get_support_chats').then(({ data }) => setSupportInbox(data || [])).catch(() => {});
+  }, [isAdmin]);
+
   // Admin-only: recent sign-ups feed + support inbox. Reloaded each time Account sheet opens.
   useEffectSet(() => {
     if (!isAdmin || !accountSheet) return;
@@ -916,7 +922,14 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </div>
         )}
         <Btn kind="ghost" onClick={async () => { if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); } window.location.reload(true); }}>Clear cache &amp; reload</Btn>
-        {!isAdmin && (
+        {isAdmin ? (
+          <Btn kind="ghost" onClick={() => setSupportInboxSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            Support inbox
+            {supportInbox.reduce((s, t) => s + Number(t.unread_count || 0), 0) > 0 && (
+              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />
+            )}
+          </Btn>
+        ) : (
           <Btn kind="ghost" onClick={() => setSupportSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             Support Center
             {store.supportUnread > 0 && (
