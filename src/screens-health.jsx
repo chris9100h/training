@@ -373,23 +373,24 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       </div>
 
       {onSetStatus && (
-        <div style={{ marginBottom: 18, padding: '12px 14px', borderRadius: 6, background: dayMode ? 'rgba(var(--accent-rgb),0.05)' : UI.bgInset, border: `0.5px solid ${dayMode ? 'rgba(var(--accent-rgb),0.2)' : UI.hair}` }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span className="micro" style={{ flex: 1, color: dayMode ? 'var(--accent)' : UI.inkFaint }}>
-              {dayMode === 'sick' ? 'SICK MODE' : dayMode === 'vacation' ? 'VACATION MODE' : 'STATUS'}
-            </span>
-            {['sick', 'vacation', null].map(mode => (
-              <button key={String(mode)} onClick={() => onSetStatus(mode, date < todayISO ? date : null)} style={{
-                background: dayMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised) : 'transparent',
-                border: `0.5px solid ${dayMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong) : UI.hairStrong}`,
-                borderRadius: 4, padding: '4px 9px', cursor: 'pointer', fontFamily: UI.fontUi,
-                fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase',
-                color: dayMode === mode ? (mode ? 'var(--accent)' : UI.inkFaint) : UI.inkGhost,
-                WebkitTapHighlightColor: 'transparent',
-              }}>
-                {mode === 'sick' ? 'Sick' : mode === 'vacation' ? 'Vacation' : 'Off'}
-              </button>
-            ))}
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+            {[{ mode: 'sick', label: 'Sick', icon: 'fa-bed-pulse' }, { mode: null, label: 'Normal', icon: null }, { mode: 'vacation', label: 'Vacation', icon: 'fa-umbrella-beach' }].map(({ mode, label, icon }, i) => {
+              const active = dayMode === mode;
+              return (
+                <button key={String(mode)} onClick={() => onSetStatus(mode, date < todayISO ? date : null)} style={{
+                  flex: 1, padding: '12px 4px', cursor: 'pointer', border: 'none',
+                  borderLeft: i > 0 ? `0.5px solid ${UI.hairStrong}` : 'none',
+                  background: active ? 'var(--accent)' : 'transparent',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+                  WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
+                }}>
+                  {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: active ? '#0a0805' : UI.inkFaint }} />}
+                  {!icon && <i className="fa-solid fa-circle-check" style={{ fontSize: 13, color: active ? '#0a0805' : UI.inkFaint }} />}
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: active ? '#0a0805' : UI.inkFaint }}>{label}</span>
+                </button>
+              );
+            })}
           </div>
           {dayMode && date === todayISO && (() => {
             const minDate = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return d.toISOString().slice(0, 10); })();
@@ -404,7 +405,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
             );
           })()}
           {dayStatusPeriod && date !== todayISO && (
-            <div style={{ marginTop: 6, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkFaint }}>
+            <div style={{ marginTop: 8, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkFaint }}>
               {new Date(dayStatusPeriod.startedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}
               {' → '}
               {dayStatusPeriod.endedAt
