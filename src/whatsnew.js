@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.376',
+    title: 'Install Zane as an app',
+    items: [
+      'A new step-by-step guide walks you through adding Zane to your home screen on iPhone or Android — find it under Settings → How to… → Install as app.',
+      'Once installed, Zane opens full-screen without a browser bar, loads instantly, and push notifications work reliably in the background.',
+      'iPhone users: the guide is also linked directly in the Push notifications setup, since installation is required for push to work on iOS.',
+    ],
+  },
+  {
     id: 'v2.375',
     title: 'Push Notifications Redesigned',
     items: [
