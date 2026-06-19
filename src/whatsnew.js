@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.375',
+    title: 'Push Notifications Redesigned',
+    items: [
+      'Pushover has been replaced by native Web Push — rest timer alerts, coaching messages, and training reminders now all work without a third-party app.',
+      'To get started, enable push for this device under Account → Push notifications → This device.',
+      'Notifications reach you on the locked screen as long as Zane is installed on your home screen (PWA).',
+      'Prefer Pushover? Re-activate it under Account → Push notifications → Advanced — a quick verification confirms your setup.',
+    ],
+  },
+  {
     id: 'v2.373',
     title: 'Sign in with your face or fingerprint',
     items: [
