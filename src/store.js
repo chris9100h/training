@@ -600,6 +600,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     weekPlanStartDate: sett.week_plan_start_date ?? null,
     lastAdvancedDate: sett.last_advanced_date ?? null,
     inProgress: sett.in_progress_session_id ?? null,
+    statusMode: sett.status_mode ?? null,
+    statusModeSince: sett.status_mode_since ?? null,
     customDayTypes: sett.custom_day_types ?? [],
     settings: {
         unit: sett.unit ?? null,
@@ -944,7 +946,9 @@ async function syncStore(prev, next, userId) {
     prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
-    prev.nextReminderAt                   !== next.nextReminderAt;
+    prev.nextReminderAt                   !== next.nextReminderAt   ||
+    prev.statusMode                       !== next.statusMode       ||
+    prev.statusModeSince                  !== next.statusModeSince;
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
@@ -986,6 +990,8 @@ async function syncStore(prev, next, userId) {
       onboarding_completed: next.settings?.onboardingCompleted ?? false,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
+      status_mode: next.statusMode ?? null,
+      status_mode_since: next.statusModeSince ?? null,
     }));
   }
 
@@ -1735,7 +1741,7 @@ async function loadClientStore(clientId) {
 async function loadCoachClientsStatus() {
   const { data, error } = await _supabase.rpc('get_coach_clients_status');
   if (error) throw error;
-  return (data || []).map(r => ({ clientId: r.client_id, inProgressSessionId: r.in_progress_session_id }));
+  return (data || []).map(r => ({ clientId: r.client_id, inProgressSessionId: r.in_progress_session_id, statusMode: r.status_mode ?? null, statusModeSince: r.status_mode_since ?? null }));
 }
 
 async function reloadCoachingState(userId) {

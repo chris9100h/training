@@ -98,6 +98,16 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
         <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
       ) : (
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {/* Sick / vacation status banner */}
+          {clientStore.statusMode && (
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: 'rgba(255,255,255,0.03)', borderBottom: `0.5px solid ${UI.hairStrong}` }}>
+              <i className={`fa-solid ${clientStore.statusMode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach'}`} style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
+              <span style={{ flex: 1, fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', fontWeight: 600 }}>
+                {clientStore.statusMode === 'sick' ? 'SICK' : 'VACATION'}
+                {clientStore.statusModeSince && (() => { const days = Math.floor((Date.now() - new Date(clientStore.statusModeSince).getTime()) / 86400000); return days > 0 ? ` · ${days} DAY${days !== 1 ? 'S' : ''}` : ''; })()}
+              </span>
+            </div>
+          )}
           {/* Live training banner (not for self — no point watching yourself) */}
           {clientStore.inProgress && !isSelf && (
             <div

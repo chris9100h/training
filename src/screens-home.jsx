@@ -1885,10 +1885,10 @@ function HomeScreen({ store, setStore, go, userId }) {
           <BracketFrame style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: 28 }}>
             <div className="micro" style={{ marginBottom: 12 }}>{cardLabel}</div>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 56, fontWeight: 900, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.inkSoft, lineHeight: 0.9, marginBottom: 14 }}>
-              RECOVER.
+              {store.statusMode === 'sick' ? 'SICK.' : store.statusMode === 'vacation' ? 'AWAY.' : 'RECOVER.'}
             </div>
             <div style={{ fontSize: 13, color: UI.inkFaint, marginBottom: 22, maxWidth: 220 }}>
-              Recovery is part of the plan.
+              {store.statusMode === 'sick' ? 'Rest up. Training can still be logged.' : store.statusMode === 'vacation' ? 'Enjoy it. Training can still be logged.' : 'Recovery is part of the plan.'}
             </div>
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
               <Btn kind="ghost" onClick={() => go({ name: 'plan-view' })} style={{ flex: 1 }}>View plan</Btn>
@@ -1910,7 +1910,12 @@ function HomeScreen({ store, setStore, go, userId }) {
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
             {/* Fixed: label, name, stats, CTAs */}
             <div style={{ flexShrink: 0, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 4 }}>
-            <div className="micro-gold" style={{ marginBottom: 6 }}>{cardLabel}</div>
+            <div className="micro-gold" style={{ marginBottom: store.statusMode && isViewingToday ? 2 : 6 }}>{cardLabel}</div>
+            {store.statusMode && isViewingToday && (
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>
+                {store.statusMode === 'sick' ? 'Sick mode active' : 'Vacation mode active'}
+              </div>
+            )}
             <FitText
               text={(activeDay.name || '').toUpperCase()}
               max={72} min={28}

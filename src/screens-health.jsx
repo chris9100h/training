@@ -307,7 +307,9 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     const isTraining = date === LB.todayISO()
       ? !!LB.plannedTrainingDay(store, date)
       : LB.isLoggedTrainingDay(store.sessions, date);
-    const { adherence, targetsSnap } = LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
+    const { adherence, targetsSnap } = store.statusMode
+      ? { adherence: null, targetsSnap: null }
+      : LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
     const savedCoachFields = {};
     coachFields.forEach(f => {
       const v = toResponse(f, coachForm[f.key]);
@@ -885,6 +887,22 @@ function HealthScreen({ store, setStore, go, userId }) {
   // Load coach-assigned macros (used to prefill targets + power adherence when
   // the user hasn't set personal targets). asClient or self-coaching row.
   const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+
+  const handleSetStatus = async (mode) => {
+    const current = store.statusMode ?? null;
+    if (mode === current) return;
+    const since = mode ? new Date().toISOString() : null;
+    setStore(s => ({ ...s, statusMode: mode, statusModeSince: since }));
+    if (coachingId) {
+      try {
+        const body = mode === 'sick'     ? 'Status: Sick — taking a break from training.'
+                   : mode === 'vacation' ? 'Status: Vacation — back soon!'
+                   : `Status: Back to normal (was ${current === 'sick' ? 'sick' : 'on vacation'}).`;
+        await LB.addCoachingNote(coachingId, 'general', null, null, body, userId);
+      } catch (_) {}
+    }
+  };
+
   useEffectH(() => {
     if (!coachingId) { setCoachingMacros(null); return; }
     let cancelled = false;
@@ -1198,6 +1216,25 @@ function HealthScreen({ store, setStore, go, userId }) {
           {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
         </button>
       } />
+      {/* Sick / Vacation status toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 16px', borderBottom: `0.5px solid ${store.statusMode ? 'rgba(var(--accent-rgb),0.2)' : UI.hair}`, background: store.statusMode ? 'rgba(var(--accent-rgb),0.04)' : 'transparent' }}>
+        <span className="micro" style={{ flex: 1, color: store.statusMode ? 'var(--accent)' : UI.inkGhost }}>
+          {store.statusMode === 'sick' ? 'SICK MODE' : store.statusMode === 'vacation' ? 'VACATION MODE' : 'STATUS'}
+        </span>
+        {['sick', 'vacation', null].map(mode => (
+          <button key={String(mode)} onClick={() => handleSetStatus(mode)} style={{
+            background: store.statusMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised) : 'transparent',
+            border: `0.5px solid ${store.statusMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong) : UI.hairStrong}`,
+            borderRadius: 4, padding: '4px 9px', cursor: 'pointer', fontFamily: UI.fontUi,
+            fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase',
+            color: store.statusMode === mode ? (mode ? 'var(--accent)' : UI.inkFaint) : UI.inkGhost,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            {mode === 'sick' ? 'Sick' : mode === 'vacation' ? 'Vacation' : 'Off'}
+          </button>
+        ))}
+      </div>
+
       <div ref={captureRef}>
         <HealthDateStrip store={store} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} />
 
