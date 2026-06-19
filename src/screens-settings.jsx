@@ -514,14 +514,20 @@ function SettingsScreen({ store, setStore, go, userId }) {
     } catch (e) { setPushStatus(`Error: ${e.message}`); }
     pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
   };
-  const testPushover = async (delaySeconds = 0) => {
+  const testRestTimer = async (delaySeconds = 0) => {
     clearTimeout(pushStatusTimer.current);
     setPushStatus(delaySeconds > 0 ? 'Sending… Lock screen now!' : 'Sending…');
+    const nonce = String(Date.now());
+    const title = 'Zane Test';
+    const message = 'Rest done — keep going! 💪';
     try {
-      const res = await LB.fnFetch(LB.PUSHOVER_URL, { message: 'Rest done — keep going! 💪', title: 'Zane Test', delaySeconds, nonce: String(Date.now()), ttl: 10 });
-      if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
-      else if (res.status === 202) { setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
-      else { const data = await res.json(); setPushStatus(data.skipped ? 'Key not synced yet — try again' : data.status === 1 ? '✓ Sent' : `Error: ${JSON.stringify(data)}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
+      const res = await LB.fnFetch(LB.WEB_PUSH_URL, { title, message, delaySeconds, nonce });
+      if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
+      if (res.status === 202) { setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
+      else { const data = await res.json().catch(() => ({})); setPushStatus(`Error: ${JSON.stringify(data)}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
+      if (store.settings?.pushoverUserKey) {
+        LB.fnFetch(LB.PUSHOVER_URL, { message, title, delaySeconds, nonce, ttl: 10 });
+      }
     } catch (e) { setPushStatus(`Error: ${e.message}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
   };
   const toggleReminder = () => { const next = !reminderEnabled; setReminderEnabled(next); setStore(s => ({ ...s, settings: { ...s.settings, reminderEnabled: next } })); };
@@ -1289,7 +1295,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
               {store.settings?.pushoverUserKey ? 'Change' : 'Set up'}
             </button>
           </Row>
-          {store.settings?.pushoverUserKey && pushEnabled && (
+          {pushEnabled && (
             <Row label="Test rest timer push">
               <button onClick={() => setTestPickerOpen(true)} style={accentBtn}>Send</button>
             </Row>
@@ -1326,9 +1332,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
       {/* ══ Test picker sheet ══ */}
       <SettingsSheet open={testPickerOpen} onClose={() => setTestPickerOpen(false)} title="Send test notification">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
-          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(0); }}>Now</Btn>
-          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(10); }}>In 10 seconds</Btn>
-          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(30); }}>In 30 seconds</Btn>
+          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testRestTimer(0); }}>Now</Btn>
+          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testRestTimer(10); }}>In 10 seconds</Btn>
+          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testRestTimer(30); }}>In 30 seconds</Btn>
         </div>
       </SettingsSheet>
 
