@@ -305,7 +305,6 @@ ALTER TABLE public.zane_push_subscriptions ADD CONSTRAINT push_subscriptions_pke
 ALTER TABLE public.zane_feature_grants ADD CONSTRAINT feature_grants_pkey PRIMARY KEY (feature, email);
 
 ALTER TABLE public.zane_coaching ADD CONSTRAINT zane_coaching_pkey PRIMARY KEY (id);
-ALTER TABLE public.zane_coaching ADD CONSTRAINT zane_coaching_coach_id_client_id_key UNIQUE (coach_id, client_id);
 ALTER TABLE public.zane_coaching ADD CONSTRAINT zane_coaching_coach_id_fkey FOREIGN KEY (coach_id) REFERENCES auth.users(id) ON DELETE CASCADE;
 ALTER TABLE public.zane_coaching ADD CONSTRAINT zane_coaching_client_id_fkey FOREIGN KEY (client_id) REFERENCES auth.users(id) ON DELETE CASCADE;
 ALTER TABLE public.zane_coaching ADD CONSTRAINT zane_coaching_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text])));
