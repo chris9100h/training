@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.378',
+    title: 'Sick & Vacation Mode',
+    items: [
+      'Set your status to Sick or Vacation in the Health tab — while active, no macro adherence is tracked and your home screen reflects your current state instead of showing a training prompt.',
+      'Your coach (or self-coaching dashboard) sees the status directly in the client list and overview, including how many days you\'ve been out.',
+      'Activate retroactively: tap any past day in Health before switching on the mode and that date becomes the start — up to two weeks back.',
+      'The period is counted separately in History → Stats under Consistency, alongside a new "Missed Workouts" card — worth a look if you haven\'t been there yet.',
+    ],
+  },
+  {
     id: 'v2.376',
     title: 'Install Zane as an app',
     items: [
