@@ -1514,12 +1514,14 @@ function HomeScreen({ store, setStore, go, userId }) {
   const handleClearStatus = async () => {
     const current = store.statusMode ?? null;
     if (!current) return;
-    const now = new Date().toISOString();
+    // Deactivating today = last sick/vacation day was yesterday
+    const d = new Date(LB.todayISO() + 'T12:00:00'); d.setDate(d.getDate() - 1);
+    const closedAt = d.toISOString();
     setStore(s => ({
       ...s, statusMode: null, statusModeSince: null,
-      statusPeriods: (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: now } : p),
+      statusPeriods: (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: closedAt } : p),
     }));
-    try { await LB.closeStatusPeriod(userId, now); } catch (_) {}
+    try { await LB.closeStatusPeriod(userId, closedAt); } catch (_) {}
   };
 
   const selectedDayCardioLogs = useMemo(() => {

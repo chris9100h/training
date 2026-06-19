@@ -948,9 +948,9 @@ function HealthScreen({ store, setStore, go, userId }) {
       ? new Date(startDateStr + 'T12:00:00').toISOString()
       : new Date().toISOString();
     // "Normal from day X" = the period ended the day BEFORE X (X is the first normal day).
-    // Closing today (no startDateStr): use now as the end.
-    const closedAt = (mode === null && startDateStr)
-      ? (() => { const d = new Date(startDateStr + 'T12:00:00'); d.setDate(d.getDate() - 1); return d.toISOString(); })()
+    // Applies whether X is a past day or today.
+    const closedAt = mode === null
+      ? (() => { const d = new Date((startDateStr || LB.todayISO()) + 'T12:00:00'); d.setDate(d.getDate() - 1); return d.toISOString(); })()
       : startedAt;
     const modeChanged = mode !== current;
     if (!modeChanged && !startDateStr) return;
