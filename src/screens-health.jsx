@@ -947,6 +947,11 @@ function HealthScreen({ store, setStore, go, userId }) {
     const startedAt = startDateStr
       ? new Date(startDateStr + 'T12:00:00').toISOString()
       : new Date().toISOString();
+    // "Normal from day X" = the period ended the day BEFORE X (X is the first normal day).
+    // Closing today (no startDateStr): use now as the end.
+    const closedAt = (mode === null && startDateStr)
+      ? (() => { const d = new Date(startDateStr + 'T12:00:00'); d.setDate(d.getDate() - 1); return d.toISOString(); })()
+      : startedAt;
     const modeChanged = mode !== current;
     if (!modeChanged && !startDateStr) return;
     const since = mode ? startedAt : null;
@@ -955,13 +960,13 @@ function HealthScreen({ store, setStore, go, userId }) {
         ? modeChanged
           ? [{ id: '_pending', mode, startedAt, endedAt: null }, ...(s.statusPeriods || []).map(p => p.endedAt ? p : { ...p, endedAt: new Date().toISOString() })]
           : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, startedAt } : p)
-        : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: startedAt } : p);
+        : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: closedAt } : p);
       return { ...s, statusMode: mode, statusModeSince: since, statusPeriods: updatedPeriods };
     });
     try {
       if (modeChanged) {
         if (mode) await LB.openStatusPeriod(userId, mode, startedAt);
-        else      await LB.closeStatusPeriod(userId, startedAt);
+        else      await LB.closeStatusPeriod(userId, closedAt);
       } else {
         await LB.updateStatusPeriodStart(userId, startedAt);
       }
@@ -1290,6 +1295,28 @@ function HealthScreen({ store, setStore, go, userId }) {
           {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
         </button>
       } />
+      {store.statusMode && !capturing && (
+        <div onClick={() => { setSelectedDate(today); setLogOpen(true); }} style={{
+          margin: '0 16px 12px',
+          padding: '10px 14px',
+          background: 'rgba(var(--accent-rgb), 0.08)',
+          border: `0.5px solid rgba(var(--accent-rgb), 0.3)`,
+          borderRadius: 6,
+          display: 'flex', alignItems: 'center', gap: 10,
+          cursor: 'pointer',
+          WebkitTapHighlightColor: 'transparent',
+        }}>
+          <i className={`fa-solid ${store.statusMode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach'}`} style={{ fontSize: 14, color: 'var(--accent)' }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
+              {store.statusMode === 'sick' ? 'Sick' : 'Vacation'}
+              {store.statusModeSince ? ` · Since ${new Date(store.statusModeSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}
+            </div>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Tap to manage or deactivate</div>
+          </div>
+          <i className="fa-solid fa-chevron-right" style={{ fontSize: 9, color: UI.inkFaint }} />
+        </div>
+      )}
       <div ref={captureRef}>
         <HealthDateStrip store={store} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} />
 

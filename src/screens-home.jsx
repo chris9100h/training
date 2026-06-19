@@ -1511,6 +1511,17 @@ function HomeScreen({ store, setStore, go, userId }) {
     return statusPeriodModeFor(sessionDate);
   }, [isViewingToday, isFutureSlot, store.statusMode, statusPeriodModeFor, sessionDate]);
 
+  const handleClearStatus = async () => {
+    const current = store.statusMode ?? null;
+    if (!current) return;
+    const now = new Date().toISOString();
+    setStore(s => ({
+      ...s, statusMode: null, statusModeSince: null,
+      statusPeriods: (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: now } : p),
+    }));
+    try { await LB.closeStatusPeriod(userId, now); } catch (_) {}
+  };
+
   const selectedDayCardioLogs = useMemo(() => {
     const dateKey = sessionDate.toISOString().slice(0, 10);
     return (store.cardioLogs || []).filter(l => l.date === dateKey);
@@ -1914,6 +1925,9 @@ function HomeScreen({ store, setStore, go, userId }) {
             </div>
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
               <Btn kind="ghost" onClick={() => go({ name: 'plan-view' })} style={{ flex: 1 }}>View plan</Btn>
+              {isViewingToday && selectedDayStatusMode && (
+                <Btn kind="ghost" onClick={handleClearStatus} style={{ flex: 1 }}>Back to normal</Btn>
+              )}
             </div>
             <button onClick={() => setCardioPopoverOpen(true)} style={{
               width: '100%', marginTop: 8, padding: '9px 16px',
@@ -1934,8 +1948,18 @@ function HomeScreen({ store, setStore, go, userId }) {
             <div style={{ flexShrink: 0, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 4 }}>
             <div className="micro-gold" style={{ marginBottom: selectedDayStatusMode ? 2 : 6 }}>{cardLabel}</div>
             {selectedDayStatusMode && (
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>
-                {selectedDayStatusMode === 'sick' ? 'Sick mode active' : 'Vacation mode active'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span className="micro" style={{ color: UI.inkFaint }}>
+                  {selectedDayStatusMode === 'sick' ? 'Sick mode active' : 'Vacation mode active'}
+                </span>
+                {isViewingToday && (
+                  <button onClick={handleClearStatus} style={{
+                    background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+                    borderRadius: 4, padding: '2px 8px', cursor: 'pointer',
+                    fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
+                    color: UI.inkFaint, WebkitTapHighlightColor: 'transparent',
+                  }}>CLEAR</button>
+                )}
               </div>
             )}
             <FitText
