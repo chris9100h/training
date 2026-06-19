@@ -2412,8 +2412,8 @@ async function openStatusPeriod(userId, mode, startedAt) {
   await _supabase.from('zane_status_periods').insert({ id: uid(), user_id: userId, mode, started_at: startedAt });
 }
 
-async function closeStatusPeriod(userId) {
-  await _supabase.from('zane_status_periods').update({ ended_at: new Date().toISOString() }).eq('user_id', userId).is('ended_at', null);
+async function closeStatusPeriod(userId, endedAt = null) {
+  await _supabase.from('zane_status_periods').update({ ended_at: endedAt || new Date().toISOString() }).eq('user_id', userId).is('ended_at', null);
 }
 
 async function updateStatusPeriodStart(userId, startedAt) {

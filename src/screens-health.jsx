@@ -901,13 +901,13 @@ function HealthScreen({ store, setStore, go, userId }) {
         ? modeChanged
           ? [{ id: '_pending', mode, startedAt, endedAt: null }, ...(s.statusPeriods || []).map(p => p.endedAt ? p : { ...p, endedAt: new Date().toISOString() })]
           : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, startedAt } : p)
-        : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: new Date().toISOString() } : p);
+        : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: startedAt } : p);
       return { ...s, statusMode: mode, statusModeSince: since, statusPeriods: updatedPeriods };
     });
     try {
       if (modeChanged) {
         if (mode) await LB.openStatusPeriod(userId, mode, startedAt);
-        else      await LB.closeStatusPeriod(userId);
+        else      await LB.closeStatusPeriod(userId, startedAt);
       } else {
         await LB.updateStatusPeriodStart(userId, startedAt);
       }
@@ -1242,7 +1242,7 @@ function HealthScreen({ store, setStore, go, userId }) {
             {store.statusMode === 'sick' ? 'SICK MODE' : store.statusMode === 'vacation' ? 'VACATION MODE' : 'STATUS'}
           </span>
           {['sick', 'vacation', null].map(mode => (
-            <button key={String(mode)} onClick={() => handleSetStatus(mode, mode && selectedDate < today ? selectedDate : null)} style={{
+            <button key={String(mode)} onClick={() => handleSetStatus(mode, selectedDate < today ? selectedDate : null)} style={{
               background: store.statusMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised) : 'transparent',
               border: `0.5px solid ${store.statusMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong) : UI.hairStrong}`,
               borderRadius: 4, padding: '4px 9px', cursor: 'pointer', fontFamily: UI.fontUi,

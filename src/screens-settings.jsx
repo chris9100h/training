@@ -352,6 +352,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [autoApproveLeft, setAutoApproveLeft] = useStateSet(null); // null = no batch budget, int = remaining
   const [periodsSheet, setPeriodsSheet] = useStateSet(false);
   const [showAllPeriods, setShowAllPeriods] = useStateSet(false);
+  const [confirmDeletePeriodId, setConfirmDeletePeriodId] = useStateSet(null);
   const [budgetSheet, setBudgetSheet] = useStateSet(false);
   const [budgetDraft, setBudgetDraft] = useStateSet(20);
   const [recentSignups, setRecentSignups] = useStateSet([]);
@@ -902,6 +903,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
             ).eq('id', id);
           };
           const deletePeriod = async (id) => {
+            setConfirmDeletePeriodId(null);
             setStore(s => ({ ...s, statusPeriods: (s.statusPeriods || []).filter(p => p.id !== id) }));
             await LB.supabase.from('zane_status_periods').delete().eq('id', id);
           };
@@ -931,12 +933,16 @@ function SettingsScreen({ store, setStore, go, userId }) {
                           }
                         </div>
                       </div>
-                      <button onClick={async () => {
-                        const ok = await confirm(`Delete this ${p.mode} period?`, { ok: 'Delete', danger: true });
-                        if (ok) deletePeriod(p.id);
-                      }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', flexShrink: 0 }}>
-                        <i className="fa-solid fa-trash-can" style={{ fontSize: 12 }} />
-                      </button>
+                      {confirmDeletePeriodId === p.id ? (
+                        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                          <button onClick={() => setConfirmDeletePeriodId(null)} style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '3px 8px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent' }}>Cancel</button>
+                          <button onClick={() => deletePeriod(p.id)} style={{ background: 'rgba(var(--danger-rgb),0.12)', border: '0.5px solid rgba(var(--danger-rgb),0.4)', borderRadius: 4, padding: '3px 8px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.danger, WebkitTapHighlightColor: 'transparent' }}>Delete</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => setConfirmDeletePeriodId(p.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', flexShrink: 0 }}>
+                          <i className="fa-solid fa-trash-can" style={{ fontSize: 12 }} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
