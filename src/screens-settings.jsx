@@ -1898,12 +1898,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
                     }}>{s.label}</button>
                   ))}
                 </div>
-                {/* Archive link */}
-                <div style={{ padding: '8px 20px', flexShrink: 0, borderBottom: `0.5px solid ${UI.hair}` }}>
-                  <button onClick={handleArchiveTicket} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent', display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <i className="fa-solid fa-box-archive" style={{ fontSize: 10 }} /> Archive ticket
-                  </button>
-                </div>
                 {/* Thread — scrollable, takes remaining height */}
                 <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 10, padding: '16px 20px', minHeight: 0 }}>
                   {supportTicketLoading && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '12px 0' }}>Loading…</div>}
@@ -1937,6 +1931,11 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   <Btn onClick={handleAdminReply} disabled={!supportAdminDraft.trim() || supportAdminSending}>
                     {supportAdminSending ? 'Sending…' : 'Send reply'}
                   </Btn>
+                  {currentStatus === 'resolved' && (
+                    <Btn kind="ghost" onClick={handleArchiveTicket} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: UI.inkFaint, borderColor: UI.hairStrong }}>
+                      <i className="fa-solid fa-box-archive" style={{ fontSize: 12 }} /> Archive ticket
+                    </Btn>
+                  )}
                 </div>
               </div>
             );

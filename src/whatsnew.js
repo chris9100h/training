@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.381',
+    title: 'Support Center',
+    items: [
+      'Report questions, bugs, or feature requests directly from the app — Settings → Support Center.',
+      'Keep multiple tickets open at once, each with its own thread and category.',
+      'See live whether your ticket is open, in progress, or resolved.',
+      'Replies land right in the thread — a dot badge lets you know when something new arrived.',
+    ],
+  },
+  {
     id: 'v2.380',
     title: 'Account — Change Password & Email, Training Reminder',
     items: [
