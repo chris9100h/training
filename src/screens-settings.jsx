@@ -1703,33 +1703,39 @@ function SettingsScreen({ store, setStore, go, userId }) {
           // ── NEW TICKET VIEW ──────────────────────────────────────────
           if (supportView === 'new') {
             return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '16px 20px' }}>
-                <button onClick={() => setSupportView('list')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, textAlign: 'left', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
-                  ← Back
-                </button>
-                <div>
-                  <div className="micro" style={{ marginBottom: 8 }}>TOPIC</div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {CATS.map(c => (
-                      <button key={c.key} onClick={() => setSupportCategoryDraft(c.key)} style={{
-                        flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer',
-                        border: `0.5px solid ${supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
-                        background: supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
-                        color: supportCategoryDraft === c.key ? 'var(--accent)' : UI.inkFaint,
-                        fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase',
-                        WebkitTapHighlightColor: 'transparent', textAlign: 'center',
-                      }}>
-                        <i className={`fa-solid ${c.icon}`} style={{ display: 'block', fontSize: 14, marginBottom: 4 }} />
-                        {c.label}
-                      </button>
-                    ))}
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                {/* scrollable top section */}
+                <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 14, padding: '16px 20px' }}>
+                  <button onClick={() => setSupportView('list')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, textAlign: 'left', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
+                    ← Back
+                  </button>
+                  <div>
+                    <div className="micro" style={{ marginBottom: 8 }}>TOPIC</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {CATS.map(c => (
+                        <button key={c.key} onClick={() => setSupportCategoryDraft(c.key)} style={{
+                          flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer',
+                          border: `0.5px solid ${supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
+                          background: supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
+                          color: supportCategoryDraft === c.key ? 'var(--accent)' : UI.inkFaint,
+                          fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase',
+                          WebkitTapHighlightColor: 'transparent', textAlign: 'center',
+                        }}>
+                          <i className={`fa-solid ${c.icon}`} style={{ display: 'block', fontSize: 14, marginBottom: 4 }} />
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-                <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
-                  placeholder="Describe your request…" rows={5} style={iStyle} />
-                <Btn onClick={handleCreateTicket} disabled={!supportDraft.trim() || supportSending}>
-                  {supportSending ? 'Creating…' : 'Create ticket'}
-                </Btn>
+                {/* sticky compose at bottom */}
+                <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
+                  <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
+                    placeholder="Describe your request…" rows={4} style={iStyle} />
+                  <Btn onClick={handleCreateTicket} disabled={!supportDraft.trim() || supportSending}>
+                    {supportSending ? 'Creating…' : 'Create ticket'}
+                  </Btn>
+                </div>
               </div>
             );
           }
