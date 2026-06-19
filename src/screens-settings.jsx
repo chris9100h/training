@@ -1824,9 +1824,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 </button>
               ))}
               <div style={{ flexGrow: 1 }} />
-              <div style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
-                <Btn onClick={() => { setSupportView('new'); setSupportDraft(''); setSupportCategoryDraft('question'); }}>+ New ticket</Btn>
-              </div>
+              <Btn onClick={() => { setSupportView('new'); setSupportDraft(''); setSupportCategoryDraft('question'); }} style={{ width: '100%', marginBottom: 'env(safe-area-inset-bottom, 0px)' }}>+ New ticket</Btn>
             </div>
           );
         })()}
