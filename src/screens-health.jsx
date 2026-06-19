@@ -238,9 +238,19 @@ function MacroLegend() {
 
 // ─── Daily log sheet ──────────────────────────────────────────────────────────
 
-function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema }) {
+function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus }) {
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
   const manualCal = !!store.settings?.manualCalories;
+  const todayISO = LB.todayISO();
+  const dayStatusPeriod = useMemoH(() => {
+    const ts = new Date(date + 'T12:00:00').getTime();
+    return (store.statusPeriods || []).find(p => {
+      const start = new Date(p.startedAt).getTime();
+      const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
+      return ts >= start && ts <= end;
+    }) || null;
+  }, [date, store.statusPeriods]);
+  const dayMode = date === todayISO ? (store.statusMode ?? null) : (dayStatusPeriod?.mode || null);
   const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', fiber: '', calories: '', water: '', note: '', offPlanNote: '' };
   const [form, setForm] = useStateH(empty);
   // Net-carb mode: adds a fiber field; calories become (P + C − fiber)×4 + F×9.
@@ -307,7 +317,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     const isTraining = date === LB.todayISO()
       ? !!LB.plannedTrainingDay(store, date)
       : LB.isLoggedTrainingDay(store.sessions, date);
-    const { adherence, targetsSnap } = store.statusMode
+    const { adherence, targetsSnap } = dayMode
       ? { adherence: null, targetsSnap: null }
       : LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
     const savedCoachFields = {};
@@ -451,6 +461,49 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
                   </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {onSetStatus && (
+        <div style={{ marginBottom: 18, padding: '12px 14px', borderRadius: 6, background: dayMode ? 'rgba(var(--accent-rgb),0.05)' : UI.bgInset, border: `0.5px solid ${dayMode ? 'rgba(var(--accent-rgb),0.2)' : UI.hair}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="micro" style={{ flex: 1, color: dayMode ? 'var(--accent)' : UI.inkFaint }}>
+              {dayMode === 'sick' ? 'SICK MODE' : dayMode === 'vacation' ? 'VACATION MODE' : 'STATUS'}
+            </span>
+            {['sick', 'vacation', null].map(mode => (
+              <button key={String(mode)} onClick={() => onSetStatus(mode, date < todayISO ? date : null)} style={{
+                background: dayMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised) : 'transparent',
+                border: `0.5px solid ${dayMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong) : UI.hairStrong}`,
+                borderRadius: 4, padding: '4px 9px', cursor: 'pointer', fontFamily: UI.fontUi,
+                fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase',
+                color: dayMode === mode ? (mode ? 'var(--accent)' : UI.inkFaint) : UI.inkGhost,
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                {mode === 'sick' ? 'Sick' : mode === 'vacation' ? 'Vacation' : 'Off'}
+              </button>
+            ))}
+          </div>
+          {dayMode && date === todayISO && (() => {
+            const minDate = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return d.toISOString().slice(0, 10); })();
+            const currentVal = store.statusModeSince ? store.statusModeSince.slice(0, 10) : todayISO;
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                <span className="micro" style={{ color: UI.inkGhost }}>SINCE</span>
+                <input type="date" value={currentVal} min={minDate} max={todayISO}
+                  onChange={e => e.target.value && onSetStatus(store.statusMode, e.target.value)}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />
+              </div>
+            );
+          })()}
+          {dayStatusPeriod && date !== todayISO && (
+            <div style={{ marginTop: 6, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkFaint }}>
+              {new Date(dayStatusPeriod.startedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}
+              {' → '}
+              {dayStatusPeriod.endedAt
+                ? new Date(dayStatusPeriod.endedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
+                : 'ongoing'}
+            </div>
+          )}
         </div>
       )}
 
@@ -1236,40 +1289,6 @@ function HealthScreen({ store, setStore, go, userId }) {
           {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
         </button>
       } />
-      {/* Sick / Vacation status toggle */}
-      <div style={{ borderBottom: `0.5px solid ${store.statusMode ? 'rgba(var(--accent-rgb),0.2)' : UI.hair}`, background: store.statusMode ? 'rgba(var(--accent-rgb),0.04)' : 'transparent' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 16px' }}>
-          <span className="micro" style={{ flex: 1, color: store.statusMode ? 'var(--accent)' : UI.inkGhost }}>
-            {store.statusMode === 'sick' ? 'SICK MODE' : store.statusMode === 'vacation' ? 'VACATION MODE' : 'STATUS'}
-          </span>
-          {['sick', 'vacation', null].map(mode => (
-            <button key={String(mode)} onClick={() => handleSetStatus(mode, selectedDate < today ? selectedDate : null)} style={{
-              background: store.statusMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised) : 'transparent',
-              border: `0.5px solid ${store.statusMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong) : UI.hairStrong}`,
-              borderRadius: 4, padding: '4px 9px', cursor: 'pointer', fontFamily: UI.fontUi,
-              fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase',
-              color: store.statusMode === mode ? (mode ? 'var(--accent)' : UI.inkFaint) : UI.inkGhost,
-              WebkitTapHighlightColor: 'transparent',
-            }}>
-              {mode === 'sick' ? 'Sick' : mode === 'vacation' ? 'Vacation' : 'Off'}
-            </button>
-          ))}
-        </div>
-        {store.statusMode && (() => {
-          const minDate = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return d.toISOString().slice(0, 10); })();
-          const currentVal = store.statusModeSince ? store.statusModeSince.slice(0, 10) : today;
-          return (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px 8px' }}>
-              <span className="micro" style={{ color: UI.inkGhost }}>SINCE</span>
-              <input type="date" value={currentVal} min={minDate} max={today}
-                onChange={e => e.target.value && handleSetStatus(store.statusMode, e.target.value)}
-                style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }}
-              />
-            </div>
-          );
-        })()}
-      </div>
-
       <div ref={captureRef}>
         <HealthDateStrip store={store} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} />
 
@@ -1284,7 +1303,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       </div>
 
-      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} activeCoachingSchema={activeCoachingSchema} />
+      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
     </Screen>
   );
