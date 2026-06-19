@@ -875,7 +875,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </div>
           {(store.statusPeriods || []).length > 0 && (
             <div style={{ marginTop: 16 }}>
-              <NavRow label="Sick & Vacation periods" hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} first />
+              <NavRow label="Sick & Vacation periods" hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} />
             </div>
           )}
           <div style={{ marginTop: 24 }}>
