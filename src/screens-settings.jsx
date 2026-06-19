@@ -1648,13 +1648,13 @@ function SettingsScreen({ store, setStore, go, userId }) {
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <Frame style={{ padding: '0 14px' }}>
-                <Row label=”Registrations need approval” first>
+                <Row label="Registrations need approval" first>
                   <Toggle on={signupApproval !== false} onToggle={toggleSignupApproval} />
                 </Row>
                 <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4, lineHeight: 1.5, paddingBottom: 8 }}>
                   When on, new sign-ups wait for approval. When off, accounts activate immediately.
                 </div>
-                <Row label=”Auto-approve batch”>
+                <Row label="Auto-approve batch">
                   <button style={accentBtn} onClick={() => { setBudgetDraft(autoApproveLeft || 20); setBudgetSheet(true); }}>
                     {autoApproveLeft != null ? `${autoApproveLeft} left` : 'Off'}
                   </button>
@@ -1662,8 +1662,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4, lineHeight: 1.5, paddingBottom: 8 }}>
                   Open registration for a batch — auto-approved until used up, then turns back on.
                 </div>
-                <NavRow label=”Recent sign-ups” hint={unseenCount > 0 ? `${unseenCount} new` : `${recentSignups.length}`} onTap={() => setSignupsSheet(true)} />
-                <NavRow label=”Background preview” hint={{ standard: 'Standard', mike: 'Mike', phoenix: 'Phoenix' }[adminBgPreview] || 'Change'} onTap={() => setBgPreviewSheet(true)} />
+                <NavRow label="Recent sign-ups" hint={unseenCount > 0 ? `${unseenCount} new` : `${recentSignups.length}`} onTap={() => setSignupsSheet(true)} />
+                <NavRow label="Background preview" hint={{ standard: 'Standard', mike: 'Mike', phoenix: 'Phoenix' }[adminBgPreview] || 'Change'} onTap={() => setBgPreviewSheet(true)} />
               </Frame>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
                 <Btn onClick={() => setSupportInboxSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', fontSize: 15, padding: '14px 16px' }}>
@@ -1679,14 +1679,14 @@ function SettingsScreen({ store, setStore, go, userId }) {
       </SettingsSheet>
 
       {/* ══ Auto-approve batch sheet (admin) — rendered after adminSheet so it sits on top ══ */}
-      <SettingsSheet open={budgetSheet} onClose={() => setBudgetSheet(false)} title=”Auto-approve batch”>
+      <SettingsSheet open={budgetSheet} onClose={() => setBudgetSheet(false)} title="Auto-approve batch">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
           <div>
-            <div className=”micro” style={{ textAlign: 'center', marginBottom: 8 }}>SIGN-UPS TO AUTO-APPROVE</div>
-            <Stepper value={budgetDraft} step={5} min={0} max={500} suffix=” sign-ups” onChange={setBudgetDraft} />
+            <div className="micro" style={{ textAlign: 'center', marginBottom: 8 }}>SIGN-UPS TO AUTO-APPROVE</div>
+            <Stepper value={budgetDraft} step={5} min={0} max={500} suffix=" sign-ups" onChange={setBudgetDraft} />
           </div>
-          <div className=”micro” style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
-            The next {budgetDraft > 0 ? budgetDraft : '—'} new accounts skip the waiting screen. Once that many have joined, “Registrations need approval” switches back on automatically. Set to 0 to re-lock now.
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
+            The next {budgetDraft > 0 ? budgetDraft : '—'} new accounts skip the waiting screen. Once that many have joined, "Registrations need approval" switches back on automatically. Set to 0 to re-lock now.
           </div>
           <Btn onClick={saveBudget}>{budgetDraft > 0 ? `Open for ${budgetDraft}` : 'Re-lock now'}</Btn>
         </div>
