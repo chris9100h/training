@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.380',
+    title: 'Account — Change Password & Email, Training Reminder',
+    items: [
+      'You can now change your password and email address directly in the app — Settings → Account → Change password / Change email. No need to go through a sign-out flow.',
+      'Training Reminder is now under Settings → Training (not Account). It sends you a push notification on days you have a workout scheduled — a quiet nudge so you don\'t miss a session.',
+      'If push notifications aren\'t active yet, the reminder toggle takes you straight to the push setup so you can enable both in one go.',
+    ],
+  },
+  {
     id: 'v2.378',
     title: 'Sick & Vacation Mode',
     items: [
