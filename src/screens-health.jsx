@@ -596,8 +596,8 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
   );
   const adh = log?.adherence;
   const showAdh = dayTarget != null || adh != null;
-  const isPerfect = adh != null && adh >= 97;
-  const verdict = adh == null ? null : adh >= 97 ? 'PERFECT' : adh >= 90 ? 'STRONG' : adh >= 75 ? 'ON TRACK' : 'OFF TRACK';
+  const isPerfect = adh != null && Math.round(adh) >= 97;
+  const verdict = adh == null ? null : Math.round(adh) >= 97 ? 'PERFECT' : Math.round(adh) >= 90 ? 'STRONG' : Math.round(adh) >= 75 ? 'ON TRACK' : 'OFF TRACK';
   const badge = (icon, label, alpha) => (
     <span style={{ display: 'flex', alignItems: 'center', gap: 4, background: `rgba(var(--accent-rgb),${alpha})`, border: `0.5px solid rgba(var(--accent-rgb),${alpha * 2})`, borderRadius: 4, padding: '3px 7px' }}>
       <i className={`fa-solid ${icon}`} style={{ fontSize: 9, color: 'var(--accent)' }} />
@@ -673,8 +673,8 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
   const r = v => v == null ? null : Math.round(v);
   const range = `${healthFmtDate(from, { day: 'numeric', month: 'short' })} – ${healthFmtDate(to, { day: 'numeric', month: 'short' })}`;
   const periodLabel = tf === '1W' ? 'THIS WEEK' : tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS';
-  const verdict = adherence == null ? null : adherence >= 97 ? 'PERFECT' : adherence >= 90 ? 'STRONG' : adherence >= 75 ? 'ON TRACK' : 'OFF TRACK';
-  const isPerfect = adherence != null && adherence >= 97;
+  const verdict = adherence == null ? null : Math.round(adherence) >= 97 ? 'PERFECT' : Math.round(adherence) >= 90 ? 'STRONG' : Math.round(adherence) >= 75 ? 'ON TRACK' : 'OFF TRACK';
+  const isPerfect = adherence != null && Math.round(adherence) >= 97;
   const trainingPct = trainingsPlanned > 0 ? Math.min(100, (trainingsDone / trainingsPlanned) * 100) : (trainingsDone > 0 ? 100 : 0);
 
   // 1W: plan-weighted current targets (full week incl. future days). 1M/3M: persisted targetsSnap avg.
