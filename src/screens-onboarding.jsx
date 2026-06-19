@@ -302,7 +302,7 @@ window.TOURS.installPwaIos = [
   {
     target: null,
     title: 'Tap the Share button',
-    body: 'At the bottom of Safari, tap the Share button — the square with an arrow pointing up.\n\nOn newer iOS versions it may be tucked away in a sub menu somewhere in the address bar area.',
+    body: 'Tap the Share button — the square with an arrow pointing up. Depending on your iOS version, it sits in the bottom toolbar or in a sub menu in the address bar area.',
     visual: 'pwaIosShare',
   },
   {
