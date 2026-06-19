@@ -106,9 +106,9 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
                 {clientStore.statusMode === 'sick' ? 'SICK' : 'VACATION'}
                 {clientStore.statusModeSince && (() => {
                   const since = new Date(clientStore.statusModeSince);
-                  const days = Math.floor((Date.now() - since.getTime()) / 86400000);
+                  const days = Math.floor((Date.now() - since.getTime()) / 86400000) + 1;
                   const dateStr = since.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }).toUpperCase();
-                  return ` · SINCE ${dateStr}${days > 0 ? ` (${days}d)` : ''}`;
+                  return ` · SINCE ${dateStr} (${days}d)`;
                 })()}
               </span>
             </div>
