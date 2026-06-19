@@ -381,6 +381,20 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [webPushCode, setWebPushCode] = useStateSet('');
   const [reminderSheet, setReminderSheet] = useStateSet(false);
   const [passkeySheet, setPasskeySheet] = useStateSet(false);
+  const [supportSheet, setSupportSheet] = useStateSet(false);
+  const [supportNotes, setSupportNotes] = useStateSet([]);
+  const [supportNotesLoading, setSupportNotesLoading] = useStateSet(false);
+  const [supportDraft, setSupportDraft] = useStateSet('');
+  const [supportSending, setSupportSending] = useStateSet(false);
+  const [supportCategoryDraft, setSupportCategoryDraft] = useStateSet('question');
+  const [supportInboxSheet, setSupportInboxSheet] = useStateSet(false);
+  const [supportInbox, setSupportInbox] = useStateSet([]);
+  const [supportInboxLoading, setSupportInboxLoading] = useStateSet(false);
+  const [supportTicket, setSupportTicket] = useStateSet(null);
+  const [supportTicketNotes, setSupportTicketNotes] = useStateSet([]);
+  const [supportTicketLoading, setSupportTicketLoading] = useStateSet(false);
+  const [supportAdminDraft, setSupportAdminDraft] = useStateSet('');
+  const [supportAdminSending, setSupportAdminSending] = useStateSet(false);
   const [changePasswordSheet, setChangePasswordSheet] = useStateSet(false);
   const [pwCurrent, setPwCurrent] = useStateSet('');
   const [pwNew, setPwNew] = useStateSet('');
@@ -442,6 +456,44 @@ function SettingsScreen({ store, setStore, go, userId }) {
     }).catch(() => {});
   }, [pushSheet]);
 
+  // Load support notes when user opens support sheet
+  useEffectSet(() => {
+    if (!supportSheet) { setSupportNotes([]); return; }
+    const coachingId = store.supportCoachingId;
+    if (!coachingId) return;
+    setSupportNotesLoading(true);
+    LB.supabase.from('zane_coaching_notes')
+      .select('id, author_id, body, created_at')
+      .eq('coaching_id', coachingId)
+      .order('created_at', { ascending: true })
+      .then(({ data }) => { setSupportNotes(data || []); setSupportNotesLoading(false); });
+    if (store.supportUnread > 0) {
+      LB.supabase.from('zane_coaching_notes')
+        .update({ read_at: new Date().toISOString() })
+        .eq('coaching_id', coachingId)
+        .neq('author_id', userId)
+        .is('read_at', null)
+        .then(() => setStore(s => ({ ...s, supportUnread: 0 })));
+    }
+  }, [supportSheet]);
+
+  // Load admin ticket notes + mark user messages read
+  useEffectSet(() => {
+    if (!supportTicket) { setSupportTicketNotes([]); return; }
+    setSupportTicketLoading(true);
+    LB.supabase.from('zane_coaching_notes')
+      .select('id, author_id, body, created_at')
+      .eq('coaching_id', supportTicket.coachingId)
+      .order('created_at', { ascending: true })
+      .then(({ data }) => { setSupportTicketNotes(data || []); setSupportTicketLoading(false); });
+    LB.supabase.from('zane_coaching_notes')
+      .update({ read_at: new Date().toISOString() })
+      .eq('coaching_id', supportTicket.coachingId)
+      .neq('author_id', userId)
+      .is('read_at', null)
+      .then(() => setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)));
+  }, [supportTicket]);
+
   // Admin-only: current global "signups need approval" setting.
   useEffectSet(() => {
     if (!isAdmin) return;
@@ -455,13 +507,20 @@ function SettingsScreen({ store, setStore, go, userId }) {
     return () => { mounted = false; };
   }, [isAdmin, accountSheet]);
 
-  // Admin-only: recent sign-ups feed. Reloaded each time the Account sheet opens.
+  // Admin-only: recent sign-ups feed + support inbox. Reloaded each time Account sheet opens.
   useEffectSet(() => {
     if (!isAdmin || !accountSheet) return;
     let mounted = true;
     LB.supabase.rpc('get_recent_signups', { p_limit: 50 }).then(({ data, error }) => { if (mounted && !error) setRecentSignups(data || []); }).catch(() => {});
+    LB.supabase.rpc('get_support_chats').then(({ data }) => { if (mounted) setSupportInbox(data || []); }).catch(() => {});
     return () => { mounted = false; };
   }, [isAdmin, accountSheet]);
+
+  useEffectSet(() => {
+    if (!supportInboxSheet || !isAdmin) return;
+    setSupportInboxLoading(true);
+    LB.supabase.rpc('get_support_chats').then(({ data }) => { setSupportInbox(data || []); setSupportInboxLoading(false); }).catch(() => setSupportInboxLoading(false));
+  }, [supportInboxSheet]);
 
   const markSignupSeen = (uid) => {
     setSeenSignups(prev => {
@@ -666,6 +725,45 @@ function SettingsScreen({ store, setStore, go, userId }) {
   };
   const handleSignOut = async () => { await LB.signOut(); };
 
+  const handleSupportSend = async () => {
+    if (!supportDraft.trim() || supportSending) return;
+    setSupportSending(true);
+    const body = supportDraft.trim();
+    setSupportDraft('');
+    try {
+      let coachingId = store.supportCoachingId;
+      if (!coachingId) {
+        const { data, error } = await LB.supabase.rpc('open_support_chat', { p_category: supportCategoryDraft });
+        if (error || !data) return;
+        coachingId = data;
+        setStore(s => ({ ...s, supportCoachingId: coachingId, supportStatus: 'open', supportCategory: supportCategoryDraft }));
+      }
+      const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
+        id: LB.uid(), coaching_id: coachingId, author_id: userId, type: 'general', body,
+      }).select('id, author_id, body, created_at').single();
+      if (!error && note) setSupportNotes(prev => [...prev, note]);
+    } finally { setSupportSending(false); }
+  };
+
+  const handleAdminReply = async () => {
+    if (!supportAdminDraft.trim() || supportAdminSending || !supportTicket) return;
+    setSupportAdminSending(true);
+    const body = supportAdminDraft.trim();
+    setSupportAdminDraft('');
+    try {
+      const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
+        id: LB.uid(), coaching_id: supportTicket.coachingId, author_id: userId, type: 'general', body,
+      }).select('id, author_id, body, created_at').single();
+      if (!error && note) setSupportTicketNotes(prev => [...prev, note]);
+    } finally { setSupportAdminSending(false); }
+  };
+
+  const handleSetSupportStatus = async (coachingId, newStatus) => {
+    await LB.supabase.rpc('set_support_status', { p_coaching_id: coachingId, p_status: newStatus });
+    setSupportInbox(prev => prev.map(t => t.coaching_id === coachingId ? { ...t, support_status: newStatus } : t));
+    setSupportTicket(t => t ? { ...t, status: newStatus } : t);
+  };
+
   const handleChangePassword = async () => {
     if (pwLoading) return;
     if (pwNew.length < 6) { setPwMsg({ text: 'Password must be at least 6 characters', ok: false }); return; }
@@ -818,6 +916,14 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </div>
         )}
         <Btn kind="ghost" onClick={async () => { if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); } window.location.reload(true); }}>Clear cache &amp; reload</Btn>
+        {!isAdmin && (
+          <Btn kind="ghost" onClick={() => setSupportSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            Support Center
+            {store.supportUnread > 0 && (
+              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />
+            )}
+          </Btn>
+        )}
         <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Sign out</Btn>
         <div className="micro" style={{ textAlign: 'center', marginTop: 4 }}>Zane · {swVersion || '…'} · Data in Supabase</div>
 
@@ -1174,6 +1280,13 @@ function SettingsScreen({ store, setStore, go, userId }) {
             );
           })()}
           <Hairline style={{ margin: '14px 0' }} />
+          {(() => {
+            const adminUnread = supportInbox.reduce((sum, t) => sum + Number(t.unread_count || 0), 0);
+            return (
+              <NavRow label="Support inbox" hint={adminUnread > 0 ? `${adminUnread} new` : `${supportInbox.length || 0}`} onTap={() => setSupportInboxSheet(true)} first />
+            );
+          })()}
+          <Hairline style={{ margin: '14px 0' }} />
           <Row label="Background" first>
             <button style={accentBtn} onClick={() => setBgPreviewSheet(true)}>
               {{ standard: 'Standard', mike: 'Mike', phoenix: 'Phoenix' }[adminBgPreview] || 'Change'}
@@ -1503,6 +1616,192 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </div>
           <Btn onClick={saveBudget}>{budgetDraft > 0 ? `Open for ${budgetDraft}` : 'Re-lock now'}</Btn>
         </div>
+      </SettingsSheet>
+
+      {/* ══ Support Center sheet (user) ══ */}
+      <SettingsSheet open={supportSheet} onClose={() => { setSupportSheet(false); setSupportDraft(''); }} title="Support Center">
+        {(() => {
+          const CATS = [
+            { key: 'feature_request', label: 'Feature request', icon: 'fa-lightbulb' },
+            { key: 'bug',             label: 'Bug',             icon: 'fa-bug' },
+            { key: 'question',        label: 'General question',icon: 'fa-circle-question' },
+          ];
+          const catLabel = (k) => CATS.find(c => c.key === k)?.label || k;
+          const statusColor = { open: 'var(--accent)', in_progress: UI.gold, resolved: UI.inkFaint };
+          const statusLabel = { open: 'Open', in_progress: 'In progress', resolved: 'Resolved' };
+          const existingCategory = store.supportCategory;
+          const existingStatus   = store.supportStatus;
+          const iStyle = { width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box', lineHeight: 1.5 };
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 8 }}>
+              {/* Status + category header */}
+              {existingStatus && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="micro" style={{ color: statusColor[existingStatus] || UI.inkFaint, letterSpacing: '0.08em' }}>{statusLabel[existingStatus] || existingStatus}</span>
+                  {existingCategory && <span className="micro" style={{ color: UI.inkFaint }}>· {catLabel(existingCategory)}</span>}
+                </div>
+              )}
+              {/* Category picker (only before first message) */}
+              {!store.supportCoachingId && (
+                <div>
+                  <div className="micro" style={{ marginBottom: 8 }}>TOPIC</div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {CATS.map(c => (
+                      <button key={c.key} onClick={() => setSupportCategoryDraft(c.key)} style={{
+                        flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer',
+                        border: `0.5px solid ${supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
+                        background: supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
+                        color: supportCategoryDraft === c.key ? 'var(--accent)' : UI.inkFaint,
+                        fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase',
+                        WebkitTapHighlightColor: 'transparent', textAlign: 'center',
+                      }}>
+                        <i className={`fa-solid ${c.icon}`} style={{ display: 'block', fontSize: 14, marginBottom: 4 }} />
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Message thread */}
+              {supportNotesLoading && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '12px 0' }}>Loading…</div>}
+              {supportNotes.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {supportNotes.map(n => {
+                    const isMe = n.author_id === userId;
+                    return (
+                      <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+                        <div style={{
+                          maxWidth: '82%', padding: '8px 12px', borderRadius: 8,
+                          background: isMe ? 'rgba(var(--accent-rgb),0.12)' : UI.bgRaised,
+                          border: `0.5px solid ${isMe ? 'rgba(var(--accent-rgb),0.2)' : UI.hairStrong}`,
+                        }}>
+                          <div style={{ fontSize: 13, color: isMe ? UI.ink : UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{n.body}</div>
+                        </div>
+                        <div className="micro" style={{ color: UI.inkGhost, marginTop: 3 }}>
+                          {new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(n.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {supportNotes.length === 0 && !supportNotesLoading && store.supportCoachingId && (
+                <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>No messages yet</div>
+              )}
+              {existingStatus !== 'resolved' && (
+                <>
+                  <textarea
+                    value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
+                    placeholder={store.supportCoachingId ? 'Write a follow-up…' : 'Describe your request…'}
+                    rows={4} style={iStyle}
+                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSupportSend(); }}
+                  />
+                  <Btn onClick={handleSupportSend} disabled={!supportDraft.trim() || supportSending}>
+                    {supportSending ? 'Sending…' : 'Send'}
+                  </Btn>
+                </>
+              )}
+              {existingStatus === 'resolved' && (
+                <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 12px', background: UI.bgRaised, borderRadius: 6, lineHeight: 1.5 }}>
+                  This ticket is resolved. Open a new one if you have another question.
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </SettingsSheet>
+
+      {/* ══ Support inbox sheet (admin) ══ */}
+      <SettingsSheet open={supportInboxSheet} onClose={() => { setSupportInboxSheet(false); setSupportTicket(null); }} title="Support inbox">
+        {(() => {
+          const CATS = { feature_request: 'Feature', bug: 'Bug', question: 'Question' };
+          const statusColor = { open: 'var(--accent)', in_progress: UI.gold, resolved: UI.inkFaint };
+          if (supportInboxLoading) return <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '16px 0' }}>Loading…</div>;
+          if (supportInbox.length === 0) return <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '16px 0' }}>No support tickets yet.</div>;
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {supportInbox.map((t, i) => (
+                <button key={t.coaching_id} onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })}
+                  style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', padding: '12px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', WebkitTapHighlightColor: 'transparent' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, flex: 1 }}>{t.client_name || t.client_email}</span>
+                    {Number(t.unread_count) > 0 && <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block', flexShrink: 0 }} />}
+                    <span className="micro" style={{ color: statusColor[t.support_status] || UI.inkFaint }}>{(t.support_status || 'open').replace('_', ' ').toUpperCase()}</span>
+                    {t.support_category && <span className="micro" style={{ color: UI.inkFaint }}>{CATS[t.support_category] || t.support_category}</span>}
+                  </div>
+                  {t.last_message_body && (
+                    <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.last_message_body}</div>
+                  )}
+                  {t.last_message_at && (
+                    <div className="micro" style={{ color: UI.inkGhost, marginTop: 3 }}>{new Date(t.last_message_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</div>
+                  )}
+                </button>
+              ))}
+            </div>
+          );
+        })()}
+      </SettingsSheet>
+
+      {/* ══ Support ticket detail sheet (admin) ══ */}
+      <SettingsSheet open={!!supportTicket} onClose={() => { setSupportTicket(null); setSupportAdminDraft(''); }} title={supportTicket?.clientName || supportTicket?.clientEmail || 'Ticket'}>
+        {(() => {
+          if (!supportTicket) return null;
+          const STATUSES = [
+            { key: 'open',        label: 'Open' },
+            { key: 'in_progress', label: 'In progress' },
+            { key: 'resolved',    label: 'Resolved' },
+          ];
+          const statusColor = { open: 'var(--accent)', in_progress: UI.gold, resolved: UI.inkFaint };
+          const iStyle = { width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box', lineHeight: 1.5 };
+          const currentStatus = supportInbox.find(t => t.coaching_id === supportTicket.coachingId)?.support_status || supportTicket.status || 'open';
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 8 }}>
+              {/* Status picker */}
+              <div style={{ display: 'flex', gap: 6 }}>
+                {STATUSES.map(s => (
+                  <button key={s.key} onClick={() => handleSetSupportStatus(supportTicket.coachingId, s.key)} style={{
+                    flex: 1, padding: '7px 4px', borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                    border: `0.5px solid ${currentStatus === s.key ? (statusColor[s.key] || UI.hairStrong) : UI.hairStrong}`,
+                    background: currentStatus === s.key ? (s.key === 'open' ? 'rgba(var(--accent-rgb),0.1)' : s.key === 'in_progress' ? 'rgba(var(--gold-rgb),0.08)' : UI.bgRaised) : 'transparent',
+                    color: currentStatus === s.key ? (statusColor[s.key] || UI.ink) : UI.inkFaint,
+                    fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                  }}>{s.label}</button>
+                ))}
+              </div>
+              {/* Thread */}
+              {supportTicketLoading && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '12px 0' }}>Loading…</div>}
+              {supportTicketNotes.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {supportTicketNotes.map(n => {
+                    const isAdmin = n.author_id === userId;
+                    return (
+                      <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAdmin ? 'flex-end' : 'flex-start' }}>
+                        <div style={{
+                          maxWidth: '82%', padding: '8px 12px', borderRadius: 8,
+                          background: isAdmin ? 'rgba(var(--accent-rgb),0.12)' : UI.bgRaised,
+                          border: `0.5px solid ${isAdmin ? 'rgba(var(--accent-rgb),0.2)' : UI.hairStrong}`,
+                        }}>
+                          <div style={{ fontSize: 13, color: isAdmin ? UI.ink : UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{n.body}</div>
+                        </div>
+                        <div className="micro" style={{ color: UI.inkGhost, marginTop: 3 }}>
+                          {isAdmin ? 'You' : supportTicket.clientName} · {new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {/* Reply input */}
+              <textarea value={supportAdminDraft} onChange={e => setSupportAdminDraft(e.target.value)}
+                placeholder="Reply…" rows={3} style={iStyle}
+                onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
+              />
+              <Btn onClick={handleAdminReply} disabled={!supportAdminDraft.trim() || supportAdminSending}>
+                {supportAdminSending ? 'Sending…' : 'Send reply'}
+              </Btn>
+            </div>
+          );
+        })()}
       </SettingsSheet>
 
       {/* ══ VIP background preview sheet (admin) ══ */}
