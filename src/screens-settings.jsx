@@ -156,6 +156,7 @@ function ChangelogSheet({ open, onClose }) {
 
 // ─── PASSKEY SHEET ───────────────────────────────────────────────────
 function PasskeySheet({ open, onClose }) {
+  const [confirmEl, confirm] = useConfirm();
   const [passkeys, setPasskeys] = useStateSet([]);
   const [loadingList, setLoadingList] = useStateSet(false);
   const [adding, setAdding] = useStateSet(false);
@@ -199,8 +200,10 @@ function PasskeySheet({ open, onClose }) {
     }
   };
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (id, name) => {
     if (deletingId) return;
+    const ok = await confirm(`Remove "${name || 'Passkey'}"? You won't be able to sign in with it anymore.`, { ok: 'Remove', danger: true });
+    if (!ok) return;
     setDeletingId(id);
     try {
       await LB.deletePasskey(id);
@@ -221,6 +224,7 @@ function PasskeySheet({ open, onClose }) {
 
   return (
     <SettingsSheet open={open} onClose={onClose} title="Passkeys">
+      {confirmEl}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
         <button onClick={handleAdd} disabled={adding} style={{
           width: '100%', padding: '12px 0', borderRadius: 6,
@@ -263,7 +267,7 @@ function PasskeySheet({ open, onClose }) {
                       Added {fmtDate(pk.created_at)}
                     </div>
                   </div>
-                  <button onClick={() => handleDelete(pk.id)} disabled={!!deletingId} style={{
+                  <button onClick={() => handleDelete(pk.id, pk.friendly_name)} disabled={!!deletingId} style={{
                     background: 'rgba(var(--danger-rgb),0.08)', border: '0.5px solid rgba(var(--danger-rgb),0.2)',
                     color: UI.danger, borderRadius: 6, padding: '5px 12px',
                     fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
