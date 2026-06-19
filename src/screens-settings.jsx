@@ -420,7 +420,16 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
   useEffectSet(() => {
     if (!pushSheet) return;
-    LB.getWebPushSubscription().then(sub => setWebPushSub(sub)).catch(() => {});
+    LB.getWebPushSubscription().then(sub => {
+      setWebPushSub(sub);
+      // Auto-restore verified state: if the browser's PushManager has an active
+      // subscription, push is working — don't require re-verification just because
+      // localStorage was cleared (cache clear, PWA reinstall, etc.).
+      if (sub && localStorage.getItem('logbook-push-verified') !== 'true') {
+        setWebPushVerified(true);
+        localStorage.setItem('logbook-push-verified', 'true');
+      }
+    }).catch(() => {});
   }, [pushSheet]);
 
   // Admin-only: current global "signups need approval" setting.
