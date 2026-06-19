@@ -888,12 +888,31 @@ function HealthScreen({ store, setStore, go, userId }) {
   // the user hasn't set personal targets). asClient or self-coaching row.
   const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
 
-  const handleSetStatus = async (mode) => {
+  const handleSetStatus = async (mode, startDateStr = null) => {
     const current = store.statusMode ?? null;
-    if (mode === current) return;
-    const since = mode ? new Date().toISOString() : null;
-    setStore(s => ({ ...s, statusMode: mode, statusModeSince: since }));
-    if (coachingId) {
+    const startedAt = startDateStr
+      ? new Date(startDateStr + 'T00:00:00').toISOString()
+      : new Date().toISOString();
+    const modeChanged = mode !== current;
+    if (!modeChanged && !startDateStr) return;
+    const since = mode ? startedAt : null;
+    setStore(s => {
+      const updatedPeriods = mode
+        ? modeChanged
+          ? [{ id: '_pending', mode, startedAt, endedAt: null }, ...(s.statusPeriods || []).map(p => p.endedAt ? p : { ...p, endedAt: new Date().toISOString() })]
+          : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, startedAt } : p)
+        : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: new Date().toISOString() } : p);
+      return { ...s, statusMode: mode, statusModeSince: since, statusPeriods: updatedPeriods };
+    });
+    try {
+      if (modeChanged) {
+        if (mode) await LB.openStatusPeriod(userId, mode, startedAt);
+        else      await LB.closeStatusPeriod(userId);
+      } else {
+        await LB.updateStatusPeriodStart(userId, startedAt);
+      }
+    } catch (_) {}
+    if (coachingId && modeChanged) {
       try {
         const body = mode === 'sick'     ? 'Status: Sick — taking a break from training.'
                    : mode === 'vacation' ? 'Status: Vacation — back soon!'
@@ -1217,22 +1236,37 @@ function HealthScreen({ store, setStore, go, userId }) {
         </button>
       } />
       {/* Sick / Vacation status toggle */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 16px', borderBottom: `0.5px solid ${store.statusMode ? 'rgba(var(--accent-rgb),0.2)' : UI.hair}`, background: store.statusMode ? 'rgba(var(--accent-rgb),0.04)' : 'transparent' }}>
-        <span className="micro" style={{ flex: 1, color: store.statusMode ? 'var(--accent)' : UI.inkGhost }}>
-          {store.statusMode === 'sick' ? 'SICK MODE' : store.statusMode === 'vacation' ? 'VACATION MODE' : 'STATUS'}
-        </span>
-        {['sick', 'vacation', null].map(mode => (
-          <button key={String(mode)} onClick={() => handleSetStatus(mode)} style={{
-            background: store.statusMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised) : 'transparent',
-            border: `0.5px solid ${store.statusMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong) : UI.hairStrong}`,
-            borderRadius: 4, padding: '4px 9px', cursor: 'pointer', fontFamily: UI.fontUi,
-            fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase',
-            color: store.statusMode === mode ? (mode ? 'var(--accent)' : UI.inkFaint) : UI.inkGhost,
-            WebkitTapHighlightColor: 'transparent',
-          }}>
-            {mode === 'sick' ? 'Sick' : mode === 'vacation' ? 'Vacation' : 'Off'}
-          </button>
-        ))}
+      <div style={{ borderBottom: `0.5px solid ${store.statusMode ? 'rgba(var(--accent-rgb),0.2)' : UI.hair}`, background: store.statusMode ? 'rgba(var(--accent-rgb),0.04)' : 'transparent' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 16px' }}>
+          <span className="micro" style={{ flex: 1, color: store.statusMode ? 'var(--accent)' : UI.inkGhost }}>
+            {store.statusMode === 'sick' ? 'SICK MODE' : store.statusMode === 'vacation' ? 'VACATION MODE' : 'STATUS'}
+          </span>
+          {['sick', 'vacation', null].map(mode => (
+            <button key={String(mode)} onClick={() => handleSetStatus(mode)} style={{
+              background: store.statusMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised) : 'transparent',
+              border: `0.5px solid ${store.statusMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong) : UI.hairStrong}`,
+              borderRadius: 4, padding: '4px 9px', cursor: 'pointer', fontFamily: UI.fontUi,
+              fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase',
+              color: store.statusMode === mode ? (mode ? 'var(--accent)' : UI.inkFaint) : UI.inkGhost,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              {mode === 'sick' ? 'Sick' : mode === 'vacation' ? 'Vacation' : 'Off'}
+            </button>
+          ))}
+        </div>
+        {store.statusMode && (() => {
+          const minDate = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return d.toISOString().slice(0, 10); })();
+          const currentVal = store.statusModeSince ? store.statusModeSince.slice(0, 10) : today;
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px 8px' }}>
+              <span className="micro" style={{ color: UI.inkGhost }}>SINCE</span>
+              <input type="date" value={currentVal} min={minDate} max={today}
+                onChange={e => e.target.value && handleSetStatus(store.statusMode, e.target.value)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }}
+              />
+            </div>
+          );
+        })()}
       </div>
 
       <div ref={captureRef}>

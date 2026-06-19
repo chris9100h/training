@@ -464,11 +464,13 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Daily health logs (weight / steps / macros / water) — one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    // Sick/vacation history periods — used for missed-workout stats.
+    isCoachLoad ? null : _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
-         cardioLogsRes, dailyLogsRes] = await Promise.all(queries);
+         cardioLogsRes, dailyLogsRes, statusPeriodsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -589,6 +591,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
       createdAt: l.created_at,
+    })),
+    statusPeriods: (statusPeriodsRes?.data || []).map(p => ({
+      id: p.id, mode: p.mode, startedAt: p.started_at, endedAt: p.ended_at ?? null,
     })),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
     // and via the local cache also offline). bestE1rmForExercise combines this
@@ -2401,6 +2406,19 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions, schema) {
   return Object.keys(out).length ? { ...out, count: week.length } : null;
 }
 
+async function openStatusPeriod(userId, mode, startedAt) {
+  await _supabase.from('zane_status_periods').update({ ended_at: new Date().toISOString() }).eq('user_id', userId).is('ended_at', null);
+  await _supabase.from('zane_status_periods').insert({ id: uid(), user_id: userId, mode, started_at: startedAt });
+}
+
+async function closeStatusPeriod(userId) {
+  await _supabase.from('zane_status_periods').update({ ended_at: new Date().toISOString() }).eq('user_id', userId).is('ended_at', null);
+}
+
+async function updateStatusPeriodStart(userId, startedAt) {
+  await _supabase.from('zane_status_periods').update({ started_at: startedAt }).eq('user_id', userId).is('ended_at', null);
+}
+
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
@@ -2415,6 +2433,7 @@ window.LB = {
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover,
   subscribeToChanges,
+  openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,
