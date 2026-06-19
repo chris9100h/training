@@ -56,6 +56,9 @@ function NavRow({ label, hint, onTap, first = false, accent = false }) {
 
 const accentBtn = { background: 'rgba(var(--accent-rgb),0.10)', border: '0.5px solid rgba(var(--accent-rgb),0.22)', color: 'var(--accent)', padding: '5px 14px', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent', flexShrink: 0 };
 
+const isIosDevice = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+  (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
 // Every settings sheet renders its title in the accent color.
 function SettingsSheet(props) {
   return <Sheet titleColor="var(--accent)" {...props} />;
@@ -63,58 +66,82 @@ function SettingsSheet(props) {
 
 // ─── HOW TO SHEET ────────────────────────────────────────────────────
 function HowToSheet({ open, onClose }) {
+  const [osPickerOpen, setOsPickerOpen] = useStateSet(false);
+  const handleClose = () => { onClose(); setOsPickerOpen(false); };
+  const btnStyle = {
+    width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    padding: '14px 0', WebkitTapHighlightColor: 'transparent',
+  };
+  const chevron = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>;
   return (
-    <SettingsSheet open={open} onClose={onClose} title="How to…">
-      <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
-        <button onClick={() => { onClose(); window.__startTour?.('createPlan'); }} style={{
-          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          padding: '14px 0', WebkitTapHighlightColor: 'transparent',
-        }}>
-          <div style={{ textAlign: 'left' }}>
-            <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Create a plan &amp; exercise</div>
-            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Guided tour of plan creation and the training loop</div>
+    <>
+      <SettingsSheet open={open} onClose={handleClose} title="How to…">
+        <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+          <button onClick={() => { onClose(); window.__startTour?.('createPlan'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Create a plan &amp; exercise</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Guided tour of plan creation and the training loop</div>
+            </div>
+            {chevron}
+          </button>
+          <div className="knurl" />
+          <button onClick={() => { onClose(); window.__startTour?.('doWorkout'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Do a workout</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Logging sets, keyboard, plate calc, navigation and ending a session</div>
+            </div>
+            {chevron}
+          </button>
+          <div className="knurl" />
+          <button onClick={() => { onClose(); window.__startTour?.('healthTab'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Use the Health tab</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Daily logging, macro targets, cardio tracking, and week overview</div>
+            </div>
+            {chevron}
+          </button>
+          <div className="knurl" />
+          <button onClick={() => { onClose(); window.__startTour?.('coaching'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Be a coach / client</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Invites, weekly check-ins, macros and notes — coach and client side</div>
+            </div>
+            {chevron}
+          </button>
+          <div className="knurl" />
+          <button onClick={() => setOsPickerOpen(true)} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Install as app</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Add Zane to your home screen — works on iPhone and Android</div>
+            </div>
+            {chevron}
+          </button>
+        </div>
+      </SettingsSheet>
+      <SettingsSheet open={osPickerOpen && open} onClose={() => setOsPickerOpen(false)} title="Install as app">
+        <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+          <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, padding: '4px 0 12px' }}>
+            Which device are you installing on?
           </div>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
-        <div className="knurl" />
-        <button onClick={() => { onClose(); window.__startTour?.('doWorkout'); }} style={{
-          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          padding: '14px 0', WebkitTapHighlightColor: 'transparent',
-        }}>
-          <div style={{ textAlign: 'left' }}>
-            <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Do a workout</div>
-            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Logging sets, keyboard, plate calc, navigation and ending a session</div>
-          </div>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
-        <div className="knurl" />
-        <button onClick={() => { onClose(); window.__startTour?.('healthTab'); }} style={{
-          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          padding: '14px 0', WebkitTapHighlightColor: 'transparent',
-        }}>
-          <div style={{ textAlign: 'left' }}>
-            <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Use the Health tab</div>
-            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Daily logging, macro targets, cardio tracking, and week overview</div>
-          </div>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
-        <div className="knurl" />
-        <button onClick={() => { onClose(); window.__startTour?.('coaching'); }} style={{
-          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          padding: '14px 0', WebkitTapHighlightColor: 'transparent',
-        }}>
-          <div style={{ textAlign: 'left' }}>
-            <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Be a coach / client</div>
-            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Invites, weekly check-ins, macros and notes — coach and client side</div>
-          </div>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
-      </div>
-    </SettingsSheet>
+          <button onClick={() => { setOsPickerOpen(false); onClose(); window.__startTour?.('installPwaIos'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>iPhone / iPad</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Safari → Share button → Add to Home Screen</div>
+            </div>
+            {chevron}
+          </button>
+          <div className="knurl" />
+          <button onClick={() => { setOsPickerOpen(false); onClose(); window.__startTour?.('installPwaAndroid'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Android</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Chrome → three-dot menu → Add to Home screen</div>
+            </div>
+            {chevron}
+          </button>
+        </div>
+      </SettingsSheet>
+    </>
   );
 }
 
@@ -151,6 +178,138 @@ function ChangelogSheet({ open, onClose }) {
         </div>
       </SettingsSheet>
     </>
+  );
+}
+
+// ─── PASSKEY SHEET ───────────────────────────────────────────────────
+function PasskeySheet({ open, onClose }) {
+  const [confirmEl, confirm] = useConfirm();
+  const [passkeys, setPasskeys] = useStateSet([]);
+  const [loadingList, setLoadingList] = useStateSet(false);
+  const [adding, setAdding] = useStateSet(false);
+  const [deletingId, setDeletingId] = useStateSet(null);
+  const [error, setError] = useStateSet('');
+  const [successMsg, setSuccessMsg] = useStateSet('');
+
+  const flash = (msg, isError = false) => {
+    if (isError) setError(msg); else setSuccessMsg(msg);
+    setTimeout(() => { setError(''); setSuccessMsg(''); }, 3500);
+  };
+
+  const loadPasskeys = async () => {
+    setLoadingList(true);
+    try {
+      const list = await LB.listPasskeys();
+      setPasskeys(list);
+    } catch (e) {
+      flash(e.message || 'Failed to load passkeys', true);
+    } finally {
+      setLoadingList(false);
+    }
+  };
+
+  useEffectSet(() => {
+    if (open) loadPasskeys();
+    else { setPasskeys([]); setError(''); setSuccessMsg(''); }
+  }, [open]);
+
+  const handleAdd = async () => {
+    if (adding) return;
+    setAdding(true); setError('');
+    try {
+      await LB.registerPasskey();
+      flash('Passkey added!');
+      loadPasskeys();
+    } catch (e) {
+      flash(e.message || 'Failed to add passkey', true);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleDelete = async (id, name) => {
+    if (deletingId) return;
+    const ok = await confirm(`Remove "${name || 'Passkey'}"? You won't be able to sign in with it anymore.`, { ok: 'Remove', danger: true });
+    if (!ok) return;
+    setDeletingId(id);
+    try {
+      await LB.deletePasskey(id);
+      setPasskeys(prev => prev.filter(p => p.id !== id));
+      flash('Passkey removed');
+    } catch (e) {
+      flash(e.message || 'Failed to remove passkey', true);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const fmtDate = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  return (
+    <SettingsSheet open={open} onClose={onClose} title="Passkeys">
+      {confirmEl}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+        <button onClick={handleAdd} disabled={adding} style={{
+          width: '100%', padding: '12px 0', borderRadius: 6,
+          background: 'rgba(var(--accent-rgb),0.10)', border: '0.5px solid rgba(var(--accent-rgb),0.25)',
+          color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+          cursor: adding ? 'default' : 'pointer', opacity: adding ? 0.6 : 1,
+          WebkitTapHighlightColor: 'transparent',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          {adding ? 'Adding…' : 'Add passkey for this device'}
+        </button>
+
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 8, marginBottom: 20, lineHeight: 1.5 }}>
+          Each device needs its own passkey — Face ID, Touch ID or device PIN.
+        </div>
+
+        {(error || successMsg) && (
+          <div style={{ fontSize: 12, color: error ? UI.danger : UI.gold, fontFamily: UI.fontUi, marginBottom: 12, padding: '8px 12px', background: error ? 'rgba(var(--danger-rgb),0.06)' : 'rgba(var(--accent-rgb),0.08)', borderRadius: 6 }}>
+            {error || successMsg}
+          </div>
+        )}
+
+        {loadingList ? (
+          <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '16px 0' }}>Loading…</div>
+        ) : passkeys.length === 0 ? (
+          <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '16px 0' }}>No passkeys registered yet</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Registered passkeys</div>
+            {passkeys.map((pk, i) => (
+              <React.Fragment key={pk.id}>
+                {i > 0 && <div className="knurl" />}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0' }}>
+                  <div>
+                    <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500 }}>
+                      {pk.friendly_name || 'Passkey'}
+                    </div>
+                    <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>
+                      Added {fmtDate(pk.created_at)}
+                    </div>
+                  </div>
+                  <button onClick={() => handleDelete(pk.id, pk.friendly_name)} disabled={!!deletingId} style={{
+                    background: 'rgba(var(--danger-rgb),0.08)', border: '0.5px solid rgba(var(--danger-rgb),0.2)',
+                    color: UI.danger, borderRadius: 6, padding: '5px 12px',
+                    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                    cursor: deletingId ? 'default' : 'pointer', opacity: deletingId === pk.id ? 0.5 : 1,
+                    WebkitTapHighlightColor: 'transparent', flexShrink: 0,
+                  }}>
+                    {deletingId === pk.id ? '…' : 'Remove'}
+                  </button>
+                </div>
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+      </div>
+    </SettingsSheet>
   );
 }
 
@@ -204,10 +363,21 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [pushStatus, setPushStatus] = useStateSet(null);
   const [pushEnabled, setPushEnabled] = useStateSet(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
   const [pushKeyDraft, setPushKeyDraft] = useStateSet('');
-  const [pushKeyModalOpen, setPushKeyModalOpen] = useStateSet(false);
   const [testPickerOpen, setTestPickerOpen] = useStateSet(false);
+  const [advancedPushSheet, setAdvancedPushSheet] = useStateSet(false);
+  const [pushoverStep, setPushoverStep] = useStateSet('idle'); // 'idle'|'entering-key'|'code-sent'
+  const [pendingCode, setPendingCode] = useStateSet('');
+  const [codeInput, setCodeInput] = useStateSet('');
+  const [verifyLoading, setVerifyLoading] = useStateSet(false);
   const [pushSheet, setPushSheet] = useStateSet(false);
+  const [webPushSub, setWebPushSub] = useStateSet(null);
+  const [webPushLoading, setWebPushLoading] = useStateSet(false);
+  const [webPushVerified, setWebPushVerified] = useStateSet(() => localStorage.getItem('logbook-push-verified') === 'true');
+  const [iosDisclaimerSeen, setIosDisclaimerSeen] = useStateSet(() => localStorage.getItem('logbook-push-ios-hint-seen') === 'true');
+  const [webPushStep, setWebPushStep] = useStateSet('idle'); // 'idle'|'code-sent'
+  const [webPushCode, setWebPushCode] = useStateSet('');
   const [reminderSheet, setReminderSheet] = useStateSet(false);
+  const [passkeySheet, setPasskeySheet] = useStateSet(false);
   const [reminderEnabled, setReminderEnabled] = useStateSet(() => store.settings?.reminderEnabled ?? false);
   const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
@@ -244,6 +414,11 @@ function SettingsScreen({ store, setStore, go, userId }) {
     if (!('caches' in window)) return;
     caches.keys().then(keys => { const name = keys.find(k => k.startsWith('zane-')); if (name) setSwVersion(name.replace('zane-', '')); });
   }, []);
+
+  useEffectSet(() => {
+    if (!pushSheet) return;
+    LB.getWebPushSubscription().then(sub => setWebPushSub(sub)).catch(() => {});
+  }, [pushSheet]);
 
   // Admin-only: current global "signups need approval" setting.
   useEffectSet(() => {
@@ -328,28 +503,109 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
   const pushStatusTimer = useRefSet(null);
   useEffectSet(() => () => clearTimeout(pushStatusTimer.current), []);
-  const togglePush = () => {
-    if (!pushEnabled) {
-      if (store.settings?.pushoverUserKey) { setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true'); setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } })); }
-      else { setPushKeyDraft(''); setPushKeyModalOpen(true); }
-    } else { setPushEnabled(false); localStorage.setItem('logbook-push-enabled', 'false'); setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: false } })); }
+  const togglePush = async () => {
+    if (webPushLoading) return;
+    setWebPushLoading(true);
+    try {
+      if (!pushEnabled) {
+        const sub = await LB.subscribeWebPush(userId);
+        setWebPushSub(sub);
+        setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true');
+        setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } }));
+        setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
+        sendWebPushCode();
+      } else {
+        await LB.unsubscribeWebPush(userId);
+        setWebPushSub(null);
+        setPushEnabled(false); localStorage.setItem('logbook-push-enabled', 'false');
+        setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
+        setWebPushStep('idle'); setWebPushCode(''); setCodeInput('');
+        setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: false } }));
+      }
+    } catch (e) {
+      clearTimeout(pushStatusTimer.current);
+      const msg = e.message?.toLowerCase() ?? '';
+      setPushStatus(msg.includes('denied') || msg.includes('permission')
+        ? 'Permission denied — enable notifications in browser settings'
+        : `Error: ${e.message}`);
+      pushStatusTimer.current = setTimeout(() => setPushStatus(null), 7000);
+    } finally {
+      setWebPushLoading(false);
+    }
   };
-  const pushKeyValid = /^[a-zA-Z0-9]{30}$/.test(pushKeyDraft.trim());
-  const confirmPushKey = () => {
-    if (!pushKeyValid) return;
-    const key = pushKeyDraft.trim();
-    setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true');
-    setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true, pushoverUserKey: key } }));
-    setPushKeyModalOpen(false);
+  const sendWebPushCode = () => {
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    setWebPushCode(code); setCodeInput(''); setWebPushStep('code-sent');
+    LB.fnFetch(LB.WEB_PUSH_URL, { title: 'Zane · verification', message: `Your code: ${code}` }).catch(() => {});
   };
-  const testPushover = async (delaySeconds = 0) => {
+  const verifyWebPushCode = () => {
+    if (codeInput.trim() !== webPushCode) {
+      clearTimeout(pushStatusTimer.current);
+      setPushStatus('Wrong code — check the notification');
+      pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
+      return;
+    }
+    setWebPushVerified(true); localStorage.setItem('logbook-push-verified', 'true');
+    setWebPushStep('idle'); setWebPushCode(''); setCodeInput('');
+    clearTimeout(pushStatusTimer.current);
+    setPushStatus('✓ Verified'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 3000);
+  };
+  const PUSHOVER_VERIFY_URL = `${LB.SUPABASE_URL}/functions/v1/pushover-verify`;
+  const closeAdvanced = () => { setAdvancedPushSheet(false); setPushoverStep('idle'); setPushKeyDraft(''); setCodeInput(''); setPendingCode(''); };
+  const sendVerificationCode = async () => {
+    setVerifyLoading(true);
+    clearTimeout(pushStatusTimer.current);
+    try {
+      const res = await LB.fnFetch(PUSHOVER_VERIFY_URL, { userKey: pushKeyDraft.trim() });
+      if (!res?.ok) { const d = await res?.json().catch(() => ({})); setPushStatus(`Error: ${d?.error || 'send failed'}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
+      const { code } = await res.json();
+      setPendingCode(code);
+      setPushoverStep('code-sent');
+    } catch (e) { setPushStatus(`Error: ${e.message}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
+    finally { setVerifyLoading(false); }
+  };
+  const verifyCode = () => {
+    if (codeInput.trim() !== pendingCode) { setPushStatus('Incorrect code — check the Pushover notification'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
+    setStore(s => ({ ...s, settings: { ...s.settings, pushoverUserKey: pushKeyDraft.trim(), usePushover: true } }));
+    setPushoverStep('idle'); setPendingCode(''); setCodeInput(''); setPushKeyDraft('');
+    setPushStatus('✓ Pushover active'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 4000);
+  };
+  const disablePushover = () => {
+    setStore(s => ({ ...s, settings: { ...s.settings, pushoverUserKey: null, usePushover: false } }));
+    setPushoverStep('idle');
+  };
+  const testWebPush = async () => {
+    clearTimeout(pushStatusTimer.current);
+    setPushStatus('Sending…');
+    try {
+      const res = await LB.fnFetch(LB.WEB_PUSH_URL, { title: 'Zane Test', message: 'Notifications are working! 💪' });
+      if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 202 || data.scheduled) { setPushStatus('✓ Sent'); }
+      else if (data.skipped) { setPushStatus('No subscription found — try toggling push off and on'); }
+      else { setPushStatus(`Error: ${JSON.stringify(data)}`); }
+    } catch (e) { setPushStatus(`Error: ${e.message}`); }
+    pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
+  };
+  const testRestTimer = async (delaySeconds = 0) => {
     clearTimeout(pushStatusTimer.current);
     setPushStatus(delaySeconds > 0 ? 'Sending… Lock screen now!' : 'Sending…');
+    const nonce = String(Date.now());
+    const title = 'Zane Test';
+    const message = 'Rest done — keep going! 💪';
+    const usesPushover = !!(store.settings?.pushoverUserKey && store.settings?.usePushover);
     try {
-      const res = await LB.fnFetch(LB.PUSHOVER_URL, { message: 'Rest done — keep going! 💪', title: 'Zane Test', delaySeconds, nonce: String(Date.now()), ttl: 10 });
-      if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
-      else if (res.status === 202) { setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
-      else { const data = await res.json(); setPushStatus(data.skipped ? 'Key not synced yet — try again in a few seconds' : data.status === 1 ? '✓ Sent' : `Error: ${JSON.stringify(data)}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
+      if (usesPushover) {
+        const res = await LB.fnFetch(LB.PUSHOVER_URL, { message, title, delaySeconds, nonce, ttl: 10 });
+        if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
+        if (res.status === 202) { setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
+        else { const data = await res.json().catch(() => ({})); setPushStatus(data.skipped ? 'Key not synced yet — try again' : `Error: ${JSON.stringify(data)}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
+      } else {
+        const res = await LB.fnFetch(LB.WEB_PUSH_URL, { title, message, delaySeconds, nonce });
+        if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
+        if (res.status === 202) { setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
+        else { const data = await res.json().catch(() => ({})); setPushStatus(`Error: ${JSON.stringify(data)}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
+      }
     } catch (e) { setPushStatus(`Error: ${e.message}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
   };
   const toggleReminder = () => { const next = !reminderEnabled; setReminderEnabled(next); setStore(s => ({ ...s, settings: { ...s.settings, reminderEnabled: next } })); };
@@ -656,6 +912,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
             <button style={accentBtn} onClick={() => setPushSheet(true)}>Configure</button>
           </Row>
           <Hairline style={{ margin: '14px 0' }} />
+          {typeof window !== 'undefined' && window.PublicKeyCredential && (
+            <>
+              <NavRow label="Passkeys" onTap={() => setPasskeySheet(true)} first />
+              <Hairline style={{ margin: '14px 0' }} />
+            </>
+          )}
           <Row label="Remind on training days" first>
             {reminderEnabled
               ? <button style={accentBtn} onClick={() => setReminderSheet(true)}>{store.settings?.reminderTime || 'Change'}</button>
@@ -667,6 +929,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
           </div>
         </div>
       </SettingsSheet>
+
+      {/* ══ Passkey Sheet ══ */}
+      <PasskeySheet open={passkeySheet} onClose={() => setPasskeySheet(false)} />
 
       {/* ══ Admin Sheet ══ */}
       <SettingsSheet open={adminSheet} onClose={() => setAdminSheet(false)} title="Admin">
@@ -1085,22 +1350,113 @@ function SettingsScreen({ store, setStore, go, userId }) {
       {/* ══ Push notifications sheet ══ */}
       <SettingsSheet open={pushSheet} onClose={() => setPushSheet(false)} title="Push notifications">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
-          <Row label="Enabled" first>
-            <Toggle on={pushEnabled} onToggle={togglePush} />
+          {isIosDevice && !pushEnabled && !iosDisclaimerSeen && (
+            <div style={{ background: 'rgba(var(--accent-rgb),0.07)', border: '0.5px solid rgba(var(--accent-rgb),0.2)', borderRadius: 6, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
+                Push notifications on iPhone and iPad require Zane to be installed as an app on your home screen. For instructions, see <span style={{ color: 'var(--accent)' }}>How to… → Install as app</span>.
+              </div>
+              <button onClick={() => { setIosDisclaimerSeen(true); localStorage.setItem('logbook-push-ios-hint-seen', 'true'); }} style={{ ...accentBtn, alignSelf: 'flex-start' }}>Got it</button>
+            </div>
+          )}
+          <Row label="This device" first>
+            {webPushLoading
+              ? <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkFaint }}>…</span>
+              : <Toggle on={pushEnabled} onToggle={togglePush} />}
           </Row>
-          {store.settings?.pushoverUserKey && (
-            <Row label="User key">
-              <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={accentBtn}>Change</button>
-            </Row>
+          {pushEnabled && store.settings?.usePushover && store.settings?.pushoverUserKey && (
+            <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>Active via Pushover — see Advanced</div>
           )}
-          {pushEnabled && (
-            <Row label="Test notification">
-              <button onClick={() => setTestPickerOpen(true)} style={accentBtn}>Send</button>
-            </Row>
-          )}
+          {pushEnabled && !store.settings?.usePushover && webPushSub && (() => {
+            const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 20, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box', letterSpacing: '0.3em', textAlign: 'center' };
+            if (webPushStep === 'code-sent') return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="micro" style={{ color: UI.inkSoft, paddingLeft: 2 }}>Enter the 6-digit code from the notification</div>
+                <input type="text" inputMode="numeric" maxLength={6} value={codeInput}
+                  onChange={e => setCodeInput(e.target.value.replace(/\D/g, ''))}
+                  placeholder="000000" style={iStyle} autoFocus />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Btn kind="ghost" onClick={sendWebPushCode}>Resend</Btn>
+                  <Btn onClick={verifyWebPushCode} disabled={codeInput.length !== 6} style={{ flex: 1 }}>Verify</Btn>
+                </div>
+              </div>
+            );
+            if (webPushVerified) return <div className="micro" style={{ color: 'var(--accent)', paddingLeft: 2 }}>✓ Active</div>;
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>Active — not yet verified</div>
+                <button onClick={sendWebPushCode} style={accentBtn}>Send verification code</button>
+              </div>
+            );
+          })()}
           {pushStatus && <div className="micro" style={{ color: pushStatus.startsWith('✓') ? 'var(--accent)' : UI.inkSoft, textAlign: 'center', padding: '6px 0' }}>{pushStatus}</div>}
+          {pushEnabled && (
+            <Row label="Advanced">
+              <button onClick={() => setAdvancedPushSheet(true)} style={accentBtn}>Open</button>
+            </Row>
+          )}
           <Btn onClick={() => setPushSheet(false)}>Done</Btn>
         </div>
+      </SettingsSheet>
+
+      {/* ══ Advanced push sheet ══ */}
+      <SettingsSheet open={advancedPushSheet} onClose={closeAdvanced} title="Advanced">
+        {(() => {
+          const isVerified = !!(store.settings?.usePushover && store.settings?.pushoverUserKey);
+          const inputStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+              <Row label="Use Pushover" first>
+                <Toggle
+                  on={isVerified || pushoverStep !== 'idle'}
+                  onToggle={() => {
+                    if (isVerified) { disablePushover(); }
+                    else if (pushoverStep !== 'idle') { setPushoverStep('idle'); setPushKeyDraft(''); setCodeInput(''); setPendingCode(''); }
+                    else { setPushoverStep('entering-key'); }
+                  }}
+                />
+              </Row>
+              <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
+                Uses the Pushover app instead of browser push for rest timer notifications. Delivers even without the PWA installed.
+              </div>
+
+              {!isVerified && pushoverStep === 'entering-key' && (
+                <>
+                  <input value={pushKeyDraft} onChange={e => setPushKeyDraft(e.target.value)}
+                    placeholder="Pushover user key (from pushover.net)"
+                    style={inputStyle} autoCorrect="off" autoCapitalize="none" spellCheck={false} />
+                  <Btn onClick={sendVerificationCode} disabled={pushKeyDraft.trim().length < 10 || verifyLoading}>
+                    {verifyLoading ? 'Sending…' : 'Send verification code'}
+                  </Btn>
+                </>
+              )}
+
+              {!isVerified && pushoverStep === 'code-sent' && (
+                <>
+                  <div className="micro" style={{ color: UI.inkFaint }}>Enter the 6-digit code from your Pushover notification</div>
+                  <input value={codeInput} onChange={e => setCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="000000" inputMode="numeric" maxLength={6} autoFocus
+                    style={{ ...inputStyle, fontSize: 20, letterSpacing: '0.3em', textAlign: 'center' }} />
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Btn kind="ghost" onClick={() => { setCodeInput(''); setPendingCode(''); sendVerificationCode(); }}>Resend</Btn>
+                    <Btn onClick={verifyCode} disabled={codeInput.length !== 6} style={{ flex: 1 }}>Verify</Btn>
+                  </div>
+                </>
+              )}
+
+              {isVerified && (
+                <>
+                  <div className="micro" style={{ color: UI.inkFaint }}>Active · key …{store.settings.pushoverUserKey.slice(-8)}</div>
+                  <Row label="Test rest timer">
+                    <button onClick={() => setTestPickerOpen(true)} style={accentBtn}>Send</button>
+                  </Row>
+                </>
+              )}
+
+              {pushStatus && <div className="micro" style={{ color: pushStatus.startsWith('✓') ? 'var(--accent)' : UI.inkSoft, textAlign: 'center', padding: '6px 0' }}>{pushStatus}</div>}
+              <Btn onClick={closeAdvanced}>Done</Btn>
+            </div>
+          );
+        })()}
       </SettingsSheet>
 
       {/* ══ Reminder sheet ══ */}
@@ -1128,24 +1484,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
         </div>
       </SettingsSheet>
 
-      {/* ══ Test picker sheet ══ */}
-      <SettingsSheet open={testPickerOpen} onClose={() => setTestPickerOpen(false)} title="Send test notification">
+      {/* ══ Test picker sheet (used from Advanced) ══ */}
+      <SettingsSheet open={testPickerOpen} onClose={() => setTestPickerOpen(false)} title="Test rest timer">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
-          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(0); }}>Now</Btn>
-          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(10); }}>In 10 seconds</Btn>
-          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testPushover(30); }}>In 30 seconds</Btn>
-        </div>
-      </SettingsSheet>
-
-      {/* ══ Pushover key sheet ══ */}
-      <SettingsSheet open={pushKeyModalOpen} onClose={() => setPushKeyModalOpen(false)} title="Pushover User Key">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.5 }}>Enter your Pushover user key. Find it at pushover.net after logging in.</div>
-          <input value={pushKeyDraft} onChange={e => setPushKeyDraft(e.target.value)} placeholder="uXXXXXXXXXXXXXXXXXXXX"
-            style={{ background: UI.bgInset, border: `0.5px solid ${pushKeyDraft && !pushKeyValid ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
-            autoCorrect="off" autoCapitalize="none" spellCheck={false} />
-          {pushKeyDraft && !pushKeyValid && <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.85)' }}>Invalid key — must be 30 alphanumeric characters</div>}
-          <Btn onClick={confirmPushKey} disabled={!pushKeyValid}>Enable notifications</Btn>
+          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testRestTimer(0); }}>Now</Btn>
+          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testRestTimer(10); }}>In 10 seconds</Btn>
+          <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testRestTimer(30); }}>In 30 seconds</Btn>
         </div>
       </SettingsSheet>
 

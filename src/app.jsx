@@ -315,6 +315,8 @@ function App() {
   const isTokenFlow = useRefA(
     window.location.hash.includes('type=invite') || window.location.hash.includes('type=recovery')
   );
+  const isRecoveryFlow = useRefA(window.location.hash.includes('type=recovery'));
+  const recoveryInProgress = useRefA(false); // set by PASSWORD_RECOVERY event; guards loadData from overriding the reset screen
   const [store, setStore]         = useStateA(null);
   const [userId, setUserId]       = useStateA(null);
   const [route, setRoute]         = useStateA({ name: 'home' });
@@ -573,6 +575,8 @@ function App() {
       try {
         const loaded = await LB.loadFromSupabase(uid);
         if (!loaded.user.approved) { setPhase('pending'); return; }
+        // PASSWORD_RECOVERY event may have fired while we were fetching — don't override the reset screen
+        if (recoveryInProgress.current) return;
         prevStore.current = loaded;
         syncBase.current = loaded;
         LB.saveBase(loaded, uid);
@@ -603,12 +607,22 @@ function App() {
         // logging in after a previous 'ready' session would never be prompted.
         onboardingChecked.current = false;
         unitPicked.current = false; // re-arm unit watcher for the new account
+        recoveryInProgress.current = false; // clear so loadData can complete after a password reset
         setUserId(session.user.id);
         if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
         else loadData(session.user.id);
+      } else if (event === 'PASSWORD_RECOVERY') {
+        // Supabase fires this (in addition to or instead of SIGNED_IN) when a
+        // recovery link is clicked — handle it explicitly so the reset screen
+        // always appears regardless of whether the implicit-flow hash is present.
+        recoveryInProgress.current = true;
+        isRecoveryFlow.current = true;
+        setUserId(session.user.id);
+        setPhase('invite');
       } else if (event === 'SIGNED_OUT') {
         onboardingChecked.current = false;
         unitPicked.current = false;
+        recoveryInProgress.current = false;
         // An offline SIGNED_OUT is almost always a failed token refresh, not a
         // real sign-out — never wipe the cache or drop to the login screen.
         if (!navigator.onLine) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
@@ -895,7 +909,7 @@ function App() {
 
   if (phase === 'init' || phase === 'loading') return <LoadingScreen />;
   if (phase === 'unauthed') return <window.Screens.LoginScreen />;
-  if (phase === 'invite') return <window.Screens.SetPasswordScreen onDone={() => loadData(userId)} />;
+  if (phase === 'invite') return <window.Screens.SetPasswordScreen isRecovery={isRecoveryFlow.current} onDone={() => loadData(userId)} />;
   if (phase === 'pending') return <window.Screens.PendingApprovalScreen onSignOut={() => LB.signOut()} />;
   if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 

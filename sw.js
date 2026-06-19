@@ -1,4 +1,4 @@
-const CACHE = 'zane-v2.367';
+const CACHE = 'zane-v2.376';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 // Works at any base path (e.g. /training/ on GitHub Pages, / on custom domain)
 const BASE = self.registration.scope.replace(/\/$/, '');
@@ -57,8 +57,69 @@ self.addEventListener('activate', e => {
   );
 });
 
+// Slot for the active SW-managed rest timer (one at a time).
+const _restTimer = { id: null, resolve: null };
+
 self.addEventListener('message', e => {
-  if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
+  if (e.data?.type === 'SKIP_WAITING') { self.skipWaiting(); return; }
+
+  if (e.data?.type === 'SCHEDULE_REST_TIMER') {
+    // Cancel any previously scheduled timer and release its waitUntil promise.
+    clearTimeout(_restTimer.id); _restTimer.id = null;
+    if (_restTimer.resolve) { _restTimer.resolve(); _restTimer.resolve = null; }
+
+    const { delayMs = 0, title, body } = e.data;
+    // waitUntil keeps the SW alive for the full rest duration.
+    e.waitUntil(new Promise(resolve => {
+      _restTimer.resolve = resolve;
+      _restTimer.id = setTimeout(async () => {
+        _restTimer.id = null; _restTimer.resolve = null;
+        // Skip notification if any app window is currently focused.
+        const cs = await clients.matchAll({ type: 'window' });
+        if (!cs.some(c => c.focused)) {
+          await self.registration.showNotification(title || 'Zane · Rest done', {
+            body: body || 'Time to start your next set! 💪',
+            icon: BASE + '/icons/icon-192.png',
+            badge: BASE + '/icons/icon-192.png',
+            tag: 'rest-timer',
+          });
+        }
+        resolve();
+      }, delayMs);
+    }));
+    return;
+  }
+
+  if (e.data?.type === 'CANCEL_REST_TIMER') {
+    clearTimeout(_restTimer.id); _restTimer.id = null;
+    if (_restTimer.resolve) { _restTimer.resolve(); _restTimer.resolve = null; }
+    return;
+  }
+});
+
+self.addEventListener('push', e => {
+  const data = e.data ? e.data.json() : {};
+  e.waitUntil(
+    self.registration.showNotification(data.title || 'Zane', {
+      body: data.body || '',
+      icon: BASE + '/icons/icon-192.png',
+      badge: BASE + '/icons/icon-192.png',
+      data: { url: data.url || BASE + '/' },
+      tag: 'zane-push',
+    })
+  );
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = e.notification.data?.url || BASE + '/';
+  e.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
+      const match = cs.find(c => c.url.startsWith(BASE));
+      if (match) return match.focus();
+      return clients.openWindow(url);
+    })
+  );
 });
 
 self.addEventListener('fetch', e => {

@@ -383,11 +383,11 @@ const EXERCISE_SIZES = [['big','Big'],['medium','Medium'],['small','Small']];
 const EQUIPMENT_TYPES = [
   { key: 'no_equipment',   label: 'No equipment' },
   { key: 'bodyweight',     label: 'Bodyweight' },
-  { key: 'barbell_dual',   label: 'Dual plates' },
-  { key: 'barbell_single', label: 'Single plate' },
   { key: 'cable',          label: 'Cable' },
-  { key: 'machine',        label: 'Machine' },
   { key: 'dumbbell',       label: 'Dumbbell' },
+  { key: 'barbell_dual',   label: 'Dual plates' },
+  { key: 'machine',        label: 'Machine' },
+  { key: 'barbell_single', label: 'Single plate' },
 ];
 
 const _chevronDown = (

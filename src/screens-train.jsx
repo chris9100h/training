@@ -637,6 +637,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }));
   };
 
+  const removeLastSet = async () => {
+    const workingSets = entry.sets.map((s, i) => ({ s, i })).filter(({ s }) => !s.warmup);
+    if (workingSets.length <= 1) return;
+    const last = workingSets[workingSets.length - 1];
+    if (!await confirm(`Remove set ${workingSets.length}?`, { ok: 'Remove', danger: true })) return;
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((e, i) => i === exIdx
+        ? { ...e, sets: e.sets.filter((_, k) => k !== last.i) }
+        : e),
+    }));
+  };
+
   const setNote = (note) => {
     updateSession(sess => ({
       ...sess,
@@ -803,11 +816,31 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   useEffectT(() => {
     const row = chipRowRef.current;
     if (!row) return;
-    const chip = row.children[exIdx];
+    const chip = row.querySelector(`[data-reorder-item]:nth-child(${exIdx + 1})`);
     if (!chip) return;
     const target = chip.offsetLeft - row.offsetWidth / 2 + chip.offsetWidth / 2;
     row.scrollLeft = target;
   }, [exIdx]);
+
+  // chip drag-to-reorder — uses the shared horizontal drag hook from ui.jsx
+  const chipDragReorderRef = UI.useDragReorderH({ longPressMs: 400,
+    onReorder: (from, to) => {
+      updateSession(sess => {
+        const entries = [...sess.entries];
+        const [moved] = entries.splice(from, 1);
+        entries.splice(to, 0, moved);
+        let idx = sess.currentExIdx || 0;
+        if (idx === from) idx = to;
+        else if (from < to && idx > from && idx <= to) idx--;
+        else if (from > to && idx >= to && idx < from) idx++;
+        return { ...sess, entries, currentExIdx: idx };
+      });
+    },
+  });
+  const chipRowSetRef = React.useCallback(node => {
+    chipRowRef.current = node;
+    chipDragReorderRef(node);
+  }, [chipDragReorderRef]);
 
   // rest timer — persisted in session so navigation doesn't kill it
   const [restStart, setRestStart] = useStateT(() => session.restStart ?? null);
@@ -818,17 +851,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const newDur = val !== null ? (dur ?? null) : null;
     setRestDuration(newDur);
     updateSession(sess => ({ ...sess, restStart: val, restDuration: newDur }));
-    // Schedule the "rest over" push right here — the single place a rest timer
-    // is started or adjusted. Scheduling it in a mount effect instead re-fired
-    // every time the Train screen was re-entered (e.g. Home → back), queuing a
-    // second server-side relay chain under the same nonce; both chains
-    // delivered, so the push arrived twice. The nonce only dedups a *newer*
-    // timer, never a re-send of the same one.
-    if (val !== null && store.settings?.pushEnabled) {
-      const def = newDur ?? restDef;
-      const delaySeconds = Math.round(Math.max(0, val + def * 1000 - Date.now()) / 1000);
-      // Authenticated as the user; the server derives the target key from the DB.
-      LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds, nonce: String(val), priority: 1 });
+    if (val !== null) {
+      if (store.settings?.pushEnabled) {
+        const def = newDur ?? restDef;
+        const delaySeconds = Math.round(Math.max(0, val + def * 1000 - Date.now()) / 1000);
+        const nonce = String(val);
+        if (store.settings?.pushoverUserKey && store.settings?.usePushover) {
+          LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds, nonce, priority: 1 });
+        } else {
+          LB.fnFetch(LB.WEB_PUSH_URL, { delaySeconds, nonce, title: 'Zane · Rest done', message: 'Time to start your next set! 💪' });
+        }
+      }
+    } else {
+      cancelPushover();
     }
   };
   const [now, setNow] = useStateT(Date.now());
@@ -1344,6 +1379,37 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       diffs.push({ type: 'removed', name: oldEx?.name || '?', exId: item.exId, originalIdx });
     }
 
+    // Reorder: detect exercises that were intentionally moved (not just shifted by
+    // a neighbour's drag). Strategy: find the Longest Increasing Subsequence of
+    // session positions — those exercises kept their relative order and were NOT
+    // dragged. Everything outside the LIS was explicitly moved by the user.
+    const matchedPairs = planItems
+      .map((_, i) => matched[i] ? { planIdx: i, sessPos: sessionPlanEntries.indexOf(matched[i]) } : null)
+      .filter(Boolean);
+    if (matchedPairs.some((p, k) => k > 0 && p.sessPos < matchedPairs[k - 1].sessPos)) {
+      // O(n²) LIS with parent-tracking — fine for typical plan sizes (<20 items)
+      const sp = matchedPairs.map(p => p.sessPos);
+      const dp = new Array(sp.length).fill(1);
+      const parent = new Array(sp.length).fill(-1);
+      let maxLen = 1, maxEnd = 0;
+      for (let i = 1; i < sp.length; i++) {
+        for (let j = 0; j < i; j++) {
+          if (sp[j] < sp[i] && dp[j] + 1 > dp[i]) { dp[i] = dp[j] + 1; parent[i] = j; }
+        }
+        if (dp[i] > maxLen) { maxLen = dp[i]; maxEnd = i; }
+      }
+      const lisSet = new Set();
+      for (let cur = maxEnd; cur !== -1; cur = parent[cur]) lisSet.add(cur);
+      const moves = matchedPairs
+        .map((p, k) => lisSet.has(k) ? null : {
+          name: matched[p.planIdx].name,
+          from: p.planIdx + 1,
+          to: p.sessPos + 1,
+        })
+        .filter(Boolean);
+      if (moves.length) diffs.push({ type: 'reorder', moves });
+    }
+
     return diffs;
   };
 
@@ -1382,7 +1448,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // 2. Remove exercises skipped during training
       const removedExIds = new Set(planDiff.filter(d => d.type === 'removed').map(d => d.exId));
       newItems = newItems.filter(item => !removedExIds.has(item.exId));
-      // 3. Insert ad-hoc exercises (process in session order so chained insertions work)
+      // 3. Reorder remaining plan items to match session order
+      if (planDiff.some(d => d.type === 'reorder')) {
+        const sessionOrder = session.entries
+          .filter(e => !e.isCardio && !e.addedDuringSession)
+          .map(e => e.exId);
+        newItems.sort((a, b) => {
+          const ai = sessionOrder.indexOf(a.exId);
+          const bi = sessionOrder.indexOf(b.exId);
+          if (ai === -1 && bi === -1) return 0;
+          if (ai === -1) return 1;
+          if (bi === -1) return -1;
+          return ai - bi;
+        });
+      }
+      // 4. Insert ad-hoc exercises (process in session order so chained insertions work)
       for (const diff of planDiff.filter(d => d.type === 'added')) {
         const newItem = { exId: diff.exId, sets: diff.sets, reps: null, repsPerSet: null, supersetGroup: diff.supersetGroup };
         const afterIdx = diff.insertAfterExId
@@ -1391,7 +1471,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const insertAt = afterIdx >= 0 ? afterIdx + 1 : newItems.length;
         newItems = [...newItems.slice(0, insertAt), newItem, ...newItems.slice(insertAt)];
       }
-      // 4. Sync supersetGroup for plan exercises that got linked to a new exercise
+      // 5. Sync supersetGroup for plan exercises that got linked to a new exercise
       const sessionGroups = new Map();
       session.entries.filter(e => !e.isCardio && !e.addedDuringSession)
         .forEach(e => sessionGroups.set(e.exId, e.supersetGroup || null));
@@ -1727,8 +1807,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </span>
       </div>
 
-      {/* Exercise chips */}
-      <div ref={chipRowRef} style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
+      {/* Exercise chips — long-press to drag-reorder via UI.useDragReorderH */}
+      <div ref={chipRowSetRef} data-reorder-list="true" style={{ flexShrink: 0, padding: '0 22px 12px', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
         {session.entries.flatMap((e, i) => {
           const done = e.isCardio ? !!e.cardioDone : e.sets.every(s => s.done || s.skipped);
           const active = i === exIdx;
@@ -1736,13 +1816,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const linkedToNext = e.supersetGroup && e.supersetGroup === nextE?.supersetGroup;
           const chip = (
             <button key={`chip-${i}`}
+              data-reorder-item="true"
               onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
               style={{
                 flexShrink: 0, maxWidth: 110,
                 padding: '5px 11px 4px', borderRadius: 4,
                 border: `1px solid ${active ? UI.gold : done ? UI.goldSoft : UI.hairStrong}`,
                 background: active ? UI.goldFaint : done ? 'rgba(201,169,97,0.05)' : 'transparent',
-                cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
                 transition: 'all 0.15s',
               }}>
               <div style={{
@@ -1996,63 +2078,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 )}
               </div>}
 
-              {/* Big confirm button */}
-              <div style={{ marginTop: 12, padding: '0 18px' }}>
-                <button
-                  data-complete-btn
-                  onPointerDown={e => { e.stopPropagation(); }}
-                  onClick={() => {
-                    if (currentSetIdx < 0) return;
-                    completeSet(currentSetIdx);
-                  }}
-                  disabled={warmupSetsRemaining || postWarmupRest || (!isNoWeightReps && (heroSet.kg == null || (!(kbField?.setIdx === bgSetIdx && kbField?.field !== 'kg') && (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps))))}
-                  style={{
-                    width: '100%', minHeight: 44,
-                    background: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-                    border: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? `1px solid ${UI.hairStrong}` : `1px solid var(--accent-deep)`,
-                    color: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? UI.inkFaint : '#0a0805',
-                    borderRadius: 6,
-                    fontFamily: UI.fontUi, fontWeight: 600, fontSize: 13, letterSpacing: '0.14em', textTransform: 'uppercase',
-                    cursor: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? 'default' : 'pointer',
-                    boxShadow: !isNoWeightReps && (heroSet.kg == null || (isUnilateral ? (!heroSet.repsL || !heroSet.repsR) : !heroSet.reps)) ? 'none' : '0 8px 30px rgba(var(--accent-rgb),0.30)',
-                    WebkitTapHighlightColor: 'transparent',
-                  }}>
-                  ✓ Check set
-                </button>
-              </div>
             </div>
           </BracketFrame>
         )}
 
         {/* All sets list — hidden for cardio */}
-        {!isCardio && <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
-            <span className="micro">{warmupCount > 0 && warmupActive ? 'WARMUP' : 'ALL SETS'}</span>
-            <button onClick={checkAllSets} disabled={anyMissingData && !allWorkingDone} style={{
-              padding: '4px 10px', borderRadius: 4,
-              background: allWorkingDone ? UI.goldFaint : 'transparent',
-              border: `1px solid ${allWorkingDone ? UI.goldSoft : UI.hair}`,
-              color: allWorkingDone ? UI.gold : UI.inkFaint,
-              fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
-              fontFamily: UI.fontUi, fontWeight: 500,
-              cursor: anyMissingData && !allWorkingDone ? 'default' : 'pointer',
-              opacity: anyMissingData && !allWorkingDone ? 0.3 : 1,
-            }}>{allWorkingDone ? '✓ All' : 'All ✓'}</button>
-          </div>
-
+        {!isCardio && <div style={{ paddingTop: 12 }}>
           {isNoWeightReps ? (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 4px 6px' }}>
-              <button onClick={addSet} style={{
-                width: 20, height: 20, borderRadius: 3,
-                background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-                color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>+</button>
-            </div>
+            <div style={{ height: 6 }} />
           ) : (
             <div style={{
               display: 'grid',
-              gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px',
+              gridTemplateColumns: isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px',
               gap: 8, alignItems: 'baseline',
               padding: '0 4px 6px',
             }}>
@@ -2068,12 +2105,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{store.settings?.smartProgression ? 'Reps (min)' : 'Reps'}</span>
               )}
               <div />
-              <button onClick={addSet} style={{
-                width: 20, height: 20, borderRadius: 3,
-                background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-                color: UI.inkSoft, fontSize: 14, lineHeight: 1, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>+</button>
             </div>
           )}
           <div className="knurl" style={{ marginBottom: 2 }} />
@@ -2105,7 +2136,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   )}
                   <div data-kb-row={i} style={{
                     display: 'grid',
-                    gridTemplateColumns: isNoWeightReps ? '28px 1fr 28px 18px' : (isUnilateral ? '28px 1fr 72px 44px 44px 28px 18px' : '28px 1fr 72px 56px 28px 18px'),
+                    gridTemplateColumns: isNoWeightReps ? '28px 1fr 28px' : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px'),
                     gap: 8, alignItems: 'center',
                     padding: '10px 4px',
                     opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
@@ -2185,16 +2216,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         fontSize: s.skipped ? 12 : 14, fontWeight: 700,
                         color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
                         opacity: !s.done && !s.skipped && !isNoWeightReps && (s.kg == null || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
-                        flexShrink: 0,
+                        flexShrink: 0, justifySelf: 'center',
                         WebkitTapHighlightColor: 'transparent',
                       }}>{s.skipped ? '×' : '✓'}</button>
 
-                    {!s.warmup && !s.done && entry.sets.length > 1 ? (
-                      <button onClick={() => removeSet(i)} style={{
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        color: UI.danger, fontSize: 16, lineHeight: 1, padding: 0, opacity: 0.6,
-                      }}>−</button>
-                    ) : <span />}
                   </div>
                   {i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) && <div className="knurl" />}
                 </React.Fragment>
@@ -2202,9 +2227,40 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             })}
           </div>
 
+          {!isCardio && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+              <button onClick={addSet} style={{
+                flex: 1, padding: '9px 0', background: 'transparent',
+                border: '1px solid var(--accent)', borderRadius: 6,
+                color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
+                letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              }}>+ ADD SET</button>
+              {entry.sets.filter(s => !s.warmup).length > 1 && (
+                <button onClick={removeLastSet} style={{
+                  flex: 1, padding: '9px 0', background: 'transparent',
+                  border: `1px solid ${UI.danger}`, borderRadius: 6,
+                  color: UI.danger, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
+                  letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                }}>− REMOVE SET</button>
+              )}
+              <button
+                onClick={checkAllSets}
+                disabled={allWorkingDone || (anyMissingData && !allWorkingDone)}
+                style={{
+                  flex: 1, padding: '9px 0', background: allWorkingDone ? UI.goldFaint : 'transparent',
+                  border: `1px solid ${allWorkingDone ? UI.goldSoft : anyMissingData ? UI.hair : UI.hairStrong}`, borderRadius: 6,
+                  color: allWorkingDone ? UI.gold : anyMissingData ? UI.inkGhost : UI.inkFaint,
+                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
+                  letterSpacing: '0.1em', cursor: allWorkingDone || anyMissingData ? 'default' : 'pointer',
+                  opacity: anyMissingData && !allWorkingDone ? 0.35 : 1,
+                  WebkitTapHighlightColor: 'transparent',
+                }}>✓ ALL</button>
+            </div>
+          )}
+
         </div>}
 
-          {/* Add set / swap / note — shown for all exercises, + and tempo hidden for cardio */}
+          {/* swap / add exercise / remove exercise / tempo / note */}
           <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
             {!isCardio && <button onClick={swapExercise} style={{
               width: 32, height: 32, borderRadius: 4,
@@ -2450,6 +2506,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     {d.supersetWithName && <span>{' · superset with '}<strong style={{ color: UI.ink }}>{d.supersetWithName}</strong></span>}
                   </span>
                 </>
+              ) : d.type === 'reorder' ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, width: '100%' }}>
+                  {d.moves.map((m, mi) => (
+                    <div key={mi} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ color: UI.goldLight, fontSize: 14 }}>⇅</span>
+                      <span style={{ color: UI.inkSoft }}>
+                        <strong style={{ color: UI.ink }}>{m.name}</strong>
+                        {` · ${m.from} → ${m.to}`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <>
                   <span style={{ color: UI.inkFaint, fontSize: 14 }}>−</span>

@@ -495,7 +495,7 @@ function Label({ children, style = {} }) {
 }
 
 // ─── Constants ──────────────────────────────────────────────────────
-const MUSCLES = ['Chest','Back','Shoulders','Biceps','Triceps','Abs','Quads','Hamstrings','Glutes','Calves','Forearms'];
+const MUSCLES = ['Abs','Back','Biceps','Calves','Chest','Forearms','Glutes','Hamstrings','Quads','Shoulders','Triceps'];
 const WEEKDAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const WEEKDAYS_FULL = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
@@ -1149,6 +1149,216 @@ function DragHandle({ style } = {}) {
     </div>
   );
 }
+
+// ─── Horizontal drag-to-reorder (chip strips) ───────────────────────────────
+// Same architecture as attachDragReorder but works along the X axis.
+// Long-press on touch activates; vertical swipe bails immediately so the page
+// scroll is never blocked. Drop-line is a vertical accent bar.
+function attachDragReorderH(container, getCb, options) {
+  const opts = options || {};
+  const LONG_PRESS_MS = opts.longPressMs != null ? opts.longPressMs : 220;
+  const MOVE_TOLERANCE = opts.moveTolerance != null ? opts.moveTolerance : 8;
+  const SCROLL_EDGE = 48;
+  let state = null;
+  let rafId = null;
+
+  const items = () => Array.prototype.slice
+    .call(container.querySelectorAll('[data-reorder-item]'))
+    .filter(el => el.closest('[data-reorder-list]') === container);
+
+  function scrollParent() {
+    let n = container;
+    while (n && n !== document.body && n !== document.documentElement) {
+      const s = getComputedStyle(n);
+      if (/(auto|scroll)/.test(s.overflowX) && n.scrollWidth > n.clientWidth + 1) return n;
+      n = n.parentElement;
+    }
+    return null;
+  }
+
+  function placeDropLine(x) {
+    if (!state.dropLine) {
+      state.dropLine = document.createElement('div');
+      state.dropLine.className = 'reorder-drop-line-h';
+      document.body.appendChild(state.dropLine);
+    }
+    const r = state.src.getBoundingClientRect();
+    state.dropLine.style.top = r.top + 'px';
+    state.dropLine.style.height = r.height + 'px';
+    state.dropLine.style.left = (x - 1) + 'px';
+  }
+
+  function updateTarget(x) {
+    const list = items();
+    let insertIdx = list.length;
+    let lineX = null;
+    for (let k = 0; k < list.length; k++) {
+      const r = list[k].getBoundingClientRect();
+      if (x < r.left + r.width / 2) { insertIdx = k; lineX = r.left - 3; break; }
+    }
+    if (lineX === null) {
+      const last = list[list.length - 1];
+      lineX = last ? last.getBoundingClientRect().right + 3 : container.getBoundingClientRect().left;
+    }
+    state.insertIdx = insertIdx;
+    placeDropLine(lineX);
+  }
+
+  function moveGhost(x, y) {
+    if (!state || !state.ghost) return;
+    state.ghost.style.transform =
+      'translate(' + (x - state.offsetX - state.baseLeft) + 'px,' +
+      (y - state.offsetY - state.baseTop) + 'px) scale(1.02)';
+  }
+
+  function tickScroll() {
+    if (!state || !state.started) { rafId = null; return; }
+    const x = state.lastX || 0;
+    const sp = state.scrollParent;
+    const el = sp || container;
+    const left = sp ? sp.getBoundingClientRect().left : 0;
+    const right = sp ? sp.getBoundingClientRect().right : window.innerWidth;
+    const max = el.scrollWidth - el.clientWidth;
+    let moved = false;
+    if (x < left + SCROLL_EDGE && el.scrollLeft > 0) {
+      const t = Math.min(1, (left + SCROLL_EDGE - x) / SCROLL_EDGE);
+      el.scrollLeft = Math.max(0, el.scrollLeft - Math.round(2 + t * 12));
+      moved = true;
+    } else if (x > right - SCROLL_EDGE && el.scrollLeft < max) {
+      const t = Math.min(1, (x - (right - SCROLL_EDGE)) / SCROLL_EDGE);
+      el.scrollLeft = Math.min(max, el.scrollLeft + Math.round(2 + t * 12));
+      moved = true;
+    }
+    if (moved) updateTarget(x);
+    rafId = requestAnimationFrame(tickScroll);
+  }
+
+  function beginDrag(x, y) {
+    const src = state.src;
+    const rect = src.getBoundingClientRect();
+    const ghost = src.cloneNode(true);
+    ghost.classList.add('reorder-ghost');
+    ghost.style.width = rect.width + 'px';
+    ghost.style.height = rect.height + 'px';
+    ghost.style.left = rect.left + 'px';
+    ghost.style.top = rect.top + 'px';
+    document.body.appendChild(ghost);
+    src.classList.add('reorder-source');
+    state.ghost = ghost;
+    state.baseLeft = rect.left;
+    state.baseTop = rect.top;
+    state.offsetX = x - rect.left;
+    state.offsetY = y - rect.top;
+    state.started = true;
+    document.body.classList.add('reorder-dragging');
+    moveGhost(x, y);
+    updateTarget(x);
+    rafId = requestAnimationFrame(tickScroll);
+  }
+
+  function teardown() {
+    if (!state) return;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    document.removeEventListener('pointermove', onMove, { passive: false });
+    document.removeEventListener('pointerup', onUp);
+    document.removeEventListener('pointercancel', onUp);
+    clearTimeout(state.pressTimer);
+    if (state.dropLine) state.dropLine.remove();
+    if (state.src) state.src.classList.remove('reorder-source');
+    const ghost = state.ghost;
+    document.body.classList.remove('reorder-dragging');
+    state = null;
+    if (ghost) { ghost.style.opacity = '0'; setTimeout(() => ghost.remove(), 160); }
+  }
+
+  function onDown(ev) {
+    if (state) return;
+    if (ev.button != null && ev.button !== 0) return;
+    if (!ev.target || !ev.target.closest) return;
+    if (ev.target.closest('[data-reorder-ignore]')) return;
+    const src = ev.target.closest('[data-reorder-item]');
+    if (!src) return;
+    const fromIdx = items().indexOf(src);
+    if (fromIdx === -1) return;
+    state = {
+      src, fromIdx, insertIdx: fromIdx,
+      startX: ev.clientX, startY: ev.clientY,
+      lastX: ev.clientX, lastY: ev.clientY,
+      pointerType: ev.pointerType || 'mouse',
+      started: false, pressTimer: null, ghost: null, dropLine: null,
+      scrollParent: scrollParent(),
+    };
+    document.addEventListener('pointermove', onMove, { passive: false });
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+    if (state.pointerType !== 'mouse') {
+      state.pressTimer = setTimeout(() => {
+        if (state && !state.started) beginDrag(state.startX, state.startY);
+      }, LONG_PRESS_MS);
+    }
+  }
+
+  function onMove(ev) {
+    if (!state) return;
+    const dx = Math.abs(ev.clientX - state.startX);
+    const dy = Math.abs(ev.clientY - state.startY);
+    const dist = Math.hypot(dx, dy);
+    if (!state.started) {
+      if (state.pointerType === 'mouse') {
+        if (dist > MOVE_TOLERANCE) beginDrag(state.startX, state.startY);
+      } else if (dist > 12) {
+        if (dy > dx) { clearTimeout(state.pressTimer); teardown(); return; }
+      }
+    }
+    if (!state || !state.started) return;
+    ev.preventDefault();
+    state.lastX = ev.clientX;
+    state.lastY = ev.clientY;
+    moveGhost(ev.clientX, ev.clientY);
+    updateTarget(ev.clientX);
+  }
+
+  function onUp() {
+    if (!state) return;
+    if (!state.started) { teardown(); return; }
+    const from = state.fromIdx;
+    let to = state.insertIdx;
+    if (to > from) to -= 1;
+    const swallow = e => { e.stopPropagation(); e.preventDefault(); };
+    document.addEventListener('click', swallow, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener('click', swallow, { capture: true }), 120);
+    teardown();
+    if (to !== from && to >= 0) {
+      const cb = getCb();
+      if (cb) cb(from, to);
+    }
+  }
+
+  function touchBlocker(ev) { if (state && state.started) ev.preventDefault(); }
+
+  container.addEventListener('pointerdown', onDown);
+  document.addEventListener('touchmove', touchBlocker, { passive: false });
+
+  return function cleanup() {
+    container.removeEventListener('pointerdown', onDown);
+    document.removeEventListener('touchmove', touchBlocker, { passive: false });
+    teardown();
+  };
+}
+
+UI.useDragReorderH = function(options) {
+  const cbRef = React.useRef(null);
+  cbRef.current = options && options.onReorder;
+  const cleanupRef = React.useRef(null);
+  const setRef = React.useCallback((node) => {
+    if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
+    if (node) cleanupRef.current = attachDragReorderH(node, () => cbRef.current, options);
+  }, []);
+  React.useEffect(() => () => {
+    if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
+  }, []);
+  return setRef;
+};
 
 // Container component that wires UI.useDragReorder to a list in one shot. Use
 // when the list count is dynamic (one per .map iteration) so each instance owns

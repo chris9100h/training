@@ -16,6 +16,61 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.376',
+    title: 'Install Zane as an app',
+    items: [
+      'A new step-by-step guide walks you through adding Zane to your home screen on iPhone or Android — find it under Settings → How to… → Install as app.',
+      'Once installed, Zane opens full-screen without a browser bar, loads instantly, and push notifications work reliably in the background.',
+      'iPhone users: the guide is also linked directly in the Push notifications setup, since installation is required for push to work on iOS.',
+    ],
+  },
+  {
+    id: 'v2.375',
+    title: 'Push Notifications Redesigned',
+    items: [
+      'Pushover has been replaced by native Web Push — rest timer alerts, coaching messages, and training reminders now all work without a third-party app.',
+      'To get started, enable push for this device under Account → Push notifications → This device.',
+      'Notifications reach you on the locked screen as long as Zane is installed on your home screen (PWA).',
+      'Prefer Pushover? Re-activate it under Account → Push notifications → Advanced — a quick verification confirms your setup.',
+    ],
+  },
+  {
+    id: 'v2.373',
+    title: 'Sign in with your face or fingerprint',
+    items: [
+      'Passkeys replace your password with Face ID, Touch ID or your device PIN — nothing to remember, nothing to type.',
+      'Set one up under Settings → Account → Passkeys → Add passkey. Takes five seconds.',
+      'Each device can have its own passkey — phone, tablet, laptop — and you can remove old ones whenever you want.',
+      'Your password still works as a fallback, so nothing breaks if you skip this.',
+    ],
+  },
+  {
+    id: 'v2.371',
+    title: 'Forgot your password?',
+    items: [
+      'A "Forgot password?" link now appears below the login button — tap it, enter your email, and you\'ll receive a reset link within seconds.',
+      'The link takes you straight to a password reset screen where you can set a new password and log back in immediately.',
+    ],
+  },
+  {
+    id: 'v2.369',
+    title: 'Drag to reorder exercises',
+    items: [
+      'Long-press any exercise chip during a session to drag it to a new position — works on touch and desktop',
+      'The session summary detects reorders and shows exactly which exercise moved where; "Update plan" saves the new order',
+      'Exercise and muscle group dropdowns are now sorted alphabetically',
+    ],
+  },
+  {
+    id: 'v2.368',
+    title: 'Training screen: set controls redesigned',
+    items: [
+      'Add Set, Remove Set, and Check All are now three clearly labelled buttons at the bottom of the set list — no more hunting for a small icon',
+      'Removed the duplicate Check Set button from the hero — the footer button is all you need',
+      'Cleaner layout with more breathing room for your sets',
+    ],
+  },
+  {
     id: 'v2.364',
     title: 'Bodyweight exercises & mid-session edits',
     items: [

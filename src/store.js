@@ -4,9 +4,59 @@ const SUPABASE_URL = 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
 
 const PUSHOVER_URL          = `${SUPABASE_URL}/functions/v1/pushover`;
+const WEB_PUSH_URL          = `${SUPABASE_URL}/functions/v1/web-push`;
 const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify`;
 
-const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+}
+
+async function getWebPushSubscription() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+
+async function subscribeWebPush(userId) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    throw new Error('Push notifications not supported in this browser');
+  }
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+  }
+  const json = sub.toJSON();
+  await unwrap(_supabase.from('zane_push_subscriptions').upsert({
+    id: json.endpoint,
+    user_id: userId,
+    endpoint: json.endpoint,
+    p256dh: json.keys.p256dh,
+    auth: json.keys.auth,
+  }, { onConflict: 'id' }));
+  return sub;
+}
+
+async function unsubscribeWebPush(userId) {
+  const sub = await getWebPushSubscription();
+  if (sub) {
+    const endpoint = sub.endpoint;
+    await sub.unsubscribe().catch(() => {});
+    await _supabase.from('zane_push_subscriptions').delete().eq('id', endpoint);
+  }
+}
+
+const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { experimental: { passkey: true } },
+});
 
 // Await a PostgREST builder and throw if it resolved with an { error }. The
 // supabase-js client does NOT throw on failed writes (network errors, RLS
@@ -133,6 +183,33 @@ async function signOut() {
   await _supabase.auth.signOut();
 }
 
+async function signInWithPasskey() {
+  const { error } = await _supabase.auth.signInWithPasskey();
+  if (error) throw error;
+}
+
+async function registerPasskey() {
+  const { data, error } = await _supabase.auth.registerPasskey();
+  if (error) throw error;
+  return data;
+}
+
+async function listPasskeys() {
+  const { data, error } = await _supabase.auth.passkey.list();
+  if (error) throw error;
+  return data || [];
+}
+
+async function deletePasskey(passkeyId) {
+  const { error } = await _supabase.auth.passkey.delete({ passkeyId });
+  if (error) throw error;
+}
+
+async function resetPassword(email, redirectTo) {
+  const { error } = await _supabase.auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) throw error;
+}
+
 async function deleteAllData(userId) {
   await Promise.all([
     unwrap(_supabase.from('zane_sessions').delete().eq('user_id', userId)),
@@ -209,6 +286,7 @@ async function importFromBackup(backup, userId) {
       rest_small: sett.restSmall || 90,
       push_enabled: sett.pushEnabled ?? false,
       pushover_user_key: sett.pushoverUserKey ?? null,
+      use_pushover: sett.usePushover ?? false,
       cycle_week_view: sett.cycleWeekView ?? false,
       accent_color: sett.accentColor ?? 'copper',
       dark_mode: sett.darkMode ?? 'dark',
@@ -531,6 +609,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         restSmall:   sett.rest_small   || 90,
         pushEnabled: sett.push_enabled ?? false,
         pushoverUserKey: sett.pushover_user_key ?? null,
+        usePushover: sett.use_pushover ?? false,
         cycleWeekView: sett.cycle_week_view ?? false,
         accentColor: sett.accent_color ?? 'copper',
         darkMode: sett.dark_mode ?? 'dark',
@@ -842,6 +921,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.restSmall       !== next.settings?.restSmall       ||
     prev.settings?.pushEnabled     !== next.settings?.pushEnabled     ||
     prev.settings?.pushoverUserKey  !== next.settings?.pushoverUserKey  ||
+    prev.settings?.usePushover      !== next.settings?.usePushover      ||
     prev.settings?.cycleWeekView   !== next.settings?.cycleWeekView   ||
     prev.settings?.accentColor      !== next.settings?.accentColor      ||
     prev.settings?.darkMode         !== next.settings?.darkMode          ||
@@ -881,6 +961,7 @@ async function syncStore(prev, next, userId) {
       rest_small:   next.settings?.restSmall   || 90,
       push_enabled: next.settings?.pushEnabled ?? false,
       pushover_user_key: next.settings?.pushoverUserKey ?? null,
+      use_pushover: next.settings?.usePushover ?? false,
       cycle_week_view: next.settings?.cycleWeekView ?? false,
       accent_color: next.settings?.accentColor ?? 'copper',
       dark_mode: next.settings?.darkMode ?? 'dark',
@@ -999,8 +1080,13 @@ function computeNextReminderAt(state) {
 
 function cancelPushover(settings, userId) {
   if (!settings?.pushEnabled) return;
-  // Identity + target key are derived server-side from the JWT now.
-  fnFetch(PUSHOVER_URL, { nonce: `cancel-${Date.now()}`, cancel: true });
+  const cancelNonce = `cancel-${Date.now()}`;
+  if (settings.pushoverUserKey && settings.usePushover) {
+    fnFetch(PUSHOVER_URL, { nonce: cancelNonce, cancel: true });
+  } else {
+    fnFetch(WEB_PUSH_URL, { nonce: cancelNonce, cancel: true });
+  }
+  navigator.serviceWorker?.controller?.postMessage({ type: 'CANCEL_REST_TIMER' });
 }
 
 function findExercise(state, exId) {
@@ -2311,9 +2397,10 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions, schema) {
 
 window.LB = {
   supabase: _supabase,
-  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, fnFetch,
+  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
+  subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
-  signIn, signUp, signOut, deleteAllData, exportBackup, importFromBackup, validateBackup,
+  signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,

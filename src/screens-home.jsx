@@ -59,9 +59,41 @@ function FitText({ text, max, min, style }) {
   );
 }
 
+// ─── PASSKEY LOGIN BUTTON ─────────────────────────────────────────────────────
+function PasskeyLoginButton({ loading, setLoading, setError }) {
+  const handlePasskey = async () => {
+    if (loading) return;
+    setLoading(true); setError('');
+    try {
+      await LB.signInWithPasskey();
+    } catch (e) {
+      setError(e.message || 'Passkey sign-in failed');
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button type="button" onClick={handlePasskey} disabled={loading} style={{
+      width: '100%', padding: '12px 0', borderRadius: 6,
+      background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+      color: loading ? UI.inkFaint : UI.ink,
+      fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+      cursor: loading ? 'default' : 'pointer',
+      WebkitTapHighlightColor: 'transparent',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+      transition: 'border-color 0.15s, color 0.15s',
+    }}>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 11c0-1.1.9-2 2-2s2 .9 2 2-.9 2-2 2-2-.9-2-2z"/><path d="M14 2C9.6 2 6 5.6 6 10c0 2.8 1.4 5.3 3.5 6.8L8 22h6l-.5-2H17l-.5-2H19l-1.2-3.5C19.2 15 20 12.6 20 10c0-4.4-2.7-8-6-8z"/>
+      </svg>
+      {loading ? '…' : 'Passkey'}
+    </button>
+  );
+}
+
 // ─── LOGIN / REGISTER ─────────────────────────────────────────────────────────
 function LoginScreen() {
-  const [mode, setMode]           = useState('login'); // 'login' | 'register'
+  const [mode, setMode]           = useState('login'); // 'login' | 'register' | 'forgot'
   const [name, setName]           = useState('');
   const [email, setEmail]         = useState('');
   const [password, setPassword]   = useState('');
@@ -69,6 +101,7 @@ function LoginScreen() {
   const [unit, setUnit]           = useState('kg'); // 'kg' | 'lbs'
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
+  const [resetSent, setResetSent] = useState(false);
   const [swVersion, setSwVersion] = useState('');
   const formRef = useRef(null);
 
@@ -93,7 +126,7 @@ function LoginScreen() {
     return () => form.removeEventListener('input', handler);
   }, []);
 
-  const switchMode = (m) => { setMode(m); setError(''); setPassword(''); setConfirm(''); };
+  const switchMode = (m) => { setMode(m); setError(''); setPassword(''); setConfirm(''); setResetSent(false); };
 
   const pwMatch = password === confirm;
   const canLogin    = email.trim() && password.length >= 6;
@@ -127,6 +160,21 @@ function LoginScreen() {
   };
 
   const isLogin = mode === 'login';
+  const isForgot = mode === 'forgot';
+
+  const submitReset = async () => {
+    const e2 = email.trim();
+    if (!e2 || loading) return;
+    setLoading(true); setError('');
+    try {
+      await LB.resetPassword(e2, 'https://zane-wo.com/');
+      setResetSent(true);
+    } catch (e) {
+      setError(e.message || 'Failed to send reset link');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <Screen scroll style={{ position: 'relative' }}>
@@ -139,97 +187,165 @@ function LoginScreen() {
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 32px 24px', position: 'relative', zIndex: 1, marginTop: 'auto', marginBottom: 'auto' }}>
         <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain', marginBottom: 28 }} />
 
-        {/* Tab switcher */}
-        <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', marginBottom: 24, borderRadius: 6, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
-          {['login', 'register'].map(m => (
-            <button key={m} onClick={() => switchMode(m)} style={{
-              padding: '10px 0',
-              background: mode === m ? UI.goldFaint : 'transparent',
-              border: 'none',
-              borderRight: m === 'login' ? `1px solid ${UI.hairStrong}` : 'none',
-              color: mode === m ? UI.gold : UI.inkFaint,
-              fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600,
-              letterSpacing: '0.12em', textTransform: 'uppercase',
-              cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-              transition: 'background 0.15s, color 0.15s',
-            }}>
-              {m === 'login' ? 'Login' : 'Register'}
-            </button>
-          ))}
-        </div>
+        {/* Tab switcher — hidden in forgot mode */}
+        {!isForgot ? (
+          <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', marginBottom: 24, borderRadius: 6, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
+            {['login', 'register'].map(m => (
+              <button key={m} onClick={() => switchMode(m)} style={{
+                padding: '10px 0',
+                background: mode === m ? UI.goldFaint : 'transparent',
+                border: 'none',
+                borderRight: m === 'login' ? `1px solid ${UI.hairStrong}` : 'none',
+                color: mode === m ? UI.gold : UI.inkFaint,
+                fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600,
+                letterSpacing: '0.12em', textTransform: 'uppercase',
+                cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                transition: 'background 0.15s, color 0.15s',
+              }}>
+                {m === 'login' ? 'Login' : 'Register'}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <button onClick={() => switchMode('login')} style={{
+            alignSelf: 'flex-start', background: 'none', border: 'none', cursor: 'pointer',
+            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.04em',
+            padding: '0 0 18px', display: 'flex', alignItems: 'center', gap: 6,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 1L1 5l4 4" /></svg>
+            Back to login
+          </button>
+        )}
 
-        <form ref={formRef} onSubmit={e => {
-            e.preventDefault();
-            if (isLogin) {
-              const els = e.target.elements;
-              submitLogin(els.namedItem('email')?.value, els.namedItem('password')?.value);
-            } else {
-              submitRegister();
-            }
-          }}
-          style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
-          {!isLogin && (
-            <Field label="Nickname">
-              <TextInput value={name} onChange={setName} placeholder="Your nickname" autoFocus={!isLogin} autoComplete="nickname" name="name" />
+        {!isForgot && (
+          <form ref={formRef} onSubmit={e => {
+              e.preventDefault();
+              if (isLogin) {
+                const els = e.target.elements;
+                submitLogin(els.namedItem('email')?.value, els.namedItem('password')?.value);
+              } else {
+                submitRegister();
+              }
+            }}
+            style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
+            {!isLogin && (
+              <Field label="Nickname">
+                <TextInput value={name} onChange={setName} placeholder="Your nickname" autoFocus={!isLogin} autoComplete="nickname" name="name" />
+              </Field>
+            )}
+            <Field label="Email">
+              <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus={isLogin} autoComplete="email" name="email" type="email" />
             </Field>
-          )}
-          <Field label="Email">
-            <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus={isLogin} autoComplete="email" name="email" type="email" />
-          </Field>
-          <Field label="Password">
-            <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters"
-              autoComplete={isLogin ? 'current-password' : 'new-password'} name="password" />
-          </Field>
-          {!isLogin && (
-            <Field label="Repeat password">
-              <TextInput value={confirm} onChange={setConfirm} type="password" placeholder="repeat password"
-                autoComplete="new-password" />
+            <Field label="Password">
+              <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters"
+                autoComplete={isLogin ? 'current-password' : 'new-password'} name="password" />
             </Field>
-          )}
+            {!isLogin && (
+              <Field label="Repeat password">
+                <TextInput value={confirm} onChange={setConfirm} type="password" placeholder="repeat password"
+                  autoComplete="new-password" />
+              </Field>
+            )}
 
-          {!isLogin && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div className="label" style={{ color: UI.inkFaint }}>Units</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                {[{ id: 'kg', label: 'Metric', sub: 'kg / km' }, { id: 'lbs', label: 'Imperial', sub: 'lbs / mi' }].map(opt => (
-                  <button key={opt.id} type="button" onClick={() => setUnit(opt.id)} style={{
-                    padding: '10px 0', borderRadius: 4, cursor: 'pointer',
-                    background: unit === opt.id ? UI.goldFaint : 'transparent',
-                    border: `1px solid ${unit === opt.id ? UI.gold : UI.hairStrong}`,
-                    color: unit === opt.id ? UI.gold : UI.inkFaint,
-                    fontFamily: UI.fontUi, textAlign: 'center',
-                    WebkitTapHighlightColor: 'transparent',
-                  }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{opt.label}</div>
-                    <div style={{ fontSize: 10, marginTop: 2, opacity: 0.7 }}>{opt.sub}</div>
-                  </button>
-                ))}
+            {!isLogin && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="label" style={{ color: UI.inkFaint }}>Units</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {[{ id: 'kg', label: 'Metric', sub: 'kg / km' }, { id: 'lbs', label: 'Imperial', sub: 'lbs / mi' }].map(opt => (
+                    <button key={opt.id} type="button" onClick={() => setUnit(opt.id)} style={{
+                      padding: '10px 0', borderRadius: 4, cursor: 'pointer',
+                      background: unit === opt.id ? UI.goldFaint : 'transparent',
+                      border: `1px solid ${unit === opt.id ? UI.gold : UI.hairStrong}`,
+                      color: unit === opt.id ? UI.gold : UI.inkFaint,
+                      fontFamily: UI.fontUi, textAlign: 'center',
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{opt.label}</div>
+                      <div style={{ fontSize: 10, marginTop: 2, opacity: 0.7 }}>{opt.sub}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!isLogin && confirm.length > 0 && !pwMatch && (
+              <div style={{ fontSize: 12, color: UI.danger, fontFamily: UI.fontUi, marginTop: -10 }}>
+                Passwords do not match
+              </div>
+            )}
+
+            {error && (
+              <div style={{ fontSize: 12, color: UI.danger, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.06)', border: `1px solid rgba(var(--danger-rgb),0.25)`, borderRadius: 4, fontFamily: UI.fontUi }}>
+                {error}
+              </div>
+            )}
+
+            {isLogin ? (
+              typeof window !== 'undefined' && window.PublicKeyCredential ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
+                  <PasskeyLoginButton loading={loading} setLoading={setLoading} setError={setError} />
+                  <Btn style={{ opacity: canLogin && !loading ? 1 : 0.4 }}>
+                    {loading ? 'Signing in…' : 'Log in'}
+                  </Btn>
+                </div>
+              ) : (
+                <Btn style={{ marginTop: 4, opacity: canLogin && !loading ? 1 : 0.4 }}>
+                  {loading ? 'Signing in…' : 'Log in'}
+                </Btn>
+              )
+            ) : (
+              <Btn disabled={!canRegister || loading} style={{ marginTop: 4, opacity: canRegister && !loading ? 1 : 0.4 }}>
+                {loading ? 'Creating account…' : 'Create account'}
+              </Btn>
+            )}
+
+            {isLogin && (
+              <button type="button" onClick={() => switchMode('forgot')} style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11,
+                letterSpacing: '0.04em', padding: '2px 0', alignSelf: 'center',
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                Forgot password?
+              </button>
+            )}
+          </form>
+        )}
+
+        {isForgot && (
+          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
+            <div style={{ textAlign: 'center', marginBottom: 4 }}>
+              <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, marginBottom: 6 }}>Reset password</div>
+              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+                {resetSent
+                  ? `A reset link was sent to ${email.trim()}. Check your inbox.`
+                  : 'Enter your email and we\'ll send you a link to set a new password.'}
               </div>
             </div>
-          )}
-
-          {!isLogin && confirm.length > 0 && !pwMatch && (
-            <div style={{ fontSize: 12, color: UI.danger, fontFamily: UI.fontUi, marginTop: -10 }}>
-              Passwords do not match
-            </div>
-          )}
-
-          {error && (
-            <div style={{ fontSize: 12, color: UI.danger, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.06)', border: `1px solid rgba(var(--danger-rgb),0.25)`, borderRadius: 4, fontFamily: UI.fontUi }}>
-              {error}
-            </div>
-          )}
-
-          {isLogin ? (
-            <Btn style={{ marginTop: 4, opacity: canLogin && !loading ? 1 : 0.4 }}>
-              {loading ? 'Signing in…' : 'Log in'}
-            </Btn>
-          ) : (
-            <Btn disabled={!canRegister || loading} style={{ marginTop: 4, opacity: canRegister && !loading ? 1 : 0.4 }}>
-              {loading ? 'Creating account…' : 'Create account'}
-            </Btn>
-          )}
-        </form>
+            {!resetSent && (
+              <>
+                <Field label="Email">
+                  <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus autoComplete="email" type="email"
+                    onKeyDown={e => e.key === 'Enter' && submitReset()} />
+                </Field>
+                {error && (
+                  <div style={{ fontSize: 12, color: UI.danger, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.06)', border: `1px solid rgba(var(--danger-rgb),0.25)`, borderRadius: 4, fontFamily: UI.fontUi }}>
+                    {error}
+                  </div>
+                )}
+                <Btn onClick={submitReset} style={{ marginTop: 4, opacity: email.trim() && !loading ? 1 : 0.4 }}>
+                  {loading ? 'Sending…' : 'Send reset link'}
+                </Btn>
+              </>
+            )}
+            {resetSent && (
+              <Btn onClick={() => switchMode('login')} style={{ marginTop: 4 }}>
+                Back to login
+              </Btn>
+            )}
+          </div>
+        )}
       </div>
 
       <div style={{ flexShrink: 0, padding: '0 22px calc(env(safe-area-inset-bottom, 8px) + 18px)', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1 }}>
@@ -240,7 +356,7 @@ function LoginScreen() {
 }
 
 // ─── SET PASSWORD (invite / password-reset flow) ──────────────────────────────
-function SetPasswordScreen({ onDone }) {
+function SetPasswordScreen({ onDone, isRecovery }) {
   const [name, setName]         = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm]   = useState('');
@@ -290,14 +406,20 @@ function SetPasswordScreen({ onDone }) {
         <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain', marginBottom: 28 }} />
         <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
           <div style={{ textAlign: 'center', marginBottom: 4 }}>
-            <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, marginBottom: 6 }}>Welcome to Zane</div>
-            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Set a password to complete your account.</div>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, marginBottom: 6 }}>
+              {isRecovery ? 'Reset your password' : 'Welcome to Zane'}
+            </div>
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+              {isRecovery ? 'Enter your new password below.' : 'Set a password to complete your account.'}
+            </div>
           </div>
-          <Field label="Your name (optional)">
-            <TextInput value={name} onChange={setName} placeholder="e.g. Alex" autoFocus />
-          </Field>
+          {!isRecovery && (
+            <Field label="Your name (optional)">
+              <TextInput value={name} onChange={setName} placeholder="e.g. Alex" autoFocus={!isRecovery} />
+            </Field>
+          )}
           <Field label="Password">
-            <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters" />
+            <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters" autoFocus={isRecovery} />
           </Field>
           <Field label="Confirm password">
             <TextInput value={confirm} onChange={setConfirm} type="password" placeholder="repeat password"
@@ -312,7 +434,9 @@ function SetPasswordScreen({ onDone }) {
             </div>
           )}
           <Btn onClick={submit} disabled={!canSubmit || loading} style={{ marginTop: 4, opacity: canSubmit && !loading ? 1 : 0.4 }}>
-            {loading ? 'Setting up…' : 'Set password & continue'}
+            {loading
+              ? (isRecovery ? 'Resetting…' : 'Setting up…')
+              : (isRecovery ? 'Reset password' : 'Set password & continue')}
           </Btn>
         </div>
       </div>

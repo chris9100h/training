@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
   const settingsRes = await dbFetch(`zane_user_settings?user_id=eq.${encodeURIComponent(recipientId)}&select=push_enabled,pushover_user_key`);
   const settings: { push_enabled: boolean; pushover_user_key: string | null }[] = await settingsRes.json().catch(() => []);
 
-  if (!settings[0]?.push_enabled || !settings[0]?.pushover_user_key) {
+  if (!settings[0]?.push_enabled) {
     return new Response(JSON.stringify({ skipped: true }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -92,17 +92,27 @@ Deno.serve(async (req) => {
     threadName = thread[0]?.name ?? '';
   }
 
-  const token    = Deno.env.get('PUSHOVER_TOKEN') ?? 'a2vfbj4vu92hwzp5t9b6cbzkc18vw9';
-  const userKey  = settings[0].pushover_user_key;
-  const title    = threadName ? `Zane · ${threadName}` : 'Zane · New message';
-  const message  = (preview ?? 'New message from your coach').split('\n')[0].slice(0, 100);
+  const title   = threadName ? `Zane · ${threadName}` : 'Zane · New message';
+  const message = (preview ?? 'New message from your coach').split('\n')[0].slice(0, 100);
 
-  const r = await fetch('https://api.pushover.net/1/messages.json', {
+  // Pushover (if configured)
+  if (settings[0].pushover_user_key) {
+    const token = Deno.env.get('PUSHOVER_TOKEN') ?? 'a2vfbj4vu92hwzp5t9b6cbzkc18vw9';
+    const r = await fetch('https://api.pushover.net/1/messages.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, user: settings[0].pushover_user_key, title, message }),
+    });
+    console.log(`[coaching-notify] pushover ${r.status}: ${await r.text()}`);
+  }
+
+  // Web Push
+  const base = Deno.env.get('SUPABASE_URL') ?? '';
+  await fetch(`${base}/functions/v1/web-push`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, user: userKey, title, message }),
-  });
-  console.log(`[coaching-notify] ${r.status}: ${await r.text()}`);
+    headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId: recipientId, title, message }),
+  }).catch(e => console.error('[coaching-notify] web-push error:', e));
 
   return new Response(JSON.stringify({ sent: true }), {
     status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },

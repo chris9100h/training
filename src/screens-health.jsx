@@ -540,6 +540,8 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
   );
   const adh = log?.adherence;
   const showAdh = dayTarget != null || adh != null;
+  const isPerfect = adh != null && adh >= 97;
+  const verdict = adh == null ? null : adh >= 97 ? 'PERFECT' : adh >= 90 ? 'STRONG' : adh >= 75 ? 'ON TRACK' : 'OFF TRACK';
   const badge = (icon, label, alpha) => (
     <span style={{ display: 'flex', alignItems: 'center', gap: 4, background: `rgba(var(--accent-rgb),${alpha})`, border: `0.5px solid rgba(var(--accent-rgb),${alpha * 2})`, borderRadius: 4, padding: '3px 7px' }}>
       <i className={`fa-solid ${icon}`} style={{ fontSize: 9, color: 'var(--accent)' }} />
@@ -565,12 +567,14 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
       )}
       {showAdh && (
         <div style={{ marginBottom: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
-            <span className="micro" style={{ color: UI.inkFaint }}>MACRO ADHERENCE</span>
-            <span className="num" style={{ fontSize: 13, color: adh != null ? adherenceColor(adh) : UI.inkGhost }}>{adh != null ? `${adh}%` : '—'}</span>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 5 }}>
+            <span className={isPerfect ? 'perfect-week-pulse num' : 'num'} style={{ fontSize: 30, color: adh != null ? adherenceColor(adh) : UI.inkGhost, fontWeight: 300, lineHeight: 1 }}>{adh != null ? `${adh}%` : '—'}</span>
+            {verdict && <span className={isPerfect ? 'perfect-week-pulse' : ''} style={{ fontSize: 12, color: adherenceColor(adh), fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.08em' }}>{verdict}</span>}
+            <span style={{ flex: 1 }} />
+            <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase' }}>macro adherence</span>
           </div>
-          <div style={{ height: 7, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
-            {adh != null && <div style={{ width: `${Math.min(100, adh)}%`, height: '100%', background: adherenceColor(adh), transition: 'width 0.3s' }} />}
+          <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
+            {adh != null && <div style={{ width: `${Math.min(100, adh)}%`, height: '100%', background: adherenceColor(adh) }} />}
           </div>
         </div>
       )}
@@ -613,7 +617,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
   const r = v => v == null ? null : Math.round(v);
   const range = `${healthFmtDate(from, { day: 'numeric', month: 'short' })} – ${healthFmtDate(to, { day: 'numeric', month: 'short' })}`;
   const periodLabel = tf === '1W' ? 'THIS WEEK' : tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS';
-  const verdict = adherence == null ? null : adherence >= 97 ? 'PERFECT WEEK' : adherence >= 90 ? 'STRONG WEEK' : adherence >= 75 ? 'ON TRACK' : 'OFF TRACK';
+  const verdict = adherence == null ? null : adherence >= 97 ? 'PERFECT' : adherence >= 90 ? 'STRONG' : adherence >= 75 ? 'ON TRACK' : 'OFF TRACK';
   const isPerfect = adherence != null && adherence >= 97;
   const trainingPct = trainingsPlanned > 0 ? Math.min(100, (trainingsDone / trainingsPlanned) * 100) : (trainingsDone > 0 ? 100 : 0);
 
@@ -707,7 +711,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
           : cell('Steps (avg)', steps != null ? r(steps).toLocaleString() : null)}
         {cell(cardioSessions ? `Cardio (${cardioSessions}×)` : 'Cardio', cardioMinutes ? cardioMinutes : null, 'min')}
         {cell('Water', water != null ? (Math.round(water / 100) / 10) : null, 'L')}
-        {cell('Calories', r(calories), 'kcal')}
+        {cell('Calories', r(calories))}
         {cell('Protein', r(protein), 'g')}
         {cell('Carbs', r(carbs), 'g')}
         {cell('Fat', r(fat), 'g')}
