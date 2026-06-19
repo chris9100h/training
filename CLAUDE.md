@@ -132,6 +132,8 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_app_config`:** `id` (int, singleton = 1), `signup_requires_approval` (boolean, default true), `auto_approve_remaining` (int, nullable — batch budget: when approval is off and this is set, each new signup decrements it via the `signup_consume_budget()` AFTER-INSERT trigger on `zane_profiles`; at 0 the trigger flips `signup_requires_approval` back on and clears the budget). Global admin config (RLS on, only SECURITY DEFINER fns touch it). Drives the `zane_profiles.approved` column default, so flipping it changes future signups only.
 
+**`zane_push_subscriptions`:** `id` (text — endpoint URL), `user_id` (uuid), `endpoint` (text), `p256dh` (text — client EC public key, base64url), `auth` (text — auth secret, base64url), `created_at` (timestamptz) — one row per device per user; managed by `subscribeWebPush`/`unsubscribeWebPush` in `store.js`; 410/404 responses auto-prune stale rows via the `web-push` Edge Function. Migration 0080.
+
 **`zane_pushover_active`:** `id` (text), `nonce` (text)
 
 **`zane_schedules`:** `id` (text), `user_id` (uuid), `name` (text), `days` (jsonb), `archived` (boolean, default false), `versions` (jsonb, default []) — array of `{ validFrom: 'YYYY-MM-DD', days: [...] }` sorted newest first; used for plan-change-from-date versioning

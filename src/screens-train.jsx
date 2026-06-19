@@ -857,11 +857,26 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // second server-side relay chain under the same nonce; both chains
     // delivered, so the push arrived twice. The nonce only dedups a *newer*
     // timer, never a re-send of the same one.
-    if (val !== null && store.settings?.pushEnabled) {
+    if (val !== null) {
       const def = newDur ?? restDef;
-      const delaySeconds = Math.round(Math.max(0, val + def * 1000 - Date.now()) / 1000);
-      // Authenticated as the user; the server derives the target key from the DB.
-      LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds, nonce: String(val), priority: 1 });
+      const delayMs = Math.round(Math.max(0, val + def * 1000 - Date.now()));
+      const hasPushover = !!(store.settings?.pushEnabled && store.settings?.pushoverUserKey);
+      // SW timer: fires when the app is backgrounded (no server required).
+      // Skip if Pushover is configured to avoid duplicate notifications.
+      if (!hasPushover && navigator.serviceWorker?.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'SCHEDULE_REST_TIMER',
+          delayMs,
+          title: 'Zane · Rest done',
+          body: 'Time to start your next set! 💪',
+        });
+      }
+      // Pushover relay: fires even when the phone is locked.
+      if (store.settings?.pushEnabled) {
+        LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds: Math.round(delayMs / 1000), nonce: String(val), priority: 1 });
+      }
+    } else {
+      navigator.serviceWorker?.controller?.postMessage({ type: 'CANCEL_REST_TIMER' });
     }
   };
   const [now, setNow] = useStateT(Date.now());

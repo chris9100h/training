@@ -339,6 +339,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [pushKeyModalOpen, setPushKeyModalOpen] = useStateSet(false);
   const [testPickerOpen, setTestPickerOpen] = useStateSet(false);
   const [pushSheet, setPushSheet] = useStateSet(false);
+  const [webPushSub, setWebPushSub] = useStateSet(null);
+  const [webPushLoading, setWebPushLoading] = useStateSet(false);
   const [reminderSheet, setReminderSheet] = useStateSet(false);
   const [passkeySheet, setPasskeySheet] = useStateSet(false);
   const [reminderEnabled, setReminderEnabled] = useStateSet(() => store.settings?.reminderEnabled ?? false);
@@ -377,6 +379,11 @@ function SettingsScreen({ store, setStore, go, userId }) {
     if (!('caches' in window)) return;
     caches.keys().then(keys => { const name = keys.find(k => k.startsWith('zane-')); if (name) setSwVersion(name.replace('zane-', '')); });
   }, []);
+
+  useEffectSet(() => {
+    if (!pushSheet) return;
+    LB.getWebPushSubscription().then(sub => setWebPushSub(sub)).catch(() => {});
+  }, [pushSheet]);
 
   // Admin-only: current global "signups need approval" setting.
   useEffectSet(() => {
@@ -461,19 +468,51 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
   const pushStatusTimer = useRefSet(null);
   useEffectSet(() => () => clearTimeout(pushStatusTimer.current), []);
-  const togglePush = () => {
-    if (!pushEnabled) {
-      if (store.settings?.pushoverUserKey) { setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true'); setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } })); }
-      else { setPushKeyDraft(''); setPushKeyModalOpen(true); }
-    } else { setPushEnabled(false); localStorage.setItem('logbook-push-enabled', 'false'); setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: false } })); }
+  const togglePush = async () => {
+    if (webPushLoading) return;
+    setWebPushLoading(true);
+    try {
+      if (!pushEnabled) {
+        const sub = await LB.subscribeWebPush(userId);
+        setWebPushSub(sub);
+        setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true');
+        setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } }));
+      } else {
+        await LB.unsubscribeWebPush(userId);
+        setWebPushSub(null);
+        setPushEnabled(false); localStorage.setItem('logbook-push-enabled', 'false');
+        setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: false } }));
+      }
+    } catch (e) {
+      clearTimeout(pushStatusTimer.current);
+      const msg = e.message?.toLowerCase() ?? '';
+      setPushStatus(msg.includes('denied') || msg.includes('permission')
+        ? 'Permission denied — enable notifications in browser settings'
+        : `Error: ${e.message}`);
+      pushStatusTimer.current = setTimeout(() => setPushStatus(null), 7000);
+    } finally {
+      setWebPushLoading(false);
+    }
   };
   const pushKeyValid = /^[a-zA-Z0-9]{30}$/.test(pushKeyDraft.trim());
   const confirmPushKey = () => {
     if (!pushKeyValid) return;
     const key = pushKeyDraft.trim();
-    setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true');
-    setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true, pushoverUserKey: key } }));
+    setStore(s => ({ ...s, settings: { ...s.settings, pushoverUserKey: key } }));
     setPushKeyModalOpen(false);
+  };
+  const testWebPush = async () => {
+    clearTimeout(pushStatusTimer.current);
+    setPushStatus('Sending…');
+    try {
+      const res = await LB.fnFetch(LB.WEB_PUSH_URL, { title: 'Zane Test', message: 'Notifications are working! 💪' });
+      if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
+      const data = await res.json().catch(() => ({}));
+      if (data.sent > 0) { setPushStatus('✓ Sent'); }
+      else if (data.skipped) { setPushStatus('No subscription found — try toggling push off and on'); }
+      else { setPushStatus(`Error: ${JSON.stringify(data)}`); }
+    } catch (e) { setPushStatus(`Error: ${e.message}`); }
+    pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
   };
   const testPushover = async (delaySeconds = 0) => {
     clearTimeout(pushStatusTimer.current);
@@ -482,7 +521,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
       const res = await LB.fnFetch(LB.PUSHOVER_URL, { message: 'Rest done — keep going! 💪', title: 'Zane Test', delaySeconds, nonce: String(Date.now()), ttl: 10 });
       if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
       else if (res.status === 202) { setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
-      else { const data = await res.json(); setPushStatus(data.skipped ? 'Key not synced yet — try again in a few seconds' : data.status === 1 ? '✓ Sent' : `Error: ${JSON.stringify(data)}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
+      else { const data = await res.json(); setPushStatus(data.skipped ? 'Key not synced yet — try again' : data.status === 1 ? '✓ Sent' : `Error: ${JSON.stringify(data)}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
     } catch (e) { setPushStatus(`Error: ${e.message}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
   };
   const toggleReminder = () => { const next = !reminderEnabled; setReminderEnabled(next); setStore(s => ({ ...s, settings: { ...s.settings, reminderEnabled: next } })); };
@@ -1227,20 +1266,34 @@ function SettingsScreen({ store, setStore, go, userId }) {
       {/* ══ Push notifications sheet ══ */}
       <SettingsSheet open={pushSheet} onClose={() => setPushSheet(false)} title="Push notifications">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
-          <Row label="Enabled" first>
-            <Toggle on={pushEnabled} onToggle={togglePush} />
+          <Row label="This device" first>
+            {webPushLoading
+              ? <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkFaint }}>…</span>
+              : <Toggle on={pushEnabled} onToggle={togglePush} />}
           </Row>
-          {store.settings?.pushoverUserKey && (
-            <Row label="User key">
-              <button onClick={() => { setPushKeyDraft(store.settings.pushoverUserKey); setPushKeyModalOpen(true); }} style={accentBtn}>Change</button>
-            </Row>
+          {pushEnabled && webPushSub && (
+            <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>
+              Subscribed · endpoint …{webPushSub.endpoint.split('/').pop()?.slice(-10)}
+            </div>
           )}
           {pushEnabled && (
             <Row label="Test notification">
-              <button onClick={() => setTestPickerOpen(true)} style={accentBtn}>Send</button>
+              <button onClick={testWebPush} style={accentBtn}>Send</button>
             </Row>
           )}
           {pushStatus && <div className="micro" style={{ color: pushStatus.startsWith('✓') ? 'var(--accent)' : UI.inkSoft, textAlign: 'center', padding: '6px 0' }}>{pushStatus}</div>}
+          <Hairline style={{ margin: '2px 0' }} />
+          <div className="micro" style={{ color: UI.inkFaint }}>Locked screen · Rest timer (optional)</div>
+          <Row label="Pushover user key" first>
+            <button onClick={() => { setPushKeyDraft(store.settings?.pushoverUserKey || ''); setPushKeyModalOpen(true); }} style={accentBtn}>
+              {store.settings?.pushoverUserKey ? 'Change' : 'Set up'}
+            </button>
+          </Row>
+          {store.settings?.pushoverUserKey && pushEnabled && (
+            <Row label="Test rest timer push">
+              <button onClick={() => setTestPickerOpen(true)} style={accentBtn}>Send</button>
+            </Row>
+          )}
           <Btn onClick={() => setPushSheet(false)}>Done</Btn>
         </div>
       </SettingsSheet>
@@ -1280,14 +1333,14 @@ function SettingsScreen({ store, setStore, go, userId }) {
       </SettingsSheet>
 
       {/* ══ Pushover key sheet ══ */}
-      <SettingsSheet open={pushKeyModalOpen} onClose={() => setPushKeyModalOpen(false)} title="Pushover User Key">
+      <SettingsSheet open={pushKeyModalOpen} onClose={() => setPushKeyModalOpen(false)} title="Pushover user key">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.5 }}>Enter your Pushover user key. Find it at pushover.net after logging in.</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.5 }}>Optional — lets Zane notify you when rest is over, even when your screen is locked. Find your user key at pushover.net.</div>
           <input value={pushKeyDraft} onChange={e => setPushKeyDraft(e.target.value)} placeholder="uXXXXXXXXXXXXXXXXXXXX"
             style={{ background: UI.bgInset, border: `0.5px solid ${pushKeyDraft && !pushKeyValid ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
             autoCorrect="off" autoCapitalize="none" spellCheck={false} />
           {pushKeyDraft && !pushKeyValid && <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.85)' }}>Invalid key — must be 30 alphanumeric characters</div>}
-          <Btn onClick={confirmPushKey} disabled={!pushKeyValid}>Enable notifications</Btn>
+          <Btn onClick={confirmPushKey} disabled={!pushKeyValid}>Save</Btn>
         </div>
       </SettingsSheet>
 

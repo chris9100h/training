@@ -4,7 +4,55 @@ const SUPABASE_URL = 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
 
 const PUSHOVER_URL          = `${SUPABASE_URL}/functions/v1/pushover`;
+const WEB_PUSH_URL          = `${SUPABASE_URL}/functions/v1/web-push`;
 const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify`;
+
+const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+}
+
+async function getWebPushSubscription() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+
+async function subscribeWebPush(userId) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    throw new Error('Push notifications not supported in this browser');
+  }
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+  }
+  const json = sub.toJSON();
+  await unwrap(_supabase.from('zane_push_subscriptions').upsert({
+    id: json.endpoint,
+    user_id: userId,
+    endpoint: json.endpoint,
+    p256dh: json.keys.p256dh,
+    auth: json.keys.auth,
+  }, { onConflict: 'id' }));
+  return sub;
+}
+
+async function unsubscribeWebPush(userId) {
+  const sub = await getWebPushSubscription();
+  if (sub) {
+    const endpoint = sub.endpoint;
+    await sub.unsubscribe().catch(() => {});
+    await _supabase.from('zane_push_subscriptions').delete().eq('id', endpoint);
+  }
+}
 
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { experimental: { passkey: true } },
@@ -1028,8 +1076,8 @@ function computeNextReminderAt(state) {
 
 function cancelPushover(settings, userId) {
   if (!settings?.pushEnabled) return;
-  // Identity + target key are derived server-side from the JWT now.
   fnFetch(PUSHOVER_URL, { nonce: `cancel-${Date.now()}`, cancel: true });
+  navigator.serviceWorker?.controller?.postMessage({ type: 'CANCEL_REST_TIMER' });
 }
 
 function findExercise(state, exId) {
@@ -2340,7 +2388,8 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions, schema) {
 
 window.LB = {
   supabase: _supabase,
-  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, fnFetch,
+  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
+  subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,

@@ -20,11 +20,21 @@ function dbFetch(path: string, options: RequestInit = {}) {
   });
 }
 
+async function sendWebPush(userId: string, title: string, message: string) {
+  const base = Deno.env.get('SUPABASE_URL') ?? '';
+  return fetch(`${base}/functions/v1/web-push`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, title, message }),
+  }).catch(e => console.error(`[reminder] web-push error for ${userId}:`, e));
+}
+
 async function sendReminders() {
+  // Query all push-enabled users with a due reminder — not just Pushover users.
   const r = await dbFetch(
-    'zane_user_settings?reminder_enabled=eq.true&next_reminder_at=not.is.null&push_enabled=eq.true&pushover_user_key=not.is.null&select=user_id,pushover_user_key,next_reminder_at'
+    'zane_user_settings?reminder_enabled=eq.true&next_reminder_at=not.is.null&push_enabled=eq.true&select=user_id,pushover_user_key,next_reminder_at'
   );
-  const rows: { user_id: string; pushover_user_key: string; next_reminder_at: string }[] = await r.json().catch(() => []);
+  const rows: { user_id: string; pushover_user_key: string | null; next_reminder_at: string }[] = await r.json().catch(() => []);
 
   const now = Date.now();
   const oneHourAgo = now - 3600_000;
@@ -34,23 +44,23 @@ async function sendReminders() {
     // Only fire if the reminder is due and not stale (older than 1 hour)
     if (scheduledAt > now || scheduledAt < oneHourAgo) continue;
 
-    try {
-      const res = await fetch('https://api.pushover.net/1/messages.json', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: PUSHOVER_TOKEN,
-          user: row.pushover_user_key,
-          title: 'Zane · Training Reminder',
-          message: "Training day ahead — time to get after it! 💪",
-          priority: 0,
-          ttl: 43200, // expire after 12 hours
-        }),
-      });
-      console.log(`[reminder] sent to ${row.user_id}: ${res.status}`);
-    } catch (e) {
-      console.error(`[reminder] pushover error for ${row.user_id}:`, e);
+    const title = 'Zane · Training Reminder';
+    const message = "Training day ahead — time to get after it! 💪";
+
+    if (row.pushover_user_key) {
+      try {
+        const res = await fetch('https://api.pushover.net/1/messages.json', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: PUSHOVER_TOKEN, user: row.pushover_user_key, title, message, priority: 0, ttl: 43200 }),
+        });
+        console.log(`[reminder] pushover sent to ${row.user_id}: ${res.status}`);
+      } catch (e) {
+        console.error(`[reminder] pushover error for ${row.user_id}:`, e);
+      }
     }
+
+    await sendWebPush(row.user_id, title, message);
 
     // Clear next_reminder_at regardless of push success so we don't retry endlessly
     await dbFetch(`zane_user_settings?user_id=eq.${row.user_id}`, {

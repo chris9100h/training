@@ -20,13 +20,20 @@ function dbFetch(path: string, options: RequestInit = {}) {
 
 async function sendPushover(userKey: string, userId: string, message: string) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
-  // Internal call: the pushover function only accepts user JWTs or the
-  // service-role key since the security hardening — the anon key is rejected.
   return fetch(`${base}/functions/v1/pushover`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, title: 'Zane', userKey, userId }),
   }).catch(e => console.error('[auto-close] pushover error:', e));
+}
+
+async function sendWebPush(userId: string, title: string, message: string) {
+  const base = Deno.env.get('SUPABASE_URL') ?? '';
+  return fetch(`${base}/functions/v1/web-push`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, title, message }),
+  }).catch(e => console.error('[auto-close] web-push error:', e));
 }
 
 Deno.serve(async (req) => {
@@ -91,12 +98,12 @@ Deno.serve(async (req) => {
           }),
         });
 
-        if (sett?.push_enabled && sett?.pushover_user_key) {
-          await sendPushover(
-            sett.pushover_user_key,
-            sess.user_id,
-            `Session auto-ended after ${timeoutMin} min of inactivity (${durationMinutes} min total).`
-          );
+        if (sett?.push_enabled) {
+          const msg = `Session auto-ended after ${timeoutMin} min of inactivity (${durationMinutes} min total).`;
+          if (sett.pushover_user_key) {
+            await sendPushover(sett.pushover_user_key, sess.user_id, msg);
+          }
+          await sendWebPush(sess.user_id, 'Zane · Session ended', msg);
         }
         closed++;
       }

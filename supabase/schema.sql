@@ -176,6 +176,15 @@ CREATE TABLE public.zane_pushover_active (
   nonce text NOT NULL DEFAULT ''::text
 );
 
+CREATE TABLE public.zane_push_subscriptions (
+  id         text        NOT NULL,
+  user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  endpoint   text        NOT NULL,
+  p256dh     text        NOT NULL,
+  auth       text        NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE public.zane_feature_grants (
   feature text NOT NULL,
   email   text NOT NULL
@@ -291,6 +300,7 @@ ALTER TABLE public.zane_user_settings ADD CONSTRAINT user_settings_pkey PRIMARY 
 ALTER TABLE public.zane_user_settings ADD CONSTRAINT user_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
 
 ALTER TABLE public.zane_pushover_active ADD CONSTRAINT pushover_active_pkey PRIMARY KEY (id);
+ALTER TABLE public.zane_push_subscriptions ADD CONSTRAINT push_subscriptions_pkey PRIMARY KEY (id);
 ALTER TABLE public.zane_feature_grants ADD CONSTRAINT feature_grants_pkey PRIMARY KEY (feature, email);
 
 ALTER TABLE public.zane_coaching ADD CONSTRAINT zane_coaching_pkey PRIMARY KEY (id);
@@ -343,6 +353,7 @@ ALTER TABLE public.zane_skips            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_user_settings    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_feature_grants   ENABLE ROW LEVEL SECURITY;  -- no policies: service-role / SECURITY DEFINER only
 ALTER TABLE public.zane_pushover_active  ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only (pushover edge fn)
+ALTER TABLE public.zane_push_subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_coaching         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_coaching_threads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_coaching_notes   ENABLE ROW LEVEL SECURITY;
@@ -392,6 +403,9 @@ CREATE POLICY "Users manage own cardio logs" ON public.zane_cardio_logs FOR ALL 
 -- daily logs
 CREATE POLICY "Users manage own daily logs" ON public.zane_daily_logs FOR ALL TO authenticated USING ((auth.uid() = user_id)) WITH CHECK ((auth.uid() = user_id));
 CREATE POLICY "coach can read client daily logs" ON public.zane_daily_logs FOR SELECT TO authenticated USING (zane_is_coach_of(user_id));
+
+-- push subscriptions
+CREATE POLICY "users manage own push subscriptions" ON public.zane_push_subscriptions FOR ALL TO public USING ((auth.uid() = user_id)) WITH CHECK ((auth.uid() = user_id));
 
 -- skips
 CREATE POLICY "own skips" ON public.zane_skips FOR ALL TO public USING ((user_id = auth.uid())) WITH CHECK ((user_id = auth.uid()));
