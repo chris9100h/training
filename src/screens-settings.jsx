@@ -381,6 +381,16 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [webPushCode, setWebPushCode] = useStateSet('');
   const [reminderSheet, setReminderSheet] = useStateSet(false);
   const [passkeySheet, setPasskeySheet] = useStateSet(false);
+  const [changePasswordSheet, setChangePasswordSheet] = useStateSet(false);
+  const [pwCurrent, setPwCurrent] = useStateSet('');
+  const [pwNew, setPwNew] = useStateSet('');
+  const [pwConfirm, setPwConfirm] = useStateSet('');
+  const [pwLoading, setPwLoading] = useStateSet(false);
+  const [pwMsg, setPwMsg] = useStateSet(null);
+  const [changeEmailSheet, setChangeEmailSheet] = useStateSet(false);
+  const [emailNew, setEmailNew] = useStateSet('');
+  const [emailLoading, setEmailLoading] = useStateSet(false);
+  const [emailMsg, setEmailMsg] = useStateSet(null);
   const [reminderEnabled, setReminderEnabled] = useStateSet(() => store.settings?.reminderEnabled ?? false);
   const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
@@ -645,6 +655,42 @@ function SettingsScreen({ store, setStore, go, userId }) {
     }; input.click();
   };
   const handleSignOut = async () => { await LB.signOut(); };
+
+  const handleChangePassword = async () => {
+    if (pwLoading) return;
+    if (pwNew.length < 8) { setPwMsg({ text: 'Password must be at least 8 characters', ok: false }); return; }
+    if (pwNew !== pwConfirm) { setPwMsg({ text: 'Passwords do not match', ok: false }); return; }
+    setPwLoading(true); setPwMsg(null);
+    try {
+      const { error: signInErr } = await LB.supabase.auth.signInWithPassword({ email: store.user?.email || '', password: pwCurrent });
+      if (signInErr) { setPwMsg({ text: 'Current password is incorrect', ok: false }); return; }
+      const { error: updateErr } = await LB.supabase.auth.updateUser({ password: pwNew });
+      if (updateErr) { setPwMsg({ text: updateErr.message || 'Failed to update password', ok: false }); }
+      else { setPwMsg({ text: 'Password updated successfully', ok: true }); setPwCurrent(''); setPwNew(''); setPwConfirm(''); }
+    } catch (e) {
+      setPwMsg({ text: e.message || 'Something went wrong', ok: false });
+    } finally {
+      setPwLoading(false);
+    }
+  };
+
+  const handleChangeEmail = async () => {
+    if (emailLoading) return;
+    const trimmed = emailNew.trim().toLowerCase();
+    if (!trimmed.includes('@') || !trimmed.includes('.')) { setEmailMsg({ text: 'Please enter a valid email address', ok: false }); return; }
+    if (trimmed === (store.user?.email || '').toLowerCase()) { setEmailMsg({ text: 'This is already your current email address', ok: false }); return; }
+    setEmailLoading(true); setEmailMsg(null);
+    try {
+      const { error } = await LB.supabase.auth.updateUser({ email: trimmed });
+      if (error) { setEmailMsg({ text: error.message || 'Failed to update email', ok: false }); }
+      else { setEmailMsg({ text: `Confirmation link sent to ${trimmed} — check your inbox and click the link to complete the change`, ok: true }); }
+    } catch (e) {
+      setEmailMsg({ text: e.message || 'Something went wrong', ok: false });
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+
   const handleDeleteAll = async () => {
     if (!await confirm('This action cannot be undone.', { title: 'Delete all data?', ok: 'Delete all', danger: true })) return;
     await LB.deleteAllData(userId); await LB.signOut();
@@ -1014,6 +1060,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
               <Hairline style={{ margin: '14px 0' }} />
             </>
           )}
+          <NavRow label="Change password" onTap={() => { setPwMsg(null); setPwCurrent(''); setPwNew(''); setPwConfirm(''); setChangePasswordSheet(true); }} first />
+          <Hairline style={{ margin: '14px 0' }} />
+          <NavRow label="Change email" onTap={() => { setEmailMsg(null); setEmailNew(''); setChangeEmailSheet(true); }} first />
+          <Hairline style={{ margin: '14px 0' }} />
           <Row label="Remind on training days" first>
             {reminderEnabled
               ? <button style={accentBtn} onClick={() => setReminderSheet(true)}>{store.settings?.reminderTime || 'Change'}</button>
@@ -1028,6 +1078,65 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
       {/* ══ Passkey Sheet ══ */}
       <PasskeySheet open={passkeySheet} onClose={() => setPasskeySheet(false)} />
+
+      {/* ══ Change Password Sheet ══ */}
+      <SettingsSheet open={changePasswordSheet} onClose={() => { setChangePasswordSheet(false); setPwCurrent(''); setPwNew(''); setPwConfirm(''); setPwMsg(null); }} title="Change password">
+        {(() => {
+          const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 8 }}>
+              <div>
+                <div className="micro" style={{ marginBottom: 6 }}>CURRENT PASSWORD</div>
+                <input type="password" value={pwCurrent} onChange={e => setPwCurrent(e.target.value)} placeholder="Current password" style={iStyle} autoComplete="current-password" />
+              </div>
+              <div>
+                <div className="micro" style={{ marginBottom: 6 }}>NEW PASSWORD</div>
+                <input type="password" value={pwNew} onChange={e => setPwNew(e.target.value)} placeholder="Min. 8 characters" style={iStyle} autoComplete="new-password" />
+              </div>
+              <div>
+                <div className="micro" style={{ marginBottom: 6 }}>CONFIRM NEW PASSWORD</div>
+                <input type="password" value={pwConfirm} onChange={e => setPwConfirm(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleChangePassword()} placeholder="Repeat new password" style={iStyle} autoComplete="new-password" />
+              </div>
+              {pwMsg && (
+                <div style={{ fontSize: 12, color: pwMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: pwMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
+                  {pwMsg.text}
+                </div>
+              )}
+              {!pwMsg?.ok
+                ? <Btn onClick={handleChangePassword} disabled={!pwCurrent || !pwNew || !pwConfirm || pwLoading}>{pwLoading ? 'Updating…' : 'Update password'}</Btn>
+                : <Btn kind="ghost" onClick={() => { setChangePasswordSheet(false); setPwMsg(null); }}>Done</Btn>
+              }
+            </div>
+          );
+        })()}
+      </SettingsSheet>
+
+      {/* ══ Change Email Sheet ══ */}
+      <SettingsSheet open={changeEmailSheet} onClose={() => { setChangeEmailSheet(false); setEmailNew(''); setEmailMsg(null); }} title="Change email">
+        {(() => {
+          const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 8 }}>
+              <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6 }}>
+                Current: <span style={{ color: UI.inkSoft }}>{store.user?.email || ''}</span>
+              </div>
+              <div>
+                <div className="micro" style={{ marginBottom: 6 }}>NEW EMAIL ADDRESS</div>
+                <input type="email" value={emailNew} onChange={e => setEmailNew(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleChangeEmail()} placeholder="new@example.com" style={iStyle} autoComplete="email" autoCapitalize="none" spellCheck={false} />
+              </div>
+              {emailMsg && (
+                <div style={{ fontSize: 12, color: emailMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: emailMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6, lineHeight: 1.55 }}>
+                  {emailMsg.text}
+                </div>
+              )}
+              {!emailMsg?.ok
+                ? <Btn onClick={handleChangeEmail} disabled={!emailNew.trim() || emailLoading}>{emailLoading ? 'Sending…' : 'Send confirmation'}</Btn>
+                : <Btn kind="ghost" onClick={() => { setChangeEmailSheet(false); setEmailNew(''); setEmailMsg(null); }}>Done</Btn>
+              }
+            </div>
+          );
+        })()}
+      </SettingsSheet>
 
       {/* ══ Admin Sheet ══ */}
       <SettingsSheet open={adminSheet} onClose={() => setAdminSheet(false)} title="Admin">
