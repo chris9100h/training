@@ -668,8 +668,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
   const handleChangePassword = async () => {
     if (pwLoading) return;
-    if (pwNew.length < 8) { setPwMsg({ text: 'Password must be at least 8 characters', ok: false }); return; }
-    if (pwNew !== pwConfirm) { setPwMsg({ text: 'Passwords do not match', ok: false }); return; }
+    if (pwNew.length < 6) { setPwMsg({ text: 'Password must be at least 6 characters', ok: false }); return; }
+    if (pwNew !== pwConfirm) return;
     setPwLoading(true); setPwMsg(null);
     try {
       const { error: signInErr } = await LB.supabase.auth.signInWithPassword({ email: store.user?.email || '', password: pwCurrent });
@@ -1094,11 +1094,14 @@ function SettingsScreen({ store, setStore, go, userId }) {
               </div>
               <div>
                 <div className="micro" style={{ marginBottom: 6 }}>NEW PASSWORD</div>
-                <input type="password" value={pwNew} onChange={e => setPwNew(e.target.value)} placeholder="Min. 8 characters" style={iStyle} autoComplete="new-password" />
+                <input type="password" value={pwNew} onChange={e => setPwNew(e.target.value)} placeholder="Min. 6 characters" style={iStyle} autoComplete="new-password" />
               </div>
               <div>
                 <div className="micro" style={{ marginBottom: 6 }}>CONFIRM NEW PASSWORD</div>
                 <input type="password" value={pwConfirm} onChange={e => setPwConfirm(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleChangePassword()} placeholder="Repeat new password" style={iStyle} autoComplete="new-password" />
+                {pwConfirm.length > 0 && pwNew !== pwConfirm && (
+                  <div style={{ fontSize: 12, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6 }}>Passwords do not match</div>
+                )}
               </div>
               {pwMsg && (
                 <div style={{ fontSize: 12, color: pwMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: pwMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
@@ -1106,7 +1109,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 </div>
               )}
               {!pwMsg?.ok
-                ? <Btn onClick={handleChangePassword} disabled={!pwCurrent || !pwNew || !pwConfirm || pwLoading}>{pwLoading ? 'Updating…' : 'Update password'}</Btn>
+                ? <Btn onClick={handleChangePassword} disabled={!pwCurrent || !pwNew || !pwConfirm || pwNew !== pwConfirm || pwLoading}>{pwLoading ? 'Updating…' : 'Update password'}</Btn>
                 : <Btn kind="ghost" onClick={() => { setChangePasswordSheet(false); setPwMsg(null); }}>Done</Btn>
               }
             </div>
