@@ -1076,7 +1076,12 @@ function computeNextReminderAt(state) {
 
 function cancelPushover(settings, userId) {
   if (!settings?.pushEnabled) return;
-  fnFetch(PUSHOVER_URL, { nonce: `cancel-${Date.now()}`, cancel: true });
+  const cancelNonce = `cancel-${Date.now()}`;
+  // Update shared nonce table → kills both web-push and pushover relay chains
+  fnFetch(WEB_PUSH_URL, { nonce: cancelNonce, cancel: true });
+  if (settings.pushoverUserKey) {
+    fnFetch(PUSHOVER_URL, { nonce: cancelNonce, cancel: true });
+  }
   navigator.serviceWorker?.controller?.postMessage({ type: 'CANCEL_REST_TIMER' });
 }
 

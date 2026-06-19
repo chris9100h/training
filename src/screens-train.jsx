@@ -851,32 +851,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const newDur = val !== null ? (dur ?? null) : null;
     setRestDuration(newDur);
     updateSession(sess => ({ ...sess, restStart: val, restDuration: newDur }));
-    // Schedule the "rest over" push right here — the single place a rest timer
-    // is started or adjusted. Scheduling it in a mount effect instead re-fired
-    // every time the Train screen was re-entered (e.g. Home → back), queuing a
-    // second server-side relay chain under the same nonce; both chains
-    // delivered, so the push arrived twice. The nonce only dedups a *newer*
-    // timer, never a re-send of the same one.
     if (val !== null) {
-      const def = newDur ?? restDef;
-      const delayMs = Math.round(Math.max(0, val + def * 1000 - Date.now()));
-      const hasPushover = !!(store.settings?.pushEnabled && store.settings?.pushoverUserKey);
-      // SW timer: fires when the app is backgrounded (no server required).
-      // Skip if Pushover is configured to avoid duplicate notifications.
-      if (!hasPushover && navigator.serviceWorker?.controller) {
-        navigator.serviceWorker.controller.postMessage({
-          type: 'SCHEDULE_REST_TIMER',
-          delayMs,
-          title: 'Zane · Rest done',
-          body: 'Time to start your next set! 💪',
-        });
-      }
-      // Pushover relay: fires even when the phone is locked.
       if (store.settings?.pushEnabled) {
-        LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds: Math.round(delayMs / 1000), nonce: String(val), priority: 1 });
+        const def = newDur ?? restDef;
+        const delaySeconds = Math.round(Math.max(0, val + def * 1000 - Date.now()) / 1000);
+        const nonce = String(val);
+        // Web-push relay chain — fires even when the phone is locked
+        LB.fnFetch(LB.WEB_PUSH_URL, { delaySeconds, nonce, title: 'Zane · Rest done', message: 'Time to start your next set! 💪' });
+        if (store.settings?.pushoverUserKey) {
+          LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds, nonce, priority: 1 });
+        }
       }
     } else {
-      navigator.serviceWorker?.controller?.postMessage({ type: 'CANCEL_REST_TIMER' });
+      cancelPushover();
     }
   };
   const [now, setNow] = useStateT(Date.now());
