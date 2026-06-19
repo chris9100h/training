@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.373',
+    title: 'Sign in with your face or fingerprint',
+    items: [
+      'Passkeys replace your password with Face ID, Touch ID or your device PIN — nothing to remember, nothing to type.',
+      'Set one up under Settings → Account → Passkeys → Add passkey. Takes five seconds.',
+      'Each device can have its own passkey — phone, tablet, laptop — and you can remove old ones whenever you want.',
+      'Your password still works as a fallback, so nothing breaks if you skip this.',
+    ],
+  },
+  {
     id: 'v2.371',
     title: 'Forgot your password?',
     items: [
