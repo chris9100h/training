@@ -823,7 +823,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   }, [exIdx]);
 
   // chip drag-to-reorder — uses the shared horizontal drag hook from ui.jsx
-  const chipDragReorderRef = UI.useDragReorderH({
+  const chipDragReorderRef = UI.useDragReorderH({ longPressMs: 400,
     onReorder: (from, to) => {
       updateSession(sess => {
         const entries = [...sess.entries];
