@@ -1476,7 +1476,19 @@ function SettingsScreen({ store, setStore, go, userId }) {
                 </div>
               </div>
             );
-            if (webPushVerified) return <div className="micro" style={{ color: 'var(--accent)', paddingLeft: 2 }}>✓ Active</div>;
+            if (webPushVerified) return (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: 'rgba(var(--accent-rgb), 0.08)', border: '0.5px solid rgba(var(--accent-rgb), 0.25)', borderRadius: 6, padding: '8px 14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 5px rgba(var(--accent-rgb),0.7)', animation: 'pulseDot 1.5s ease-in-out infinite', flexShrink: 0 }} />
+                  <span className="micro" style={{ color: 'var(--accent)' }}>ACTIVE</span>
+                </div>
+                <div style={{ width: 0.5, height: 10, background: 'rgba(var(--accent-rgb), 0.35)' }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <i className="fa-solid fa-circle-check" style={{ fontSize: 10, color: 'var(--accent)' }} />
+                  <span className="micro" style={{ color: 'var(--accent)' }}>VERIFIED</span>
+                </div>
+              </div>
+            );
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>Active — not yet verified</div>
