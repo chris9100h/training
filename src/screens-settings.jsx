@@ -67,14 +67,14 @@ function SettingsSheet(props) {
 function FullSheet({ open, onClose, title, children }) {
   if (!open) return null;
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.bg, display: 'flex', flexDirection: 'column' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.bg, display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
       <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0, background: UI.bgRaised }}>
         <div style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)' }}>{title}</div>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', display: 'flex', alignItems: 'center' }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 8, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', display: 'flex', alignItems: 'center' }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', padding: '20px', boxSizing: 'border-box', maxWidth: 540, width: '100%', alignSelf: 'center' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', boxSizing: 'border-box', maxWidth: 540, width: '100%', alignSelf: 'center' }}>
         {children}
       </div>
     </div>
@@ -1693,7 +1693,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           // ── NEW TICKET VIEW ──────────────────────────────────────────
           if (supportView === 'new') {
             return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '16px 20px' }}>
                 <button onClick={() => setSupportView('list')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, textAlign: 'left', padding: 0, WebkitTapHighlightColor: 'transparent' }}>
                   ← Back
                 </button>
@@ -1729,9 +1729,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
             const activeTicket = tickets.find(t => t.coachingId === supportActiveTicketId);
             const statusDot = { open: UI.danger, in_progress: UI.gold, resolved: UI.inkFaint };
             return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                {/* Header */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, paddingBottom: 12, borderBottom: `0.5px solid ${UI.hair}` }}>
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                {/* Header row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
                   <button onClick={() => { setSupportView('list'); setSupportActiveTicketId(null); setSupportDraft(''); }}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: 0, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
                     ← Back
@@ -1744,8 +1744,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
                     </div>
                   )}
                 </div>
-                {/* Messages */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
+                {/* Messages — scrollable */}
+                <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 10, padding: '16px 20px', minHeight: 0 }}>
                   {supportActiveLoading && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '12px 0' }}>Loading…</div>}
                   {!supportActiveLoading && supportActiveNotes.length === 0 && (
                     <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '24px 0' }}>No messages yet.</div>
@@ -1764,9 +1764,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
                     );
                   })}
                 </div>
-                {/* Compose */}
+                {/* Compose — sticks to bottom */}
                 {activeTicket?.status !== 'resolved' ? (
-                  <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
                     <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
                       placeholder="Write a message…" rows={3} style={iStyle}
                       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSupportSend(); }} />
@@ -1775,8 +1775,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
                     </Btn>
                   </div>
                 ) : (
-                  <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 12, fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.5 }}>
-                    This ticket is resolved. ← Go back to open a new one.
+                  <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.5 }}>
+                    This ticket is resolved. Go back to open a new one.
                   </div>
                 )}
               </div>
@@ -1786,7 +1786,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           // ── LIST VIEW (default) ──────────────────────────────────────
           const statusBorder = { open: UI.danger, in_progress: UI.gold, resolved: UI.inkFaint };
           return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px' }}>
               <Btn onClick={() => { setSupportView('new'); setSupportDraft(''); setSupportCategoryDraft('question'); }}>+ New ticket</Btn>
               {tickets.length === 0 && (
                 <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '24px 0' }}>
@@ -1822,10 +1822,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
       {/* ══ Support inbox full-screen sheet (admin) — inbox list + ticket detail in one ══ */}
       <FullSheet
         open={supportInboxSheet}
-        onClose={supportTicket
-          ? () => { setSupportTicket(null); setSupportAdminDraft(''); }
-          : () => { setSupportInboxSheet(false); setSupportCatFilter('all'); }
-        }
+        onClose={() => { setSupportInboxSheet(false); setSupportTicket(null); setSupportAdminDraft(''); setSupportCatFilter('all'); }}
         title={supportTicket ? (supportTicket.clientName || supportTicket.clientEmail) : 'Support inbox'}
       >
         {(() => {
@@ -1844,14 +1841,18 @@ function SettingsScreen({ store, setStore, go, userId }) {
             const sBg    = { open: 'rgba(var(--danger-rgb),0.12)', in_progress: UI.bgInset, resolved: 'rgba(var(--accent-rgb),0.1)' };
             const currentStatus = supportInbox.find(t => t.coaching_id === supportTicket.coachingId)?.support_status || supportTicket.status || 'open';
             return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                {/* Category + status info */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, paddingBottom: 14, borderBottom: `0.5px solid ${UI.hair}` }}>
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                {/* Back + meta */}
+                <div style={{ padding: '12px 20px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <button onClick={() => { setSupportTicket(null); setSupportAdminDraft(''); }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: 0, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
+                    ← Back
+                  </button>
                   <span className="micro" style={{ color: UI.inkFaint }}>{supportTicket.clientEmail}</span>
                   {supportTicket.category && <span className="micro" style={{ color: UI.inkFaint }}>· {CATS[supportTicket.category] || supportTicket.category}</span>}
                 </div>
                 {/* Status picker */}
-                <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+                <div style={{ display: 'flex', gap: 6, padding: '12px 20px', flexShrink: 0, borderBottom: `0.5px solid ${UI.hair}` }}>
                   {STATUSES.map(s => (
                     <button key={s.key} onClick={() => handleSetSupportStatus(supportTicket.coachingId, s.key)} style={{
                       flex: 1, padding: '7px 4px', borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
@@ -1862,8 +1863,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
                     }}>{s.label}</button>
                   ))}
                 </div>
-                {/* Thread */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+                {/* Thread — scrollable, takes remaining height */}
+                <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 10, padding: '16px 20px', minHeight: 0 }}>
                   {supportTicketLoading && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '12px 0' }}>Loading…</div>}
                   {!supportTicketLoading && supportTicketNotes.length === 0 && (
                     <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '24px 0' }}>No messages yet.</div>
@@ -1886,10 +1887,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
                     );
                   })}
                 </div>
-                {/* Reply */}
-                <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {/* Compose — sticks to bottom */}
+                <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
                   <textarea value={supportAdminDraft} onChange={e => setSupportAdminDraft(e.target.value)}
-                    placeholder="Reply…" rows={4} style={iStyle}
+                    placeholder="Reply…" rows={3} style={iStyle}
                     onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
                   />
                   <Btn onClick={handleAdminReply} disabled={!supportAdminDraft.trim() || supportAdminSending}>
@@ -1909,7 +1910,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           ];
           const filtered = supportCatFilter === 'all' ? supportInbox : supportInbox.filter(t => t.support_category === supportCatFilter);
           return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, padding: '16px 20px' }}>
               <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
                 {filterDefs.map(f => (
                   <button key={f.key} onClick={() => setSupportCatFilter(f.key)} style={{
