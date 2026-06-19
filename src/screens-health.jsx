@@ -952,6 +952,10 @@ function HealthScreen({ store, setStore, go, userId }) {
     const closedAt = mode === null
       ? (() => { const d = new Date((startDateStr || LB.todayISO()) + 'T12:00:00'); d.setDate(d.getDate() - 1); return d.toISOString(); })()
       : startedAt;
+    // If closedAt < the open period's startedAt (e.g. activated and closed the same day),
+    // delete the period entirely instead of creating an invalid start > end record.
+    const openPeriod = mode === null ? (store.statusPeriods || []).find(p => !p.endedAt) : null;
+    const shouldDelete = !!openPeriod && closedAt < openPeriod.startedAt;
     const modeChanged = mode !== current;
     if (!modeChanged && !startDateStr) return;
     const since = mode ? startedAt : null;
@@ -960,12 +964,15 @@ function HealthScreen({ store, setStore, go, userId }) {
         ? modeChanged
           ? [{ id: '_pending', mode, startedAt, endedAt: null }, ...(s.statusPeriods || []).map(p => p.endedAt ? p : { ...p, endedAt: new Date().toISOString() })]
           : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, startedAt } : p)
-        : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: closedAt } : p);
+        : shouldDelete
+          ? (s.statusPeriods || []).filter(p => !!p.endedAt)
+          : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: closedAt } : p);
       return { ...s, statusMode: mode, statusModeSince: since, statusPeriods: updatedPeriods };
     });
     try {
       if (modeChanged) {
         if (mode) await LB.openStatusPeriod(userId, mode, startedAt);
+        else if (shouldDelete) await LB.supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null);
         else      await LB.closeStatusPeriod(userId, closedAt);
       } else {
         await LB.updateStatusPeriodStart(userId, startedAt);

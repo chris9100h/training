@@ -1517,11 +1517,19 @@ function HomeScreen({ store, setStore, go, userId }) {
     // Deactivating today = last sick/vacation day was yesterday
     const d = new Date(LB.todayISO() + 'T12:00:00'); d.setDate(d.getDate() - 1);
     const closedAt = d.toISOString();
+    const openPeriod = (store.statusPeriods || []).find(p => !p.endedAt);
+    // If the period started today, closedAt (yesterday) < startedAt → delete instead of creating an invalid record
+    const shouldDelete = !!openPeriod && closedAt < openPeriod.startedAt;
     setStore(s => ({
       ...s, statusMode: null, statusModeSince: null,
-      statusPeriods: (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: closedAt } : p),
+      statusPeriods: shouldDelete
+        ? (s.statusPeriods || []).filter(p => !!p.endedAt)
+        : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: closedAt } : p),
     }));
-    try { await LB.closeStatusPeriod(userId, closedAt); } catch (_) {}
+    try {
+      if (shouldDelete) await LB.supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null);
+      else await LB.closeStatusPeriod(userId, closedAt);
+    } catch (_) {}
   };
 
   const selectedDayCardioLogs = useMemo(() => {
