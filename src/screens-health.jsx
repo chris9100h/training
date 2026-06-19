@@ -372,6 +372,49 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         {healthFmtDate(date, { weekday: 'long', day: 'numeric', month: 'long' })}
       </div>
 
+      {onSetStatus && (
+        <div style={{ marginBottom: 18, padding: '12px 14px', borderRadius: 6, background: dayMode ? 'rgba(var(--accent-rgb),0.05)' : UI.bgInset, border: `0.5px solid ${dayMode ? 'rgba(var(--accent-rgb),0.2)' : UI.hair}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="micro" style={{ flex: 1, color: dayMode ? 'var(--accent)' : UI.inkFaint }}>
+              {dayMode === 'sick' ? 'SICK MODE' : dayMode === 'vacation' ? 'VACATION MODE' : 'STATUS'}
+            </span>
+            {['sick', 'vacation', null].map(mode => (
+              <button key={String(mode)} onClick={() => onSetStatus(mode, date < todayISO ? date : null)} style={{
+                background: dayMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised) : 'transparent',
+                border: `0.5px solid ${dayMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong) : UI.hairStrong}`,
+                borderRadius: 4, padding: '4px 9px', cursor: 'pointer', fontFamily: UI.fontUi,
+                fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase',
+                color: dayMode === mode ? (mode ? 'var(--accent)' : UI.inkFaint) : UI.inkGhost,
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                {mode === 'sick' ? 'Sick' : mode === 'vacation' ? 'Vacation' : 'Off'}
+              </button>
+            ))}
+          </div>
+          {dayMode && date === todayISO && (() => {
+            const minDate = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return d.toISOString().slice(0, 10); })();
+            const currentVal = store.statusModeSince ? store.statusModeSince.slice(0, 10) : todayISO;
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                <span className="micro" style={{ color: UI.inkGhost }}>SINCE</span>
+                <input type="date" value={currentVal} min={minDate} max={todayISO}
+                  onChange={e => e.target.value && onSetStatus(store.statusMode, e.target.value)}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />
+              </div>
+            );
+          })()}
+          {dayStatusPeriod && date !== todayISO && (
+            <div style={{ marginTop: 6, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkFaint }}>
+              {new Date(dayStatusPeriod.startedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}
+              {' → '}
+              {dayStatusPeriod.endedAt
+                ? new Date(dayStatusPeriod.endedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
+                : 'ongoing'}
+            </div>
+          )}
+        </div>
+      )}
+
       {tooOld && (
         <div style={{ fontSize: 11, color: 'var(--danger)', fontFamily: UI.fontUi, padding: '8px 10px', background: 'rgba(var(--danger-rgb),0.1)', borderRadius: 4, marginBottom: 14 }}>
           You can only create a new entry up to 14 days back.
@@ -461,49 +504,6 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
                   </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {onSetStatus && (
-        <div style={{ marginBottom: 18, padding: '12px 14px', borderRadius: 6, background: dayMode ? 'rgba(var(--accent-rgb),0.05)' : UI.bgInset, border: `0.5px solid ${dayMode ? 'rgba(var(--accent-rgb),0.2)' : UI.hair}` }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span className="micro" style={{ flex: 1, color: dayMode ? 'var(--accent)' : UI.inkFaint }}>
-              {dayMode === 'sick' ? 'SICK MODE' : dayMode === 'vacation' ? 'VACATION MODE' : 'STATUS'}
-            </span>
-            {['sick', 'vacation', null].map(mode => (
-              <button key={String(mode)} onClick={() => onSetStatus(mode, date < todayISO ? date : null)} style={{
-                background: dayMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised) : 'transparent',
-                border: `0.5px solid ${dayMode === mode ? (mode ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong) : UI.hairStrong}`,
-                borderRadius: 4, padding: '4px 9px', cursor: 'pointer', fontFamily: UI.fontUi,
-                fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase',
-                color: dayMode === mode ? (mode ? 'var(--accent)' : UI.inkFaint) : UI.inkGhost,
-                WebkitTapHighlightColor: 'transparent',
-              }}>
-                {mode === 'sick' ? 'Sick' : mode === 'vacation' ? 'Vacation' : 'Off'}
-              </button>
-            ))}
-          </div>
-          {dayMode && date === todayISO && (() => {
-            const minDate = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return d.toISOString().slice(0, 10); })();
-            const currentVal = store.statusModeSince ? store.statusModeSince.slice(0, 10) : todayISO;
-            return (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                <span className="micro" style={{ color: UI.inkGhost }}>SINCE</span>
-                <input type="date" value={currentVal} min={minDate} max={todayISO}
-                  onChange={e => e.target.value && onSetStatus(store.statusMode, e.target.value)}
-                  style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />
-              </div>
-            );
-          })()}
-          {dayStatusPeriod && date !== todayISO && (
-            <div style={{ marginTop: 6, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkFaint }}>
-              {new Date(dayStatusPeriod.startedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}
-              {' → '}
-              {dayStatusPeriod.endedAt
-                ? new Date(dayStatusPeriod.endedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
-                : 'ongoing'}
-            </div>
-          )}
         </div>
       )}
 
