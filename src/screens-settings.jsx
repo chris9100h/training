@@ -1822,7 +1822,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
       {/* ══ Support inbox full-screen sheet (admin) — inbox list + ticket detail in one ══ */}
       <FullSheet
         open={supportInboxSheet}
-        onClose={() => { setSupportInboxSheet(false); setSupportTicket(null); setSupportAdminDraft(''); setSupportCatFilter('all'); }}
+        onClose={supportTicket
+          ? () => { setSupportTicket(null); setSupportAdminDraft(''); }
+          : () => { setSupportInboxSheet(false); setSupportCatFilter('all'); }
+        }
         title={supportTicket ? (supportTicket.clientName || supportTicket.clientEmail) : 'Support inbox'}
       >
         {(() => {
