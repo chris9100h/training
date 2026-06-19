@@ -56,6 +56,9 @@ function NavRow({ label, hint, onTap, first = false, accent = false }) {
 
 const accentBtn = { background: 'rgba(var(--accent-rgb),0.10)', border: '0.5px solid rgba(var(--accent-rgb),0.22)', color: 'var(--accent)', padding: '5px 14px', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent', flexShrink: 0 };
 
+const isIosDevice = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+  (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
 // Every settings sheet renders its title in the accent color.
 function SettingsSheet(props) {
   return <Sheet titleColor="var(--accent)" {...props} />;
@@ -370,6 +373,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [webPushSub, setWebPushSub] = useStateSet(null);
   const [webPushLoading, setWebPushLoading] = useStateSet(false);
   const [webPushVerified, setWebPushVerified] = useStateSet(() => localStorage.getItem('logbook-push-verified') === 'true');
+  const [iosDisclaimerSeen, setIosDisclaimerSeen] = useStateSet(() => localStorage.getItem('logbook-push-ios-hint-seen') === 'true');
   const [webPushStep, setWebPushStep] = useStateSet('idle'); // 'idle'|'code-sent'
   const [webPushCode, setWebPushCode] = useStateSet('');
   const [reminderSheet, setReminderSheet] = useStateSet(false);
@@ -1346,6 +1350,14 @@ function SettingsScreen({ store, setStore, go, userId }) {
       {/* ══ Push notifications sheet ══ */}
       <SettingsSheet open={pushSheet} onClose={() => setPushSheet(false)} title="Push notifications">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+          {isIosDevice && !pushEnabled && !iosDisclaimerSeen && (
+            <div style={{ background: 'rgba(var(--accent-rgb),0.07)', border: '0.5px solid rgba(var(--accent-rgb),0.2)', borderRadius: 6, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
+                Push notifications on iPhone and iPad require Zane to be installed as an app on your home screen. For instructions, see <span style={{ color: 'var(--accent)' }}>How to… → Install as app</span>.
+              </div>
+              <button onClick={() => { setIosDisclaimerSeen(true); localStorage.setItem('logbook-push-ios-hint-seen', 'true'); }} style={{ ...accentBtn, alignSelf: 'flex-start' }}>Got it</button>
+            </div>
+          )}
           <Row label="This device" first>
             {webPushLoading
               ? <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkFaint }}>…</span>
