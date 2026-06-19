@@ -6,7 +6,9 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const PUSHOVER_URL          = `${SUPABASE_URL}/functions/v1/pushover`;
 const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify`;
 
-const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { experimental: { passkey: true } },
+});
 
 // Await a PostgREST builder and throw if it resolved with an { error }. The
 // supabase-js client does NOT throw on failed writes (network errors, RLS
@@ -131,6 +133,17 @@ async function signUp(email, password, name, unit = null) {
 
 async function signOut() {
   await _supabase.auth.signOut();
+}
+
+async function signInWithPasskey() {
+  const { error } = await _supabase.auth.signInWithPasskey();
+  if (error) throw error;
+}
+
+async function registerPasskey() {
+  const { data, error } = await _supabase.auth.registerPasskey();
+  if (error) throw error;
+  return data;
 }
 
 async function resetPassword(email, redirectTo) {
@@ -2318,7 +2331,7 @@ window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, fnFetch,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
-  signIn, signUp, signOut, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
+  signIn, signUp, signOut, signInWithPasskey, registerPasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,

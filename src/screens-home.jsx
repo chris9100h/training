@@ -59,6 +59,38 @@ function FitText({ text, max, min, style }) {
   );
 }
 
+// ─── PASSKEY LOGIN BUTTON ─────────────────────────────────────────────────────
+function PasskeyLoginButton({ loading, setLoading, setError }) {
+  const handlePasskey = async () => {
+    if (loading) return;
+    setLoading(true); setError('');
+    try {
+      await LB.signInWithPasskey();
+    } catch (e) {
+      setError(e.message || 'Passkey sign-in failed');
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button type="button" onClick={handlePasskey} disabled={loading} style={{
+      width: '100%', padding: '12px 0', borderRadius: 6,
+      background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+      color: loading ? UI.inkFaint : UI.ink,
+      fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+      cursor: loading ? 'default' : 'pointer',
+      WebkitTapHighlightColor: 'transparent',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+      transition: 'border-color 0.15s, color 0.15s',
+    }}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="8" cy="8" r="4" /><path d="M20 21v-1a4 4 0 0 0-4-4h-2" /><line x1="16" y1="11" x2="22" y2="11" /><line x1="19" y1="8" x2="19" y2="14" />
+      </svg>
+      {loading ? 'Signing in…' : 'Sign in with passkey'}
+    </button>
+  );
+}
+
 // ─── LOGIN / REGISTER ─────────────────────────────────────────────────────────
 function LoginScreen() {
   const [mode, setMode]           = useState('login'); // 'login' | 'register' | 'forgot'
@@ -268,6 +300,17 @@ function LoginScreen() {
               }}>
                 Forgot password?
               </button>
+            )}
+
+            {isLogin && typeof window !== 'undefined' && window.PublicKeyCredential && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0' }}>
+                  <div style={{ flex: 1, height: 1, background: UI.hair }} />
+                  <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>or</span>
+                  <div style={{ flex: 1, height: 1, background: UI.hair }} />
+                </div>
+                <PasskeyLoginButton loading={loading} setLoading={setLoading} setError={setError} />
+              </>
             )}
           </form>
         )}

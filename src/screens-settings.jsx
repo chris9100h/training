@@ -208,6 +208,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [testPickerOpen, setTestPickerOpen] = useStateSet(false);
   const [pushSheet, setPushSheet] = useStateSet(false);
   const [reminderSheet, setReminderSheet] = useStateSet(false);
+  const [passkeyLoading, setPasskeyLoading] = useStateSet(false);
+  const [passkeyMsg, setPasskeyMsg] = useStateSet('');
   const [reminderEnabled, setReminderEnabled] = useStateSet(() => store.settings?.reminderEnabled ?? false);
   const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
@@ -656,6 +658,32 @@ function SettingsScreen({ store, setStore, go, userId }) {
             <button style={accentBtn} onClick={() => setPushSheet(true)}>Configure</button>
           </Row>
           <Hairline style={{ margin: '14px 0' }} />
+          {typeof window !== 'undefined' && window.PublicKeyCredential && (
+            <>
+              <Row label="Passkeys">
+                <button style={accentBtn} disabled={passkeyLoading} onClick={async () => {
+                  setPasskeyLoading(true); setPasskeyMsg('');
+                  try {
+                    await LB.registerPasskey();
+                    setPasskeyMsg('Passkey added!');
+                  } catch (e) {
+                    setPasskeyMsg(e.message || 'Failed to add passkey');
+                  } finally {
+                    setPasskeyLoading(false);
+                    setTimeout(() => setPasskeyMsg(''), 4000);
+                  }
+                }}>{passkeyLoading ? 'Adding…' : 'Add passkey'}</button>
+              </Row>
+              {passkeyMsg ? (
+                <div style={{ fontSize: 11, color: passkeyMsg.includes('!') ? UI.gold : UI.danger, fontFamily: UI.fontUi, marginTop: 6 }}>{passkeyMsg}</div>
+              ) : (
+                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+                  Register this device for passwordless sign-in using Face ID, Touch ID or your device PIN.
+                </div>
+              )}
+              <Hairline style={{ margin: '14px 0' }} />
+            </>
+          )}
           <Row label="Remind on training days" first>
             {reminderEnabled
               ? <button style={accentBtn} onClick={() => setReminderSheet(true)}>{store.settings?.reminderTime || 'Change'}</button>
