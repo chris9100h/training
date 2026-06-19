@@ -350,6 +350,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
   );
   const [signupApproval, setSignupApproval] = useStateSet(null); // null = loading, bool = current
   const [autoApproveLeft, setAutoApproveLeft] = useStateSet(null); // null = no batch budget, int = remaining
+  const [periodsSheet, setPeriodsSheet] = useStateSet(false);
+  const [showAllPeriods, setShowAllPeriods] = useStateSet(false);
   const [budgetSheet, setBudgetSheet] = useStateSet(false);
   const [budgetDraft, setBudgetDraft] = useStateSet(20);
   const [recentSignups, setRecentSignups] = useStateSet([]);
@@ -871,10 +873,85 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             By default calories are calculated from macros (P×4 + C×4 + F×9). Enable this to enter calories directly — useful for net-carb tracking.
           </div>
+          {(store.statusPeriods || []).length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <NavRow label="Sick & Vacation periods" hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} first />
+            </div>
+          )}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setHealthSheet(false)}>Done</Btn>
           </div>
         </div>
+      </SettingsSheet>
+
+      {/* ══ Sick & Vacation Periods Sheet ══ */}
+      <SettingsSheet open={periodsSheet} onClose={() => setPeriodsSheet(false)} title="Sick & Vacation periods">
+        {(() => {
+          const allPeriods = (store.statusPeriods || []);
+          const PREVIEW = 5;
+          const visible = showAllPeriods ? allPeriods : allPeriods.slice(0, PREVIEW);
+          const todayStr = LB.todayISO();
+          const fmtDate = (iso) => {
+            const d = new Date(iso);
+            return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+          };
+          const updatePeriod = async (id, patch) => {
+            setStore(s => ({ ...s, statusPeriods: (s.statusPeriods || []).map(p => p.id === id ? { ...p, ...patch } : p) }));
+            await LB.supabase.from('zane_status_periods').update(
+              Object.fromEntries(Object.entries(patch).map(([k, v]) => [k === 'startedAt' ? 'started_at' : k === 'endedAt' ? 'ended_at' : k, v]))
+            ).eq('id', id);
+          };
+          const deletePeriod = async (id) => {
+            setStore(s => ({ ...s, statusPeriods: (s.statusPeriods || []).filter(p => p.id !== id) }));
+            await LB.supabase.from('zane_status_periods').delete().eq('id', id);
+          };
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+              {visible.map((p, i) => {
+                const isActive = !p.endedAt;
+                const icon = p.mode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach';
+                const label = p.mode === 'sick' ? 'SICK' : 'VACATION';
+                return (
+                  <div key={p.id}>
+                    {i > 0 && <div className="knurl" />}
+                    <div style={{ padding: '12px 0', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                      <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: 'var(--accent)', marginTop: 2, width: 16, textAlign: 'center', flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="micro" style={{ color: 'var(--accent)', marginBottom: 6 }}>{label}</div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <input type="date" value={p.startedAt.slice(0, 10)} max={p.endedAt ? p.endedAt.slice(0, 10) : todayStr}
+                            onChange={e => e.target.value && updatePeriod(p.id, { startedAt: e.target.value + 'T12:00:00.000Z' })}
+                            style={{ background: 'transparent', border: 'none', color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />
+                          <span style={{ color: UI.inkFaint, fontSize: 11, fontFamily: UI.fontUi }}>→</span>
+                          {isActive
+                            ? <span style={{ fontSize: 12, fontFamily: UI.fontUi, color: 'var(--accent)', fontStyle: 'italic' }}>ongoing</span>
+                            : <input type="date" value={p.endedAt.slice(0, 10)} min={p.startedAt.slice(0, 10)} max={todayStr}
+                                onChange={e => e.target.value && updatePeriod(p.id, { endedAt: e.target.value + 'T12:00:00.000Z' })}
+                                style={{ background: 'transparent', border: 'none', color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />
+                          }
+                        </div>
+                      </div>
+                      <button onClick={() => deletePeriod(p.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', flexShrink: 0 }}>
+                        <i className="fa-solid fa-trash-can" style={{ fontSize: 12 }} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {!showAllPeriods && allPeriods.length > PREVIEW && (
+                <button onClick={() => setShowAllPeriods(true)} style={{ width: '100%', marginTop: 8, padding: '7px 0', background: 'none', border: `0.5px solid ${UI.hair}`, borderRadius: 4, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', letterSpacing: '0.04em' }}>
+                  Show all ({allPeriods.length})
+                </button>
+              )}
+              {allPeriods.length === 0 && (
+                <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>No periods recorded yet.</div>
+              )}
+              <div style={{ marginTop: 24 }}>
+                <Btn style={{ width: '100%' }} onClick={() => setPeriodsSheet(false)}>Done</Btn>
+              </div>
+            </div>
+          );
+        })()}
       </SettingsSheet>
 
       {/* ══ Account Sheet ══ */}
