@@ -104,7 +104,12 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
               <i className={`fa-solid ${clientStore.statusMode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach'}`} style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', fontWeight: 600 }}>
                 {clientStore.statusMode === 'sick' ? 'SICK' : 'VACATION'}
-                {clientStore.statusModeSince && (() => { const days = Math.floor((Date.now() - new Date(clientStore.statusModeSince).getTime()) / 86400000); return days > 0 ? ` · ${days} DAY${days !== 1 ? 'S' : ''}` : ''; })()}
+                {clientStore.statusModeSince && (() => {
+                  const since = new Date(clientStore.statusModeSince);
+                  const days = Math.floor((Date.now() - since.getTime()) / 86400000);
+                  const dateStr = since.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }).toUpperCase();
+                  return ` · SINCE ${dateStr}${days > 0 ? ` (${days}d)` : ''}`;
+                })()}
               </span>
             </div>
           )}
@@ -575,6 +580,39 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
           </div>
         ))
       }
+
+      {/* Sick & vacation history */}
+      {(clientStore.statusPeriods || []).length > 0 && (() => {
+        const sorted = [...(clientStore.statusPeriods || [])].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+        return (
+          <>
+            <div className="micro" style={{ color: UI.inkFaint, margin: '20px 0 8px', paddingLeft: 2 }}>SICK & VACATION</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {sorted.map((p, i) => {
+                const icon = p.mode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach';
+                const modeLabel = p.mode === 'sick' ? 'Sick' : 'Vacation';
+                const startDate = new Date(p.startedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+                const endDate = p.endedAt ? new Date(p.endedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : null;
+                const days = p.endedAt
+                  ? Math.round((new Date(p.endedAt) - new Date(p.startedAt)) / 86400000) + 1
+                  : Math.floor((Date.now() - new Date(p.startedAt).getTime()) / 86400000) + 1;
+                return (
+                  <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 14px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
+                    <i className={`fa-solid ${icon}`} style={{ fontSize: 12, color: !p.endedAt ? 'var(--accent)' : UI.inkFaint, flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontSize: 12, fontFamily: UI.fontUi, fontWeight: 600, color: !p.endedAt ? UI.ink : UI.inkSoft }}>{modeLabel}</span>
+                      <span style={{ fontSize: 11, fontFamily: UI.fontUi, color: UI.inkFaint, marginLeft: 8 }}>
+                        {startDate} → {endDate || 'ongoing'}
+                      </span>
+                    </div>
+                    <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{days}d</span>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }
