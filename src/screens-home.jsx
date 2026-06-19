@@ -2069,9 +2069,9 @@ function HomeScreen({ store, setStore, go, userId }) {
       )}
 
       {/* Last session + not-logged strip — fixed above tab bar */}
-      {(lastSession || (recentBannerDay && !store.inProgress)) && (
+      {(lastSession || (recentBannerDay && !store.inProgress && !store.statusMode)) && (
         <div style={{ flexShrink: 0, padding: '10px 22px' }}>
-          {lastSession && recentBannerDay && !store.inProgress ? (
+          {lastSession && recentBannerDay && !store.inProgress && !store.statusMode ? (
             <div style={{ display: 'flex', gap: 8 }}>
               <Frame onClick={() => go({ name: 'session', sessionId: lastSession.id, back: { name: 'home' } })} style={{ flex: 1, minWidth: 0, padding: '10px 12px', cursor: 'pointer' }}>
                 <div className="micro" style={{ marginBottom: 3 }}>LAST SESSION</div>
