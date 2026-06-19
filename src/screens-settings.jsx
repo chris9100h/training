@@ -919,8 +919,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const activeCount = activeSessions.filter(s => !s.is_finished).length;
 
   return (
-    <Screen>
+    <Screen scroll={false}>
       <TopBar title="Settings" onBack={() => go({ name: 'home' })} />
+      <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain' }}>
       <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
 
         {/* ─── User ─── */}
@@ -985,6 +986,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
             </Frame>
           </div>
         )}
+      </div>
+      </div>
+      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `0.5px solid ${UI.hair}`, background: UI.bg }}>
         <Btn kind="ghost" onClick={async () => { if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); } window.location.reload(true); }}>Clear cache &amp; reload</Btn>
         {isAdmin ? (() => {
           const unseenCount = recentSignups.filter(u => !seenSignups.has(u.user_id)).length;
@@ -1006,7 +1010,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
         )}
         <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Sign out</Btn>
         <div className="micro" style={{ textAlign: 'center', marginTop: 4 }}>Zane · {swVersion || '…'} · Data in Supabase</div>
-
       </div>
 
       {confirmEl}
