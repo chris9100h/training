@@ -415,6 +415,9 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [supportTicketLoading, setSupportTicketLoading] = useStateSet(false);
   const [supportAdminDraft, setSupportAdminDraft] = useStateSet('');
   const [supportAdminSending, setSupportAdminSending] = useStateSet(false);
+  const [archivedInbox, setArchivedInbox] = useStateSet([]);
+  const [showArchived, setShowArchived] = useStateSet(false);
+  const [archivedLoading, setArchivedLoading] = useStateSet(false);
   const [changePasswordSheet, setChangePasswordSheet] = useStateSet(false);
   const [pwCurrent, setPwCurrent] = useStateSet('');
   const [pwNew, setPwNew] = useStateSet('');
@@ -832,6 +835,15 @@ function SettingsScreen({ store, setStore, go, userId }) {
     setStore(s => ({ ...s, supportTickets: (s.supportTickets || []).map(t =>
       t.coachingId === coachingId ? { ...t, status: newStatus } : t
     )}));
+  };
+
+  const handleArchiveTicket = async () => {
+    if (!supportTicket) return;
+    const coachingId = supportTicket.coachingId;
+    await LB.supabase.rpc('archive_support_ticket', { p_coaching_id: coachingId });
+    setSupportInbox(prev => prev.filter(t => t.coaching_id !== coachingId));
+    setSupportTicket(null);
+    setSupportAdminDraft('');
   };
 
   const handleChangePassword = async () => {
@@ -1844,7 +1856,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
         open={supportInboxSheet}
         onClose={supportTicket
           ? () => { setSupportTicket(null); setSupportAdminDraft(''); }
-          : () => { setSupportInboxSheet(false); setSupportCatFilter('all'); }
+          : () => { setSupportInboxSheet(false); setSupportCatFilter('all'); setShowArchived(false); }
         }
         title={supportTicket ? (supportTicket.clientName || supportTicket.clientEmail) : 'Support inbox'}
       >
@@ -1885,6 +1897,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
                       fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
                     }}>{s.label}</button>
                   ))}
+                </div>
+                {/* Archive link */}
+                <div style={{ padding: '8px 20px', flexShrink: 0, borderBottom: `0.5px solid ${UI.hair}` }}>
+                  <button onClick={handleArchiveTicket} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <i className="fa-solid fa-box-archive" style={{ fontSize: 10 }} /> Archive ticket
+                  </button>
                 </div>
                 {/* Thread — scrollable, takes remaining height */}
                 <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 10, padding: '16px 20px', minHeight: 0 }}>
@@ -1971,6 +1989,40 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   )}
                 </button>
               ))}
+              {/* ── Archived section ── */}
+              <div style={{ borderTop: `0.5px solid ${UI.hair}`, marginTop: 4, paddingTop: 12 }}>
+                <button onClick={async () => {
+                  if (showArchived) { setShowArchived(false); return; }
+                  setShowArchived(true);
+                  setArchivedLoading(true);
+                  const { data } = await LB.supabase.rpc('get_archived_support_chats');
+                  setArchivedInbox(data || []);
+                  setArchivedLoading(false);
+                }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent', display: 'flex', alignItems: 'center', gap: 6, marginBottom: showArchived ? 12 : 0 }}>
+                  <i className={`fa-solid fa-chevron-${showArchived ? 'up' : 'down'}`} style={{ fontSize: 9 }} />
+                  Archived
+                </button>
+                {showArchived && (
+                  archivedLoading
+                    ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '8px 0' }}>Loading…</div>
+                    : archivedInbox.length === 0
+                    ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic', padding: '8px 0' }}>No archived tickets.</div>
+                    : archivedInbox.map(t => (
+                      <button key={t.coaching_id}
+                        onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })}
+                        style={{ width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderLeft: `3px solid ${UI.inkGhost}`, borderRadius: 8, cursor: 'pointer', textAlign: 'left', padding: '12px 14px', marginBottom: 8, WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 4, opacity: 0.7 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: UI.inkSoft, fontFamily: UI.fontUi, flex: 1 }}>{t.client_name || t.client_email}</span>
+                          <span className="micro" style={{ color: UI.inkGhost }}>{(t.support_status || 'resolved').replace('_', ' ').toUpperCase()}</span>
+                          {t.support_category && <span className="micro" style={{ color: UI.inkGhost }}>{CATS[t.support_category] || t.support_category}</span>}
+                        </div>
+                        {t.last_message_body && (
+                          <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.last_message_body}</div>
+                        )}
+                      </button>
+                    ))
+                )}
+              </div>
             </div>
           );
         })()}

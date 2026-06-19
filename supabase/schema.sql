@@ -200,7 +200,8 @@ CREATE TABLE public.zane_coaching (
   status text NOT NULL DEFAULT 'pending'::text,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   checkin_requested_at timestamp with time zone,
-  checkin_enabled boolean NOT NULL DEFAULT true
+  checkin_enabled boolean NOT NULL DEFAULT true,
+  archived boolean DEFAULT false
 );
 
 CREATE TABLE public.zane_coaching_threads (
