@@ -80,13 +80,13 @@ function PasskeyLoginButton({ loading, setLoading, setError }) {
       fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
       cursor: loading ? 'default' : 'pointer',
       WebkitTapHighlightColor: 'transparent',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
       transition: 'border-color 0.15s, color 0.15s',
     }}>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="8" cy="8" r="4" /><path d="M20 21v-1a4 4 0 0 0-4-4h-2" /><line x1="16" y1="11" x2="22" y2="11" /><line x1="19" y1="8" x2="19" y2="14" />
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 11c0-1.1.9-2 2-2s2 .9 2 2-.9 2-2 2-2-.9-2-2z"/><path d="M14 2C9.6 2 6 5.6 6 10c0 2.8 1.4 5.3 3.5 6.8L8 22h6l-.5-2H17l-.5-2H19l-1.2-3.5C19.2 15 20 12.6 20 10c0-4.4-2.7-8-6-8z"/>
       </svg>
-      {loading ? 'Signing in…' : 'Sign in with passkey'}
+      {loading ? '…' : 'Passkey'}
     </button>
   );
 }
@@ -282,9 +282,18 @@ function LoginScreen() {
             )}
 
             {isLogin ? (
-              <Btn style={{ marginTop: 4, opacity: canLogin && !loading ? 1 : 0.4 }}>
-                {loading ? 'Signing in…' : 'Log in'}
-              </Btn>
+              typeof window !== 'undefined' && window.PublicKeyCredential ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
+                  <PasskeyLoginButton loading={loading} setLoading={setLoading} setError={setError} />
+                  <Btn style={{ opacity: canLogin && !loading ? 1 : 0.4 }}>
+                    {loading ? 'Signing in…' : 'Log in'}
+                  </Btn>
+                </div>
+              ) : (
+                <Btn style={{ marginTop: 4, opacity: canLogin && !loading ? 1 : 0.4 }}>
+                  {loading ? 'Signing in…' : 'Log in'}
+                </Btn>
+              )
             ) : (
               <Btn disabled={!canRegister || loading} style={{ marginTop: 4, opacity: canRegister && !loading ? 1 : 0.4 }}>
                 {loading ? 'Creating account…' : 'Create account'}
@@ -300,17 +309,6 @@ function LoginScreen() {
               }}>
                 Forgot password?
               </button>
-            )}
-
-            {isLogin && typeof window !== 'undefined' && window.PublicKeyCredential && (
-              <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0' }}>
-                  <div style={{ flex: 1, height: 1, background: UI.hair }} />
-                  <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>or</span>
-                  <div style={{ flex: 1, height: 1, background: UI.hair }} />
-                </div>
-                <PasskeyLoginButton loading={loading} setLoading={setLoading} setError={setError} />
-              </>
             )}
           </form>
         )}
