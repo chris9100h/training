@@ -286,6 +286,7 @@ async function importFromBackup(backup, userId) {
       rest_small: sett.restSmall || 90,
       push_enabled: sett.pushEnabled ?? false,
       pushover_user_key: sett.pushoverUserKey ?? null,
+      use_pushover: sett.usePushover ?? false,
       cycle_week_view: sett.cycleWeekView ?? false,
       accent_color: sett.accentColor ?? 'copper',
       dark_mode: sett.darkMode ?? 'dark',
@@ -608,6 +609,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         restSmall:   sett.rest_small   || 90,
         pushEnabled: sett.push_enabled ?? false,
         pushoverUserKey: sett.pushover_user_key ?? null,
+        usePushover: sett.use_pushover ?? false,
         cycleWeekView: sett.cycle_week_view ?? false,
         accentColor: sett.accent_color ?? 'copper',
         darkMode: sett.dark_mode ?? 'dark',
@@ -919,6 +921,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.restSmall       !== next.settings?.restSmall       ||
     prev.settings?.pushEnabled     !== next.settings?.pushEnabled     ||
     prev.settings?.pushoverUserKey  !== next.settings?.pushoverUserKey  ||
+    prev.settings?.usePushover      !== next.settings?.usePushover      ||
     prev.settings?.cycleWeekView   !== next.settings?.cycleWeekView   ||
     prev.settings?.accentColor      !== next.settings?.accentColor      ||
     prev.settings?.darkMode         !== next.settings?.darkMode          ||
@@ -958,6 +961,7 @@ async function syncStore(prev, next, userId) {
       rest_small:   next.settings?.restSmall   || 90,
       push_enabled: next.settings?.pushEnabled ?? false,
       pushover_user_key: next.settings?.pushoverUserKey ?? null,
+      use_pushover: next.settings?.usePushover ?? false,
       cycle_week_view: next.settings?.cycleWeekView ?? false,
       accent_color: next.settings?.accentColor ?? 'copper',
       dark_mode: next.settings?.darkMode ?? 'dark',
@@ -1077,10 +1081,10 @@ function computeNextReminderAt(state) {
 function cancelPushover(settings, userId) {
   if (!settings?.pushEnabled) return;
   const cancelNonce = `cancel-${Date.now()}`;
-  // Update shared nonce table → kills both web-push and pushover relay chains
-  fnFetch(WEB_PUSH_URL, { nonce: cancelNonce, cancel: true });
-  if (settings.pushoverUserKey) {
+  if (settings.pushoverUserKey && settings.usePushover) {
     fnFetch(PUSHOVER_URL, { nonce: cancelNonce, cancel: true });
+  } else {
+    fnFetch(WEB_PUSH_URL, { nonce: cancelNonce, cancel: true });
   }
   navigator.serviceWorker?.controller?.postMessage({ type: 'CANCEL_REST_TIMER' });
 }

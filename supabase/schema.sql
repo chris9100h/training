@@ -147,6 +147,7 @@ CREATE TABLE public.zane_user_settings (
   accent_color text DEFAULT 'gold'::text,
   dark_mode text DEFAULT 'dark'::text,
   pushover_user_key text,
+  use_pushover boolean DEFAULT false,
   week_plan_start_date date,
   tempo_enabled boolean DEFAULT false,
   tempo_eccentric numeric DEFAULT 4,

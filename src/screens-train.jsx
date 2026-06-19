@@ -856,10 +856,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const def = newDur ?? restDef;
         const delaySeconds = Math.round(Math.max(0, val + def * 1000 - Date.now()) / 1000);
         const nonce = String(val);
-        // Web-push relay chain — fires even when the phone is locked
-        LB.fnFetch(LB.WEB_PUSH_URL, { delaySeconds, nonce, title: 'Zane · Rest done', message: 'Time to start your next set! 💪' });
-        if (store.settings?.pushoverUserKey) {
+        if (store.settings?.pushoverUserKey && store.settings?.usePushover) {
           LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds, nonce, priority: 1 });
+        } else {
+          LB.fnFetch(LB.WEB_PUSH_URL, { delaySeconds, nonce, title: 'Zane · Rest done', message: 'Time to start your next set! 💪' });
         }
       }
     } else {

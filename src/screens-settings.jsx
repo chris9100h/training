@@ -336,8 +336,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [pushStatus, setPushStatus] = useStateSet(null);
   const [pushEnabled, setPushEnabled] = useStateSet(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
   const [pushKeyDraft, setPushKeyDraft] = useStateSet('');
-  const [pushKeyModalOpen, setPushKeyModalOpen] = useStateSet(false);
   const [testPickerOpen, setTestPickerOpen] = useStateSet(false);
+  const [advancedPushSheet, setAdvancedPushSheet] = useStateSet(false);
+  const [pushoverStep, setPushoverStep] = useStateSet('idle'); // 'idle'|'entering-key'|'code-sent'
+  const [pendingCode, setPendingCode] = useStateSet('');
+  const [codeInput, setCodeInput] = useStateSet('');
+  const [verifyLoading, setVerifyLoading] = useStateSet(false);
   const [pushSheet, setPushSheet] = useStateSet(false);
   const [webPushSub, setWebPushSub] = useStateSet(null);
   const [webPushLoading, setWebPushLoading] = useStateSet(false);
@@ -494,12 +498,29 @@ function SettingsScreen({ store, setStore, go, userId }) {
       setWebPushLoading(false);
     }
   };
-  const pushKeyValid = /^[a-zA-Z0-9]{30}$/.test(pushKeyDraft.trim());
-  const confirmPushKey = () => {
-    if (!pushKeyValid) return;
-    const key = pushKeyDraft.trim();
-    setStore(s => ({ ...s, settings: { ...s.settings, pushoverUserKey: key } }));
-    setPushKeyModalOpen(false);
+  const PUSHOVER_VERIFY_URL = `${LB.SUPABASE_URL}/functions/v1/pushover-verify`;
+  const closeAdvanced = () => { setAdvancedPushSheet(false); setPushoverStep('idle'); setPushKeyDraft(''); setCodeInput(''); setPendingCode(''); };
+  const sendVerificationCode = async () => {
+    setVerifyLoading(true);
+    clearTimeout(pushStatusTimer.current);
+    try {
+      const res = await LB.fnFetch(PUSHOVER_VERIFY_URL, { userKey: pushKeyDraft.trim() });
+      if (!res?.ok) { const d = await res?.json().catch(() => ({})); setPushStatus(`Error: ${d?.error || 'send failed'}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
+      const { code } = await res.json();
+      setPendingCode(code);
+      setPushoverStep('code-sent');
+    } catch (e) { setPushStatus(`Error: ${e.message}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
+    finally { setVerifyLoading(false); }
+  };
+  const verifyCode = () => {
+    if (codeInput.trim() !== pendingCode) { setPushStatus('Incorrect code — check the Pushover notification'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
+    setStore(s => ({ ...s, settings: { ...s.settings, pushoverUserKey: pushKeyDraft.trim(), usePushover: true } }));
+    setPushoverStep('idle'); setPendingCode(''); setCodeInput(''); setPushKeyDraft('');
+    setPushStatus('✓ Pushover active'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 4000);
+  };
+  const disablePushover = () => {
+    setStore(s => ({ ...s, settings: { ...s.settings, pushoverUserKey: null, usePushover: false } }));
+    setPushoverStep('idle');
   };
   const testWebPush = async () => {
     clearTimeout(pushStatusTimer.current);
@@ -520,13 +541,18 @@ function SettingsScreen({ store, setStore, go, userId }) {
     const nonce = String(Date.now());
     const title = 'Zane Test';
     const message = 'Rest done — keep going! 💪';
+    const usesPushover = !!(store.settings?.pushoverUserKey && store.settings?.usePushover);
     try {
-      const res = await LB.fnFetch(LB.WEB_PUSH_URL, { title, message, delaySeconds, nonce });
-      if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
-      if (res.status === 202) { setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
-      else { const data = await res.json().catch(() => ({})); setPushStatus(`Error: ${JSON.stringify(data)}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
-      if (store.settings?.pushoverUserKey) {
-        LB.fnFetch(LB.PUSHOVER_URL, { message, title, delaySeconds, nonce, ttl: 10 });
+      if (usesPushover) {
+        const res = await LB.fnFetch(LB.PUSHOVER_URL, { message, title, delaySeconds, nonce, ttl: 10 });
+        if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
+        if (res.status === 202) { setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
+        else { const data = await res.json().catch(() => ({})); setPushStatus(data.skipped ? 'Key not synced yet — try again' : `Error: ${JSON.stringify(data)}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
+      } else {
+        const res = await LB.fnFetch(LB.WEB_PUSH_URL, { title, message, delaySeconds, nonce });
+        if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
+        if (res.status === 202) { setPushStatus(`✓ Scheduled — notification in ~${delaySeconds}s`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), (delaySeconds + 15) * 1000); }
+        else { const data = await res.json().catch(() => ({})); setPushStatus(`Error: ${JSON.stringify(data)}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
       }
     } catch (e) { setPushStatus(`Error: ${e.message}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
   };
@@ -1288,20 +1314,73 @@ function SettingsScreen({ store, setStore, go, userId }) {
             </Row>
           )}
           {pushStatus && <div className="micro" style={{ color: pushStatus.startsWith('✓') ? 'var(--accent)' : UI.inkSoft, textAlign: 'center', padding: '6px 0' }}>{pushStatus}</div>}
-          <Hairline style={{ margin: '2px 0' }} />
-          <div className="micro" style={{ color: UI.inkFaint }}>Locked screen · Rest timer (optional)</div>
-          <Row label="Pushover user key" first>
-            <button onClick={() => { setPushKeyDraft(store.settings?.pushoverUserKey || ''); setPushKeyModalOpen(true); }} style={accentBtn}>
-              {store.settings?.pushoverUserKey ? 'Change' : 'Set up'}
-            </button>
-          </Row>
           {pushEnabled && (
-            <Row label="Test rest timer push">
-              <button onClick={() => setTestPickerOpen(true)} style={accentBtn}>Send</button>
+            <Row label="Advanced">
+              <button onClick={() => setAdvancedPushSheet(true)} style={accentBtn}>Open</button>
             </Row>
           )}
           <Btn onClick={() => setPushSheet(false)}>Done</Btn>
         </div>
+      </SettingsSheet>
+
+      {/* ══ Advanced push sheet ══ */}
+      <SettingsSheet open={advancedPushSheet} onClose={closeAdvanced} title="Advanced">
+        {(() => {
+          const isVerified = !!(store.settings?.usePushover && store.settings?.pushoverUserKey);
+          const inputStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+              <Row label="Use Pushover" first>
+                <Toggle
+                  on={isVerified || pushoverStep !== 'idle'}
+                  onToggle={() => {
+                    if (isVerified) { disablePushover(); }
+                    else if (pushoverStep !== 'idle') { setPushoverStep('idle'); setPushKeyDraft(''); setCodeInput(''); setPendingCode(''); }
+                    else { setPushoverStep('entering-key'); }
+                  }}
+                />
+              </Row>
+              <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
+                Uses the Pushover app instead of browser push for rest timer notifications. Delivers even without the PWA installed.
+              </div>
+
+              {!isVerified && pushoverStep === 'entering-key' && (
+                <>
+                  <input value={pushKeyDraft} onChange={e => setPushKeyDraft(e.target.value)}
+                    placeholder="Pushover user key (from pushover.net)"
+                    style={inputStyle} autoCorrect="off" autoCapitalize="none" spellCheck={false} />
+                  <Btn onClick={sendVerificationCode} disabled={pushKeyDraft.trim().length < 10 || verifyLoading}>
+                    {verifyLoading ? 'Sending…' : 'Send verification code'}
+                  </Btn>
+                </>
+              )}
+
+              {!isVerified && pushoverStep === 'code-sent' && (
+                <>
+                  <div className="micro" style={{ color: UI.inkFaint }}>Enter the 6-digit code from your Pushover notification</div>
+                  <input value={codeInput} onChange={e => setCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="123456" inputMode="numeric" style={inputStyle} />
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Btn kind="ghost" onClick={() => { setPushoverStep('entering-key'); setCodeInput(''); setPendingCode(''); }}>Back</Btn>
+                    <Btn onClick={verifyCode} disabled={codeInput.length !== 6} style={{ flex: 1 }}>Verify</Btn>
+                  </div>
+                </>
+              )}
+
+              {isVerified && (
+                <>
+                  <div className="micro" style={{ color: UI.inkFaint }}>Active · key …{store.settings.pushoverUserKey.slice(-8)}</div>
+                  <Row label="Test rest timer">
+                    <button onClick={() => setTestPickerOpen(true)} style={accentBtn}>Send</button>
+                  </Row>
+                </>
+              )}
+
+              {pushStatus && <div className="micro" style={{ color: pushStatus.startsWith('✓') ? 'var(--accent)' : UI.inkSoft, textAlign: 'center', padding: '6px 0' }}>{pushStatus}</div>}
+              <Btn onClick={closeAdvanced}>Done</Btn>
+            </div>
+          );
+        })()}
       </SettingsSheet>
 
       {/* ══ Reminder sheet ══ */}
@@ -1329,24 +1408,12 @@ function SettingsScreen({ store, setStore, go, userId }) {
         </div>
       </SettingsSheet>
 
-      {/* ══ Test picker sheet ══ */}
-      <SettingsSheet open={testPickerOpen} onClose={() => setTestPickerOpen(false)} title="Send test notification">
+      {/* ══ Test picker sheet (used from Advanced) ══ */}
+      <SettingsSheet open={testPickerOpen} onClose={() => setTestPickerOpen(false)} title="Test rest timer">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
           <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testRestTimer(0); }}>Now</Btn>
           <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testRestTimer(10); }}>In 10 seconds</Btn>
           <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testRestTimer(30); }}>In 30 seconds</Btn>
-        </div>
-      </SettingsSheet>
-
-      {/* ══ Pushover key sheet ══ */}
-      <SettingsSheet open={pushKeyModalOpen} onClose={() => setPushKeyModalOpen(false)} title="Pushover user key">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.5 }}>Optional — lets Zane notify you when rest is over, even when your screen is locked. Find your user key at pushover.net.</div>
-          <input value={pushKeyDraft} onChange={e => setPushKeyDraft(e.target.value)} placeholder="uXXXXXXXXXXXXXXXXXXXX"
-            style={{ background: UI.bgInset, border: `0.5px solid ${pushKeyDraft && !pushKeyValid ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
-            autoCorrect="off" autoCapitalize="none" spellCheck={false} />
-          {pushKeyDraft && !pushKeyValid && <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.85)' }}>Invalid key — must be 30 alphanumeric characters</div>}
-          <Btn onClick={confirmPushKey} disabled={!pushKeyValid}>Save</Btn>
         </div>
       </SettingsSheet>
 
