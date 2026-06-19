@@ -917,7 +917,8 @@ function HealthScreen({ store, setStore, go, userId }) {
         const body = mode === 'sick'     ? 'Status: Sick — taking a break from training.'
                    : mode === 'vacation' ? 'Status: Vacation — back soon!'
                    : `Status: Back to normal (was ${current === 'sick' ? 'sick' : 'on vacation'}).`;
-        await LB.addCoachingNote(coachingId, 'general', null, null, body, userId);
+        const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
+        await LB.addCoachingNote(coachingId, 'general', null, null, body, userId, threadId);
       } catch (_) {}
     }
   };
