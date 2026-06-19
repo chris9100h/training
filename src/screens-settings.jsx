@@ -1678,7 +1678,17 @@ function SettingsScreen({ store, setStore, go, userId }) {
       </SettingsSheet>
 
       {/* ══ Support Center full-screen sheet (user) ══ */}
-      <FullSheet open={supportSheet} onClose={() => setSupportSheet(false)} title="Support Center">
+      <FullSheet
+        open={supportSheet}
+        onClose={
+          supportView === 'thread'
+            ? () => { setSupportView('list'); setSupportActiveTicketId(null); setSupportDraft(''); }
+            : supportView === 'new'
+            ? () => setSupportView('list')
+            : () => setSupportSheet(false)
+        }
+        title="Support Center"
+      >
         {(() => {
           const CATS = [
             { key: 'feature_request', label: 'Feature request', icon: 'fa-lightbulb' },
@@ -1786,8 +1796,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           // ── LIST VIEW (default) ──────────────────────────────────────
           const statusBorder = { open: UI.danger, in_progress: UI.gold, resolved: UI.inkFaint };
           return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px' }}>
-              <Btn onClick={() => { setSupportView('new'); setSupportDraft(''); setSupportCategoryDraft('question'); }}>+ New ticket</Btn>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', flex: 1 }}>
               {tickets.length === 0 && (
                 <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '24px 0' }}>
                   No tickets yet. Tap "+ New ticket" if you need help.
@@ -1814,6 +1823,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   )}
                 </button>
               ))}
+              <div style={{ flexGrow: 1 }} />
+              <div style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+                <Btn onClick={() => { setSupportView('new'); setSupportDraft(''); setSupportCategoryDraft('question'); }}>+ New ticket</Btn>
+              </div>
             </div>
           );
         })()}
