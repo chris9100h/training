@@ -787,7 +787,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <Hairline style={{ margin: '14px 0' }} />
           {typeof window !== 'undefined' && window.PublicKeyCredential && (
             <>
-              <NavRow label="Passkeys" onTap={() => setPasskeySheet(true)} />
+              <NavRow label="Passkeys" onTap={() => setPasskeySheet(true)} first />
               <Hairline style={{ margin: '14px 0' }} />
             </>
           )}
