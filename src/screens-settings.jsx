@@ -931,7 +931,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
                           }
                         </div>
                       </div>
-                      <button onClick={() => deletePeriod(p.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', flexShrink: 0 }}>
+                      <button onClick={async () => {
+                        const ok = await confirm(`Delete this ${p.mode} period?`, { ok: 'Delete', danger: true });
+                        if (ok) deletePeriod(p.id);
+                      }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', flexShrink: 0 }}>
                         <i className="fa-solid fa-trash-can" style={{ fontSize: 12 }} />
                       </button>
                     </div>
