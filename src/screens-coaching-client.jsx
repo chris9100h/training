@@ -304,6 +304,14 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
 
       if (isTrainingDay) {
         if (planStartDateStr && dateStr < planStartDateStr) continue;
+        // Sick/vacation days don't count against adherence.
+        const ts = date.getTime();
+        const inStatusPeriod = (clientStore.statusPeriods || []).some(p => {
+          const start = new Date(p.startedAt).getTime();
+          const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
+          return ts >= start && ts <= end;
+        });
+        if (inStatusPeriod) continue;
         planned++;
         if (sessionDates.has(dateStr)) done++;
       }

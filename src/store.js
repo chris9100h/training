@@ -464,8 +464,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Daily health logs (weight / steps / macros / water) — one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, created_at').eq('user_id', userId).order('date', { ascending: false }),
-    // Sick/vacation history periods — used for missed-workout stats.
-    isCoachLoad ? null : _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
+    // Sick/vacation history periods — used for missed-workout stats and training adherence.
+    // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
+    _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
