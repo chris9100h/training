@@ -370,7 +370,8 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [webPushSub, setWebPushSub] = useStateSet(null);
   const [webPushLoading, setWebPushLoading] = useStateSet(false);
   const [webPushVerified, setWebPushVerified] = useStateSet(() => localStorage.getItem('logbook-push-verified') === 'true');
-  const [webPushPending, setWebPushPending] = useStateSet(false);
+  const [webPushStep, setWebPushStep] = useStateSet('idle'); // 'idle'|'code-sent'
+  const [webPushCode, setWebPushCode] = useStateSet('');
   const [reminderSheet, setReminderSheet] = useStateSet(false);
   const [passkeySheet, setPasskeySheet] = useStateSet(false);
   const [reminderEnabled, setReminderEnabled] = useStateSet(() => store.settings?.reminderEnabled ?? false);
@@ -508,14 +509,13 @@ function SettingsScreen({ store, setStore, go, userId }) {
         setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true');
         setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } }));
         setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
-        setWebPushPending(true);
-        LB.fnFetch(LB.WEB_PUSH_URL, { title: 'Zane', message: 'Push notifications are working! 💪' }).catch(() => {});
+        sendWebPushCode();
       } else {
         await LB.unsubscribeWebPush(userId);
         setWebPushSub(null);
         setPushEnabled(false); localStorage.setItem('logbook-push-enabled', 'false');
         setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
-        setWebPushPending(false);
+        setWebPushStep('idle'); setWebPushCode(''); setCodeInput('');
         setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: false } }));
       }
     } catch (e) {
@@ -529,13 +529,22 @@ function SettingsScreen({ store, setStore, go, userId }) {
       setWebPushLoading(false);
     }
   };
-  const confirmWebPushVerify = () => {
-    setWebPushVerified(true); localStorage.setItem('logbook-push-verified', 'true');
-    setWebPushPending(false);
+  const sendWebPushCode = () => {
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    setWebPushCode(code); setCodeInput(''); setWebPushStep('code-sent');
+    LB.fnFetch(LB.WEB_PUSH_URL, { title: 'Zane · verification', message: `Your code: ${code}` }).catch(() => {});
   };
-  const resendWebPushVerify = () => {
-    setWebPushPending(true);
-    LB.fnFetch(LB.WEB_PUSH_URL, { title: 'Zane', message: 'Push notifications are working! 💪' }).catch(() => {});
+  const verifyWebPushCode = () => {
+    if (codeInput.trim() !== webPushCode) {
+      clearTimeout(pushStatusTimer.current);
+      setPushStatus('Wrong code — check the notification');
+      pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
+      return;
+    }
+    setWebPushVerified(true); localStorage.setItem('logbook-push-verified', 'true');
+    setWebPushStep('idle'); setWebPushCode(''); setCodeInput('');
+    clearTimeout(pushStatusTimer.current);
+    setPushStatus('✓ Verified'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 3000);
   };
   const PUSHOVER_VERIFY_URL = `${LB.SUPABASE_URL}/functions/v1/pushover-verify`;
   const closeAdvanced = () => { setAdvancedPushSheet(false); setPushoverStep('idle'); setPushKeyDraft(''); setCodeInput(''); setPendingCode(''); };
@@ -1345,24 +1354,28 @@ function SettingsScreen({ store, setStore, go, userId }) {
           {pushEnabled && store.settings?.usePushover && store.settings?.pushoverUserKey && (
             <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>Active via Pushover — see Advanced</div>
           )}
-          {pushEnabled && !store.settings?.usePushover && webPushSub && (
-            webPushPending ? (
+          {pushEnabled && !store.settings?.usePushover && webPushSub && (() => {
+            const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 20, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box', letterSpacing: '0.3em', textAlign: 'center' };
+            if (webPushStep === 'code-sent') return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div className="micro" style={{ color: UI.inkSoft, paddingLeft: 2 }}>Test notification sent — confirm once you receive it</div>
+                <div className="micro" style={{ color: UI.inkSoft, paddingLeft: 2 }}>Enter the 6-digit code from the notification</div>
+                <input type="text" inputMode="numeric" maxLength={6} value={codeInput}
+                  onChange={e => setCodeInput(e.target.value.replace(/\D/g, ''))}
+                  placeholder="000000" style={iStyle} autoFocus />
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={resendWebPushVerify} style={{ ...accentBtn, flex: 1 }}>Resend</button>
-                  <button onClick={confirmWebPushVerify} style={{ ...accentBtn, flex: 1, background: 'rgba(var(--accent-rgb),0.18)' }}>Confirm ✓</button>
+                  <Btn kind="ghost" onClick={sendWebPushCode}>Resend</Btn>
+                  <Btn onClick={verifyWebPushCode} disabled={codeInput.length !== 6} style={{ flex: 1 }}>Verify</Btn>
                 </div>
               </div>
-            ) : webPushVerified ? (
-              <div className="micro" style={{ color: 'var(--accent)', paddingLeft: 2 }}>✓ Active</div>
-            ) : (
+            );
+            if (webPushVerified) return <div className="micro" style={{ color: 'var(--accent)', paddingLeft: 2 }}>✓ Active</div>;
+            return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>Active — not yet verified</div>
-                <button onClick={resendWebPushVerify} style={accentBtn}>Send test notification</button>
+                <button onClick={sendWebPushCode} style={accentBtn}>Send verification code</button>
               </div>
-            )
-          )}
+            );
+          })()}
           {pushStatus && <div className="micro" style={{ color: pushStatus.startsWith('✓') ? 'var(--accent)' : UI.inkSoft, textAlign: 'center', padding: '6px 0' }}>{pushStatus}</div>}
           {pushEnabled && (
             <Row label="Advanced">
