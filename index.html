@@ -228,6 +228,15 @@ setTimeout(async function() {
   d.textContent += 'window.Screens: ' + JSON.stringify(Object.keys(window.Screens||{})) + '\n';
   d.textContent += 'window.React: ' + typeof window.React + '\n';
   d.textContent += 'window.Screen: ' + typeof window.Screen + '\n';
+  var btn = document.createElement('button');
+  btn.textContent = 'Clear cache & reload';
+  btn.style.cssText = 'margin-top:24px;display:block;padding:12px 24px;background:#c87469;color:#07060a;border:none;border-radius:6px;font-family:monospace;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:0.04em';
+  btn.onclick = async function() {
+    btn.textContent = 'Clearing…';
+    if ('caches' in window) { var keys = await caches.keys(); await Promise.all(keys.map(function(k){ return caches.delete(k); })); }
+    window.location.reload(true);
+  };
+  d.appendChild(btn);
 }, 6000);
 </script>
 
