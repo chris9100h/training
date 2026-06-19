@@ -529,7 +529,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
       const res = await LB.fnFetch(LB.WEB_PUSH_URL, { title: 'Zane Test', message: 'Notifications are working! 💪' });
       if (!res) { setPushStatus('Error: not signed in'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); return; }
       const data = await res.json().catch(() => ({}));
-      if (data.sent > 0) { setPushStatus('✓ Sent'); }
+      if (res.status === 202 || data.scheduled) { setPushStatus('✓ Sent'); }
       else if (data.skipped) { setPushStatus('No subscription found — try toggling push off and on'); }
       else { setPushStatus(`Error: ${JSON.stringify(data)}`); }
     } catch (e) { setPushStatus(`Error: ${e.message}`); }
