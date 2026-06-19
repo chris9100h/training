@@ -630,7 +630,17 @@ function SettingsScreen({ store, setStore, go, userId }) {
       }
     } catch (e) { setPushStatus(`Error: ${e.message}`); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000); }
   };
-  const toggleReminder = () => { const next = !reminderEnabled; setReminderEnabled(next); setStore(s => ({ ...s, settings: { ...s.settings, reminderEnabled: next } })); };
+  const toggleReminder = () => {
+    const next = !reminderEnabled;
+    if (next && !pushEnabled) {
+      // Push not active — open push sheet instead of enabling reminder
+      setTrainingSheet(false);
+      setPushSheet(true);
+      return;
+    }
+    setReminderEnabled(next);
+    setStore(s => ({ ...s, settings: { ...s.settings, reminderEnabled: next } }));
+  };
   const updateReminderTime = (val) => { setReminderTime(val); setStore(s => ({ ...s, settings: { ...s.settings, reminderTime: val } })); };
   const saveNickname = () => { const t = nickname.trim(); if (!t || t === store.user?.name) return; setStore(s => ({ ...s, user: { ...s.user, name: t } })); };
   const exportData = async (filename) => {
@@ -1063,13 +1073,6 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <NavRow label="Change password" onTap={() => { setPwMsg(null); setPwCurrent(''); setPwNew(''); setPwConfirm(''); setChangePasswordSheet(true); }} first />
           <Hairline style={{ margin: '14px 0' }} />
           <NavRow label="Change email" onTap={() => { setEmailMsg(null); setEmailNew(''); setChangeEmailSheet(true); }} first />
-          <Hairline style={{ margin: '14px 0' }} />
-          <Row label="Remind on training days" first>
-            {reminderEnabled
-              ? <button style={accentBtn} onClick={() => setReminderSheet(true)}>{store.settings?.reminderTime || 'Change'}</button>
-              : <Toggle on={false} onToggle={toggleReminder} />
-            }
-          </Row>
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setAccountSheet(false)}>Done</Btn>
           </div>
@@ -1217,6 +1220,17 @@ function SettingsScreen({ store, setStore, go, userId }) {
           <Row label="Warmup sets in summary">
             <Toggle on={showWarmupInSummary} onToggle={() => { const n = !showWarmupInSummary; setShowWarmupInSummary(n); setStore(s => ({ ...s, settings: { ...s.settings, showWarmupInSummary: n } })); }} />
           </Row>
+          <Row label="Remind on training days">
+            {reminderEnabled
+              ? <button style={accentBtn} onClick={() => setReminderSheet(true)}>{store.settings?.reminderTime || 'Change'}</button>
+              : <Toggle on={false} onToggle={toggleReminder} />
+            }
+          </Row>
+          {!pushEnabled && (
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+              Requires push notifications — toggling will open the push setup.
+            </div>
+          )}
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setTrainingSheet(false)}>Done</Btn>
           </div>
