@@ -219,7 +219,7 @@ function PasskeySheet({ open, onClose }) {
   const fmtDate = (iso) => {
     if (!iso) return '';
     const d = new Date(iso);
-    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
   return (
