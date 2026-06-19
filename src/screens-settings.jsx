@@ -1303,9 +1303,11 @@ function SettingsScreen({ store, setStore, go, userId }) {
               ? <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkFaint }}>…</span>
               : <Toggle on={pushEnabled} onToggle={togglePush} />}
           </Row>
-          {pushEnabled && webPushSub && (
+          {pushEnabled && (
             <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>
-              Subscribed · endpoint …{webPushSub.endpoint.split('/').pop()?.slice(-10)}
+              {store.settings?.usePushover && store.settings?.pushoverUserKey
+                ? 'Active via Pushover — see Advanced'
+                : webPushSub ? `Subscribed · endpoint …${webPushSub.endpoint.split('/').pop()?.slice(-10)}` : null}
             </div>
           )}
           {pushEnabled && (
