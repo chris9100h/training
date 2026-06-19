@@ -1352,6 +1352,15 @@ function StatsTab({ store, sessions, go }) {
   // Memoize so this only re-runs when the day rolls over, the sessions change,
   // or the active plan changes — not on every unrelated re-render.
   const { currentStreak, longestStreak } = useMemoL(() => {
+    const periods = store.statusPeriods || [];
+    const isInStatusPeriod = (d) => {
+      const ts = d.getTime();
+      return periods.some(p => {
+        const start = new Date(p.startedAt).getTime();
+        const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
+        return ts >= start && ts <= end;
+      });
+    };
     let cur = 0;
     for (let i = 0; i <= 730; i++) {
       const d = new Date(today); d.setDate(today.getDate() - i); d.setHours(12, 0, 0, 0);
@@ -1359,8 +1368,8 @@ function StatsTab({ store, sessions, go }) {
       const key = d.toISOString().slice(0, 10);
       if (sessionDateSet.has(key)) { cur++; }
       else if (i === 0) { /* today not done yet — don't break */ }
-      else if (isTrainingDay(d)) { break; }
-      // rest day → continue without breaking or counting
+      else if (isTrainingDay(d) && !isInStatusPeriod(d)) { break; }
+      // rest day or sick/vacation day → continue without breaking or counting
     }
     let longest = 0, ls = 0;
     if (sessions.length > 0) {
@@ -1370,12 +1379,12 @@ function StatsTab({ store, sessions, go }) {
         const d = new Date(earliest); d.setDate(earliest.getDate() + i); d.setHours(12, 0, 0, 0);
         const key = d.toISOString().slice(0, 10);
         if (sessionDateSet.has(key)) { ls++; longest = Math.max(longest, ls); }
-        else if (isTrainingDay(d)) { ls = 0; }
-        // rest day → ls unchanged
+        else if (isTrainingDay(d) && !isInStatusPeriod(d)) { ls = 0; }
+        // rest day or sick/vacation day → ls unchanged
       }
     }
     return { currentStreak: cur, longestStreak: longest };
-  }, [todayKey, sessions, store.activeScheduleId, store.cycleStartDate]);
+  }, [todayKey, sessions, store.statusPeriods, store.activeScheduleId, store.cycleStartDate]);
 
   const totalTrainingMins = durations.reduce((a, b) => a + b, 0);
   const totalTrainingStr = totalTrainingMins >= 60
