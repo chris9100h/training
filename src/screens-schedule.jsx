@@ -1071,6 +1071,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         <DayTypePicker
           store={store} setStore={setStore}
           title="Choose day type"
+          hideRest={isFlex}
           onClose={() => setPickingType(false)}
           onPick={addDayType}
           onImport={(day, migrateId) => {
@@ -1123,7 +1124,7 @@ const dayEditIconBtn = {
 };
 
 // ─── Day-type picker (sheet) ─────────────────────────────────────────
-function DayTypePicker({ store, setStore, title, onClose, onPick, onImport }) {
+function DayTypePicker({ store, setStore, title, onClose, onPick, onImport, hideRest = false }) {
   const [confirmEl, confirm] = useConfirm();
   const [creating, setCreating] = useStateS(false);
   const [newName, setNewName] = useStateS('');
@@ -1152,7 +1153,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick, onImport }) {
     <Sheet open={true} onClose={onClose} title={title}>
       <span className="label">Standard</span>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '8px 0 18px' }}>
-        {STANDARD_DAY_TYPES.map(t => (
+        {STANDARD_DAY_TYPES.filter(t => !(hideRest && t === 'REST')).map(t => (
           <button key={t} onClick={() => onPick(t)} style={dayTypeChip(t === 'REST')}>{t}</button>
         ))}
       </div>
