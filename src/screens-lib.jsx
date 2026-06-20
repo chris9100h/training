@@ -1796,6 +1796,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                           onClick={hasCharts ? e => { e.stopPropagation(); setEffortChart({ dayId: s.dayId, dayName: s.dayName }); } : undefined}
                         >
                           {s.dayName}
+                          {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
                           {hasCharts && <i className="fa-solid fa-chart-line" style={{ fontSize: 10, color: UI.gold }} />}
                         </div>
                       );
