@@ -1064,7 +1064,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   const previewCardioPrefill = LB.cardioWeekPrefill(store?.cardioLogs, previewWeekStart, store?.settings?.unit);
   const previewResponses = (() => {
     const r = {};
-    if (previewDailyPrefill) Object.entries(previewDailyPrefill).forEach(([k, v]) => { if (v != null) r[k] = v; });
+    if (previewDailyPrefill) Object.entries(previewDailyPrefill).forEach(([k, v]) => { if (v != null && k !== 'count') r[k] = v; });
     if (previewCardioPrefill) {
       if (previewCardioPrefill.cardioMinutes != null) r.cardio_minutes = previewCardioPrefill.cardioMinutes;
       if (previewCardioPrefill.cardioDistanceM != null) r.cardio_distance_m = previewCardioPrefill.cardioDistanceM;
