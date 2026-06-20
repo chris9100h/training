@@ -2385,21 +2385,7 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions, schema) {
   if (sessions != null) {
     const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
     const thisEnded = sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= ws && d < we; });
-    const prevEnded = sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= prevWs && d < ws; });
     if (thisEnded.length) out.days_trained = thisEnded.length;
-    if (thisEnded.length > 0 || prevEnded.length > 0) {
-      // Reuse the canonical totalVolume(): effReps = min(L,R) for unilateral
-      // sets (weaker side is the bottleneck) and the server-aggregate fallback
-      // for sessions windowed out of the boot load.
-      const thisVol = thisEnded.reduce((n, s) => n + totalVolume(s), 0);
-      const prevVol = prevEnded.reduce((n, s) => n + totalVolume(s), 0);
-      const thisAvg = thisEnded.length ? thisVol / thisEnded.length : 0;
-      const prevAvg = prevEnded.length ? prevVol / prevEnded.length : 0;
-      const diff = (thisAvg > 0 || prevAvg > 0)
-        ? Math.sign(thisAvg - prevAvg)
-        : Math.sign(thisEnded.length - prevEnded.length);
-      out.performance_vs_last_week = diff > 0 ? 'improved' : diff < 0 ? 'worse' : 'same';
-    }
   }
   const offPlanLines = week
     .filter(l => l.offPlanNote && l.offPlanNote.trim())
