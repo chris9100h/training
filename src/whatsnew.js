@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.382',
+    title: 'Quick Actions & Bonus Workouts',
+    items: [
+      'New Quick Actions menu — pull down on the home screen to log a workout, daily data, cardio, a check-in, or message your coach without navigating anywhere.',
+      'Start any day from your plan as a bonus session — pick "Workout → From plan", choose a day, and it\'s logged without touching your cycle. Useful when the equipment you need is taken.',
+      'Freestyle workouts: open session, no plan needed. Add exercises as you go, name it at the end.',
+      'The app figures out whether a bonus or freestyle session should advance your cycle: if today has training planned and you haven\'t done it yet, it asks. Already trained today or it\'s a rest day — automatically logged as bonus, no questions asked.',
+    ],
+  },
+  {
     id: 'v2.381',
     title: 'Support Center',
     items: [
