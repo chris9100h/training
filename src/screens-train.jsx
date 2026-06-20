@@ -1013,11 +1013,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   }, [exIdx, sessionId]);
   useEffectT(() => () => stopTempo(), []);
 
-  // Auto-skip superset prompt when adding the first exercise to an empty freestyle session
-  useEffectT(() => {
-    if (addSupersetData && session.entries.length === 0) confirmAdd(null);
-  }, [addSupersetData, session.entries.length]);
-
   // Log ALL document pointer/click events — captures ghost-clicks and shows where they land.
   useEffectT(() => {
     const onPD = e => {
@@ -1247,9 +1242,42 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const doAdd = (newExId) => {
     setAddOpen(false);
-    // Defer insertion until the user picks a superset (or solo) —
-    // that choice determines where the new exercise is placed.
-    setAddSupersetData({ newExId });
+    if (session.entries.length === 0) {
+      // First exercise in an empty session — skip the superset prompt and insert directly.
+      setStore(s => {
+        const sess = s.sessions.find(x => x.id === session.id);
+        if (!sess) return s;
+        const newEx = LB.findExercise(s, newExId);
+        const isUni = newEx?.movement_type === 'unilateral';
+        const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
+        const last = LB.bestRecentEntry(s, newExId, session.dayId);
+        const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
+        const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+        const newEntry = {
+          exId: newExId,
+          name: newEx?.name || newExId,
+          plannedSets: 3,
+          plannedReps: null,
+          plannedRepsPerSet: null,
+          sets: seedSets,
+          note: '',
+          supersetGroup: null,
+          addedDuringSession: true,
+        };
+        return {
+          ...s,
+          sessions: s.sessions.map(x => x.id !== session.id ? x : {
+            ...x,
+            entries: [newEntry],
+            currentExIdx: 0,
+          }),
+        };
+      });
+    } else {
+      // Defer insertion until the user picks a superset (or solo) —
+      // that choice determines where the new exercise is placed.
+      setAddSupersetData({ newExId });
+    }
   };
 
   // Called from the superset modal: targetIdx = null → solo (insert after current),
