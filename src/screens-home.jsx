@@ -1811,10 +1811,14 @@ function HomeScreen({ store, setStore, go, userId }) {
       const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
       return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
     });
+    // If the chosen day is today's scheduled day, treat it as a normal session
+    // so the cycle advances on finish — only set isBonus when it's a true extra.
+    const isTodaysDay = LB.todaysDay(store)?.day?.id === day.id;
     const session = {
       id: LB.uid(), scheduleId: sch?.id, dayId: day.id, dayName: day.name,
       date: new Date().toISOString(), startedAt: new Date().toISOString(),
-      ended: null, entries, currentExIdx: 0, cyclePos: null, isBonus: true,
+      ended: null, entries, currentExIdx: 0, cyclePos: null,
+      ...(!isTodaysDay && { isBonus: true }),
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
     loggingRef.current = false;
