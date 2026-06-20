@@ -788,9 +788,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           }),
         };
       });
-      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isFreestyle && advanceCycle && { isBonus: false }) };
+      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isBonus && advanceCycle && { isBonus: false }) };
     });
-    const shouldAdvance = session.isFreestyle ? advanceCycle : !session.isBonus;
+    const shouldAdvance = session.isBonus ? advanceCycle : true;
     setStore(s => ({
       ...s,
       inProgress: null,
@@ -1460,7 +1460,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const tryFinish = () => {
-    if (session.isFreestyle) {
+    if (session.isBonus) {
+      // Determine whether to show the "replace today's workout?" step.
+      // Only relevant in cycle mode when today has training that isn't done yet.
       const todayData = LB.todaysDay(store);
       const activeSchedule = todayData?.schedule;
       const isCycleMode = activeSchedule && !LB.isWeekdayPlan(activeSchedule);
@@ -1471,9 +1473,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const hasTodayTraining = isCycleMode && (todayData?.day?.items?.length ?? 0) > 0 && !alreadyDoneToday;
       setShowCycleStep(hasTodayTraining);
       setAdvanceCycle(false);
-      setFreestyleName('');
-      setFinishStep('name');
+      if (session.isFreestyle) {
+        setFreestyleName('');
+        setFinishStep('name');
+      } else {
+        setFinishStep(hasTodayTraining ? 'cycle' : 'feel');
+      }
     } else {
+      setShowCycleStep(false);
       setFinishStep('feel');
     }
     setPendingFeel(null);
@@ -2520,7 +2527,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </>) : finishStep === 'cycle' ? (<>
           <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 8 }}>Replace today's workout?</div>
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 20 }}>
-            Today is a scheduled training day. Did this freestyle session replace it, or was it extra?
+            {(() => { const n = LB.todaysDay(store)?.day?.name; return n ? `Today is ${n} day. Did this session replace it, or was it extra?` : 'Today is a scheduled training day. Did this session replace it, or was it extra?'; })()}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <Btn onClick={() => { setAdvanceCycle(true); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
