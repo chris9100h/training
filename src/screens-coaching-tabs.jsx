@@ -1132,7 +1132,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               {previewOpen ? 'Close preview' : 'Preview this week'}
             </button>
           )}
-          {previewResponses && canSubmitToday && (
+          {previewResponses && canSubmitToday && new Date().getDay() !== 1 && (
             <button onClick={() => setPreviewOpen(v => !v)}
               style={{ background: previewOpen ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset, border: `0.5px solid ${previewOpen ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, borderRadius: 6, padding: '11px 13px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
               <i className="fa-solid fa-eye" />
