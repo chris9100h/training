@@ -1364,7 +1364,7 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const cardLabel = useMemo(() => {
     if (isFlex) {
-      return `${isViewingToday ? 'NEXT UP' : 'PREVIEW'} · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
+      return `${isViewingToday ? 'NEXT UP · ' : ''}DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
     }
     if (isViewingToday) {
       if (weekdayMode) return `TODAY · ${WEEKDAYS_FULL[selectedWd].toUpperCase()}`;
@@ -1400,11 +1400,19 @@ function HomeScreen({ store, setStore, go, userId }) {
   }, [store.sessions]);
 
   const doneSession = useMemo(() => {
+    // Flex slots carry no calendar date — a past rotation slot maps back to the
+    // most recent session logged for that day so "going back" shows the workout.
+    if (isFlex) {
+      if (selectedSlot >= dayIdx || !activeDay?.id) return null;
+      return [...store.sessions]
+        .filter(s => s.ended && s.dayId === activeDay.id)
+        .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] ?? null;
+    }
     const dateKey = sessionDate.toISOString().slice(0, 10);
     return [...store.sessions]
       .filter(s => s.ended && s.date.slice(0, 10) === dateKey)
       .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] ?? null;
-  }, [store.sessions, sessionDate]);
+  }, [isFlex, selectedSlot, dayIdx, activeDay?.id, store.sessions, sessionDate]);
 
   const { improvementCount, regressionCount } = useMemo(() => {
     if (!doneSession) return { improvementCount: 0, regressionCount: 0 };
@@ -1485,9 +1493,9 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const isSlotDone = useMemo(() => {
     if (isActiveRest) return false;
-    // Flex: the next-up day is never "done" — finishing it advances the rotation
-    // to the following day, so the card always shows an actionable workout.
-    if (isFlex) return false;
+    // Flex: the next-up day is never "done", but earlier slots in the current
+    // rotation pass are — show their completed session when scrolling back.
+    if (isFlex) return selectedSlot < dayIdx && !!doneSession;
     if (weekdayMode) {
       const key = `${sessionDate.getFullYear()}-${sessionDate.getMonth()}-${sessionDate.getDate()}`;
       return completedDateKeys?.has(key) ?? false;
@@ -1500,7 +1508,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (sel?.daysFromStart != null) return completedCyclePos?.has(sel.daysFromStart) ?? false;
     const pos = (currentCycleNum + weekOffset) * dayCount + selectedSlot;
     return completedCyclePos?.has(pos) ?? false;
-  }, [isActiveRest, weekdayMode, cycleWeekView, sessionDate, completedDateKeys, completedCyclePos, week, selectedWd, currentCycleNum, weekOffset, dayCount, selectedSlot]);
+  }, [isActiveRest, isFlex, dayIdx, doneSession, weekdayMode, cycleWeekView, sessionDate, completedDateKeys, completedCyclePos, week, selectedWd, currentCycleNum, weekOffset, dayCount, selectedSlot]);
 
   const skipsMap = useMemo(() => {
     const m = new Map();
@@ -2110,7 +2118,10 @@ function HomeScreen({ store, setStore, go, userId }) {
                 ? `D${(d.slotIdx ?? i) + 1}`
                 : d.date.toLocaleDateString(undefined, { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
             let isCompleted = false;
-            if (!r && !isFlex) {
+            if (!r && isFlex) {
+              // Earlier slots in the current rotation pass that have a session.
+              isCompleted = (d.slotIdx ?? i) < dayIdx && store.sessions.some(s => s.ended && s.dayId === d.id);
+            } else if (!r && !isFlex) {
               if (weekdayMode) {
                 const slotKey = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
                 isCompleted = completedDateKeys?.has(slotKey) ?? false;
