@@ -2206,6 +2206,14 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         onBack={() => go(justFinished ? { name: 'home' } : (back || { name: 'hist' }))}
         right={
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {s.isBonus && (
+              <span style={{
+                fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
+                color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)',
+                border: `0.5px solid rgba(var(--accent-rgb), 0.3)`,
+                borderRadius: 4, padding: '3px 6px',
+              }}>BONUS</span>
+            )}
             <button onClick={takeScreenshot} disabled={capturing} style={{
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',

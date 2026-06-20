@@ -793,7 +793,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setStore(s => ({
       ...s,
       inProgress: null,
-      ...(!session.isFreestyle && !isWeekdayMode && { cycleIndex: s.cycleIndex + 1 }),
+      ...(!session.isFreestyle && !session.isBonus && !isWeekdayMode && { cycleIndex: s.cycleIndex + 1 }),
       lastAdvancedDate: LB.todayISO(),
       ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
     }));
@@ -1012,6 +1012,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setCardioForm(cd ? { type: cd.type || '', duration: cd.durationMinutes ? String(cd.durationMinutes) : '', distance: cd.distanceM != null ? mToDisplayT(cd.distanceM, du) : '', paceFeeling: cd.paceFeeling ?? null, effort: cd.effort ?? null, distUnit: du } : { type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: du });
   }, [exIdx, sessionId]);
   useEffectT(() => () => stopTempo(), []);
+
+  // Auto-skip superset prompt when adding the first exercise to an empty freestyle session
+  useEffectT(() => {
+    if (addSupersetData && session.entries.length === 0) confirmAdd(null);
+  }, [addSupersetData, session.entries.length]);
 
   // Log ALL document pointer/click events — captures ghost-clicks and shows where they land.
   useEffectT(() => {
@@ -1424,7 +1429,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const tryFinish = () => {
-    if (session.isFreestyle) {
+    if (session.isFreestyle && !session.isBonus) {
       setFreestyleName('');
       setFinishStep('name');
     } else {
@@ -1508,7 +1513,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   if (!entry) {
-    return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
+    if (!session.isFreestyle && !session.isBonus) {
+      return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
+    }
+    // Empty freestyle/bonus session — show exercise picker immediately
+    return (
+      <Screen scroll={false}>
+        <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 0', display: 'flex' }}>
+          <button onClick={abandon} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.danger, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>×</button>
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 }}>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, textAlign: 'center' }}>Add an exercise to get started.</div>
+          <Btn onClick={() => setAddOpen(true)}>Add exercise</Btn>
+        </div>
+        {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
+        {confirmEl}
+      </Screen>
+    );
   }
 
   const entrySets = entry?.sets || [];

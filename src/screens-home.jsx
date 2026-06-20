@@ -1144,6 +1144,8 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [dailyLogOpen, setDailyLogOpen] = useState(false);
   const [checkinDue, setCheckinDue] = useState(false);
   const [backlogPickerOpen, setBacklogPickerOpen] = useState(false);
+  const [workoutSubOpen, setWorkoutSubOpen] = useState(false);
+  const [bonusDayPickerOpen, setBonusDayPickerOpen] = useState(false);
   const [pullDelta, setPullDelta] = useState(0);
   const [coachingSchema, setCoachingSchema] = useState(null);
   const swipeRef = useRef({ y: null, x: null });
@@ -1735,6 +1737,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const onTouchCancel = () => { swipeRef.current = { y: null, x: null }; setPullDelta(0); };
 
   const startFreestyleSession = () => {
+    setWorkoutSubOpen(false);
     setQuickActionsOpen(false);
     const session = {
       id: LB.uid(), scheduleId: null, dayId: null, dayName: 'Freestyle',
@@ -1742,6 +1745,35 @@ function HomeScreen({ store, setStore, go, userId }) {
       ended: null, entries: [], currentExIdx: 0, cyclePos: null, isFreestyle: true,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    go({ name: 'train', sessionId: session.id });
+  };
+
+  const startBonusSession = async (day) => {
+    if (loggingRef.current) return;
+    loggingRef.current = true;
+    setBonusDayPickerOpen(false);
+    setWorkoutSubOpen(false);
+    setQuickActionsOpen(false);
+    const seedRefs = await LB.fetchSeedEntries(store, day.items, day.id, userId);
+    const entries = (day.items || []).map(it => {
+      const ex = LB.findExercise(store, it.exId);
+      if (ex?.movement_type === 'cardio') {
+        return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
+      }
+      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, day.id);
+      const isUni = ex?.unilateral || false;
+      const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet, seedRefs[it.exId]);
+      const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+      const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
+      return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+    });
+    const session = {
+      id: LB.uid(), scheduleId: sch?.id, dayId: day.id, dayName: day.name,
+      date: new Date().toISOString(), startedAt: new Date().toISOString(),
+      ended: null, entries, currentExIdx: 0, cyclePos: null, isBonus: true,
+    };
+    setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    loggingRef.current = false;
     go({ name: 'train', sessionId: session.id });
   };
 
@@ -2454,7 +2486,7 @@ function HomeScreen({ store, setStore, go, userId }) {
           return (
             <div>
               {actionBtn(() => { setQuickActionsOpen(false); setDailyLogOpen(true); }, 'Daily Log', 'Weight, macros, water & steps')}
-              {actionBtn(startFreestyleSession, 'Freestyle Workout', 'Open training — add exercises on the fly')}
+              {actionBtn(() => { setQuickActionsOpen(false); setWorkoutSubOpen(true); }, 'Workout', sch ? 'From plan or freestyle' : 'Open training — add exercises on the fly')}
               {allMissedDays.length > 0 && actionBtn(
                 () => {
                   setQuickActionsOpen(false);
@@ -2487,6 +2519,55 @@ function HomeScreen({ store, setStore, go, userId }) {
             </div>
           );
         })()}
+      </Sheet>
+
+      {/* Workout sub-picker: From plan | Freestyle */}
+      <Sheet open={workoutSubOpen} onClose={() => setWorkoutSubOpen(false)} title="Start workout">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {sch && (
+            <button onClick={() => { setWorkoutSubOpen(false); setBonusDayPickerOpen(true); }} style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            }}>
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>From plan</div>
+                <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Pick a day from your schedule — won't advance your cycle</div>
+              </div>
+              <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+            </button>
+          )}
+          <button onClick={startFreestyleSession} style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+            padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+            borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>Freestyle</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Open session — add exercises on the fly</div>
+            </div>
+            <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+          </button>
+        </div>
+      </Sheet>
+
+      {/* Bonus day picker — training days from the active schedule */}
+      <Sheet open={bonusDayPickerOpen} onClose={() => setBonusDayPickerOpen(false)} title="Pick a day">
+        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 14 }}>
+          This won't advance your cycle — it's logged as a bonus session.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {(sch?.days || []).filter(d => d.items?.length > 0).map(d => (
+            <button key={d.id} onClick={() => startBonusSession(d)} style={{
+              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{d.name}</span>
+              <span className="micro" style={{ color: UI.inkFaint }}>{d.items.length} exercise{d.items.length !== 1 ? 's' : ''}</span>
+            </button>
+          ))}
+        </div>
       </Sheet>
 
       {/* Backlog day picker when multiple missed sessions */}
