@@ -39,7 +39,9 @@ CREATE TABLE public.zane_schedules (
   name text NOT NULL,
   days jsonb NOT NULL DEFAULT '[]'::jsonb,
   archived boolean NOT NULL DEFAULT false,
-  versions jsonb NOT NULL DEFAULT '[]'::jsonb
+  versions jsonb NOT NULL DEFAULT '[]'::jsonb,
+  is_flex boolean NOT NULL DEFAULT false,
+  sessions_per_week integer
 );
 
 CREATE TABLE public.zane_sessions (

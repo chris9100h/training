@@ -14,6 +14,19 @@ function useIsPadS() {
 
 const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','BACK','REST'];
 
+// One-line plan summary shown in the plan list and viewer header.
+function planDescriptor(s) {
+  const trainingDays = s.days.filter(d => d.items.length).length;
+  if (LB.isFlexPlan(s)) {
+    const goal = s.sessions_per_week;
+    return `Flexible · ${trainingDays} ${trainingDays === 1 ? 'workout' : 'workouts'}${goal ? ` · ${goal}×/week` : ''}`;
+  }
+  if (LB.isWeekdayPlan(s)) {
+    return `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`;
+  }
+  return `${s.days.length}-day cycle · ${trainingDays} training days`;
+}
+
 // ─── PlanScreen ────────────────────────────────────────────────────
 function PlanScreen({ store, setStore, go }) {
   const [archivedOpen, setArchivedOpen] = useStateS(false);
@@ -98,9 +111,7 @@ function PlanScreen({ store, setStore, go }) {
                 <Pill gold>active</Pill>
               </div>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>
-                {LB.isWeekdayPlan(s)
-                  ? `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`
-                  : `${s.days.length}-day cycle · ${s.days.filter(d => d.items.length).length} training days`}
+                {planDescriptor(s)}
               </div>
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {s.days.map((d) => (
@@ -112,9 +123,7 @@ function PlanScreen({ store, setStore, go }) {
             <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px' }}>
               <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1, marginBottom: 6 }}>{s.name}</div>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>
-                {LB.isWeekdayPlan(s)
-                  ? `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`
-                  : `${s.days.length}-day cycle · ${s.days.filter(d => d.items.length).length} training days`}
+                {planDescriptor(s)}
               </div>
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {s.days.map((d) => (
@@ -148,9 +157,7 @@ function PlanScreen({ store, setStore, go }) {
                     <Pill>archived</Pill>
                   </div>
                   <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>
-                    {LB.isWeekdayPlan(s)
-                      ? `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`
-                      : `${s.days.length}-day cycle · ${s.days.filter(d => d.items.length).length} training days`}
+                    {planDescriptor(s)}
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {s.days.map((d) => <Pill key={d.id}>{d.name}</Pill>)}
@@ -172,6 +179,7 @@ function PlanScreen({ store, setStore, go }) {
 function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
   const sch = store.schedules.find(s => s.id === (scheduleId || store.activeScheduleId));
   const isWeekday = sch ? LB.isWeekdayPlan(sch) : false;
+  const isFlex = sch ? LB.isFlexPlan(sch) : false;
   const jsDay = new Date().getDay();
   const todayWeekday = jsDay === 0 ? 6 : jsDay - 1;
   const isActivePlan = !!sch && sch.id === store.activeScheduleId;
@@ -199,7 +207,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
     ? (() => {
         if (isWeekday) return displayDays.find(d => d.weekday === todayWeekday)?.id ?? null;
         let pos;
-        if (versions) {
+        if (isFlex) {
+          pos = ((store.cycleIndex || 0) % sch.days.length + sch.days.length) % sch.days.length;
+        } else if (versions) {
           pos = LB.getCyclePosForDate(sch, today);
         } else if (store.cycleStartDate) {
           const st = LB.parseDate(store.cycleStartDate);
@@ -286,8 +296,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
       cycleIndex: 0,
       // Reset the start date that doesn't apply to this plan type, so a later
       // type switch can't read a stale date left over from a different plan.
-      cycleStartDate:    isWeekday ? null          : LB.todayISO(),
-      weekPlanStartDate: isWeekday ? LB.todayISO() : null,
+      // Flex plans have no date anchor at all — position is the cycleIndex.
+      cycleStartDate:    (isWeekday || isFlex) ? null          : LB.todayISO(),
+      weekPlanStartDate: isWeekday             ? LB.todayISO() : null,
     }));
   };
   const duplicate = () => {
@@ -504,6 +515,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
       <TopBar
         title={sch.name}
         sub={(() => {
+          if (isFlex) return `Flexible · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}${sch.sessions_per_week ? ` · ${sch.sessions_per_week}×/week` : ''}`;
           return isWeekday
             ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ')
             : `${displayDays.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`;
@@ -673,6 +685,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
 
   const isActive = draft.id === store.activeScheduleId;
   const isWeekday = LB.isWeekdayPlan(draft);
+  const isFlex = LB.isFlexPlan(draft);
 
   const toggleWeekdayEdit = (idx) => {
     setDraft(d => {
@@ -822,7 +835,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         ? `This resets the plan structure: all ${dayCount} ${dayCount === 1 ? 'day' : 'days'} and their order are cleared, and you rebuild the week from scratch. Your exercises stay safe in the exercise library.`
         : 'Switch this plan to weekday mode?';
       if (!await confirm(msg, { title: 'Switch to Weekday mode?', ok: dayCount > 0 ? 'Reset & switch' : 'Switch', danger: dayCount > 0 })) return;
-      setDraft(d => ({ ...d, mode: 'weekday', days: [] }));
+      // Weekday plans can't be flex — clear the modifier on switch.
+      setDraft(d => ({ ...d, mode: 'weekday', days: [], is_flex: false }));
     } else {
       // Weekday → Cycle: just strip weekday assignments, keep exercises
       setDraft(d => ({
@@ -832,6 +846,24 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           .sort((a, b) => (a.weekday != null ? a.weekday : 0) - (b.weekday != null ? b.weekday : 0))
           .map(function(day) { var nd = Object.assign({}, day); delete nd.weekday; return nd; }),
       }));
+    }
+  };
+
+  // Flex is a modifier on Cycle mode: ordered days, but the position advances
+  // only when you train/skip (never by date). Toggling it on an active plan
+  // clears the date anchor so the date-based cycle math stops driving position.
+  const toggleFlex = () => {
+    const turningOn = !isFlex;
+    setDraft(d => {
+      const next = { ...d, is_flex: turningOn };
+      if (turningOn && next.sessions_per_week == null) {
+        const trainingDays = (d.days || []).filter(x => x.items?.length > 0).length;
+        next.sessions_per_week = Math.min(7, Math.max(1, trainingDays || 3));
+      }
+      return next;
+    });
+    if (isActive) {
+      setStore(s => ({ ...s, cycleStartDate: turningOn ? null : LB.todayISO() }));
     }
   };
 
@@ -878,7 +910,42 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           </div>
         </Field>
 
-        {isActive && !isWeekday && (
+        {!isWeekday && (
+          <Field label="Flexible schedule">
+            <button onClick={toggleFlex} style={{
+              display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+              background: UI.bgInset, border: `1px solid ${isFlex ? UI.goldSoft : UI.hairStrong}`,
+              borderRadius: 4, padding: '10px 12px', cursor: 'pointer', textAlign: 'left',
+            }}>
+              <div style={{
+                width: 44, height: 26, borderRadius: 13, flexShrink: 0, position: 'relative',
+                background: isFlex ? UI.gold : UI.hairStrong, transition: 'background 0.15s',
+              }}>
+                <div style={{
+                  position: 'absolute', top: 3, left: isFlex ? 21 : 3, width: 20, height: 20,
+                  borderRadius: '50%', background: '#fff', transition: 'left 0.15s',
+                }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Advance only when I train</div>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
+                  No fixed days. The next workout waits until you log it — rest days never push your plan forward.
+                </div>
+              </div>
+            </button>
+          </Field>
+        )}
+
+        {isFlex && (
+          <Field label="Sessions per week goal">
+            <Stepper value={draft.sessions_per_week ?? 4} step={1} min={1}
+              suffix="/ week"
+              onChange={v => setDraft(d => ({ ...d, sessions_per_week: Math.min(7, Math.max(1, Math.round(v))) }))} />
+            <div className="micro" style={{ marginTop: 8, textAlign: 'center' }}>Used to measure your weekly consistency</div>
+          </Field>
+        )}
+
+        {isActive && !isWeekday && !isFlex && (
           <Field label="Cycle start date (Day 1)">
             <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%' }}>
               <input type="date" value={store.cycleStartDate || ''}

@@ -427,7 +427,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps').eq('user_id', userId),
-    _supabase.from('zane_schedules').select('id, name, days, archived, versions').eq('user_id', userId),
+    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle')
@@ -1452,6 +1452,14 @@ function isWeekdayPlan(sch) {
   return sch.mode === 'weekday' || (sch.days.length > 0 && sch.days.some(d => d.weekday != null));
 }
 
+// Flexible plan: an ordered-day cycle whose position advances only on a logged
+// session or skip (never by calendar date). is_flex is a passthrough DB column
+// on the schedule object (like days/versions/archived). A flex plan is never a
+// weekday plan.
+function isFlexPlan(sch) {
+  return !!sch && sch.is_flex === true;
+}
+
 function getPlanDaysForDate(schedule, dateStr) {
   const versions = schedule.versions;
   if (!versions?.length) return schedule.days || [];
@@ -1549,6 +1557,12 @@ function todaysDay(state) {
     if (day) return { schedule: sch, day, idx: todayWd };
     return { schedule: sch, day: { id: 'rest-virtual', name: 'REST', items: [], weekday: todayWd }, idx: todayWd };
   }
+  // Flexible plan: position is the action-advanced cycleIndex, not date-derived.
+  if (isFlexPlan(sch)) {
+    const len = sch.days.length;
+    const idx = (((state.cycleIndex || 0) % len) + len) % len;
+    return { schedule: sch, day: sch.days[idx], idx };
+  }
   // When versions exist, derive today's position from the version active today
   const cyclePosToday = getCyclePosForDate(sch, todayStr);
   if (cyclePosToday !== null) {
@@ -1571,6 +1585,12 @@ function todaysDay(state) {
 function nextDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
+  // Flexible plan: the next day in sequence (cycleIndex + 1), no date math.
+  if (isFlexPlan(sch)) {
+    const len = sch.days.length;
+    const idx = ((((state.cycleIndex || 0) + 1) % len) + len) % len;
+    return { schedule: sch, day: sch.days[idx], idx };
+  }
   if (sch.versions?.length) {
     const tomorrow = new Date(); tomorrow.setHours(12, 0, 0, 0); tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().slice(0, 10);
@@ -2482,7 +2502,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
+  uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,
