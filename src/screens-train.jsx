@@ -793,7 +793,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setStore(s => ({
       ...s,
       inProgress: null,
-      ...(!session.isFreestyle && !session.isBonus && !isWeekdayMode && { cycleIndex: s.cycleIndex + 1 }),
+      ...(!session.isBonus && !isWeekdayMode && { cycleIndex: s.cycleIndex + 1 }),
       lastAdvancedDate: LB.todayISO(),
       ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
     }));
@@ -1457,7 +1457,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const tryFinish = () => {
-    if (session.isFreestyle && !session.isBonus) {
+    if (session.isFreestyle) {
       setFreestyleName('');
       setFinishStep('name');
     } else {
@@ -1557,7 +1557,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   }, [avgStats, session.entries, session.startedAt]);
 
   if (!entry) {
-    if (!session.isFreestyle && !session.isBonus) {
+    if (!session.isBonus) {
       return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
     }
     // Empty freestyle/bonus session — show exercise picker immediately

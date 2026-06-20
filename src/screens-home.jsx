@@ -1786,7 +1786,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     const session = {
       id: LB.uid(), scheduleId: null, dayId: null, dayName: 'Freestyle',
       date: new Date().toISOString(), startedAt: new Date().toISOString(),
-      ended: null, entries: [], currentExIdx: 0, cyclePos: null, isFreestyle: true,
+      ended: null, entries: [], currentExIdx: 0, cyclePos: null, isFreestyle: true, isBonus: true,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
     go({ name: 'train', sessionId: session.id });
