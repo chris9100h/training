@@ -238,9 +238,19 @@ function MacroLegend() {
 
 // ─── Daily log sheet ──────────────────────────────────────────────────────────
 
-function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema }) {
+function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus }) {
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
   const manualCal = !!store.settings?.manualCalories;
+  const todayISO = LB.todayISO();
+  const dayStatusPeriod = useMemoH(() => {
+    const ts = new Date(date + 'T12:00:00').getTime();
+    return (store.statusPeriods || []).find(p => {
+      const start = new Date(p.startedAt).getTime();
+      const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
+      return ts >= start && ts <= end;
+    }) || null;
+  }, [date, store.statusPeriods]);
+  const dayMode = date === todayISO ? (store.statusMode ?? null) : (dayStatusPeriod?.mode || null);
   const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', fiber: '', calories: '', water: '', note: '', offPlanNote: '' };
   const [form, setForm] = useStateH(empty);
   // Net-carb mode: adds a fiber field; calories become (P + C − fiber)×4 + F×9.
@@ -307,7 +317,9 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     const isTraining = date === LB.todayISO()
       ? !!LB.plannedTrainingDay(store, date)
       : LB.isLoggedTrainingDay(store.sessions, date);
-    const { adherence, targetsSnap } = LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
+    const { adherence, targetsSnap } = dayMode
+      ? { adherence: null, targetsSnap: null }
+      : LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
     const savedCoachFields = {};
     coachFields.forEach(f => {
       const v = toResponse(f, coachForm[f.key]);
@@ -359,6 +371,50 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14 }}>
         {healthFmtDate(date, { weekday: 'long', day: 'numeric', month: 'long' })}
       </div>
+
+      {onSetStatus && (
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+            {[{ mode: 'sick', label: 'Sick', icon: 'fa-bed-pulse' }, { mode: null, label: 'Normal', icon: null }, { mode: 'vacation', label: 'Vacation', icon: 'fa-umbrella-beach' }].map(({ mode, label, icon }, i) => {
+              const active = dayMode === mode;
+              return (
+                <button key={String(mode)} onClick={() => onSetStatus(mode, date < todayISO ? date : null)} style={{
+                  flex: 1, padding: '12px 4px', cursor: 'pointer', border: 'none',
+                  borderLeft: i > 0 ? `0.5px solid ${UI.hairStrong}` : 'none',
+                  background: active ? 'var(--accent)' : 'transparent',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+                  WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
+                }}>
+                  {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: active ? '#0a0805' : UI.inkFaint }} />}
+                  {!icon && <i className="fa-solid fa-circle-check" style={{ fontSize: 13, color: active ? '#0a0805' : UI.inkFaint }} />}
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: active ? '#0a0805' : UI.inkFaint }}>{label}</span>
+                </button>
+              );
+            })}
+          </div>
+          {dayMode && date === todayISO && (() => {
+            const minDate = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return d.toISOString().slice(0, 10); })();
+            const currentVal = store.statusModeSince ? store.statusModeSince.slice(0, 10) : todayISO;
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                <span className="micro" style={{ color: UI.inkGhost }}>SINCE</span>
+                <input type="date" value={currentVal} min={minDate} max={todayISO}
+                  onChange={e => e.target.value && onSetStatus(store.statusMode, e.target.value)}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />
+              </div>
+            );
+          })()}
+          {dayStatusPeriod && date !== todayISO && (
+            <div style={{ marginTop: 8, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkFaint }}>
+              {new Date(dayStatusPeriod.startedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}
+              {' → '}
+              {dayStatusPeriod.endedAt
+                ? new Date(dayStatusPeriod.endedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
+                : 'ongoing'}
+            </div>
+          )}
+        </div>
+      )}
 
       {tooOld && (
         <div style={{ fontSize: 11, color: 'var(--danger)', fontFamily: UI.fontUi, padding: '8px 10px', background: 'rgba(var(--danger-rgb),0.1)', borderRadius: 4, marginBottom: 14 }}>
@@ -540,8 +596,8 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
   );
   const adh = log?.adherence;
   const showAdh = dayTarget != null || adh != null;
-  const isPerfect = adh != null && adh >= 97;
-  const verdict = adh == null ? null : adh >= 97 ? 'PERFECT' : adh >= 90 ? 'STRONG' : adh >= 75 ? 'ON TRACK' : 'OFF TRACK';
+  const isPerfect = adh != null && Math.round(adh) >= 97;
+  const verdict = adh == null ? null : Math.round(adh) >= 97 ? 'PERFECT' : Math.round(adh) >= 90 ? 'STRONG' : Math.round(adh) >= 75 ? 'ON TRACK' : 'OFF TRACK';
   const badge = (icon, label, alpha) => (
     <span style={{ display: 'flex', alignItems: 'center', gap: 4, background: `rgba(var(--accent-rgb),${alpha})`, border: `0.5px solid rgba(var(--accent-rgb),${alpha * 2})`, borderRadius: 4, padding: '3px 7px' }}>
       <i className={`fa-solid ${icon}`} style={{ fontSize: 9, color: 'var(--accent)' }} />
@@ -617,8 +673,8 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
   const r = v => v == null ? null : Math.round(v);
   const range = `${healthFmtDate(from, { day: 'numeric', month: 'short' })} – ${healthFmtDate(to, { day: 'numeric', month: 'short' })}`;
   const periodLabel = tf === '1W' ? 'THIS WEEK' : tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS';
-  const verdict = adherence == null ? null : adherence >= 97 ? 'PERFECT' : adherence >= 90 ? 'STRONG' : adherence >= 75 ? 'ON TRACK' : 'OFF TRACK';
-  const isPerfect = adherence != null && adherence >= 97;
+  const verdict = adherence == null ? null : Math.round(adherence) >= 97 ? 'PERFECT' : Math.round(adherence) >= 90 ? 'STRONG' : Math.round(adherence) >= 75 ? 'ON TRACK' : 'OFF TRACK';
+  const isPerfect = adherence != null && Math.round(adherence) >= 97;
   const trainingPct = trainingsPlanned > 0 ? Math.min(100, (trainingsDone / trainingsPlanned) * 100) : (trainingsDone > 0 ? 100 : 0);
 
   // 1W: plan-weighted current targets (full week incl. future days). 1M/3M: persisted targetsSnap avg.
@@ -885,6 +941,54 @@ function HealthScreen({ store, setStore, go, userId }) {
   // Load coach-assigned macros (used to prefill targets + power adherence when
   // the user hasn't set personal targets). asClient or self-coaching row.
   const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+
+  const handleSetStatus = async (mode, startDateStr = null) => {
+    const current = store.statusMode ?? null;
+    const startedAt = startDateStr
+      ? new Date(startDateStr + 'T12:00:00').toISOString()
+      : new Date().toISOString();
+    // "Normal from day X" = the period ended the day BEFORE X (X is the first normal day).
+    // Applies whether X is a past day or today.
+    const closedAt = mode === null
+      ? (() => { const d = new Date((startDateStr || LB.todayISO()) + 'T12:00:00'); d.setDate(d.getDate() - 1); return d.toISOString(); })()
+      : startedAt;
+    // If closedAt < the open period's startedAt (e.g. activated and closed the same day),
+    // delete the period entirely instead of creating an invalid start > end record.
+    const openPeriod = mode === null ? (store.statusPeriods || []).find(p => !p.endedAt) : null;
+    const shouldDelete = !!openPeriod && closedAt < openPeriod.startedAt;
+    const modeChanged = mode !== current;
+    if (!modeChanged && !startDateStr) return;
+    const since = mode ? startedAt : null;
+    setStore(s => {
+      const updatedPeriods = mode
+        ? modeChanged
+          ? [{ id: '_pending', mode, startedAt, endedAt: null }, ...(s.statusPeriods || []).map(p => p.endedAt ? p : { ...p, endedAt: new Date().toISOString() })]
+          : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, startedAt } : p)
+        : shouldDelete
+          ? (s.statusPeriods || []).filter(p => !!p.endedAt)
+          : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: closedAt } : p);
+      return { ...s, statusMode: mode, statusModeSince: since, statusPeriods: updatedPeriods };
+    });
+    try {
+      if (modeChanged) {
+        if (mode) await LB.openStatusPeriod(userId, mode, startedAt);
+        else if (shouldDelete) await LB.supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null);
+        else      await LB.closeStatusPeriod(userId, closedAt);
+      } else {
+        await LB.updateStatusPeriodStart(userId, startedAt);
+      }
+    } catch (_) {}
+    if (coachingId && modeChanged) {
+      try {
+        const body = mode === 'sick'     ? 'Status: Sick — taking a break from training.'
+                   : mode === 'vacation' ? 'Status: Vacation — back soon!'
+                   : `Status: Back to normal (was ${current === 'sick' ? 'sick' : 'on vacation'}).`;
+        const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
+        await LB.addCoachingNote(coachingId, 'general', null, null, body, userId, threadId);
+      } catch (_) {}
+    }
+  };
+
   useEffectH(() => {
     if (!coachingId) { setCoachingMacros(null); return; }
     let cancelled = false;
@@ -1198,6 +1302,28 @@ function HealthScreen({ store, setStore, go, userId }) {
           {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
         </button>
       } />
+      {store.statusMode && !capturing && (
+        <div onClick={() => { setSelectedDate(today); setLogOpen(true); }} style={{
+          margin: '0 16px 12px',
+          padding: '10px 14px',
+          background: 'rgba(var(--accent-rgb), 0.08)',
+          border: `0.5px solid rgba(var(--accent-rgb), 0.3)`,
+          borderRadius: 6,
+          display: 'flex', alignItems: 'center', gap: 10,
+          cursor: 'pointer',
+          WebkitTapHighlightColor: 'transparent',
+        }}>
+          <i className={`fa-solid ${store.statusMode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach'}`} style={{ fontSize: 14, color: 'var(--accent)' }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
+              {store.statusMode === 'sick' ? 'Sick' : 'Vacation'}
+              {store.statusModeSince ? ` · Since ${new Date(store.statusModeSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}
+            </div>
+            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Tap to manage or deactivate</div>
+          </div>
+          <i className="fa-solid fa-chevron-right" style={{ fontSize: 9, color: UI.inkFaint }} />
+        </div>
+      )}
       <div ref={captureRef}>
         <HealthDateStrip store={store} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} />
 
@@ -1212,7 +1338,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       </div>
 
-      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} activeCoachingSchema={activeCoachingSchema} />
+      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
     </Screen>
   );

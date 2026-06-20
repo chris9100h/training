@@ -93,6 +93,7 @@ function CoachingMultiView({ views, renderView }) {
 function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false }) {
   const allClients = store.coaching?.asCoach || [];
   const [liveMap, setLiveMap] = useStateC({});
+  const [statusMap, setStatusMap] = useStateC({});
   const [checkinMap, setCheckinMap] = useStateC({});
   const [inviteOpen, setInviteOpen] = useStateC(false);
   const [inviteEmail, setInviteEmail] = useStateC('');
@@ -107,9 +108,10 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
     const poll = () => {
       Promise.all([LB.loadCoachClientsStatus(), LB.loadCoachCheckinStatus()])
         .then(([statusData, checkinData]) => {
-          const lm = {};
-          statusData.forEach(r => { lm[r.clientId] = r.inProgressSessionId; });
+          const lm = {}, sm = {};
+          statusData.forEach(r => { lm[r.clientId] = r.inProgressSessionId; if (r.statusMode) sm[r.clientId] = r.statusMode; });
           setLiveMap(lm);
+          setStatusMap(sm);
           const cm = {};
           checkinData.forEach(r => { cm[r.coachingId] = r.checkedInAt; });
           setCheckinMap(cm);
@@ -272,6 +274,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 12px 24px' }}>
           {allClients.map(c => {
             const inProgress = liveMap[c.clientId];
+            const clientStatusMode = statusMap[c.clientId] || null;
             const clientUnread = unreadNotes.filter(n => n.authorId === c.clientId).length;
             const checkinAt = c.id in checkinMap ? checkinMap[c.id] : undefined;
             const checkinDue = c.status === 'active' && (c.checkinEnabled ?? true) && checkinAt === null;
@@ -283,6 +286,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
                 key={c.id}
                 client={c}
                 inProgress={inProgress}
+                statusMode={clientStatusMode}
                 unreadCount={clientUnread}
                 checkinDue={checkinDue}
                 checkinNew={checkinNew}
@@ -298,7 +302,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
   );
 }
 
-function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, checkinNew, checkinAt, onRequestCheckin, go }) {
+function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, checkinDue, checkinNew, checkinAt, onRequestCheckin, go }) {
   const isPending = client.status === 'pending';
   const [requested, setRequested] = useStateC(false);
   const [checkinDismissed, setCheckinDismissed] = useStateC(false);
@@ -324,7 +328,7 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
 
   const showCheckinNew = checkinNew && !checkinDismissed;
 
-  const borderColor = inProgress ? 'rgba(var(--accent-rgb),0.4)' : (showCheckinNew || checkinDue) ? 'rgba(var(--accent-rgb),0.2)' : UI.hair;
+  const borderColor = inProgress ? 'rgba(var(--accent-rgb),0.4)' : statusMode ? UI.hairStrong : (showCheckinNew || checkinDue) ? 'rgba(var(--accent-rgb),0.2)' : UI.hair;
 
   return (
     <div
@@ -342,6 +346,11 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
         {showCheckinNew && !inProgress && (
           <div style={{ position: 'absolute', bottom: 0, right: 0, width: 12, height: 12, borderRadius: 6, background: 'var(--accent)', border: '2px solid var(--bg)' }} />
         )}
+        {statusMode && !inProgress && !showCheckinNew && (
+          <div style={{ position: 'absolute', top: 0, right: 0, width: 12, height: 12, borderRadius: 6, background: UI.inkGhost, border: '2px solid var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <i className={`fa-solid ${statusMode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach'}`} style={{ fontSize: 5, color: UI.bg }} />
+          </div>
+        )}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 2 }}>{client.clientName || client.clientEmail}</div>
@@ -349,6 +358,8 @@ function CoachingTabClientCard({ client, inProgress, unreadCount, checkinDue, ch
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.05em' }}>INVITE PENDING</div>
         ) : inProgress ? (
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>TRAINING NOW</div>
+        ) : statusMode ? (
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>{statusMode === 'sick' ? 'SICK' : 'VACATION'}</div>
         ) : showCheckinNew ? (
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>CHECK-IN SUBMITTED</div>
         ) : checkinDue ? (

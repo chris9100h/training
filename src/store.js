@@ -453,10 +453,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.from('zane_coaching_notes')
       .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
       .is('read_at', null)
-      .neq('author_id', userId),
-    // Real coaching row (for check-in requests) — exclude the self-coaching row
-    // so maybeSingle() never trips when both a real coach and self-coaching exist.
-    isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
+      .neq('author_id', userId)
+      .not('coaching_id', 'like', 'support_%'),
+    // Real coaching row (for check-in requests) — exclude self-coaching and support rows.
+    isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).not('id', 'like', 'support_%').maybeSingle(),
     // Self-coaching row (coach_id = client_id), if the user is their own coach
     isCoachLoad ? null : _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
     // Cardio quick-logs — all records for the user (typically < a few hundred rows)
@@ -464,11 +464,17 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Daily health logs (weight / steps / macros / water) — one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    // Sick/vacation history periods — used for missed-workout stats and training adherence.
+    // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
+    _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
+    // Support tickets — user's own ticket list, newest activity first
+    isCoachLoad ? null : _supabase.rpc('get_user_support_chats'),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
-         cardioLogsRes, dailyLogsRes] = await Promise.all(queries);
+         cardioLogsRes, dailyLogsRes, statusPeriodsRes,
+         supportTicketsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -590,6 +596,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       coachFields: l.daily_coach_fields ?? null,
       createdAt: l.created_at,
     })),
+    statusPeriods: (statusPeriodsRes?.data || []).map(p => ({
+      id: p.id, mode: p.mode, startedAt: p.started_at, endedAt: p.ended_at ?? null,
+    })),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
     // and via the local cache also offline). bestE1rmForExercise combines this
     // with the windowed sessions, so PR detection stays exact mid-session.
@@ -600,6 +609,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     weekPlanStartDate: sett.week_plan_start_date ?? null,
     lastAdvancedDate: sett.last_advanced_date ?? null,
     inProgress: sett.in_progress_session_id ?? null,
+    statusMode: sett.status_mode ?? null,
+    statusModeSince: sett.status_mode_since ?? null,
     customDayTypes: sett.custom_day_types ?? [],
     settings: {
         unit: sett.unit ?? null,
@@ -665,6 +676,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         createdAt: n.created_at,
       })),
     },
+    supportTickets: (supportTicketsRes?.data || []).map(t => ({
+      coachingId: t.coaching_id,
+      status: t.support_status,
+      category: t.support_category,
+      createdAt: t.created_at,
+      lastMessageAt: t.last_message_at,
+      lastMessageBody: t.last_message_body,
+      unreadCount: Number(t.unread_count || 0),
+    })),
+    supportUnread: (supportTicketsRes?.data || []).reduce((s, t) => s + Number(t.unread_count || 0), 0),
   };
   if (!isCoachLoad) await autoArchiveMissedDays(userId, result);
   return result;
@@ -944,7 +965,9 @@ async function syncStore(prev, next, userId) {
     prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
-    prev.nextReminderAt                   !== next.nextReminderAt;
+    prev.nextReminderAt                   !== next.nextReminderAt   ||
+    prev.statusMode                       !== next.statusMode       ||
+    prev.statusModeSince                  !== next.statusModeSince;
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
@@ -986,6 +1009,8 @@ async function syncStore(prev, next, userId) {
       onboarding_completed: next.settings?.onboardingCompleted ?? false,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
+      status_mode: next.statusMode ?? null,
+      status_mode_since: next.statusModeSince ?? null,
     }));
   }
 
@@ -1735,7 +1760,7 @@ async function loadClientStore(clientId) {
 async function loadCoachClientsStatus() {
   const { data, error } = await _supabase.rpc('get_coach_clients_status');
   if (error) throw error;
-  return (data || []).map(r => ({ clientId: r.client_id, inProgressSessionId: r.in_progress_session_id }));
+  return (data || []).map(r => ({ clientId: r.client_id, inProgressSessionId: r.in_progress_session_id, statusMode: r.status_mode ?? null, statusModeSince: r.status_mode_since ?? null }));
 }
 
 async function reloadCoachingState(userId) {
@@ -2395,6 +2420,19 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions, schema) {
   return Object.keys(out).length ? { ...out, count: week.length } : null;
 }
 
+async function openStatusPeriod(userId, mode, startedAt) {
+  await _supabase.from('zane_status_periods').update({ ended_at: new Date().toISOString() }).eq('user_id', userId).is('ended_at', null);
+  await _supabase.from('zane_status_periods').insert({ id: uid(), user_id: userId, mode, started_at: startedAt });
+}
+
+async function closeStatusPeriod(userId, endedAt = null) {
+  await _supabase.from('zane_status_periods').update({ ended_at: endedAt || new Date().toISOString() }).eq('user_id', userId).is('ended_at', null);
+}
+
+async function updateStatusPeriodStart(userId, startedAt) {
+  await _supabase.from('zane_status_periods').update({ started_at: startedAt }).eq('user_id', userId).is('ended_at', null);
+}
+
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
@@ -2409,6 +2447,7 @@ window.LB = {
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover,
   subscribeToChanges,
+  openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,

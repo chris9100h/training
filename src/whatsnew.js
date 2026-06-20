@@ -16,6 +16,35 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.381',
+    title: 'Support Center',
+    items: [
+      'Report questions, bugs, or feature requests directly from the app — Settings → Support Center.',
+      'Keep multiple tickets open at once, each with its own thread and category.',
+      'See live whether your ticket is open, in progress, or resolved.',
+      'Replies land right in the thread — a dot badge lets you know when something new arrived.',
+    ],
+  },
+  {
+    id: 'v2.380',
+    title: 'Account — Change Password & Email, Training Reminder',
+    items: [
+      'You can now change your password and email address directly in the app — Settings → Account → Change password / Change email. No need to go through a sign-out flow.',
+      'Training Reminder is now under Settings → Training (not Account). It sends you a push notification on days you have a workout scheduled — a quiet nudge so you don\'t miss a session.',
+      'If push notifications aren\'t active yet, the reminder toggle takes you straight to the push setup so you can enable both in one go.',
+    ],
+  },
+  {
+    id: 'v2.378',
+    title: 'Sick & Vacation Mode',
+    items: [
+      'Set your status to Sick or Vacation in the Health tab — while active, no macro adherence is tracked and your home screen reflects your current state instead of showing a training prompt.',
+      'Your coach (or self-coaching dashboard) sees the status directly in the client list and overview, including how many days you\'ve been out.',
+      'Activate retroactively: tap any past day in Health before switching on the mode and that date becomes the start — up to two weeks back.',
+      'The period is counted separately in History → Stats under Consistency, alongside a new "Missed Workouts" card — worth a look if you haven\'t been there yet.',
+    ],
+  },
+  {
     id: 'v2.376',
     title: 'Install Zane as an app',
     items: [

@@ -200,7 +200,8 @@ CREATE TABLE public.zane_coaching (
   status text NOT NULL DEFAULT 'pending'::text,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   checkin_requested_at timestamp with time zone,
-  checkin_enabled boolean NOT NULL DEFAULT true
+  checkin_enabled boolean NOT NULL DEFAULT true,
+  archived boolean DEFAULT false
 );
 
 CREATE TABLE public.zane_coaching_threads (
@@ -305,7 +306,6 @@ ALTER TABLE public.zane_push_subscriptions ADD CONSTRAINT push_subscriptions_pke
 ALTER TABLE public.zane_feature_grants ADD CONSTRAINT feature_grants_pkey PRIMARY KEY (feature, email);
 
 ALTER TABLE public.zane_coaching ADD CONSTRAINT zane_coaching_pkey PRIMARY KEY (id);
-ALTER TABLE public.zane_coaching ADD CONSTRAINT zane_coaching_coach_id_client_id_key UNIQUE (coach_id, client_id);
 ALTER TABLE public.zane_coaching ADD CONSTRAINT zane_coaching_coach_id_fkey FOREIGN KEY (coach_id) REFERENCES auth.users(id) ON DELETE CASCADE;
 ALTER TABLE public.zane_coaching ADD CONSTRAINT zane_coaching_client_id_fkey FOREIGN KEY (client_id) REFERENCES auth.users(id) ON DELETE CASCADE;
 ALTER TABLE public.zane_coaching ADD CONSTRAINT zane_coaching_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text])));
@@ -825,18 +825,17 @@ AS $function$
 $function$;
 
 CREATE OR REPLACE FUNCTION public.get_coach_clients_status()
- RETURNS TABLE(client_id uuid, in_progress_session_id text)
+ RETURNS TABLE(client_id uuid, in_progress_session_id text, status_mode text, status_mode_since timestamptz)
  LANGUAGE sql
  SECURITY DEFINER
  SET search_path TO 'public'
 AS $function$
-  select us.user_id as client_id, us.in_progress_session_id
+  select us.user_id as client_id, us.in_progress_session_id, us.status_mode, us.status_mode_since
   from zane_user_settings us
   inner join zane_coaching zc on zc.client_id = us.user_id
   where zc.coach_id = auth.uid()
     and zc.coach_id <> zc.client_id
-    and zc.status = 'active'
-    and us.in_progress_session_id is not null;
+    and zc.status = 'active';
 $function$;
 
 CREATE OR REPLACE FUNCTION public.get_coach_checkin_status()

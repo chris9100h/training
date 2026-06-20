@@ -776,6 +776,22 @@ function App() {
       (note) => {
         setStore(s => {
           if (!s?.coaching) return s;
+          if (note.coachingId?.startsWith('support_')) {
+            // Own support ticket reply → update badge and ticket list
+            const myTicket = (s.supportTickets || []).some(t => t.coachingId === note.coachingId);
+            if (myTicket) {
+              return {
+                ...s,
+                supportUnread: (s.supportUnread || 0) + 1,
+                supportTickets: (s.supportTickets || []).map(t =>
+                  t.coachingId === note.coachingId
+                    ? { ...t, unreadCount: t.unreadCount + 1, lastMessageAt: note.createdAt, lastMessageBody: note.body }
+                    : t
+                ),
+              };
+            }
+            return s; // Admin sees someone else's support note — ignore Realtime
+          }
           if ((s.coaching.unreadNotes || []).some(n => n.id === note.id)) return s;
           return {
             ...s,

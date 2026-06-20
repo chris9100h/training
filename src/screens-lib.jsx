@@ -1352,6 +1352,15 @@ function StatsTab({ store, sessions, go }) {
   // Memoize so this only re-runs when the day rolls over, the sessions change,
   // or the active plan changes — not on every unrelated re-render.
   const { currentStreak, longestStreak } = useMemoL(() => {
+    const periods = store.statusPeriods || [];
+    const isInStatusPeriod = (d) => {
+      const ts = d.getTime();
+      return periods.some(p => {
+        const start = new Date(p.startedAt).getTime();
+        const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
+        return ts >= start && ts <= end;
+      });
+    };
     let cur = 0;
     for (let i = 0; i <= 730; i++) {
       const d = new Date(today); d.setDate(today.getDate() - i); d.setHours(12, 0, 0, 0);
@@ -1359,8 +1368,8 @@ function StatsTab({ store, sessions, go }) {
       const key = d.toISOString().slice(0, 10);
       if (sessionDateSet.has(key)) { cur++; }
       else if (i === 0) { /* today not done yet — don't break */ }
-      else if (isTrainingDay(d)) { break; }
-      // rest day → continue without breaking or counting
+      else if (isTrainingDay(d) && !isInStatusPeriod(d)) { break; }
+      // rest day or sick/vacation day → continue without breaking or counting
     }
     let longest = 0, ls = 0;
     if (sessions.length > 0) {
@@ -1370,12 +1379,12 @@ function StatsTab({ store, sessions, go }) {
         const d = new Date(earliest); d.setDate(earliest.getDate() + i); d.setHours(12, 0, 0, 0);
         const key = d.toISOString().slice(0, 10);
         if (sessionDateSet.has(key)) { ls++; longest = Math.max(longest, ls); }
-        else if (isTrainingDay(d)) { ls = 0; }
-        // rest day → ls unchanged
+        else if (isTrainingDay(d) && !isInStatusPeriod(d)) { ls = 0; }
+        // rest day or sick/vacation day → ls unchanged
       }
     }
     return { currentStreak: cur, longestStreak: longest };
-  }, [todayKey, sessions, store.activeScheduleId, store.cycleStartDate]);
+  }, [todayKey, sessions, store.statusPeriods, store.activeScheduleId, store.cycleStartDate]);
 
   const totalTrainingMins = durations.reduce((a, b) => a + b, 0);
   const totalTrainingStr = totalTrainingMins >= 60
@@ -1403,6 +1412,32 @@ function StatsTab({ store, sessions, go }) {
     const weeks = Math.round((currentMonday - anchorMonday) / (7 * 86400000)) + 1;
     return (relevant.length / Math.max(1, weeks)).toFixed(1);
   }, [sessions, planStart]);
+
+  const { missedWorkouts, sickVacationMissed } = useMemoL(() => {
+    if (!sch || !planStart) return { missedWorkouts: 0, sickVacationMissed: 0 };
+    const skipDates = new Set((store.skips || []).map(s => s.date.slice(0, 10)));
+    const periods = store.statusPeriods || [];
+    const isInStatusPeriod = (dateStr) => {
+      const ts = new Date(dateStr + 'T12:00:00').getTime();
+      return periods.some(p => {
+        const start = new Date(p.startedAt).getTime();
+        const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
+        return ts >= start && ts <= end;
+      });
+    };
+    let missed = 0, sickVac = 0;
+    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1); yesterday.setHours(12, 0, 0, 0);
+    for (let d = new Date(planStart); d <= yesterday; d.setDate(d.getDate() + 1)) {
+      d.setHours(12, 0, 0, 0);
+      if (!isTrainingDay(d)) continue;
+      const key = d.toISOString().slice(0, 10);
+      if (sessionDateSet.has(key) || skipDates.has(key)) continue;
+      missed++;
+      if (isInStatusPeriod(key)) sickVac++;
+    }
+    return { missedWorkouts: missed, sickVacationMissed: sickVac };
+  }, [todayKey, sessions, store.skips, store.statusPeriods, store.activeScheduleId, store.cycleStartDate, planStart]);
+
   const exCounts = {};
   sessions.forEach(s => s.entries.forEach(e => { exCounts[e.exId] = (exCounts[e.exId] || 0) + 1; }));
   const topExercises = Object.entries(exCounts).sort((a, b) => b[1] - a[1]).slice(0, 5)
@@ -1506,6 +1541,8 @@ function StatsTab({ store, sessions, go }) {
           <StatCard label="This Year" value={thisYearSessions.length} sub="sessions" compact />
           <StatCard label="This Month" value={thisMonthSessions.length} sub="sessions" compact />
           <StatCard label="This Week" value={thisWeekSessions.length} sub="sessions" compact />
+          {planStart && <StatCard label="Missed Workouts" value={missedWorkouts} sub="since plan start" compact />}
+          {planStart && <StatCard label="Of Which Sick/Away" value={sickVacationMissed} sub="status mode" compact />}
         </div>
       </div>
 
