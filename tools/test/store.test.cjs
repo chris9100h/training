@@ -424,6 +424,71 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.dailyLogsWeekPrefill([], '2026-06-08'), null);
   });
 
+  // ── Flexible plans ────────────────────────────────────────────────────────
+  const flexSch = { id: 'fx', name: 'FLEX', is_flex: true, versions: [], days: [
+    { id: 'd0', name: 'PUSH', items: [{ exId: 'e1' }] },
+    { id: 'd1', name: 'PULL', items: [{ exId: 'e2' }] },
+    { id: 'd2', name: 'LEGS', items: [{ exId: 'e3' }] },
+  ] };
+  const flexState = (cycleIndex) => ({ activeScheduleId: 'fx', cycleIndex, cycleStartDate: null, schedules: [flexSch] });
+
+  test('isFlexPlan detects the is_flex column, ignores legacy plans', () => {
+    assert.strictEqual(LB.isFlexPlan(flexSch), true);
+    assert.strictEqual(LB.isFlexPlan({ days: [], versions: [] }), false);
+    assert.strictEqual(LB.isFlexPlan({ is_flex: false, days: [] }), false);
+    assert.strictEqual(LB.isFlexPlan(null), false);
+  });
+
+  test('todaysDay on a flex plan reads the cycleIndex, never the date', () => {
+    assert.strictEqual(LB.todaysDay(flexState(0)).day.id, 'd0');
+    assert.strictEqual(LB.todaysDay(flexState(1)).day.id, 'd1');
+    assert.strictEqual(LB.todaysDay(flexState(2)).idx, 2);
+    // wraps around the rotation
+    assert.strictEqual(LB.todaysDay(flexState(3)).day.id, 'd0');
+    assert.strictEqual(LB.todaysDay(flexState(5)).day.id, 'd2');
+  });
+
+  test('nextDay on a flex plan is the following day in the rotation', () => {
+    assert.strictEqual(LB.nextDay(flexState(0)).day.id, 'd1');
+    assert.strictEqual(LB.nextDay(flexState(2)).day.id, 'd0'); // wraps
+  });
+
+  // ── weekPerformanceSignal ────────────────────────────────────────────────
+  const wpSet = (kg, reps, done = true) => ({ kg, reps, done, warmup: false, skipped: false });
+  const wpSession = (date, sets) => ({ id: date, ended: date + 'T18:00:00', date, dayId: 'd0',
+    entries: [{ exId: 'e1', sets }] });
+
+  test('weekPerformanceSignal returns null without a comparable prior week', () => {
+    const state = { sessions: [wpSession('2026-06-09', [wpSet(100, 5)])] };
+    assert.strictEqual(LB.weekPerformanceSignal(state, '2026-06-08'), null);
+  });
+
+  test('weekPerformanceSignal reports improvement when most sets beat the prior session', () => {
+    const state = { sessions: [
+      wpSession('2026-06-01', [wpSet(100, 5), wpSet(100, 5)]), // pre-week baseline
+      wpSession('2026-06-09', [wpSet(105, 5), wpSet(105, 5)]), // this week: more weight
+    ] };
+    assert.strictEqual(LB.weekPerformanceSignal(state, '2026-06-08'), 'improved');
+  });
+
+  test('weekPerformanceSignal reports worse when most sets decline', () => {
+    const state = { sessions: [
+      wpSession('2026-06-01', [wpSet(100, 5), wpSet(100, 5)]),
+      wpSession('2026-06-09', [wpSet(95, 5), wpSet(95, 5)]),
+    ] };
+    assert.strictEqual(LB.weekPerformanceSignal(state, '2026-06-08'), 'worse');
+  });
+
+  test('weekPerformanceSignal compares against pre-week sessions, not same-week ones', () => {
+    const state = { sessions: [
+      wpSession('2026-06-02', [wpSet(100, 5)]), // baseline before the week
+      wpSession('2026-06-09', [wpSet(110, 5)]), // earlier in the reported week
+      wpSession('2026-06-11', [wpSet(112, 5)]), // later same week — must NOT compare to Jun 9
+    ] };
+    // Both week sessions improve over the Jun 2 baseline → improved
+    assert.strictEqual(LB.weekPerformanceSignal(state, '2026-06-08'), 'improved');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

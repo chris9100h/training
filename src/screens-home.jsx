@@ -1092,7 +1092,10 @@ function HomeScreen({ store, setStore, go, userId }) {
   const dayIdx = today?.idx ?? 0;
   const dayCount = sch?.days?.length || 0;
   const weekdayMode = sch ? LB.isWeekdayPlan(sch) : false;
-  const cycleWeekView = !weekdayMode && (store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
+  const isFlex = sch ? LB.isFlexPlan(sch) : false;
+  // Flex plans have no calendar week — the strip is the rotation itself, so the
+  // Mon–Sun cycle-week overlay never applies.
+  const cycleWeekView = !weekdayMode && !isFlex && (store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
 
   const jsDay = new Date().getDay();
   const todayWd = jsDay === 0 ? 6 : jsDay - 1;
@@ -1103,7 +1106,7 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   // Auto-migrate from cycleIndex to cycleStartDate on first load
   useEffect(() => {
-    if (!weekdayMode && sch && !store.cycleStartDate) {
+    if (!weekdayMode && !isFlex && sch && !store.cycleStartDate) {
       const today = new Date(); today.setHours(12, 0, 0, 0);
       const start = new Date(today.getTime() - (store.cycleIndex || 0) * 86400000);
       setStore(s => s.cycleStartDate ? s : { ...s, cycleStartDate: start.toISOString().slice(0, 10) });
@@ -1325,6 +1328,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const isFutureSlot = sessionDate > (() => { const d = new Date(); d.setHours(12,0,0,0); return d; })();
 
   const periodLabel = useMemo(() => {
+    if (isFlex) return 'FLEXIBLE';
     if (weekdayMode) {
       if (store.weekPlanStartDate) {
         const monday = new Date(); monday.setHours(12, 0, 0, 0);
@@ -1356,9 +1360,12 @@ function HomeScreen({ store, setStore, go, userId }) {
     }
     const cycleNum = currentCycleNum + weekOffset + 1;
     return `CYCLE ${cycleNum}`;
-  }, [weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch]);
+  }, [isFlex, weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch]);
 
   const cardLabel = useMemo(() => {
+    if (isFlex) {
+      return `${isViewingToday ? 'NEXT UP' : 'PREVIEW'} · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
+    }
     if (isViewingToday) {
       if (weekdayMode) return `TODAY · ${WEEKDAYS_FULL[selectedWd].toUpperCase()}`;
       if (cycleWeekView) {
@@ -1374,7 +1381,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       return `${dateStr} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
     }
     return `${dateStr} · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
-  }, [isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week]);
+  }, [isFlex, isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week]);
 
   const avgDayDuration = useMemo(() => {
     if (!activeDay?.id) return null;
@@ -1478,6 +1485,9 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const isSlotDone = useMemo(() => {
     if (isActiveRest) return false;
+    // Flex: the next-up day is never "done" — finishing it advances the rotation
+    // to the following day, so the card always shows an actionable workout.
+    if (isFlex) return false;
     if (weekdayMode) {
       const key = `${sessionDate.getFullYear()}-${sessionDate.getMonth()}-${sessionDate.getDate()}`;
       return completedDateKeys?.has(key) ?? false;
@@ -1512,9 +1522,9 @@ function HomeScreen({ store, setStore, go, userId }) {
   }, [store.statusPeriods]);
 
   const selectedDateSkip = useMemo(() => {
-    if (isViewingToday || isFutureSlot) return null;
+    if (isFlex || isViewingToday || isFutureSlot) return null;
     return skipsMap.get(sessionDate.toISOString().slice(0, 10)) ?? null;
-  }, [isViewingToday, isFutureSlot, skipsMap, sessionDate]);
+  }, [isFlex, isViewingToday, isFutureSlot, skipsMap, sessionDate]);
 
   const selectedDayStatusMode = useMemo(() => {
     if (isFutureSlot) return null;
@@ -1697,6 +1707,14 @@ function HomeScreen({ store, setStore, go, userId }) {
       return;
     }
     setWarmupPromptData({ entries, cyclePos, firstWorkingKg, firstName: entries[0]?.name || '?' });
+  };
+
+  // Flex: skip the current next-up day — advance the rotation by one without
+  // logging anything (no dated skip row; flex has no calendar to mark).
+  const flexSkip = () => {
+    if (!dayCount) return;
+    setStore(s => ({ ...s, cycleIndex: (s.cycleIndex || 0) + 1, lastAdvancedDate: LB.todayISO() }));
+    setSelectedSlot((((dayIdx + 1) % dayCount) + dayCount) % dayCount);
   };
 
   const confirmStart = (withWarmup) => {
@@ -2049,31 +2067,35 @@ function HomeScreen({ store, setStore, go, userId }) {
 
       <div style={{ flex: 1, minHeight: 0, padding: '16px 22px 0', display: 'flex', flexDirection: 'column', gap: 12, position: 'relative', zIndex: 1 }}>
 
-        {/* Period navigation */}
+        {/* Period navigation — flex has no calendar weeks, just a static label */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button onClick={goBack} disabled={weekOffset <= minOffset} style={{
-            width: 30, height: 30, borderRadius: 4,
-            background: 'transparent',
-            border: `1px solid ${weekOffset <= minOffset ? 'transparent' : UI.hairStrong}`,
-            color: weekOffset <= minOffset ? UI.inkGhost : UI.inkSoft,
-            cursor: weekOffset <= minOffset ? 'default' : 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M6 1 1 6l5 5"/></svg>
-          </button>
+          {!isFlex && (
+            <button onClick={goBack} disabled={weekOffset <= minOffset} style={{
+              width: 30, height: 30, borderRadius: 4,
+              background: 'transparent',
+              border: `1px solid ${weekOffset <= minOffset ? 'transparent' : UI.hairStrong}`,
+              color: weekOffset <= minOffset ? UI.inkGhost : UI.inkSoft,
+              cursor: weekOffset <= minOffset ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M6 1 1 6l5 5"/></svg>
+            </button>
+          )}
           <div style={{ flex: 1, textAlign: 'center' }}>
             <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft, textTransform: 'uppercase' }}>{periodLabel}</span>
           </div>
-          <button onClick={goForward} disabled={weekOffset === 0} style={{
-            width: 30, height: 30, borderRadius: 4,
-            background: 'transparent',
-            border: `1px solid ${weekOffset === 0 ? 'transparent' : UI.hairStrong}`,
-            color: weekOffset === 0 ? UI.inkGhost : UI.inkSoft,
-            cursor: weekOffset === 0 ? 'default' : 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M2 1l5 5-5 5"/></svg>
-          </button>
+          {!isFlex && (
+            <button onClick={goForward} disabled={weekOffset === 0} style={{
+              width: 30, height: 30, borderRadius: 4,
+              background: 'transparent',
+              border: `1px solid ${weekOffset === 0 ? 'transparent' : UI.hairStrong}`,
+              color: weekOffset === 0 ? UI.inkGhost : UI.inkSoft,
+              cursor: weekOffset === 0 ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M2 1l5 5-5 5"/></svg>
+            </button>
+          )}
         </div>
 
         {/* day strip */}
@@ -2084,9 +2106,11 @@ function HomeScreen({ store, setStore, go, userId }) {
             const r = !d.items?.length;
             const slotLabel = weekdayMode
               ? WEEKDAYS[i]
-              : d.date.toLocaleDateString(undefined, { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
+              : isFlex
+                ? `D${(d.slotIdx ?? i) + 1}`
+                : d.date.toLocaleDateString(undefined, { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
             let isCompleted = false;
-            if (!r) {
+            if (!r && !isFlex) {
               if (weekdayMode) {
                 const slotKey = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
                 isCompleted = completedDateKeys?.has(slotKey) ?? false;
@@ -2101,7 +2125,9 @@ function HomeScreen({ store, setStore, go, userId }) {
               }
             }
             const dateKey = d.date.toISOString().slice(0, 10);
-            const isPast = !d.isToday && d.date < new Date();
+            // Flex slots carry no real calendar date, so none of the date-derived
+            // markers (missed / skipped / status / completed) apply.
+            const isPast = !isFlex && !d.isToday && d.date < new Date();
             const planStartStr = oldestVersionStart
               || (weekdayMode ? store.weekPlanStartDate : store.cycleStartDate);
             const isBeforePlanStart = planStartStr ? d.date < LB.parseDate(planStartStr) : false;
@@ -2321,7 +2347,11 @@ function HomeScreen({ store, setStore, go, userId }) {
                     </div>
                   </Frame>
                 )}
-                {!selectedDateSkip && (
+                {!selectedDateSkip && (isFlex && !isViewingToday ? (
+                  <div style={{ padding: '12px 16px', borderRadius: 6, border: `1px dashed ${UI.hairStrong}`, textAlign: 'center' }}>
+                    <span className="micro" style={{ color: UI.inkFaint }}>PREVIEW · START THIS FROM THE NEXT-UP DAY</span>
+                  </div>
+                ) : (
                   <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
                     <button onClick={startSession} disabled={!!store.inProgress} style={{
                       opacity: store.inProgress ? 0.35 : 1,
@@ -2334,11 +2364,11 @@ function HomeScreen({ store, setStore, go, userId }) {
                     }}>
                       <i className="fa-solid fa-dumbbell" style={{ fontSize: 13, color: 'rgba(10,8,5,0.55)' }} />
                       <span style={{ color: 'rgba(10,8,5,0.75)', letterSpacing: '0.18em', fontWeight: 700, fontSize: 13, fontFamily: UI.fontUi }}>
-                        {isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION'}
+                        {isFlex || isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION'}
                       </span>
                     </button>
                     {isViewingToday && (
-                      <button onClick={() => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
+                      <button onClick={isFlex ? flexSkip : () => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
                         flexShrink: 0, width: 80, minHeight: 48, borderRadius: 6, cursor: 'pointer',
                         background: 'transparent',
                         border: `1px solid ${UI.hairStrong}`,
@@ -2350,7 +2380,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                       </button>
                     )}
                   </div>
-                )}
+                ))}
               </div>
             )}
 

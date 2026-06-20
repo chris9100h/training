@@ -226,6 +226,8 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   if (!activeSch) return [];
 
   const isWd = LB.isWeekdayPlan(activeSch);
+  const isFlex = LB.isFlexPlan(activeSch);
+  const flexGoal = activeSch.sessions_per_week || null;
 
   // When versions exist, the oldest entry's validFrom is the plan's true origin date —
   // use it instead of the (potentially reset) cycleStartDate / weekPlanStartDate.
@@ -288,6 +290,25 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
     if (monday < planStartMonday) return null;
 
     let planned = 0, done = 0;
+
+    // Flex plans have no fixed training days — adherence is sessions trained
+    // this week against the weekly frequency goal, regardless of which days.
+    if (isFlex) {
+      const weekEnd = new Date(monday); weekEnd.setDate(monday.getDate() + 7);
+      const mondayKey = localDateKey(monday);
+      const weekEndKey = localDateKey(weekEnd);
+      // Count each session once (sessionDates can hold two keys per session).
+      done = planSessions.filter(s => {
+        const k = s.date ? s.date.slice(0, 10) : localDateKey(new Date(s.ended));
+        return k >= mondayKey && k < weekEndKey;
+      }).length;
+      planned = flexGoal || 0;
+      const pct = planned > 0 ? Math.min(100, Math.round((done / planned) * 100)) : null;
+      const isoWeek = (() => { const t = new Date(monday); t.setDate(t.getDate() + 4 - (t.getDay() || 7)); return Math.ceil((((t - new Date(t.getFullYear(), 0, 1)) / 86400000) + 1) / 7); })();
+      const label = w === 0 ? 'This week' : w === 1 ? 'Last week' : `W${isoWeek}`;
+      return { label, planned, done, pct };
+    }
+
     for (let d = 0; d < 7; d++) {
       const date = new Date(monday);
       date.setDate(monday.getDate() + d);
