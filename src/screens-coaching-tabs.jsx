@@ -1018,6 +1018,12 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   // Check-ins cover Mon–Sun. On Sunday the current week isn't over yet — only
   // allow submission from Monday onwards (day 1; Sunday = 0 in JS getDay()).
   const canSubmitToday = new Date().getDay() !== 0;
+  // Monday of the current training week (what's accumulating right now for the upcoming check-in)
+  const previewWeekStart = (() => {
+    const t = new Date(); const d = t.getDay();
+    const m = new Date(t); m.setDate(t.getDate() - (d === 0 ? 6 : d - 1));
+    return m.toISOString().slice(0, 10);
+  })();
   const [checkins, setCheckins] = useStateC(null);
   const [schema, setSchema] = useStateC(null); // null = loading, then resolved or CHECKIN_DEFAULT_SCHEMA
   const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
@@ -1025,6 +1031,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   const [deleting, setDeleting] = useStateC(false);
   const [pastOpen, setPastOpen] = useStateC(false);
   const [builderOpen, setBuilderOpen] = useStateC(false);
+  const [previewOpen, setPreviewOpen] = useStateC(false);
 
   const load = () => LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
   useEffectC(() => {
@@ -1051,6 +1058,22 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   }
 
   const resolvedSchema = schema || store?.settings?.defaultCheckinSchema || CHECKIN_DEFAULT_SCHEMA;
+
+  // Preview: build a fake check-in from the current training week's accumulated data
+  const previewDailyPrefill = LB.dailyLogsWeekPrefill(store?.dailyLogs, previewWeekStart, store?.sessions, resolvedSchema);
+  const previewCardioPrefill = LB.cardioWeekPrefill(store?.cardioLogs, previewWeekStart, store?.settings?.unit);
+  const previewResponses = (() => {
+    const r = {};
+    if (previewDailyPrefill) Object.entries(previewDailyPrefill).forEach(([k, v]) => { if (v != null) r[k] = v; });
+    if (previewCardioPrefill) {
+      if (previewCardioPrefill.cardioMinutes != null) r.cardio_minutes = previewCardioPrefill.cardioMinutes;
+      if (previewCardioPrefill.cardioDistanceM != null) r.cardio_distance_m = previewCardioPrefill.cardioDistanceM;
+      if (previewCardioPrefill.paceFeeling != null) r.cardio_pace_feeling = previewCardioPrefill.paceFeeling;
+      if (previewCardioPrefill.effort != null) r.cardio_effort = previewCardioPrefill.effort;
+      if (previewCardioPrefill.pace != null) r.cardio_pace = previewCardioPrefill.pace;
+    }
+    return Object.keys(r).length ? r : null;
+  })();
 
   // ── Form: new check-in or editing any existing one ──
   if (editTarget) {
@@ -1101,6 +1124,18 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               Submit this week's check-in
             </button>
           )}
+          {!thisWeek && checkinEnabled && !canSubmitToday && previewResponses && (
+            <button onClick={() => setPreviewOpen(v => !v)}
+              style={{ flex: 1, background: previewOpen ? `rgba(var(--accent-rgb),0.1)` : `rgba(var(--accent-rgb),0.05)`, border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+              {previewOpen ? 'Close preview' : 'Preview this week'}
+            </button>
+          )}
+          {previewResponses && canSubmitToday && (
+            <button onClick={() => setPreviewOpen(v => !v)}
+              style={{ background: previewOpen ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset, border: `0.5px solid ${previewOpen ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, borderRadius: 6, padding: '11px 13px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
+              <i className="fa-solid fa-eye" />
+            </button>
+          )}
           {isSelf && (
             <button onClick={() => setBuilderOpen(true)}
               style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '11px 13px', cursor: 'pointer', color: UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
@@ -1108,6 +1143,21 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
             </button>
           )}
         </div>
+
+        {previewOpen && previewResponses && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
+              <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--ok)', flexShrink: 0 }} />
+              <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase' }}>In progress — data still accumulating</span>
+            </div>
+            <CheckInCard
+              ci={{ weekStart: previewWeekStart, responses: previewResponses }}
+              schema={resolvedSchema}
+              defaultOpen={true}
+              embedded={true}
+            />
+          </div>
+        )}
 
         {checkins.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
