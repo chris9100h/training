@@ -1152,6 +1152,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
             </div>
             <CheckInCard
               ci={{ weekStart: previewWeekStart, responses: previewResponses }}
+              prevCi={checkins[0]}
               schema={resolvedSchema}
               defaultOpen={true}
               embedded={true}
