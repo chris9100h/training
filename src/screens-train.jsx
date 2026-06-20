@@ -791,10 +791,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isBonus && advanceCycle && { isBonus: false }) };
     });
     const shouldAdvance = session.isBonus ? advanceCycle : true;
+    // For freestyle sessions scheduleId is null so isWeekdayMode is always false —
+    // check the active plan too so weekday-mode users don't get a stale cycleIndex bump.
+    const activeIsWeekday = LB.isWeekdayPlan(LB.todaysDay(store)?.schedule);
     setStore(s => ({
       ...s,
       inProgress: null,
-      ...(shouldAdvance && !isWeekdayMode && { cycleIndex: s.cycleIndex + 1 }),
+      ...(shouldAdvance && !isWeekdayMode && !activeIsWeekday && { cycleIndex: s.cycleIndex + 1 }),
       lastAdvancedDate: LB.todayISO(),
       ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
     }));
@@ -1465,12 +1468,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // Only relevant in cycle mode when today has training that isn't done yet.
       const todayData = LB.todaysDay(store);
       const activeSchedule = todayData?.schedule;
-      const isCycleMode = activeSchedule && !LB.isWeekdayPlan(activeSchedule);
       const todayDayId = todayData?.day?.id;
       const alreadyDoneToday = !!todayDayId && store.sessions.some(
         s => s.ended && s.dayId === todayDayId && s.date?.slice(0, 10) === LB.todayISO()
       );
-      const hasTodayTraining = isCycleMode && (todayData?.day?.items?.length ?? 0) > 0 && !alreadyDoneToday;
+      const hasTodayTraining = (todayData?.day?.items?.length ?? 0) > 0 && !alreadyDoneToday;
       setShowCycleStep(hasTodayTraining);
       setAdvanceCycle(false);
       if (session.isFreestyle) {
