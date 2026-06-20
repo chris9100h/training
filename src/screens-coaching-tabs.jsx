@@ -40,7 +40,7 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
 // Root screen for the coaching tab — routes to coach or client view.
 // When the user is both coach and client, shows a two-tab layout.
 
-function CoachingTabScreen({ store, setStore, userId, go }) {
+function CoachingTabScreen({ store, setStore, userId, go, initialClientTab }) {
   const isCoach = (store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0;
   const isClient = store.coaching?.asClient?.status === 'active';
   const isSelf = !!store.settings?.beYourOwnCoach && !!store.coaching?.asSelf;
@@ -54,7 +54,7 @@ function CoachingTabScreen({ store, setStore, userId, go }) {
       />
     );
     if (id === 'clients') return <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} hideTopBar={hideTopBar} />;
-    return <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} hideTopBar={hideTopBar} />;
+    return <CoachingTabClientView store={store} setStore={setStore} userId={userId} go={go} hideTopBar={hideTopBar} initialTab={initialClientTab} />;
   };
 
   const views = [];
@@ -66,14 +66,15 @@ function CoachingTabScreen({ store, setStore, userId, go }) {
   if (views.length === 0) return <CoachingTabCoachView store={store} setStore={setStore} userId={userId} go={go} />;
   // Single role → render it directly with its own top bar.
   if (views.length === 1) return renderView(views[0].id, false);
-  // Multiple roles → sub-tab bar across the active views.
-  return <CoachingMultiView views={views} renderView={renderView} />;
+  // Multiple roles → sub-tab bar. If we arrived via a client-facing quick action, start on 'coach' sub-tab.
+  const initialView = initialClientTab ? 'coach' : undefined;
+  return <CoachingMultiView views={views} renderView={renderView} initialView={initialView} />;
 }
 
 // Sub-tab bar shown when a user holds several coaching roles at once
 // (e.g. self + real clients). Keeps every view mounted so switching is instant.
-function CoachingMultiView({ views, renderView }) {
-  const [active, setActive] = useStateC(views[0].id);
+function CoachingMultiView({ views, renderView, initialView }) {
+  const [active, setActive] = useStateC(initialView && views.some(v => v.id === initialView) ? initialView : views[0].id);
   const activeId = views.some(v => v.id === active) ? active : views[0].id;
   return (
     <div style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: UI.bg, color: UI.ink }}>
@@ -1211,9 +1212,9 @@ function CheckInRequestModal({ coaching }) {
 // ─── CoachingTabClientView ────────────────────────────────────────────────────
 // Client's coaching tab — messages + nutrition + check-in.
 
-function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false }) {
+function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false, initialTab }) {
   const coaching = store.coaching?.asClient;
-  const [tab, setTab] = useStateC('messages');
+  const [tab, setTab] = useStateC(initialTab || 'messages');
   const [confirmEl, confirm] = useConfirm();
   const [ending, setEnding] = useStateC(false);
 

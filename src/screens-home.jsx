@@ -2566,8 +2566,11 @@ function HomeScreen({ store, setStore, go, userId }) {
                   setQuickActionsOpen(false);
                   const bothActive = asClient?.status === 'active' && asSelf;
                   if (bothActive) { setCheckinPickerOpen(true); return; }
-                  const cId = asSelf ? asSelf.id : asClient.id;
-                  go({ name: 'coaching-client', coachingId: cId, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf: !!asSelf, backRoute: 'home' });
+                  if (asSelf) {
+                    go({ name: 'coaching-client', coachingId: asSelf.id, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf: true, backRoute: 'home' });
+                  } else {
+                    go({ name: 'coaching', initialClientTab: 'checkin' });
+                  }
                 },
                 'fa-clipboard-check',
                 'Check-in',
@@ -2576,7 +2579,7 @@ function HomeScreen({ store, setStore, go, userId }) {
               {asClient?.status === 'active' && actionBtn(
                 () => {
                   setQuickActionsOpen(false);
-                  go({ name: 'coaching-client', coachingId: asClient.id, clientId: userId, clientName: store.user.name, initialTab: 'notes' });
+                  go({ name: 'coaching', initialClientTab: 'messages' });
                 },
                 'fa-message',
                 'Message Coach',
@@ -2591,14 +2594,16 @@ function HomeScreen({ store, setStore, go, userId }) {
       {(() => {
         const asClient = store.coaching?.asClient;
         const asSelf   = store.coaching?.asSelf;
-        const navCheckin = (coachingId, isSelf) =>
-          go({ name: 'coaching-client', coachingId, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf, backRoute: 'home' });
+        const navCheckinSelf = () =>
+          go({ name: 'coaching-client', coachingId: asSelf.id, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf: true, backRoute: 'home' });
+        const navCheckinCoach = () =>
+          go({ name: 'coaching', initialClientTab: 'checkin' });
         const btnStyle = { width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
         return (
           <Sheet open={checkinPickerOpen} onClose={() => setCheckinPickerOpen(false)} title="Which check-in?">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {asClient?.status === 'active' && (
-                <button onClick={() => { setCheckinPickerOpen(false); navCheckin(asClient.id, false); }} style={btnStyle}>
+                <button onClick={() => { setCheckinPickerOpen(false); navCheckinCoach(); }} style={btnStyle}>
                   <i className="fa-solid fa-user-tie" style={{ width: 20, textAlign: 'center', color: 'var(--accent)', fontSize: 16 }} />
                   <div style={{ flex: 1, textAlign: 'left' }}>
                     <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', fontFamily: UI.fontUi }}>Coach check-in</div>
@@ -2608,7 +2613,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                 </button>
               )}
               {asSelf && (
-                <button onClick={() => { setCheckinPickerOpen(false); navCheckin(asSelf.id, true); }} style={btnStyle}>
+                <button onClick={() => { setCheckinPickerOpen(false); navCheckinSelf(); }} style={btnStyle}>
                   <i className="fa-solid fa-user" style={{ width: 20, textAlign: 'center', color: 'var(--accent)', fontSize: 16 }} />
                   <div style={{ flex: 1, textAlign: 'left' }}>
                     <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', fontFamily: UI.fontUi }}>Self check-in</div>
