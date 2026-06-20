@@ -1464,7 +1464,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const todayData = LB.todaysDay(store);
       const activeSchedule = todayData?.schedule;
       const isCycleMode = activeSchedule && !LB.isWeekdayPlan(activeSchedule);
-      const hasTodayTraining = isCycleMode && (todayData?.day?.items?.length ?? 0) > 0;
+      const todayDayId = todayData?.day?.id;
+      const alreadyDoneToday = !!todayDayId && store.sessions.some(
+        s => s.ended && s.dayId === todayDayId && s.date?.slice(0, 10) === LB.todayISO()
+      );
+      const hasTodayTraining = isCycleMode && (todayData?.day?.items?.length ?? 0) > 0 && !alreadyDoneToday;
       setShowCycleStep(hasTodayTraining);
       setAdvanceCycle(false);
       setFreestyleName('');
