@@ -2626,7 +2626,7 @@ function HomeScreen({ store, setStore, go, userId }) {
             }}>
               <div style={{ flex: 1, textAlign: 'left' }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>From plan</div>
-                <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Pick a day from your schedule — won't advance your cycle</div>
+                <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Pick a day from your schedule — you choose at the end whether it counts</div>
               </div>
               <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
             </button>
@@ -2648,7 +2648,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       {/* Bonus day picker — training days from the active schedule */}
       <Sheet open={bonusDayPickerOpen} onClose={() => setBonusDayPickerOpen(false)} title="Pick a day">
         <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 14 }}>
-          This won't advance your cycle — it's logged as a bonus session.
+          You choose at the end whether this replaces a scheduled day or counts as extra.
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {(sch?.days || []).filter(d => d.items?.length > 0).map(d => (
