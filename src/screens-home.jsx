@@ -2511,15 +2511,16 @@ function HomeScreen({ store, setStore, go, userId }) {
       {/* Quick actions sheet — triggered by swipe-down */}
       <Sheet open={quickActionsOpen} onClose={() => setQuickActionsOpen(false)} title="Quick actions">
         {(() => {
-          const actionBtn = (onClick, label, sub) => (
+          const actionBtn = (onClick, icon, label, sub) => (
             <button onClick={onClick} style={{
-              width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+              width: '100%', display: 'flex', alignItems: 'center', gap: 14,
               padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
               borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
               marginBottom: 8,
             }}>
+              <i className={`fa-solid ${icon}`} style={{ fontSize: 16, color: 'var(--accent)', width: 18, textAlign: 'center', flexShrink: 0 }} />
               <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{label}</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', fontFamily: UI.fontUi }}>{label}</div>
                 <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>{sub}</div>
               </div>
               <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
@@ -2529,26 +2530,28 @@ function HomeScreen({ store, setStore, go, userId }) {
           const asSelf = store.coaching?.asSelf;
           return (
             <div>
-              {actionBtn(() => { setQuickActionsOpen(false); setDailyLogOpen(true); }, 'Daily Log', 'Weight, macros, water & steps')}
-              {actionBtn(() => { setQuickActionsOpen(false); setWorkoutSubOpen(true); }, 'Workout', sch ? 'From plan or freestyle' : 'Open training — add exercises on the fly')}
+              {actionBtn(() => { setQuickActionsOpen(false); setDailyLogOpen(true); }, 'fa-calendar-day', 'Daily Log', 'Weight, macros, water & steps')}
+              {actionBtn(() => { setQuickActionsOpen(false); setWorkoutSubOpen(true); }, 'fa-dumbbell', 'Workout', sch ? 'From plan or freestyle' : 'Open training — add exercises on the fly')}
               {allMissedDays.length > 0 && actionBtn(
                 () => {
                   setQuickActionsOpen(false);
                   if (allMissedDays.length === 1) { startBacklogSession(allMissedDays[0]); }
                   else setBacklogPickerOpen(true);
                 },
+                'fa-clock-rotate-left',
                 'Backlog Session',
                 allMissedDays.length === 1
                   ? `Log ${allMissedDays[0].dayName} (${allMissedDays[0].daysAgo === 1 ? 'yesterday' : `${allMissedDays[0].daysAgo}d ago`})`
                   : `${allMissedDays.length} unlogged sessions`,
               )}
-              {actionBtn(() => { setQuickActionsOpen(false); setCardioPopoverOpen(true); }, 'Cardio', 'Start live or log manually')}
+              {actionBtn(() => { setQuickActionsOpen(false); setCardioPopoverOpen(true); }, 'fa-person-running', 'Cardio', 'Start live or log manually')}
               {checkinDue && (asClient?.status === 'active' || asSelf) && actionBtn(
                 () => {
                   setQuickActionsOpen(false);
                   const cId = asSelf ? asSelf.id : asClient.id;
                   go({ name: 'coaching-client', coachingId: cId, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf: !!asSelf });
                 },
+                'fa-clipboard-check',
                 'Check-in',
                 'This week\'s check-in is due',
               )}
@@ -2557,6 +2560,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                   setQuickActionsOpen(false);
                   go({ name: 'coaching-client', coachingId: asClient.id, clientId: userId, clientName: store.user.name, initialTab: 'notes' });
                 },
+                'fa-message',
                 'Message Coach',
                 'Send a note to your coach',
               )}
