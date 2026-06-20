@@ -1146,6 +1146,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [backlogPickerOpen, setBacklogPickerOpen] = useState(false);
   const [workoutSubOpen, setWorkoutSubOpen] = useState(false);
   const [bonusDayPickerOpen, setBonusDayPickerOpen] = useState(false);
+  const [checkinPickerOpen, setCheckinPickerOpen] = useState(false);
   const [pullDelta, setPullDelta] = useState(0);
   const [coachingSchema, setCoachingSchema] = useState(null);
   const swipeRef = useRef({ y: null, x: null });
@@ -2556,6 +2557,8 @@ function HomeScreen({ store, setStore, go, userId }) {
               {checkinDue && (asClient?.status === 'active' || asSelf) && actionBtn(
                 () => {
                   setQuickActionsOpen(false);
+                  const bothActive = asClient?.status === 'active' && asSelf;
+                  if (bothActive) { setCheckinPickerOpen(true); return; }
                   const cId = asSelf ? asSelf.id : asClient.id;
                   go({ name: 'coaching-client', coachingId: cId, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf: !!asSelf, backRoute: 'home' });
                 },
@@ -2576,6 +2579,41 @@ function HomeScreen({ store, setStore, go, userId }) {
           );
         })()}
       </Sheet>
+
+      {/* Check-in picker: real coach vs. self-coaching */}
+      {(() => {
+        const asClient = store.coaching?.asClient;
+        const asSelf   = store.coaching?.asSelf;
+        const navCheckin = (coachingId, isSelf) =>
+          go({ name: 'coaching-client', coachingId, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf, backRoute: 'home' });
+        const btnStyle = { width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
+        return (
+          <Sheet open={checkinPickerOpen} onClose={() => setCheckinPickerOpen(false)} title="Which check-in?">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {asClient?.status === 'active' && (
+                <button onClick={() => { setCheckinPickerOpen(false); navCheckin(asClient.id, false); }} style={btnStyle}>
+                  <i className="fa-solid fa-user-tie" style={{ width: 20, textAlign: 'center', color: 'var(--accent)', fontSize: 16 }} />
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', fontFamily: UI.fontUi }}>Coach check-in</div>
+                    <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>{asClient.coachName || 'Your coach'}</div>
+                  </div>
+                  <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+                </button>
+              )}
+              {asSelf && (
+                <button onClick={() => { setCheckinPickerOpen(false); navCheckin(asSelf.id, true); }} style={btnStyle}>
+                  <i className="fa-solid fa-user" style={{ width: 20, textAlign: 'center', color: 'var(--accent)', fontSize: 16 }} />
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', fontFamily: UI.fontUi }}>Self check-in</div>
+                    <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Your own coaching dashboard</div>
+                  </div>
+                  <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+                </button>
+              )}
+            </div>
+          </Sheet>
+        );
+      })()}
 
       {/* Workout sub-picker: From plan | Freestyle */}
       <Sheet open={workoutSubOpen} onClose={() => setWorkoutSubOpen(false)} title="Start workout">
