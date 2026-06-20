@@ -1540,6 +1540,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setPendingFeel(null);
   };
 
+  // Pace-bar base: the parts that DON'T depend on `now`. The 250 ms `now` tick
+  // re-renders this component 4×/s; memoizing the set scans here keeps only the
+  // elapsed-time math in the per-tick path. Returns null when the bar is hidden.
+  // MUST be before any early return (React rules of hooks).
+  const paceBase = useMemoT(() => {
+    const timeline = avgStats?.timeline;
+    if (!timeline || !session.startedAt) return null;
+    const totalSetsDone = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done && !x.warmup).length || 0), 0);
+    if (totalSetsDone < 2) return null;
+    const remainingSets = session.entries.reduce((s, e) => s + (e.sets?.filter(x => !x.done && !x.skipped && !x.warmup).length || 0), 0);
+    if (remainingSets === 0) return null;
+    const expectedSec = timeline[totalSetsDone - 1];
+    if (expectedSec == null) return null;
+    return { totalSetsDone, expectedSec };
+  }, [avgStats, session.entries, session.startedAt]);
+
   if (!entry) {
     if (!session.isFreestyle && !session.isBonus) {
       return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
@@ -1613,21 +1629,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
     persistRestStart(null);
   };
-
-  // Pace-bar base: the parts that DON'T depend on `now`. The 250 ms `now` tick
-  // re-renders this component 4×/s; memoizing the set scans here keeps only the
-  // elapsed-time math in the per-tick path. Returns null when the bar is hidden.
-  const paceBase = useMemoT(() => {
-    const timeline = avgStats?.timeline;
-    if (!timeline || !session.startedAt) return null;
-    const totalSetsDone = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done && !x.warmup).length || 0), 0);
-    if (totalSetsDone < 2) return null;
-    const remainingSets = session.entries.reduce((s, e) => s + (e.sets?.filter(x => !x.done && !x.skipped && !x.warmup).length || 0), 0);
-    if (remainingSets === 0) return null;
-    const expectedSec = timeline[totalSetsDone - 1];
-    if (expectedSec == null) return null; // beyond historical set count
-    return { totalSetsDone, expectedSec };
-  }, [avgStats, session.entries, session.startedAt]);
 
   // Derive warmup overlay vars here so they're available inside the main return
   const warmupOverlayGlobalIdx = warmupSetsRemaining ? entry.sets.findIndex(s => s.warmup && !s.done) : -1;
