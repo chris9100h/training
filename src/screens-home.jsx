@@ -1144,6 +1144,8 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [dailyLogOpen, setDailyLogOpen] = useState(false);
   const [checkinDue, setCheckinDue] = useState(false);
   const [backlogPickerOpen, setBacklogPickerOpen] = useState(false);
+  const [pullDelta, setPullDelta] = useState(0);
+  const [coachingSchema, setCoachingSchema] = useState(null);
   const swipeRef = useRef({ y: null, x: null });
 
   const minOffset = (() => {
@@ -1632,6 +1634,16 @@ function HomeScreen({ store, setStore, go, userId }) {
     }).catch(() => setCheckinDue(false));
   }, [store.coaching]);
 
+  useEffect(() => {
+    const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id;
+    if (!coachingId) { setCoachingSchema(null); return; }
+    let cancelled = false;
+    LB.loadCheckinSchema(coachingId).then(schema => {
+      if (!cancelled) setCoachingSchema(schema || null);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [store.coaching?.asClient?.id, store.coaching?.asSelf?.id]);
+
   const startSession = async () => {
     if (!activeDay || isActiveRest) return;
     // Seeds/progression consume the recent history synchronously — when an
@@ -1703,14 +1715,24 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (quickActionsOpen) return;
     swipeRef.current = { y: e.touches[0].clientY, x: e.touches[0].clientX };
   };
+  const onTouchMove = (e) => {
+    const start = swipeRef.current;
+    if (!start.y) return;
+    const dy = e.touches[0].clientY - start.y;
+    const dx = Math.abs(e.touches[0].clientX - start.x);
+    if (dy > 0 && dy > dx * 0.5) setPullDelta(dy);
+    else setPullDelta(0);
+  };
   const onTouchEnd = (e) => {
     const start = swipeRef.current;
     if (!start.y) return;
     const dy = e.changedTouches[0].clientY - start.y;
     const dx = Math.abs(e.changedTouches[0].clientX - start.x);
     swipeRef.current = { y: null, x: null };
+    setPullDelta(0);
     if (dy > 65 && dy > dx * 1.5) setQuickActionsOpen(true);
   };
+  const onTouchCancel = () => { swipeRef.current = { y: null, x: null }; setPullDelta(0); };
 
   const startFreestyleSession = () => {
     setQuickActionsOpen(false);
@@ -1814,7 +1836,7 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
-      <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+      <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
       {/* Background ZANE watermark (per-user override via TRAIN_BG_OVERRIDES) */}
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
         <img src={trainBg} style={isCustomBg
@@ -1861,6 +1883,29 @@ function HomeScreen({ store, setStore, go, userId }) {
           </div>
         </div>
         <div className="knurl" style={{ marginLeft: -22, marginRight: -22 }} />
+      </div>
+
+      {/* Pull-down indicator — fades in as the user pulls, turns gold at threshold */}
+      <div style={{
+        flexShrink: 0,
+        height: Math.min(pullDelta * 0.4, 28),
+        overflow: 'hidden',
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        transition: pullDelta === 0 ? 'height 0.25s ease' : 'none',
+        pointerEvents: 'none',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 4,
+          opacity: Math.min(1, pullDelta / 50),
+          color: pullDelta >= 65 ? UI.gold : UI.inkFaint,
+          transition: pullDelta === 0 ? 'opacity 0.25s ease, color 0.15s ease' : 'color 0.1s ease',
+        }}>
+          <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.18em', fontWeight: 600 }}>
+            {pullDelta >= 65 ? 'RELEASE' : 'QUICK ACTIONS'}
+          </span>
+          <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </div>
       </div>
 
       {/* In-progress banner */}
@@ -2469,8 +2514,8 @@ function HomeScreen({ store, setStore, go, userId }) {
         store={store}
         setStore={setStore}
         date={LB.todayISO()}
-        targets={store.settings?.macroTargets ?? null}
-        activeCoachingSchema={null}
+        targets={LB.effectiveMacroTargets(store.settings?.macroTargets, null)}
+        activeCoachingSchema={coachingSchema}
       />
 
       </div>{/* end swipe wrapper */}

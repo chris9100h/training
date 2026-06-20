@@ -371,7 +371,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return () => { on = false; };
   }, [entry?.exId]);
   const last = localLast ?? (entry ? remoteLast[entry.exId] : null) ?? null;
-  const isCardio = !!entry.isCardio;
+  const isCardio = !!entry?.isCardio;
   const isUnilateral = !isCardio && (exercise?.movement_type ?? (exercise?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
   const isNoWeightReps = !isCardio && !!exercise?.no_weight_reps;
   const progressionTargetForSet = (workingSetIdx) => {
@@ -961,7 +961,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [planDiffOpen, setPlanDiffOpen] = useStateT(false);
   const [planDiff, setPlanDiff] = useStateT([]);
   const [swapOpen, setSwapOpen] = useStateT(false);
-  const [addOpen, setAddOpen] = useStateT(false);
+  const [addOpen, setAddOpen] = useStateT(() => !!(session.isFreestyle && session.entries.length === 0));
   const [addSupersetData, setAddSupersetData] = useStateT(null); // { newIdx } | null
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
@@ -1511,10 +1511,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
   }
 
-  const completed = isCardio ? (entry.cardioDone ? 1 : 0) : entry.sets.filter(s => s.done).length;
-  const allDone = isCardio ? !!entry.cardioDone : (completed === entry.sets.length);
-  const currentSetIdx = entry.sets.findIndex(s => !s.done);
-  const warmupCount = entry.sets.filter(s => s.warmup).length;
+  const entrySets = entry?.sets || [];
+  const completed = isCardio ? (entry?.cardioDone ? 1 : 0) : entrySets.filter(s => s.done).length;
+  const allDone = !entry || (isCardio ? !!entry.cardioDone : (completed === entrySets.length));
+  const currentSetIdx = entrySets.findIndex(s => !s.done);
+  const warmupCount = entrySets.filter(s => s.warmup).length;
   const isCurrentWarmup = warmupCount > 0 && currentSetIdx >= 0 && !!entry.sets[currentSetIdx]?.warmup;
   const warmupSetsRemaining = warmupCount > 0 && entry.sets.filter(s => s.warmup).some(s => !s.done);
   const allWarmupDone = warmupCount > 0 && entry.sets.filter(s => s.warmup).every(s => s.done);
@@ -1862,6 +1863,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {entry ? (<>
 
         {/* Exercise name */}
         <div style={{ flexShrink: 0 }}>
@@ -2342,6 +2344,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </Frame>
         )}
 
+      </>) : null}
       </div>
 
       {/* Footer nav */}
@@ -2362,7 +2365,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </button>
         {allDone ? (
           <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>
-            {exIdx === session.entries.length - 1 ? 'Finish →' : 'Next exercise →'}
+            {(session.entries.length === 0 || exIdx === session.entries.length - 1) ? 'Finish →' : 'Next exercise →'}
           </Btn>
         ) : isCardio ? (<>
           <Btn kind="ghost" onClick={skipCardio} style={{ flex: 1, minHeight: 44 }}>Skip</Btn>
@@ -2371,7 +2374,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           )}
         </>) : (<>
           {(() => {
-            const pending = entry.sets.find(s => !s.done && !s.skipped);
+            const pending = entrySets.find(s => !s.done && !s.skipped);
             const hasVal = pending && (pending.kg != null || pending.reps != null || pending.repsL != null || pending.repsR != null);
             return <Btn onClick={checkSet} disabled={!hasVal} style={{ flex: 2, minHeight: 44, padding: '10px 16px' }}>Check set</Btn>;
           })()}
