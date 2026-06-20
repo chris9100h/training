@@ -788,12 +788,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           }),
         };
       });
-      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }) };
+      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }) };
     });
     setStore(s => ({
       ...s,
       inProgress: null,
-      ...(!isWeekdayMode && { cycleIndex: s.cycleIndex + 1 }),
+      ...(!session.isFreestyle && !isWeekdayMode && { cycleIndex: s.cycleIndex + 1 }),
       lastAdvancedDate: LB.todayISO(),
       ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
     }));
@@ -953,6 +953,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [finishOpen, setFinishOpen] = useStateT(false);
   const [finishStep, setFinishStep] = useStateT('confirm');
   const [pendingFeel, setPendingFeel] = useStateT(null);
+  const [freestyleName, setFreestyleName] = useStateT('');
   const [notePicker, setNotePicker] = useStateT(false);
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
@@ -1423,7 +1424,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const tryFinish = () => {
-    setFinishStep('feel');
+    if (session.isFreestyle) {
+      setFreestyleName('');
+      setFinishStep('name');
+    } else {
+      setFinishStep('feel');
+    }
     setPendingFeel(null);
   };
 
@@ -2380,7 +2386,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </div>
 
       {/* finish confirmation */}
-      <Sheet open={finishOpen} onClose={() => { setFinishOpen(false); setFinishStep('confirm'); setPendingFeel(null); }} title={finishStep === 'confirm' ? "End session?" : "Rate workout effort"}>
+      <Sheet open={finishOpen} onClose={() => { setFinishOpen(false); setFinishStep('confirm'); setPendingFeel(null); }} title={finishStep === 'confirm' ? "End session?" : finishStep === 'name' ? "Name this workout" : "Rate workout effort"}>
         {finishStep === 'confirm' ? (<>
           <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 18, lineHeight: 1.6 }}>
             {(() => {
@@ -2424,6 +2430,26 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={() => setFinishOpen(false)} style={{ flex: 1 }}>Continue</Btn>
             <Btn onClick={tryFinish} style={{ flex: 2 }}>Finish ✓</Btn>
+          </div>
+        </>) : finishStep === 'name' ? (<>
+          <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 14, fontFamily: UI.fontUi }}>
+            Give this freestyle workout a name, or skip to keep "Freestyle".
+          </div>
+          <input
+            value={freestyleName}
+            onChange={e => setFreestyleName(e.target.value)}
+            placeholder="e.g. Push day, Arms & shoulders…"
+            autoFocus
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              background: UI.bgInset, border: `1px solid ${UI.hair}`,
+              borderRadius: 4, padding: '12px 14px', color: UI.ink,
+              fontFamily: UI.fontUi, fontSize: 15, outline: 'none',
+            }}
+          />
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <Btn kind="ghost" onClick={() => { setFinishStep('feel'); setPendingFeel(null); }} style={{ flex: 1 }}>Skip</Btn>
+            <Btn onClick={() => { setFinishStep('feel'); setPendingFeel(null); }} style={{ flex: 2 }}>Next →</Btn>
           </div>
         </>) : (<>
           <FeelSelector value={pendingFeel} onChange={setPendingFeel} />

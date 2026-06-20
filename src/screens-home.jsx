@@ -1140,6 +1140,11 @@ function HomeScreen({ store, setStore, go, userId }) {
   // The not-logged Log handler awaits a seed fetch — guard against a double
   // tap creating two sessions inside that window.
   const loggingRef = useRef(false);
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const [dailyLogOpen, setDailyLogOpen] = useState(false);
+  const [checkinDue, setCheckinDue] = useState(false);
+  const [backlogPickerOpen, setBacklogPickerOpen] = useState(false);
+  const swipeRef = useRef({ y: null, x: null });
 
   const minOffset = (() => {
     if (weekdayMode) {
@@ -1574,6 +1579,59 @@ function HomeScreen({ store, setStore, go, userId }) {
     return null;
   }, [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
 
+  const allMissedDays = useMemo(() => {
+    if (!sch) return [];
+    const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
+    const sessionDates = new Set(store.sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
+    const missed = [];
+    for (let daysAgo = 1; daysAgo <= 14; daysAgo++) {
+      const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
+      const dateKey = d.toISOString().slice(0, 10);
+      if (sessionDates.has(dateKey)) continue;
+      if (skipsMap.get(dateKey)) continue;
+      let trainingDay = null;
+      if (weekdayMode) {
+        if (store.weekPlanStartDate && dateKey < store.weekPlanStartDate) continue;
+        const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+        trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
+      } else if (store.cycleStartDate) {
+        const vDays = LB.getPlanDaysForDate(sch, dateKey);
+        if (!vDays.length) continue;
+        const cyclePosForDate = LB.getCyclePosForDate(sch, dateKey);
+        let idx;
+        if (cyclePosForDate !== null) {
+          idx = cyclePosForDate;
+        } else {
+          const start = LB.parseDate(store.cycleStartDate);
+          const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+          if (n < 0) continue;
+          idx = ((n % vDays.length) + vDays.length) % vDays.length;
+        }
+        const dayData = vDays[idx];
+        if (dayData?.items?.length > 0) trainingDay = dayData;
+      }
+      if (!trainingDay) continue;
+      missed.push({ date: d, dateKey, dayName: trainingDay.name, dayId: trainingDay.id, daysAgo, dayData: trainingDay });
+    }
+    return missed;
+  }, [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
+
+  useEffect(() => {
+    const coaching = store.coaching;
+    if (!coaching) return;
+    const asClient = coaching.asClient;
+    const asSelf = coaching.asSelf;
+    const hasCoaching = (asClient?.status === 'active' && (asClient?.checkinEnabled ?? true)) || !!asSelf;
+    if (!hasCoaching) { setCheckinDue(false); return; }
+    const coachingId = asClient?.id || asSelf?.id;
+    if (!coachingId) { setCheckinDue(false); return; }
+    LB.loadCheckins(coachingId).then(rows => {
+      const weekStart = LB.checkinWeekStart();
+      const thisWeek = rows.find(r => r.weekStart === weekStart);
+      setCheckinDue(!thisWeek);
+    }).catch(() => setCheckinDue(false));
+  }, [store.coaching]);
+
   const startSession = async () => {
     if (!activeDay || isActiveRest) return;
     // Seeds/progression consume the recent history synchronously — when an
@@ -1638,6 +1696,55 @@ function HomeScreen({ store, setStore, go, userId }) {
       cyclePos,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    go({ name: 'train', sessionId: session.id });
+  };
+
+  const onTouchStart = (e) => {
+    if (quickActionsOpen) return;
+    swipeRef.current = { y: e.touches[0].clientY, x: e.touches[0].clientX };
+  };
+  const onTouchEnd = (e) => {
+    const start = swipeRef.current;
+    if (!start.y) return;
+    const dy = e.changedTouches[0].clientY - start.y;
+    const dx = Math.abs(e.changedTouches[0].clientX - start.x);
+    swipeRef.current = { y: null, x: null };
+    if (dy > 65 && dy > dx * 1.5) setQuickActionsOpen(true);
+  };
+
+  const startFreestyleSession = () => {
+    setQuickActionsOpen(false);
+    const session = {
+      id: LB.uid(), scheduleId: null, dayId: null, dayName: 'Freestyle',
+      date: new Date().toISOString(), startedAt: new Date().toISOString(),
+      ended: null, entries: [], currentExIdx: 0, cyclePos: null, isFreestyle: true,
+    };
+    setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    go({ name: 'train', sessionId: session.id });
+  };
+
+  const startBacklogSession = async (missed) => {
+    if (loggingRef.current) return;
+    loggingRef.current = true;
+    setQuickActionsOpen(false);
+    setBacklogPickerOpen(false);
+    const { dayData, dayId, dayName, date } = missed;
+    const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
+    const entries = (dayData?.items || []).map(it => {
+      const ex = LB.findExercise(store, it.exId);
+      if (ex?.movement_type === 'cardio') {
+        return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
+      }
+      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
+      const isUni = ex?.unilateral || false;
+      const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
+      const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+      const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
+      return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+    });
+    const session = { id: LB.uid(), scheduleId: sch?.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
+    setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    loggingRef.current = false;
     go({ name: 'train', sessionId: session.id });
   };
 
@@ -1707,6 +1814,7 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
+      <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
       {/* Background ZANE watermark (per-user override via TRAIN_BG_OVERRIDES) */}
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
         <img src={trainBg} style={isCustomBg
@@ -2278,6 +2386,94 @@ function HomeScreen({ store, setStore, go, userId }) {
         );
       })()}
       {confirmEl}
+
+      {/* Quick actions sheet — triggered by swipe-down */}
+      <Sheet open={quickActionsOpen} onClose={() => setQuickActionsOpen(false)} title="Quick actions">
+        {(() => {
+          const actionBtn = (onClick, label, sub) => (
+            <button onClick={onClick} style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              marginBottom: 8,
+            }}>
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{label}</div>
+                <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>{sub}</div>
+              </div>
+              <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+            </button>
+          );
+          const asClient = store.coaching?.asClient;
+          const asSelf = store.coaching?.asSelf;
+          return (
+            <div>
+              {actionBtn(() => { setQuickActionsOpen(false); setDailyLogOpen(true); }, 'Daily Log', 'Weight, macros, water & steps')}
+              {actionBtn(startFreestyleSession, 'Freestyle Workout', 'Open training — add exercises on the fly')}
+              {allMissedDays.length > 0 && actionBtn(
+                () => {
+                  setQuickActionsOpen(false);
+                  if (allMissedDays.length === 1) { startBacklogSession(allMissedDays[0]); }
+                  else setBacklogPickerOpen(true);
+                },
+                'Backlog Session',
+                allMissedDays.length === 1
+                  ? `Log ${allMissedDays[0].dayName} (${allMissedDays[0].daysAgo === 1 ? 'yesterday' : `${allMissedDays[0].daysAgo}d ago`})`
+                  : `${allMissedDays.length} unlogged sessions`,
+              )}
+              {actionBtn(() => { setQuickActionsOpen(false); setCardioPopoverOpen(true); }, 'Cardio', 'Start live or log manually')}
+              {checkinDue && (asClient?.status === 'active' || asSelf) && actionBtn(
+                () => {
+                  setQuickActionsOpen(false);
+                  const cId = asSelf ? asSelf.id : asClient.id;
+                  go({ name: 'coaching-client', coachingId: cId, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf: !!asSelf });
+                },
+                'Check-in',
+                'This week\'s check-in is due',
+              )}
+              {asClient?.status === 'active' && actionBtn(
+                () => {
+                  setQuickActionsOpen(false);
+                  go({ name: 'coaching-client', coachingId: asClient.id, clientId: userId, clientName: store.user.name, initialTab: 'notes' });
+                },
+                'Message Coach',
+                'Send a note to your coach',
+              )}
+            </div>
+          );
+        })()}
+      </Sheet>
+
+      {/* Backlog day picker when multiple missed sessions */}
+      <Sheet open={backlogPickerOpen} onClose={() => setBacklogPickerOpen(false)} title="Which session?">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {allMissedDays.map(m => (
+            <button key={m.dateKey} onClick={() => startBacklogSession(m)} style={{
+              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{m.dayName}</span>
+              <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
+                {m.daysAgo === 1 ? 'yesterday' : `${m.daysAgo}d ago`}
+              </span>
+            </button>
+          ))}
+        </div>
+      </Sheet>
+
+      {/* Daily log sheet */}
+      <DailyLogSheet
+        open={dailyLogOpen}
+        onClose={() => setDailyLogOpen(false)}
+        store={store}
+        setStore={setStore}
+        date={LB.todayISO()}
+        targets={store.settings?.macroTargets ?? null}
+        activeCoachingSchema={null}
+      />
+
+      </div>{/* end swipe wrapper */}
     </Screen>
   );
 }
