@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.390',
+    title: 'Flexible Plans',
+    items: [
+      'Cycle plans can now be flexible — no fixed weekdays and no rest days. The rotation only moves forward when you actually train, so a missed day never pushes your plan out of sync. Great for an unpredictable week: Sun–Tue–Thu one week, Mon–Wed–Sat the next.',
+      'To set one up: Plan → create or edit a plan → keep Mode on "Cycle" → turn on "Flexible schedule", pick your weekly goal, add your days, and activate.',
+      'On the home screen the day strip shows your rotation — look ahead, skip to the next workout, or catch up a day you missed.',
+      'Coaching: the weekly goal you set drives your adherence in the dashboard, so it reflects how often you trained — not which days.',
+    ],
+  },
+  {
     id: 'v2.382',
     title: 'Quick Actions & Bonus Workouts',
     items: [
