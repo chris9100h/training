@@ -795,10 +795,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // check the active plan too so weekday-mode users don't get a stale cycleIndex bump.
     const activeSch = LB.todaysDay(store)?.schedule;
     const activeIsWeekday = LB.isWeekdayPlan(activeSch);
-    // On a flex plan cycleIndex IS the live position, so only a real session of
-    // that plan may advance it — a freestyle/ad-hoc workout must not skip the
-    // next-up day forward.
-    const flexBlocks = LB.isFlexPlan(activeSch) && (session.isFreestyle || session.scheduleId !== activeSch?.id);
+    // On a flex plan cycleIndex IS the live position, so it only advances when
+    // the finished session is the current next-up day. A freestyle workout, a
+    // session from another plan, or a catch-up of an earlier (skipped) rotation
+    // day must leave the next-up pointer where it is.
+    const flexBlocks = LB.isFlexPlan(activeSch) &&
+      (session.isFreestyle || session.scheduleId !== activeSch?.id || session.dayId !== LB.todaysDay(store)?.day?.id);
     setStore(s => ({
       ...s,
       inProgress: null,

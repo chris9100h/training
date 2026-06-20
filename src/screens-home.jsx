@@ -1705,10 +1705,13 @@ function HomeScreen({ store, setStore, go, userId }) {
         : (currentCycleNum + weekOffset) * dayCount + selectedSlot;
     const firstWorkingKg = entries[0]?.sets[0]?.kg ?? null;
     const firstEx = LB.findExercise(store, activeDay.items[0]?.exId);
+    // Flex sessions are always logged "now" — the selected slot is just a
+    // rotation position, never a calendar date (catch-ups date to today too).
+    const sessionDateISO = (isFlex ? new Date() : sessionDate).toISOString();
     if (firstEx?.equipment === 'bodyweight') {
       const session = {
         id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
-        date: sessionDate.toISOString(), startedAt: new Date().toISOString(), entries, currentExIdx: 0, cyclePos,
+        date: sessionDateISO, startedAt: new Date().toISOString(), entries, currentExIdx: 0, cyclePos,
       };
       setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
       go({ name: 'train', sessionId: session.id });
@@ -1743,7 +1746,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     }
     const session = {
       id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
-      date: sessionDate.toISOString(), startedAt, ended: null, entries, currentExIdx: 0,
+      date: (isFlex ? new Date() : sessionDate).toISOString(), startedAt, ended: null, entries, currentExIdx: 0,
       cyclePos,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
@@ -2358,9 +2361,9 @@ function HomeScreen({ store, setStore, go, userId }) {
                     </div>
                   </Frame>
                 )}
-                {!selectedDateSkip && (isFlex && !isViewingToday ? (
+                {!selectedDateSkip && (isFlex && selectedSlot > dayIdx ? (
                   <div style={{ padding: '12px 16px', borderRadius: 6, border: `1px dashed ${UI.hairStrong}`, textAlign: 'center' }}>
-                    <span className="micro" style={{ color: UI.inkFaint }}>PREVIEW · START THIS FROM THE NEXT-UP DAY</span>
+                    <span className="micro" style={{ color: UI.inkFaint }}>UPCOMING · START THIS FROM THE NEXT-UP DAY</span>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
@@ -2375,7 +2378,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                     }}>
                       <i className="fa-solid fa-dumbbell" style={{ fontSize: 13, color: 'rgba(10,8,5,0.55)' }} />
                       <span style={{ color: 'rgba(10,8,5,0.75)', letterSpacing: '0.18em', fontWeight: 700, fontSize: 13, fontFamily: UI.fontUi }}>
-                        {isFlex || isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION'}
+                        {isFlex && !isViewingToday ? 'CATCH UP' : (isFlex || isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION')}
                       </span>
                     </button>
                     {isViewingToday && (
