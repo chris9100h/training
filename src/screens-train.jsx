@@ -788,12 +788,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           }),
         };
       });
-      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }) };
+      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isFreestyle && advanceCycle && { isBonus: false }) };
     });
+    const shouldAdvance = session.isFreestyle ? advanceCycle : !session.isBonus;
     setStore(s => ({
       ...s,
       inProgress: null,
-      ...(!session.isBonus && !isWeekdayMode && { cycleIndex: s.cycleIndex + 1 }),
+      ...(shouldAdvance && !isWeekdayMode && { cycleIndex: s.cycleIndex + 1 }),
       lastAdvancedDate: LB.todayISO(),
       ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
     }));
@@ -954,6 +955,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [finishStep, setFinishStep] = useStateT('confirm');
   const [pendingFeel, setPendingFeel] = useStateT(null);
   const [freestyleName, setFreestyleName] = useStateT('');
+  const [showCycleStep, setShowCycleStep] = useStateT(false);
+  const [advanceCycle, setAdvanceCycle] = useStateT(false);
   const [notePicker, setNotePicker] = useStateT(false);
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
@@ -1458,6 +1461,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const tryFinish = () => {
     if (session.isFreestyle) {
+      const todayData = LB.todaysDay(store);
+      const activeSchedule = todayData?.schedule;
+      const isCycleMode = activeSchedule && !LB.isWeekdayPlan(activeSchedule);
+      const hasTodayTraining = isCycleMode && (todayData?.day?.items?.length ?? 0) > 0;
+      setShowCycleStep(hasTodayTraining);
+      setAdvanceCycle(false);
       setFreestyleName('');
       setFinishStep('name');
     } else {
@@ -2501,8 +2510,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             }}
           />
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <Btn kind="ghost" onClick={() => { setFinishStep('feel'); setPendingFeel(null); }} style={{ flex: 1 }}>Skip</Btn>
-            <Btn onClick={() => { setFinishStep('feel'); setPendingFeel(null); }} style={{ flex: 2 }}>Next →</Btn>
+            <Btn kind="ghost" onClick={() => { setFinishStep(showCycleStep ? 'cycle' : 'feel'); setPendingFeel(null); }} style={{ flex: 1 }}>Skip</Btn>
+            <Btn onClick={() => { setFinishStep(showCycleStep ? 'cycle' : 'feel'); setPendingFeel(null); }} style={{ flex: 2 }}>Next →</Btn>
+          </div>
+        </>) : finishStep === 'cycle' ? (<>
+          <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 8 }}>Replace today's workout?</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 20 }}>
+            Today is a scheduled training day. Did this freestyle session replace it, or was it extra?
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Btn onClick={() => { setAdvanceCycle(true); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
+              Replaces it — advance my cycle
+            </Btn>
+            <Btn kind="ghost" onClick={() => { setAdvanceCycle(false); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
+              Extra session — keep as bonus
+            </Btn>
           </div>
         </>) : (<>
           <FeelSelector value={pendingFeel} onChange={setPendingFeel} />
