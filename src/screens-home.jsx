@@ -1149,6 +1149,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const [checkinPickerOpen, setCheckinPickerOpen] = useState(false);
   const [pullDelta, setPullDelta] = useState(0);
   const [coachingSchema, setCoachingSchema] = useState(null);
+  const [coachingMacros, setCoachingMacros] = useState(null);
   const swipeRef = useRef({ y: null, x: null });
 
   const minOffset = (() => {
@@ -1645,6 +1646,14 @@ function HomeScreen({ store, setStore, go, userId }) {
     LB.loadCheckinSchema(coachingId).then(schema => {
       if (!cancelled) setCoachingSchema(schema || null);
     }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [store.coaching?.asClient?.id, store.coaching?.asSelf?.id]);
+
+  useEffect(() => {
+    const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id;
+    if (!coachingId) { setCoachingMacros(null); return; }
+    let cancelled = false;
+    LB.loadCoachingMacros(coachingId).then(data => { if (!cancelled) setCoachingMacros(data[0] || null); }).catch(() => {});
     return () => { cancelled = true; };
   }, [store.coaching?.asClient?.id, store.coaching?.asSelf?.id]);
 
@@ -2701,7 +2710,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         store={store}
         setStore={setStore}
         date={LB.todayISO()}
-        targets={LB.effectiveMacroTargets(store.settings?.macroTargets, null)}
+        targets={LB.effectiveMacroTargets(store.settings?.macroTargets, coachingMacros)}
         activeCoachingSchema={coachingSchema}
         onSetStatus={handleSetStatus}
       />
