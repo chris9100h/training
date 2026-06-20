@@ -2410,6 +2410,57 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions, schema) {
   return Object.keys(out).length ? { ...out, count: week.length } : null;
 }
 
+// Aggregate improvement vs decline chips across all sessions in `weekStart` week.
+// For each working set, compares against the most recent pre-week session for
+// the same exercise (same dayId preferred, any dayId as fallback). Returns
+// 'improved' | 'worse' | 'same' | null (null when no comparable sets found).
+function weekPerformanceSignal(state, weekStart) {
+  if (!weekStart || !state?.sessions?.length) return null;
+  const ws = weekStart.slice(0, 10);
+  const we = (() => { const d = new Date(ws + 'T12:00:00'); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })();
+  const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
+
+  const weekSessions = state.sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= ws && d < we; });
+  if (!weekSessions.length) return null;
+
+  const preSessions = state.sessions
+    .filter(s => s.ended)
+    .filter(s => { const d = dayOf(s); return d && d < ws; })
+    .slice()
+    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+
+  let improvements = 0, declines = 0;
+
+  for (const session of weekSessions) {
+    for (const entry of (session.entries || [])) {
+      const exId = entry.exId; if (!exId) continue;
+      // Prefer same dayId, fall back to any day
+      let prevEntry = null;
+      for (const pass of [true, false]) {
+        for (const ps of preSessions) {
+          if (pass && session.dayId && ps.dayId !== session.dayId) continue;
+          const pe = (ps.entries || []).find(e => e.exId === exId && (e.sets || []).some(x => x.kg != null || x.reps != null));
+          if (pe) { prevEntry = pe; break; }
+        }
+        if (prevEntry) break;
+      }
+      if (!prevEntry) continue;
+      const working = (entry.sets || []).filter(s => !s.warmup && !s.skipped && s.done);
+      const prevWorking = (prevEntry.sets || []).filter(s => !s.warmup && !s.skipped);
+      working.forEach((set, i) => {
+        const prev = prevWorking[i]; if (!prev) return;
+        if (isImprovement(set, prev)) improvements++;
+        else if (isDecline(set, prev)) declines++;
+      });
+    }
+  }
+
+  if (improvements === 0 && declines === 0) return null;
+  if (improvements > declines) return 'improved';
+  if (declines > improvements) return 'worse';
+  return 'same';
+}
+
 async function openStatusPeriod(userId, mode, startedAt) {
   await _supabase.from('zane_status_periods').update({ ended_at: new Date().toISOString() }).eq('user_id', userId).is('ended_at', null);
   await _supabase.from('zane_status_periods').insert({ id: uid(), user_id: userId, mode, started_at: startedAt });
@@ -2444,5 +2495,5 @@ window.LB = {
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill, detectCardioPRs,
-  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill,
+  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
 };

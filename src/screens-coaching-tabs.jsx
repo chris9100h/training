@@ -1072,6 +1072,8 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
       if (previewCardioPrefill.effort != null) r.cardio_effort = previewCardioPrefill.effort;
       if (previewCardioPrefill.pace != null) r.cardio_pace = previewCardioPrefill.pace;
     }
+    const perf = LB.weekPerformanceSignal(store, previewWeekStart);
+    if (perf != null) r.performance_vs_last_week = perf;
     return Object.keys(r).length ? r : null;
   })();
 
