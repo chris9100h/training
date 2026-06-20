@@ -68,7 +68,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
     <Screen scroll={false}>
       {!hideTopBar && (
         isSelf
-          ? <TopBar title="Coaching" />
+          ? <TopBar title="Coaching" onBack={backRoute !== 'settings' ? () => go({ name: backRoute }) : undefined} />
           : <TopBar
               title={clientName}
               sub={<span className="micro" style={{ color: 'var(--accent)', letterSpacing: '0.12em' }}>COACHING</span>}

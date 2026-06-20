@@ -2557,7 +2557,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                 () => {
                   setQuickActionsOpen(false);
                   const cId = asSelf ? asSelf.id : asClient.id;
-                  go({ name: 'coaching-client', coachingId: cId, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf: !!asSelf });
+                  go({ name: 'coaching-client', coachingId: cId, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf: !!asSelf, backRoute: 'home' });
                 },
                 'fa-clipboard-check',
                 'Check-in',
