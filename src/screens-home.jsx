@@ -1593,7 +1593,8 @@ function HomeScreen({ store, setStore, go, userId }) {
       const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
       const dateKey = d.toISOString().slice(0, 10);
       if (sessionDates.has(dateKey)) continue;
-      if (skipsMap.get(dateKey)) continue;
+      const skip = skipsMap.get(dateKey);
+      if (skip && skip.skipReason !== '—') continue;
       let trainingDay = null;
       if (weekdayMode) {
         if (store.weekPlanStartDate && dateKey < store.weekPlanStartDate) continue;
@@ -1850,7 +1851,13 @@ function HomeScreen({ store, setStore, go, userId }) {
       return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
     });
     const session = { id: LB.uid(), scheduleId: sch?.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
-    setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    const autoSkip = skipsMap.get(missed.dateKey);
+    setStore(s => ({
+      ...s,
+      sessions: [...s.sessions, session],
+      inProgress: session.id,
+      ...(autoSkip?.skipReason === '—' ? { skips: (s.skips || []).filter(x => x.id !== autoSkip.id) } : {}),
+    }));
     loggingRef.current = false;
     go({ name: 'train', sessionId: session.id });
   };
