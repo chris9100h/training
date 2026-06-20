@@ -53,7 +53,9 @@ CREATE TABLE public.zane_sessions (
   entries jsonb NOT NULL DEFAULT '[]'::jsonb,
   started_at timestamp with time zone,
   duration_minutes integer,
-  feel text
+  feel text,
+  is_bonus boolean NOT NULL DEFAULT false,
+  is_freestyle boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE public.zane_session_entries (

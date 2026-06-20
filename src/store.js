@@ -430,7 +430,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_schedules').select('id, name, days, archived, versions').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel')
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
@@ -571,6 +571,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         } : {}),
         durationMinutes: s.duration_minutes ?? null,
         feel: s.feel ?? null,
+        ...(s.is_bonus     ? { isBonus:     true } : {}),
+        ...(s.is_freestyle ? { isFreestyle: true } : {}),
       };
     }),
     skips: (skipsRes.data || []).map(s => ({
@@ -828,6 +830,8 @@ function sessionToRow(s, userId) {
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
   row.feel = feel ?? null;
+  row.is_bonus = !!isBonus;
+  row.is_freestyle = !!isFreestyle;
   return row;
 }
 
