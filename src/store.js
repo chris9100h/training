@@ -427,10 +427,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps').eq('user_id', userId),
-    _supabase.from('zane_schedules').select('id, name, days, archived, versions').eq('user_id', userId),
+    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel')
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
@@ -571,6 +571,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         } : {}),
         durationMinutes: s.duration_minutes ?? null,
         feel: s.feel ?? null,
+        ...(s.is_bonus     ? { isBonus:     true } : {}),
+        ...(s.is_freestyle ? { isFreestyle: true } : {}),
       };
     }),
     skips: (skipsRes.data || []).map(s => ({
@@ -823,11 +825,13 @@ function sessionToRow(s, userId) {
   // keeps its default '[]' on insert and is left untouched on update.
   // agg* are read-only server aggregates attached at load time — never synced.
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
   row.feel = feel ?? null;
+  row.is_bonus = !!isBonus;
+  row.is_freestyle = !!isFreestyle;
   return row;
 }
 
@@ -1448,6 +1452,14 @@ function isWeekdayPlan(sch) {
   return sch.mode === 'weekday' || (sch.days.length > 0 && sch.days.some(d => d.weekday != null));
 }
 
+// Flexible plan: an ordered-day cycle whose position advances only on a logged
+// session or skip (never by calendar date). is_flex is a passthrough DB column
+// on the schedule object (like days/versions/archived). A flex plan is never a
+// weekday plan.
+function isFlexPlan(sch) {
+  return !!sch && sch.is_flex === true;
+}
+
 function getPlanDaysForDate(schedule, dateStr) {
   const versions = schedule.versions;
   if (!versions?.length) return schedule.days || [];
@@ -1545,6 +1557,12 @@ function todaysDay(state) {
     if (day) return { schedule: sch, day, idx: todayWd };
     return { schedule: sch, day: { id: 'rest-virtual', name: 'REST', items: [], weekday: todayWd }, idx: todayWd };
   }
+  // Flexible plan: position is the action-advanced cycleIndex, not date-derived.
+  if (isFlexPlan(sch)) {
+    const len = sch.days.length;
+    const idx = (((state.cycleIndex || 0) % len) + len) % len;
+    return { schedule: sch, day: sch.days[idx], idx };
+  }
   // When versions exist, derive today's position from the version active today
   const cyclePosToday = getCyclePosForDate(sch, todayStr);
   if (cyclePosToday !== null) {
@@ -1567,6 +1585,12 @@ function todaysDay(state) {
 function nextDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
+  // Flexible plan: the next day in sequence (cycleIndex + 1), no date math.
+  if (isFlexPlan(sch)) {
+    const len = sch.days.length;
+    const idx = ((((state.cycleIndex || 0) + 1) % len) + len) % len;
+    return { schedule: sch, day: sch.days[idx], idx };
+  }
   if (sch.versions?.length) {
     const tomorrow = new Date(); tomorrow.setHours(12, 0, 0, 0); tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().slice(0, 10);
@@ -2381,21 +2405,7 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions, schema) {
   if (sessions != null) {
     const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
     const thisEnded = sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= ws && d < we; });
-    const prevEnded = sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= prevWs && d < ws; });
     if (thisEnded.length) out.days_trained = thisEnded.length;
-    if (thisEnded.length > 0 || prevEnded.length > 0) {
-      // Reuse the canonical totalVolume(): effReps = min(L,R) for unilateral
-      // sets (weaker side is the bottleneck) and the server-aggregate fallback
-      // for sessions windowed out of the boot load.
-      const thisVol = thisEnded.reduce((n, s) => n + totalVolume(s), 0);
-      const prevVol = prevEnded.reduce((n, s) => n + totalVolume(s), 0);
-      const thisAvg = thisEnded.length ? thisVol / thisEnded.length : 0;
-      const prevAvg = prevEnded.length ? prevVol / prevEnded.length : 0;
-      const diff = (thisAvg > 0 || prevAvg > 0)
-        ? Math.sign(thisAvg - prevAvg)
-        : Math.sign(thisEnded.length - prevEnded.length);
-      out.performance_vs_last_week = diff > 0 ? 'improved' : diff < 0 ? 'worse' : 'same';
-    }
   }
   const offPlanLines = week
     .filter(l => l.offPlanNote && l.offPlanNote.trim())
@@ -2420,6 +2430,57 @@ function dailyLogsWeekPrefill(dailyLogs, weekStart, sessions, schema) {
   return Object.keys(out).length ? { ...out, count: week.length } : null;
 }
 
+// Aggregate improvement vs decline chips across all sessions in `weekStart` week.
+// For each working set, compares against the most recent pre-week session for
+// the same exercise (same dayId preferred, any dayId as fallback). Returns
+// 'improved' | 'worse' | 'same' | null (null when no comparable sets found).
+function weekPerformanceSignal(state, weekStart) {
+  if (!weekStart || !state?.sessions?.length) return null;
+  const ws = weekStart.slice(0, 10);
+  const we = (() => { const d = new Date(ws + 'T12:00:00'); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })();
+  const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
+
+  const weekSessions = state.sessions.filter(s => s.ended).filter(s => { const d = dayOf(s); return d && d >= ws && d < we; });
+  if (!weekSessions.length) return null;
+
+  const preSessions = state.sessions
+    .filter(s => s.ended)
+    .filter(s => { const d = dayOf(s); return d && d < ws; })
+    .slice()
+    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+
+  let improvements = 0, declines = 0;
+
+  for (const session of weekSessions) {
+    for (const entry of (session.entries || [])) {
+      const exId = entry.exId; if (!exId) continue;
+      // Prefer same dayId, fall back to any day
+      let prevEntry = null;
+      for (const pass of [true, false]) {
+        for (const ps of preSessions) {
+          if (pass && session.dayId && ps.dayId !== session.dayId) continue;
+          const pe = (ps.entries || []).find(e => e.exId === exId && (e.sets || []).some(x => x.kg != null || x.reps != null));
+          if (pe) { prevEntry = pe; break; }
+        }
+        if (prevEntry) break;
+      }
+      if (!prevEntry) continue;
+      const working = (entry.sets || []).filter(s => !s.warmup && !s.skipped && s.done);
+      const prevWorking = (prevEntry.sets || []).filter(s => !s.warmup && !s.skipped);
+      working.forEach((set, i) => {
+        const prev = prevWorking[i]; if (!prev) return;
+        if (isImprovement(set, prev)) improvements++;
+        else if (isDecline(set, prev)) declines++;
+      });
+    }
+  }
+
+  if (improvements === 0 && declines === 0) return null;
+  if (improvements > declines) return 'improved';
+  if (declines > improvements) return 'worse';
+  return 'same';
+}
+
 async function openStatusPeriod(userId, mode, startedAt) {
   await _supabase.from('zane_status_periods').update({ ended_at: new Date().toISOString() }).eq('user_id', userId).is('ended_at', null);
   await _supabase.from('zane_status_periods').insert({ id: uid(), user_id: userId, mode, started_at: startedAt });
@@ -2441,7 +2502,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
+  uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,
@@ -2454,5 +2515,5 @@ window.LB = {
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill, detectCardioPRs,
-  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill,
+  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
 };

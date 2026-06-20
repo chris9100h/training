@@ -371,7 +371,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return () => { on = false; };
   }, [entry?.exId]);
   const last = localLast ?? (entry ? remoteLast[entry.exId] : null) ?? null;
-  const isCardio = !!entry.isCardio;
+  const isCardio = !!entry?.isCardio;
   const isUnilateral = !isCardio && (exercise?.movement_type ?? (exercise?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
   const isNoWeightReps = !isCardio && !!exercise?.no_weight_reps;
   const progressionTargetForSet = (workingSetIdx) => {
@@ -788,12 +788,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           }),
         };
       });
-      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }) };
+      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isBonus && advanceCycle && { isBonus: false }) };
     });
+    const shouldAdvance = session.isBonus ? advanceCycle : true;
+    // For freestyle sessions scheduleId is null so isWeekdayMode is always false —
+    // check the active plan too so weekday-mode users don't get a stale cycleIndex bump.
+    const activeSch = LB.todaysDay(store)?.schedule;
+    const activeIsWeekday = LB.isWeekdayPlan(activeSch);
+    // On a flex plan cycleIndex IS the live position, so it only advances when
+    // the finished session is the current next-up day. A freestyle workout, a
+    // session from another plan, or a catch-up of an earlier (skipped) rotation
+    // day must leave the next-up pointer where it is.
+    const flexBlocks = LB.isFlexPlan(activeSch) &&
+      (session.isFreestyle || session.scheduleId !== activeSch?.id || session.dayId !== LB.todaysDay(store)?.day?.id);
     setStore(s => ({
       ...s,
       inProgress: null,
-      ...(!isWeekdayMode && { cycleIndex: s.cycleIndex + 1 }),
+      ...(shouldAdvance && !isWeekdayMode && !activeIsWeekday && !flexBlocks && { cycleIndex: s.cycleIndex + 1 }),
       lastAdvancedDate: LB.todayISO(),
       ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
     }));
@@ -823,7 +834,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   }, [exIdx]);
 
   // chip drag-to-reorder — uses the shared horizontal drag hook from ui.jsx
-  const chipDragReorderRef = UI.useDragReorderH({ longPressMs: 400,
+  const chipDragReorderRef = UI.useDragReorderH({ longPressMs: 600,
     onReorder: (from, to) => {
       updateSession(sess => {
         const entries = [...sess.entries];
@@ -953,6 +964,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [finishOpen, setFinishOpen] = useStateT(false);
   const [finishStep, setFinishStep] = useStateT('confirm');
   const [pendingFeel, setPendingFeel] = useStateT(null);
+  const [freestyleName, setFreestyleName] = useStateT('');
+  const [showCycleStep, setShowCycleStep] = useStateT(false);
+  const [advanceCycle, setAdvanceCycle] = useStateT(false);
   const [notePicker, setNotePicker] = useStateT(false);
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
@@ -960,7 +974,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [planDiffOpen, setPlanDiffOpen] = useStateT(false);
   const [planDiff, setPlanDiff] = useStateT([]);
   const [swapOpen, setSwapOpen] = useStateT(false);
-  const [addOpen, setAddOpen] = useStateT(false);
+  const [addOpen, setAddOpen] = useStateT(() => !!(session.isFreestyle && session.entries.length === 0));
   const [addSupersetData, setAddSupersetData] = useStateT(null); // { newIdx } | null
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
@@ -1241,9 +1255,42 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const doAdd = (newExId) => {
     setAddOpen(false);
-    // Defer insertion until the user picks a superset (or solo) —
-    // that choice determines where the new exercise is placed.
-    setAddSupersetData({ newExId });
+    if (session.entries.length === 0) {
+      // First exercise in an empty session — skip the superset prompt and insert directly.
+      setStore(s => {
+        const sess = s.sessions.find(x => x.id === session.id);
+        if (!sess) return s;
+        const newEx = LB.findExercise(s, newExId);
+        const isUni = newEx?.movement_type === 'unilateral';
+        const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
+        const last = LB.bestRecentEntry(s, newExId, session.dayId);
+        const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
+        const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+        const newEntry = {
+          exId: newExId,
+          name: newEx?.name || newExId,
+          plannedSets: 3,
+          plannedReps: null,
+          plannedRepsPerSet: null,
+          sets: seedSets,
+          note: '',
+          supersetGroup: null,
+          addedDuringSession: true,
+        };
+        return {
+          ...s,
+          sessions: s.sessions.map(x => x.id !== session.id ? x : {
+            ...x,
+            entries: [newEntry],
+            currentExIdx: 0,
+          }),
+        };
+      });
+    } else {
+      // Defer insertion until the user picks a superset (or solo) —
+      // that choice determines where the new exercise is placed.
+      setAddSupersetData({ newExId });
+    }
   };
 
   // Called from the superset modal: targetIdx = null → solo (insert after current),
@@ -1423,7 +1470,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const tryFinish = () => {
-    setFinishStep('feel');
+    if (session.isBonus) {
+      // Determine whether to show the "replace today's workout?" step.
+      // Only relevant in cycle mode when today has training that isn't done yet.
+      const todayData = LB.todaysDay(store);
+      const activeSchedule = todayData?.schedule;
+      const todayDayId = todayData?.day?.id;
+      const alreadyDoneToday = !!todayDayId && store.sessions.some(
+        s => s.ended && s.dayId === todayDayId && s.date?.slice(0, 10) === LB.todayISO()
+      );
+      const hasTodayTraining = (todayData?.day?.items?.length ?? 0) > 0 && !alreadyDoneToday;
+      setShowCycleStep(hasTodayTraining);
+      setAdvanceCycle(false);
+      if (session.isFreestyle) {
+        setFreestyleName('');
+        setFinishStep('name');
+      } else {
+        setFinishStep(hasTodayTraining ? 'cycle' : 'feel');
+      }
+    } else {
+      setShowCycleStep(false);
+      setFinishStep('feel');
+    }
     setPendingFeel(null);
   };
 
@@ -1501,14 +1569,47 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setPendingFeel(null);
   };
 
+  // Pace-bar base: the parts that DON'T depend on `now`. The 250 ms `now` tick
+  // re-renders this component 4×/s; memoizing the set scans here keeps only the
+  // elapsed-time math in the per-tick path. Returns null when the bar is hidden.
+  // MUST be before any early return (React rules of hooks).
+  const paceBase = useMemoT(() => {
+    const timeline = avgStats?.timeline;
+    if (!timeline || !session.startedAt) return null;
+    const totalSetsDone = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done && !x.warmup).length || 0), 0);
+    if (totalSetsDone < 2) return null;
+    const remainingSets = session.entries.reduce((s, e) => s + (e.sets?.filter(x => !x.done && !x.skipped && !x.warmup).length || 0), 0);
+    if (remainingSets === 0) return null;
+    const expectedSec = timeline[totalSetsDone - 1];
+    if (expectedSec == null) return null;
+    return { totalSetsDone, expectedSec };
+  }, [avgStats, session.entries, session.startedAt]);
+
   if (!entry) {
-    return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
+    if (!session.isBonus) {
+      return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
+    }
+    // Empty freestyle/bonus session — show exercise picker immediately
+    return (
+      <Screen scroll={false}>
+        <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 22px 0', display: 'flex' }}>
+          <button onClick={abandon} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.danger, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>×</button>
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 }}>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, textAlign: 'center' }}>Add an exercise to get started.</div>
+          <Btn onClick={() => setAddOpen(true)}>Add exercise</Btn>
+        </div>
+        {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
+        {confirmEl}
+      </Screen>
+    );
   }
 
-  const completed = isCardio ? (entry.cardioDone ? 1 : 0) : entry.sets.filter(s => s.done).length;
-  const allDone = isCardio ? !!entry.cardioDone : (completed === entry.sets.length);
-  const currentSetIdx = entry.sets.findIndex(s => !s.done);
-  const warmupCount = entry.sets.filter(s => s.warmup).length;
+  const entrySets = entry?.sets || [];
+  const completed = isCardio ? (entry?.cardioDone ? 1 : 0) : entrySets.filter(s => s.done).length;
+  const allDone = !entry || (isCardio ? !!entry.cardioDone : (completed === entrySets.length));
+  const currentSetIdx = entrySets.findIndex(s => !s.done);
+  const warmupCount = entrySets.filter(s => s.warmup).length;
   const isCurrentWarmup = warmupCount > 0 && currentSetIdx >= 0 && !!entry.sets[currentSetIdx]?.warmup;
   const warmupSetsRemaining = warmupCount > 0 && entry.sets.filter(s => s.warmup).some(s => !s.done);
   const allWarmupDone = warmupCount > 0 && entry.sets.filter(s => s.warmup).every(s => s.done);
@@ -1557,21 +1658,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
     persistRestStart(null);
   };
-
-  // Pace-bar base: the parts that DON'T depend on `now`. The 250 ms `now` tick
-  // re-renders this component 4×/s; memoizing the set scans here keeps only the
-  // elapsed-time math in the per-tick path. Returns null when the bar is hidden.
-  const paceBase = useMemoT(() => {
-    const timeline = avgStats?.timeline;
-    if (!timeline || !session.startedAt) return null;
-    const totalSetsDone = session.entries.reduce((s, e) => s + (e.sets?.filter(x => x.done && !x.warmup).length || 0), 0);
-    if (totalSetsDone < 2) return null;
-    const remainingSets = session.entries.reduce((s, e) => s + (e.sets?.filter(x => !x.done && !x.skipped && !x.warmup).length || 0), 0);
-    if (remainingSets === 0) return null;
-    const expectedSec = timeline[totalSetsDone - 1];
-    if (expectedSec == null) return null; // beyond historical set count
-    return { totalSetsDone, expectedSec };
-  }, [avgStats, session.entries, session.startedAt]);
 
   // Derive warmup overlay vars here so they're available inside the main return
   const warmupOverlayGlobalIdx = warmupSetsRemaining ? entry.sets.findIndex(s => s.warmup && !s.done) : -1;
@@ -1856,6 +1942,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {entry ? (<>
 
         {/* Exercise name */}
         <div style={{ flexShrink: 0 }}>
@@ -2336,6 +2423,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </Frame>
         )}
 
+      </>) : null}
       </div>
 
       {/* Footer nav */}
@@ -2356,7 +2444,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </button>
         {allDone ? (
           <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>
-            {exIdx === session.entries.length - 1 ? 'Finish →' : 'Next exercise →'}
+            {(session.entries.length === 0 || exIdx === session.entries.length - 1) ? 'Finish →' : 'Next exercise →'}
           </Btn>
         ) : isCardio ? (<>
           <Btn kind="ghost" onClick={skipCardio} style={{ flex: 1, minHeight: 44 }}>Skip</Btn>
@@ -2365,7 +2453,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           )}
         </>) : (<>
           {(() => {
-            const pending = entry.sets.find(s => !s.done && !s.skipped);
+            const pending = entrySets.find(s => !s.done && !s.skipped);
             const hasVal = pending && (pending.kg != null || pending.reps != null || pending.repsL != null || pending.repsR != null);
             return <Btn onClick={checkSet} disabled={!hasVal} style={{ flex: 2, minHeight: 44, padding: '10px 16px' }}>Check set</Btn>;
           })()}
@@ -2380,7 +2468,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </div>
 
       {/* finish confirmation */}
-      <Sheet open={finishOpen} onClose={() => { setFinishOpen(false); setFinishStep('confirm'); setPendingFeel(null); }} title={finishStep === 'confirm' ? "End session?" : "Rate workout effort"}>
+      <Sheet open={finishOpen} onClose={() => { setFinishOpen(false); setFinishStep('confirm'); setPendingFeel(null); }} title={finishStep === 'confirm' ? "End session?" : finishStep === 'name' ? "Name this workout" : "Rate workout effort"}>
         {finishStep === 'confirm' ? (<>
           <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 18, lineHeight: 1.6 }}>
             {(() => {
@@ -2424,6 +2512,39 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={() => setFinishOpen(false)} style={{ flex: 1 }}>Continue</Btn>
             <Btn onClick={tryFinish} style={{ flex: 2 }}>Finish ✓</Btn>
+          </div>
+        </>) : finishStep === 'name' ? (<>
+          <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 14, fontFamily: UI.fontUi }}>
+            Give this freestyle workout a name, or skip to keep "Freestyle".
+          </div>
+          <input
+            value={freestyleName}
+            onChange={e => setFreestyleName(e.target.value)}
+            placeholder="e.g. Push day, Arms & shoulders…"
+            autoFocus
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              background: UI.bgInset, border: `1px solid ${UI.hair}`,
+              borderRadius: 4, padding: '12px 14px', color: UI.ink,
+              fontFamily: UI.fontUi, fontSize: 15, outline: 'none',
+            }}
+          />
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <Btn kind="ghost" onClick={() => { setFinishStep(showCycleStep ? 'cycle' : 'feel'); setPendingFeel(null); }} style={{ flex: 1 }}>Skip</Btn>
+            <Btn onClick={() => { setFinishStep(showCycleStep ? 'cycle' : 'feel'); setPendingFeel(null); }} style={{ flex: 2 }}>Next →</Btn>
+          </div>
+        </>) : finishStep === 'cycle' ? (<>
+          <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 8 }}>Replace today's workout?</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 20 }}>
+            {(() => { const n = LB.todaysDay(store)?.day?.name; return n ? `Today is ${n} day. Did this session replace it, or was it extra?` : 'Today is a scheduled training day. Did this session replace it, or was it extra?'; })()}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Btn onClick={() => { setAdvanceCycle(true); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
+              Replaces it — advance my cycle
+            </Btn>
+            <Btn kind="ghost" onClick={() => { setAdvanceCycle(false); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
+              Extra session — keep as bonus
+            </Btn>
           </div>
         </>) : (<>
           <FeelSelector value={pendingFeel} onChange={setPendingFeel} />

@@ -594,7 +594,10 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
       <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }}>{label}</div>
     </div>
   );
-  const adh = log?.adherence;
+  const storedAdh = log?.adherence;
+  const adh = storedAdh != null
+    ? storedAdh
+    : (log && dayTarget ? LB.macroAdherence({ protein: log.protein, carbs: log.carbs, fat: log.fat }, dayTarget) : null);
   const showAdh = dayTarget != null || adh != null;
   const isPerfect = adh != null && Math.round(adh) >= 97;
   const verdict = adh == null ? null : Math.round(adh) >= 97 ? 'PERFECT' : Math.round(adh) >= 90 ? 'STRONG' : Math.round(adh) >= 75 ? 'ON TRACK' : 'OFF TRACK';

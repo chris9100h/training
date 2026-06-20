@@ -1240,6 +1240,7 @@ function StatsTab({ store, sessions, go }) {
 
   // Determine whether we're in cycle mode and compute current cycle window
   const sch = store.schedules.find(s => s.id === store.activeScheduleId);
+  const isFlex = sch ? LB.isFlexPlan(sch) : false;
   const isCycleMode = sch && !LB.isWeekdayPlan(sch) && !!store.cycleStartDate;
   const cycleLen = sch?.days?.length || 1;
   const cycleWindowStart = (() => {
@@ -1525,18 +1526,22 @@ function StatsTab({ store, sessions, go }) {
       <div>
         <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>CONSISTENCY</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          {/* Current streak — full width, slightly taller than longest */}
-          <div style={{ gridColumn: '1 / -1', background: UI.goldFaint, borderRadius: 4, padding: '14px 14px', textAlign: 'center', border: `1px solid ${UI.goldSoft}` }}>
-            <div className="micro" style={{ color: UI.gold, marginBottom: 6 }}>CURRENT STREAK</div>
-            <div className="num" style={{ fontSize: 40, color: UI.gold, lineHeight: 1 }}>{currentStreak}</div>
-            <div className="micro" style={{ color: UI.gold, marginTop: 5, opacity: 0.7 }}>{currentStreak === 1 ? 'DAY' : 'DAYS'}</div>
-          </div>
-          {/* Longest streak — full width, slightly shorter than current */}
-          <div style={{ gridColumn: '1 / -1', background: UI.goldFaint, borderRadius: 4, padding: '10px 14px', textAlign: 'center', border: `1px solid ${UI.goldSoft}` }}>
-            <div className="micro" style={{ color: UI.gold, marginBottom: 4 }}>LONGEST STREAK</div>
-            <div className="num" style={{ fontSize: 28, color: UI.gold, lineHeight: 1 }}>{longestStreak}</div>
-            <div className="micro" style={{ color: UI.gold, marginTop: 3, opacity: 0.7 }}>{longestStreak === 1 ? 'DAY' : 'DAYS'}</div>
-          </div>
+          {/* Streaks are day-based and assume fixed training days — meaningless for
+              flexible plans, where the rotation never expects a specific day. */}
+          {!isFlex && (
+            <div style={{ gridColumn: '1 / -1', background: UI.goldFaint, borderRadius: 4, padding: '14px 14px', textAlign: 'center', border: `1px solid ${UI.goldSoft}` }}>
+              <div className="micro" style={{ color: UI.gold, marginBottom: 6 }}>CURRENT STREAK</div>
+              <div className="num" style={{ fontSize: 40, color: UI.gold, lineHeight: 1 }}>{currentStreak}</div>
+              <div className="micro" style={{ color: UI.gold, marginTop: 5, opacity: 0.7 }}>{currentStreak === 1 ? 'DAY' : 'DAYS'}</div>
+            </div>
+          )}
+          {!isFlex && (
+            <div style={{ gridColumn: '1 / -1', background: UI.goldFaint, borderRadius: 4, padding: '10px 14px', textAlign: 'center', border: `1px solid ${UI.goldSoft}` }}>
+              <div className="micro" style={{ color: UI.gold, marginBottom: 4 }}>LONGEST STREAK</div>
+              <div className="num" style={{ fontSize: 28, color: UI.gold, lineHeight: 1 }}>{longestStreak}</div>
+              <div className="micro" style={{ color: UI.gold, marginTop: 3, opacity: 0.7 }}>{longestStreak === 1 ? 'DAY' : 'DAYS'}</div>
+            </div>
+          )}
           <StatCard label="Avg / Week" value={avgSessionsPerWeek} sub="sessions" compact />
           <StatCard label="This Year" value={thisYearSessions.length} sub="sessions" compact />
           <StatCard label="This Month" value={thisMonthSessions.length} sub="sessions" compact />
@@ -1796,6 +1801,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                           onClick={hasCharts ? e => { e.stopPropagation(); setEffortChart({ dayId: s.dayId, dayName: s.dayName }); } : undefined}
                         >
                           {s.dayName}
+                          {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
                           {hasCharts && <i className="fa-solid fa-chart-line" style={{ fontSize: 10, color: UI.gold }} />}
                         </div>
                       );
@@ -2206,6 +2212,14 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         onBack={() => go(justFinished ? { name: 'home' } : (back || { name: 'hist' }))}
         right={
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {s.isBonus && (
+              <span style={{
+                fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
+                color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)',
+                border: `0.5px solid rgba(var(--accent-rgb), 0.3)`,
+                borderRadius: 4, padding: '3px 6px',
+              }}>BONUS</span>
+            )}
             <button onClick={takeScreenshot} disabled={capturing} style={{
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',

@@ -1306,8 +1306,13 @@ function attachDragReorderH(container, getCb, options) {
     if (!state.started) {
       if (state.pointerType === 'mouse') {
         if (dist > MOVE_TOLERANCE) beginDrag(state.startX, state.startY);
-      } else if (dist > 12) {
-        if (dy > dx) { clearTimeout(state.pressTimer); teardown(); return; }
+      } else if (dist > 8) {
+        // Any movement before long-press fires → user is scrolling, cancel.
+        // (Previously only cancelled on dy>dx, letting horizontal scroll keep
+        //  the timer alive — causing accidental reorders mid-scroll.)
+        clearTimeout(state.pressTimer);
+        teardown();
+        return;
       }
     }
     if (!state || !state.started) return;

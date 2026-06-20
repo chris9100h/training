@@ -1092,7 +1092,10 @@ function HomeScreen({ store, setStore, go, userId }) {
   const dayIdx = today?.idx ?? 0;
   const dayCount = sch?.days?.length || 0;
   const weekdayMode = sch ? LB.isWeekdayPlan(sch) : false;
-  const cycleWeekView = !weekdayMode && (store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
+  const isFlex = sch ? LB.isFlexPlan(sch) : false;
+  // Flex plans have no calendar week — the strip is the rotation itself, so the
+  // Mon–Sun cycle-week overlay never applies.
+  const cycleWeekView = !weekdayMode && !isFlex && (store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
 
   const jsDay = new Date().getDay();
   const todayWd = jsDay === 0 ? 6 : jsDay - 1;
@@ -1103,7 +1106,7 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   // Auto-migrate from cycleIndex to cycleStartDate on first load
   useEffect(() => {
-    if (!weekdayMode && sch && !store.cycleStartDate) {
+    if (!weekdayMode && !isFlex && sch && !store.cycleStartDate) {
       const today = new Date(); today.setHours(12, 0, 0, 0);
       const start = new Date(today.getTime() - (store.cycleIndex || 0) * 86400000);
       setStore(s => s.cycleStartDate ? s : { ...s, cycleStartDate: start.toISOString().slice(0, 10) });
@@ -1140,6 +1143,17 @@ function HomeScreen({ store, setStore, go, userId }) {
   // The not-logged Log handler awaits a seed fetch — guard against a double
   // tap creating two sessions inside that window.
   const loggingRef = useRef(false);
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const [dailyLogOpen, setDailyLogOpen] = useState(false);
+  const [checkinDue, setCheckinDue] = useState(false);
+  const [backlogPickerOpen, setBacklogPickerOpen] = useState(false);
+  const [workoutSubOpen, setWorkoutSubOpen] = useState(false);
+  const [bonusDayPickerOpen, setBonusDayPickerOpen] = useState(false);
+  const [checkinPickerOpen, setCheckinPickerOpen] = useState(false);
+  const [pullDelta, setPullDelta] = useState(0);
+  const [coachingSchema, setCoachingSchema] = useState(null);
+  const [coachingMacros, setCoachingMacros] = useState(null);
+  const swipeRef = useRef({ y: null, x: null });
 
   const minOffset = (() => {
     if (weekdayMode) {
@@ -1314,6 +1328,7 @@ function HomeScreen({ store, setStore, go, userId }) {
   const isFutureSlot = sessionDate > (() => { const d = new Date(); d.setHours(12,0,0,0); return d; })();
 
   const periodLabel = useMemo(() => {
+    if (isFlex) return 'FLEXIBLE';
     if (weekdayMode) {
       if (store.weekPlanStartDate) {
         const monday = new Date(); monday.setHours(12, 0, 0, 0);
@@ -1345,9 +1360,12 @@ function HomeScreen({ store, setStore, go, userId }) {
     }
     const cycleNum = currentCycleNum + weekOffset + 1;
     return `CYCLE ${cycleNum}`;
-  }, [weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch]);
+  }, [isFlex, weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch]);
 
   const cardLabel = useMemo(() => {
+    if (isFlex) {
+      return `${isViewingToday ? 'NEXT UP · ' : ''}DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
+    }
     if (isViewingToday) {
       if (weekdayMode) return `TODAY · ${WEEKDAYS_FULL[selectedWd].toUpperCase()}`;
       if (cycleWeekView) {
@@ -1363,7 +1381,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       return `${dateStr} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
     }
     return `${dateStr} · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
-  }, [isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week]);
+  }, [isFlex, isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week]);
 
   const avgDayDuration = useMemo(() => {
     if (!activeDay?.id) return null;
@@ -1382,11 +1400,19 @@ function HomeScreen({ store, setStore, go, userId }) {
   }, [store.sessions]);
 
   const doneSession = useMemo(() => {
+    // Flex slots carry no calendar date — a past rotation slot maps back to the
+    // most recent session logged for that day so "going back" shows the workout.
+    if (isFlex) {
+      if (selectedSlot >= dayIdx || !activeDay?.id) return null;
+      return [...store.sessions]
+        .filter(s => s.ended && s.dayId === activeDay.id)
+        .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] ?? null;
+    }
     const dateKey = sessionDate.toISOString().slice(0, 10);
     return [...store.sessions]
       .filter(s => s.ended && s.date.slice(0, 10) === dateKey)
       .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] ?? null;
-  }, [store.sessions, sessionDate]);
+  }, [isFlex, selectedSlot, dayIdx, activeDay?.id, store.sessions, sessionDate]);
 
   const { improvementCount, regressionCount } = useMemo(() => {
     if (!doneSession) return { improvementCount: 0, regressionCount: 0 };
@@ -1467,6 +1493,9 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   const isSlotDone = useMemo(() => {
     if (isActiveRest) return false;
+    // Flex: the next-up day is never "done", but earlier slots in the current
+    // rotation pass are — show their completed session when scrolling back.
+    if (isFlex) return selectedSlot < dayIdx && !!doneSession;
     if (weekdayMode) {
       const key = `${sessionDate.getFullYear()}-${sessionDate.getMonth()}-${sessionDate.getDate()}`;
       return completedDateKeys?.has(key) ?? false;
@@ -1479,7 +1508,7 @@ function HomeScreen({ store, setStore, go, userId }) {
     if (sel?.daysFromStart != null) return completedCyclePos?.has(sel.daysFromStart) ?? false;
     const pos = (currentCycleNum + weekOffset) * dayCount + selectedSlot;
     return completedCyclePos?.has(pos) ?? false;
-  }, [isActiveRest, weekdayMode, cycleWeekView, sessionDate, completedDateKeys, completedCyclePos, week, selectedWd, currentCycleNum, weekOffset, dayCount, selectedSlot]);
+  }, [isActiveRest, isFlex, dayIdx, doneSession, weekdayMode, cycleWeekView, sessionDate, completedDateKeys, completedCyclePos, week, selectedWd, currentCycleNum, weekOffset, dayCount, selectedSlot]);
 
   const skipsMap = useMemo(() => {
     const m = new Map();
@@ -1501,9 +1530,9 @@ function HomeScreen({ store, setStore, go, userId }) {
   }, [store.statusPeriods]);
 
   const selectedDateSkip = useMemo(() => {
-    if (isViewingToday || isFutureSlot) return null;
+    if (isFlex || isViewingToday || isFutureSlot) return null;
     return skipsMap.get(sessionDate.toISOString().slice(0, 10)) ?? null;
-  }, [isViewingToday, isFutureSlot, skipsMap, sessionDate]);
+  }, [isFlex, isViewingToday, isFutureSlot, skipsMap, sessionDate]);
 
   const selectedDayStatusMode = useMemo(() => {
     if (isFutureSlot) return null;
@@ -1574,6 +1603,78 @@ function HomeScreen({ store, setStore, go, userId }) {
     return null;
   }, [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
 
+  const allMissedDays = useMemo(() => {
+    if (!sch) return [];
+    const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
+    const sessionDates = new Set(store.sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
+    const missed = [];
+    for (let daysAgo = 1; daysAgo <= 14; daysAgo++) {
+      const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
+      const dateKey = d.toISOString().slice(0, 10);
+      if (sessionDates.has(dateKey)) continue;
+      const skip = skipsMap.get(dateKey);
+      if (skip && skip.skipReason !== '—') continue;
+      let trainingDay = null;
+      if (weekdayMode) {
+        if (store.weekPlanStartDate && dateKey < store.weekPlanStartDate) continue;
+        const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+        trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
+      } else if (store.cycleStartDate) {
+        const vDays = LB.getPlanDaysForDate(sch, dateKey);
+        if (!vDays.length) continue;
+        const cyclePosForDate = LB.getCyclePosForDate(sch, dateKey);
+        let idx;
+        if (cyclePosForDate !== null) {
+          idx = cyclePosForDate;
+        } else {
+          const start = LB.parseDate(store.cycleStartDate);
+          const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+          if (n < 0) continue;
+          idx = ((n % vDays.length) + vDays.length) % vDays.length;
+        }
+        const dayData = vDays[idx];
+        if (dayData?.items?.length > 0) trainingDay = dayData;
+      }
+      if (!trainingDay) continue;
+      missed.push({ date: d, dateKey, dayName: trainingDay.name, dayId: trainingDay.id, daysAgo, dayData: trainingDay });
+    }
+    return missed;
+  }, [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
+
+  useEffect(() => {
+    const coaching = store.coaching;
+    if (!coaching) return;
+    const asClient = coaching.asClient;
+    const asSelf = coaching.asSelf;
+    const hasCoaching = (asClient?.status === 'active' && (asClient?.checkinEnabled ?? true)) || !!asSelf;
+    if (!hasCoaching) { setCheckinDue(false); return; }
+    const coachingId = asClient?.id || asSelf?.id;
+    if (!coachingId) { setCheckinDue(false); return; }
+    LB.loadCheckins(coachingId).then(rows => {
+      const weekStart = LB.checkinWeekStart();
+      const thisWeek = rows.find(r => r.weekStart === weekStart);
+      setCheckinDue(!thisWeek);
+    }).catch(() => setCheckinDue(false));
+  }, [store.coaching]);
+
+  useEffect(() => {
+    const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id;
+    if (!coachingId) { setCoachingSchema(null); return; }
+    let cancelled = false;
+    LB.loadCheckinSchema(coachingId).then(schema => {
+      if (!cancelled) setCoachingSchema(schema || null);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [store.coaching?.asClient?.id, store.coaching?.asSelf?.id]);
+
+  useEffect(() => {
+    const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id;
+    if (!coachingId) { setCoachingMacros(null); return; }
+    let cancelled = false;
+    LB.loadCoachingMacros(coachingId).then(data => { if (!cancelled) setCoachingMacros(data[0] || null); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [store.coaching?.asClient?.id, store.coaching?.asSelf?.id]);
+
   const startSession = async () => {
     if (!activeDay || isActiveRest) return;
     // Seeds/progression consume the recent history synchronously — when an
@@ -1604,16 +1705,27 @@ function HomeScreen({ store, setStore, go, userId }) {
         : (currentCycleNum + weekOffset) * dayCount + selectedSlot;
     const firstWorkingKg = entries[0]?.sets[0]?.kg ?? null;
     const firstEx = LB.findExercise(store, activeDay.items[0]?.exId);
+    // Flex sessions are always logged "now" — the selected slot is just a
+    // rotation position, never a calendar date (catch-ups date to today too).
+    const sessionDateISO = (isFlex ? new Date() : sessionDate).toISOString();
     if (firstEx?.equipment === 'bodyweight') {
       const session = {
         id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
-        date: sessionDate.toISOString(), startedAt: new Date().toISOString(), entries, currentExIdx: 0, cyclePos,
+        date: sessionDateISO, startedAt: new Date().toISOString(), entries, currentExIdx: 0, cyclePos,
       };
       setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
       go({ name: 'train', sessionId: session.id });
       return;
     }
     setWarmupPromptData({ entries, cyclePos, firstWorkingKg, firstName: entries[0]?.name || '?' });
+  };
+
+  // Flex: skip the current next-up day — advance the rotation by one without
+  // logging anything (no dated skip row; flex has no calendar to mark).
+  const flexSkip = () => {
+    if (!dayCount) return;
+    setStore(s => ({ ...s, cycleIndex: (s.cycleIndex || 0) + 1, lastAdvancedDate: LB.todayISO() }));
+    setSelectedSlot((((dayIdx + 1) % dayCount) + dayCount) % dayCount);
   };
 
   const confirmStart = (withWarmup) => {
@@ -1634,10 +1746,157 @@ function HomeScreen({ store, setStore, go, userId }) {
     }
     const session = {
       id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
-      date: sessionDate.toISOString(), startedAt, ended: null, entries, currentExIdx: 0,
+      date: (isFlex ? new Date() : sessionDate).toISOString(), startedAt, ended: null, entries, currentExIdx: 0,
       cyclePos,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    go({ name: 'train', sessionId: session.id });
+  };
+
+  const onTouchStart = (e) => {
+    if (quickActionsOpen) return;
+    swipeRef.current = { y: e.touches[0].clientY, x: e.touches[0].clientX };
+  };
+  const onTouchMove = (e) => {
+    const start = swipeRef.current;
+    if (!start.y) return;
+    const dy = e.touches[0].clientY - start.y;
+    const dx = Math.abs(e.touches[0].clientX - start.x);
+    if (dy > 0 && dy > dx * 0.5) setPullDelta(dy);
+    else setPullDelta(0);
+  };
+  const onTouchEnd = (e) => {
+    const start = swipeRef.current;
+    if (!start.y) return;
+    const dy = e.changedTouches[0].clientY - start.y;
+    const dx = Math.abs(e.changedTouches[0].clientX - start.x);
+    swipeRef.current = { y: null, x: null };
+    setPullDelta(0);
+    if (dy > 65 && dy > dx * 1.5) setQuickActionsOpen(true);
+  };
+  const onTouchCancel = () => { swipeRef.current = { y: null, x: null }; setPullDelta(0); };
+
+  const handleSetStatus = async (mode, startDateStr = null) => {
+    const current = store.statusMode ?? null;
+    const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+    const startedAt = startDateStr
+      ? new Date(startDateStr + 'T12:00:00').toISOString()
+      : new Date().toISOString();
+    const closedAt = mode === null
+      ? (() => { const d = new Date((startDateStr || LB.todayISO()) + 'T12:00:00'); d.setDate(d.getDate() - 1); return d.toISOString(); })()
+      : startedAt;
+    const openPeriod = mode === null ? (store.statusPeriods || []).find(p => !p.endedAt) : null;
+    const shouldDelete = !!openPeriod && closedAt < openPeriod.startedAt;
+    const modeChanged = mode !== current;
+    if (!modeChanged && !startDateStr) return;
+    const since = mode ? startedAt : null;
+    setStore(s => {
+      const updatedPeriods = mode
+        ? modeChanged
+          ? [{ id: '_pending', mode, startedAt, endedAt: null }, ...(s.statusPeriods || []).map(p => p.endedAt ? p : { ...p, endedAt: new Date().toISOString() })]
+          : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, startedAt } : p)
+        : shouldDelete
+          ? (s.statusPeriods || []).filter(p => !!p.endedAt)
+          : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: closedAt } : p);
+      return { ...s, statusMode: mode, statusModeSince: since, statusPeriods: updatedPeriods };
+    });
+    try {
+      if (modeChanged) {
+        if (mode) await LB.openStatusPeriod(userId, mode, startedAt);
+        else if (shouldDelete) await LB.supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null);
+        else      await LB.closeStatusPeriod(userId, closedAt);
+      } else {
+        await LB.updateStatusPeriodStart(userId, startedAt);
+      }
+    } catch (_) {}
+    if (coachingId && modeChanged) {
+      try {
+        const body = mode === 'sick'     ? 'Status: Sick — taking a break from training.'
+                   : mode === 'vacation' ? 'Status: Vacation — back soon!'
+                   : `Status: Back to normal (was ${current === 'sick' ? 'sick' : 'on vacation'}).`;
+        const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
+        await LB.addCoachingNote(coachingId, 'general', null, null, body, userId, threadId);
+      } catch (_) {}
+    }
+  };
+
+  const startFreestyleSession = () => {
+    setWorkoutSubOpen(false);
+    setQuickActionsOpen(false);
+    const session = {
+      id: LB.uid(), scheduleId: null, dayId: null, dayName: 'Freestyle',
+      date: new Date().toISOString(), startedAt: new Date().toISOString(),
+      ended: null, entries: [], currentExIdx: 0, cyclePos: null, isFreestyle: true, isBonus: true,
+    };
+    setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    go({ name: 'train', sessionId: session.id });
+  };
+
+  const startBonusSession = async (day) => {
+    if (loggingRef.current) return;
+    loggingRef.current = true;
+    setBonusDayPickerOpen(false);
+    setWorkoutSubOpen(false);
+    setQuickActionsOpen(false);
+    const seedRefs = await LB.fetchSeedEntries(store, day.items, day.id, userId);
+    const entries = (day.items || []).map(it => {
+      const ex = LB.findExercise(store, it.exId);
+      if (ex?.movement_type === 'cardio') {
+        return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
+      }
+      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, day.id);
+      const isUni = ex?.unilateral || false;
+      const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet, seedRefs[it.exId]);
+      const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+      const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
+      return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+    });
+    // Treat as normal (cycle advances) only when this is today's scheduled day
+    // AND it hasn't been trained yet today. If already done, it's always bonus.
+    const todayStr = LB.todayISO();
+    const isTodaysDay = LB.todaysDay(store)?.day?.id === day.id;
+    const alreadyDoneToday = isTodaysDay && store.sessions.some(
+      s => s.ended && s.dayId === day.id && s.date?.slice(0, 10) === todayStr
+    );
+    const session = {
+      id: LB.uid(), scheduleId: sch?.id, dayId: day.id, dayName: day.name,
+      date: new Date().toISOString(), startedAt: new Date().toISOString(),
+      ended: null, entries, currentExIdx: 0, cyclePos: null,
+      ...(!isTodaysDay || alreadyDoneToday ? { isBonus: true } : {}),
+    };
+    setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    loggingRef.current = false;
+    go({ name: 'train', sessionId: session.id });
+  };
+
+  const startBacklogSession = async (missed) => {
+    if (loggingRef.current) return;
+    loggingRef.current = true;
+    setQuickActionsOpen(false);
+    setBacklogPickerOpen(false);
+    const { dayData, dayId, dayName, date } = missed;
+    const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
+    const entries = (dayData?.items || []).map(it => {
+      const ex = LB.findExercise(store, it.exId);
+      if (ex?.movement_type === 'cardio') {
+        return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
+      }
+      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
+      const isUni = ex?.unilateral || false;
+      const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
+      const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+      const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
+      return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+    });
+    const session = { id: LB.uid(), scheduleId: sch?.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
+    const autoSkip = skipsMap.get(missed.dateKey);
+    setStore(s => ({
+      ...s,
+      sessions: [...s.sessions, session],
+      inProgress: session.id,
+      ...(autoSkip?.skipReason === '—' ? { skips: (s.skips || []).filter(x => x.id !== autoSkip.id) } : {}),
+    }));
+    loggingRef.current = false;
     go({ name: 'train', sessionId: session.id });
   };
 
@@ -1707,6 +1966,7 @@ function HomeScreen({ store, setStore, go, userId }) {
 
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
+      <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
       {/* Background ZANE watermark (per-user override via TRAIN_BG_OVERRIDES) */}
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
         <img src={trainBg} style={isCustomBg
@@ -1755,6 +2015,29 @@ function HomeScreen({ store, setStore, go, userId }) {
         <div className="knurl" style={{ marginLeft: -22, marginRight: -22 }} />
       </div>
 
+      {/* Pull-down indicator — fades in as the user pulls, turns gold at threshold */}
+      <div style={{
+        flexShrink: 0,
+        height: Math.min(pullDelta * 0.4, 28),
+        overflow: 'hidden',
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        transition: pullDelta === 0 ? 'height 0.25s ease' : 'none',
+        pointerEvents: 'none',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 4,
+          opacity: Math.min(1, pullDelta / 50),
+          color: pullDelta >= 65 ? UI.gold : UI.inkFaint,
+          transition: pullDelta === 0 ? 'opacity 0.25s ease, color 0.15s ease' : 'color 0.1s ease',
+        }}>
+          <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.18em', fontWeight: 600 }}>
+            {pullDelta >= 65 ? 'RELEASE' : 'QUICK ACTIONS'}
+          </span>
+          <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </div>
+      </div>
+
       {/* In-progress banner */}
       {store.inProgress && (() => {
         const activeSession = store.sessions.find(s => s.id === store.inProgress);
@@ -1795,31 +2078,35 @@ function HomeScreen({ store, setStore, go, userId }) {
 
       <div style={{ flex: 1, minHeight: 0, padding: '16px 22px 0', display: 'flex', flexDirection: 'column', gap: 12, position: 'relative', zIndex: 1 }}>
 
-        {/* Period navigation */}
+        {/* Period navigation — flex has no calendar weeks, just a static label */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button onClick={goBack} disabled={weekOffset <= minOffset} style={{
-            width: 30, height: 30, borderRadius: 4,
-            background: 'transparent',
-            border: `1px solid ${weekOffset <= minOffset ? 'transparent' : UI.hairStrong}`,
-            color: weekOffset <= minOffset ? UI.inkGhost : UI.inkSoft,
-            cursor: weekOffset <= minOffset ? 'default' : 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M6 1 1 6l5 5"/></svg>
-          </button>
+          {!isFlex && (
+            <button onClick={goBack} disabled={weekOffset <= minOffset} style={{
+              width: 30, height: 30, borderRadius: 4,
+              background: 'transparent',
+              border: `1px solid ${weekOffset <= minOffset ? 'transparent' : UI.hairStrong}`,
+              color: weekOffset <= minOffset ? UI.inkGhost : UI.inkSoft,
+              cursor: weekOffset <= minOffset ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M6 1 1 6l5 5"/></svg>
+            </button>
+          )}
           <div style={{ flex: 1, textAlign: 'center' }}>
             <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft, textTransform: 'uppercase' }}>{periodLabel}</span>
           </div>
-          <button onClick={goForward} disabled={weekOffset === 0} style={{
-            width: 30, height: 30, borderRadius: 4,
-            background: 'transparent',
-            border: `1px solid ${weekOffset === 0 ? 'transparent' : UI.hairStrong}`,
-            color: weekOffset === 0 ? UI.inkGhost : UI.inkSoft,
-            cursor: weekOffset === 0 ? 'default' : 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M2 1l5 5-5 5"/></svg>
-          </button>
+          {!isFlex && (
+            <button onClick={goForward} disabled={weekOffset === 0} style={{
+              width: 30, height: 30, borderRadius: 4,
+              background: 'transparent',
+              border: `1px solid ${weekOffset === 0 ? 'transparent' : UI.hairStrong}`,
+              color: weekOffset === 0 ? UI.inkGhost : UI.inkSoft,
+              cursor: weekOffset === 0 ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M2 1l5 5-5 5"/></svg>
+            </button>
+          )}
         </div>
 
         {/* day strip */}
@@ -1830,9 +2117,14 @@ function HomeScreen({ store, setStore, go, userId }) {
             const r = !d.items?.length;
             const slotLabel = weekdayMode
               ? WEEKDAYS[i]
-              : d.date.toLocaleDateString(undefined, { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
+              : isFlex
+                ? `D${(d.slotIdx ?? i) + 1}`
+                : d.date.toLocaleDateString(undefined, { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
             let isCompleted = false;
-            if (!r) {
+            if (!r && isFlex) {
+              // Earlier slots in the current rotation pass that have a session.
+              isCompleted = (d.slotIdx ?? i) < dayIdx && store.sessions.some(s => s.ended && s.dayId === d.id);
+            } else if (!r && !isFlex) {
               if (weekdayMode) {
                 const slotKey = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
                 isCompleted = completedDateKeys?.has(slotKey) ?? false;
@@ -1847,7 +2139,9 @@ function HomeScreen({ store, setStore, go, userId }) {
               }
             }
             const dateKey = d.date.toISOString().slice(0, 10);
-            const isPast = !d.isToday && d.date < new Date();
+            // Flex slots carry no real calendar date, so none of the date-derived
+            // markers (missed / skipped / status / completed) apply.
+            const isPast = !isFlex && !d.isToday && d.date < new Date();
             const planStartStr = oldestVersionStart
               || (weekdayMode ? store.weekPlanStartDate : store.cycleStartDate);
             const isBeforePlanStart = planStartStr ? d.date < LB.parseDate(planStartStr) : false;
@@ -2067,7 +2361,11 @@ function HomeScreen({ store, setStore, go, userId }) {
                     </div>
                   </Frame>
                 )}
-                {!selectedDateSkip && (
+                {!selectedDateSkip && (isFlex && selectedSlot > dayIdx ? (
+                  <div style={{ padding: '12px 16px', borderRadius: 6, border: `1px dashed ${UI.hairStrong}`, textAlign: 'center' }}>
+                    <span className="micro" style={{ color: UI.inkFaint }}>UPCOMING · START THIS FROM THE NEXT-UP DAY</span>
+                  </div>
+                ) : (
                   <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
                     <button onClick={startSession} disabled={!!store.inProgress} style={{
                       opacity: store.inProgress ? 0.35 : 1,
@@ -2080,11 +2378,11 @@ function HomeScreen({ store, setStore, go, userId }) {
                     }}>
                       <i className="fa-solid fa-dumbbell" style={{ fontSize: 13, color: 'rgba(10,8,5,0.55)' }} />
                       <span style={{ color: 'rgba(10,8,5,0.75)', letterSpacing: '0.18em', fontWeight: 700, fontSize: 13, fontFamily: UI.fontUi }}>
-                        {isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION'}
+                        {isFlex && !isViewingToday ? 'CATCH UP' : (isFlex || isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION')}
                       </span>
                     </button>
                     {isViewingToday && (
-                      <button onClick={() => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
+                      <button onClick={isFlex ? flexSkip : () => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
                         flexShrink: 0, width: 80, minHeight: 48, borderRadius: 6, cursor: 'pointer',
                         background: 'transparent',
                         border: `1px solid ${UI.hairStrong}`,
@@ -2096,7 +2394,7 @@ function HomeScreen({ store, setStore, go, userId }) {
                       </button>
                     )}
                   </div>
-                )}
+                ))}
               </div>
             )}
 
@@ -2278,6 +2576,190 @@ function HomeScreen({ store, setStore, go, userId }) {
         );
       })()}
       {confirmEl}
+
+      {/* Quick actions sheet — triggered by swipe-down */}
+      <Sheet open={quickActionsOpen} onClose={() => setQuickActionsOpen(false)} title="Quick actions" titleColor="var(--accent)">
+        {(() => {
+          const actionBtn = (onClick, icon, label, sub) => (
+            <button onClick={onClick} style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 14,
+              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              marginBottom: 8,
+            }}>
+              <i className={`fa-solid ${icon}`} style={{ fontSize: 20, color: 'var(--accent)', width: 22, textAlign: 'center', flexShrink: 0 }} />
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', fontFamily: UI.fontUi }}>{label}</div>
+                <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>{sub}</div>
+              </div>
+              <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+            </button>
+          );
+          const asClient = store.coaching?.asClient;
+          const asSelf = store.coaching?.asSelf;
+          return (
+            <div>
+              {actionBtn(() => { setQuickActionsOpen(false); setDailyLogOpen(true); }, 'fa-calendar-day', 'Daily Log', 'Weight, macros, water & steps')}
+              {actionBtn(() => { setQuickActionsOpen(false); setWorkoutSubOpen(true); }, 'fa-dumbbell', 'Workout', sch ? 'From plan or freestyle' : 'Open training — add exercises on the fly')}
+              {allMissedDays.length > 0 && actionBtn(
+                () => {
+                  setQuickActionsOpen(false);
+                  if (allMissedDays.length === 1) { startBacklogSession(allMissedDays[0]); }
+                  else setBacklogPickerOpen(true);
+                },
+                'fa-clock-rotate-left',
+                'Backlog Session',
+                allMissedDays.length === 1
+                  ? `Log ${allMissedDays[0].dayName} (${allMissedDays[0].daysAgo === 1 ? 'yesterday' : `${allMissedDays[0].daysAgo}d ago`})`
+                  : `${allMissedDays.length} unlogged sessions`,
+              )}
+              {actionBtn(() => { setQuickActionsOpen(false); setCardioPopoverOpen(true); }, 'fa-person-running', 'Cardio', 'Start live or log manually')}
+              {checkinDue && (asClient?.status === 'active' || asSelf) && actionBtn(
+                () => {
+                  setQuickActionsOpen(false);
+                  const bothActive = asClient?.status === 'active' && asSelf;
+                  if (bothActive) { setCheckinPickerOpen(true); return; }
+                  if (asSelf) {
+                    go({ name: 'coaching-client', coachingId: asSelf.id, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf: true, backRoute: 'home' });
+                  } else {
+                    go({ name: 'coaching', initialClientTab: 'checkin' });
+                  }
+                },
+                'fa-clipboard-check',
+                'Check-in',
+                'This week\'s check-in is due',
+              )}
+              {asClient?.status === 'active' && actionBtn(
+                () => {
+                  setQuickActionsOpen(false);
+                  go({ name: 'coaching', initialClientTab: 'messages' });
+                },
+                'fa-message',
+                'Message Coach',
+                'Send a note to your coach',
+              )}
+            </div>
+          );
+        })()}
+      </Sheet>
+
+      {/* Check-in picker: real coach vs. self-coaching */}
+      {(() => {
+        const asClient = store.coaching?.asClient;
+        const asSelf   = store.coaching?.asSelf;
+        const navCheckinSelf = () =>
+          go({ name: 'coaching-client', coachingId: asSelf.id, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf: true, backRoute: 'home' });
+        const navCheckinCoach = () =>
+          go({ name: 'coaching', initialClientTab: 'checkin' });
+        const btnStyle = { width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
+        return (
+          <Sheet open={checkinPickerOpen} onClose={() => setCheckinPickerOpen(false)} title="Which check-in?">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {asClient?.status === 'active' && (
+                <button onClick={() => { setCheckinPickerOpen(false); navCheckinCoach(); }} style={btnStyle}>
+                  <i className="fa-solid fa-user-tie" style={{ width: 20, textAlign: 'center', color: 'var(--accent)', fontSize: 16 }} />
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', fontFamily: UI.fontUi }}>Coach check-in</div>
+                    <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>{asClient.coachName || 'Your coach'}</div>
+                  </div>
+                  <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+                </button>
+              )}
+              {asSelf && (
+                <button onClick={() => { setCheckinPickerOpen(false); navCheckinSelf(); }} style={btnStyle}>
+                  <i className="fa-solid fa-user" style={{ width: 20, textAlign: 'center', color: 'var(--accent)', fontSize: 16 }} />
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', fontFamily: UI.fontUi }}>Self check-in</div>
+                    <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Your own coaching dashboard</div>
+                  </div>
+                  <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+                </button>
+              )}
+            </div>
+          </Sheet>
+        );
+      })()}
+
+      {/* Workout sub-picker: From plan | Freestyle */}
+      <Sheet open={workoutSubOpen} onClose={() => setWorkoutSubOpen(false)} title="Start workout">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {sch && (
+            <button onClick={() => { setWorkoutSubOpen(false); setBonusDayPickerOpen(true); }} style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            }}>
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>From plan</div>
+                <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Pick a day from your schedule — you choose at the end whether it counts</div>
+              </div>
+              <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+            </button>
+          )}
+          <button onClick={startFreestyleSession} style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+            padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+            borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>Freestyle</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Open session — add exercises on the fly</div>
+            </div>
+            <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+          </button>
+        </div>
+      </Sheet>
+
+      {/* Bonus day picker — training days from the active schedule */}
+      <Sheet open={bonusDayPickerOpen} onClose={() => setBonusDayPickerOpen(false)} title="Pick a day">
+        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 14 }}>
+          You choose at the end whether this replaces a scheduled day or counts as extra.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {(sch?.days || []).filter(d => d.items?.length > 0).map(d => (
+            <button key={d.id} onClick={() => startBonusSession(d)} style={{
+              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{d.name}</span>
+              <span className="micro" style={{ color: UI.inkFaint }}>{d.items.length} exercise{d.items.length !== 1 ? 's' : ''}</span>
+            </button>
+          ))}
+        </div>
+      </Sheet>
+
+      {/* Backlog day picker when multiple missed sessions */}
+      <Sheet open={backlogPickerOpen} onClose={() => setBacklogPickerOpen(false)} title="Which session?">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {allMissedDays.map(m => (
+            <button key={m.dateKey} onClick={() => startBacklogSession(m)} style={{
+              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{m.dayName}</span>
+              <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
+                {m.daysAgo === 1 ? 'yesterday' : `${m.daysAgo}d ago`}
+              </span>
+            </button>
+          ))}
+        </div>
+      </Sheet>
+
+      {/* Daily log sheet */}
+      <DailyLogSheet
+        open={dailyLogOpen}
+        onClose={() => setDailyLogOpen(false)}
+        store={store}
+        setStore={setStore}
+        date={LB.todayISO()}
+        targets={LB.effectiveMacroTargets(store.settings?.macroTargets, coachingMacros)}
+        activeCoachingSchema={coachingSchema}
+        onSetStatus={handleSetStatus}
+      />
+
+      </div>{/* end swipe wrapper */}
     </Screen>
   );
 }
