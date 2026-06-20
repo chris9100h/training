@@ -929,7 +929,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
               <div style={{ flex: 1 }}>
                 <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Advance only when I train</div>
                 <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
-                  No fixed days. The next workout waits until you log it — rest days never push your plan forward.
+                  No fixed days and no rest days — your next workout simply waits until you log it, whenever that is.
                 </div>
               </div>
             </button>
