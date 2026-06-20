@@ -793,11 +793,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const shouldAdvance = session.isBonus ? advanceCycle : true;
     // For freestyle sessions scheduleId is null so isWeekdayMode is always false —
     // check the active plan too so weekday-mode users don't get a stale cycleIndex bump.
-    const activeIsWeekday = LB.isWeekdayPlan(LB.todaysDay(store)?.schedule);
+    const activeSch = LB.todaysDay(store)?.schedule;
+    const activeIsWeekday = LB.isWeekdayPlan(activeSch);
+    // On a flex plan cycleIndex IS the live position, so only a real session of
+    // that plan may advance it — a freestyle/ad-hoc workout must not skip the
+    // next-up day forward.
+    const flexBlocks = LB.isFlexPlan(activeSch) && (session.isFreestyle || session.scheduleId !== activeSch?.id);
     setStore(s => ({
       ...s,
       inProgress: null,
-      ...(shouldAdvance && !isWeekdayMode && !activeIsWeekday && { cycleIndex: s.cycleIndex + 1 }),
+      ...(shouldAdvance && !isWeekdayMode && !activeIsWeekday && !flexBlocks && { cycleIndex: s.cycleIndex + 1 }),
       lastAdvancedDate: LB.todayISO(),
       ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
     }));
