@@ -1736,6 +1736,50 @@ function HomeScreen({ store, setStore, go, userId }) {
   };
   const onTouchCancel = () => { swipeRef.current = { y: null, x: null }; setPullDelta(0); };
 
+  const handleSetStatus = async (mode, startDateStr = null) => {
+    const current = store.statusMode ?? null;
+    const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+    const startedAt = startDateStr
+      ? new Date(startDateStr + 'T12:00:00').toISOString()
+      : new Date().toISOString();
+    const closedAt = mode === null
+      ? (() => { const d = new Date((startDateStr || LB.todayISO()) + 'T12:00:00'); d.setDate(d.getDate() - 1); return d.toISOString(); })()
+      : startedAt;
+    const openPeriod = mode === null ? (store.statusPeriods || []).find(p => !p.endedAt) : null;
+    const shouldDelete = !!openPeriod && closedAt < openPeriod.startedAt;
+    const modeChanged = mode !== current;
+    if (!modeChanged && !startDateStr) return;
+    const since = mode ? startedAt : null;
+    setStore(s => {
+      const updatedPeriods = mode
+        ? modeChanged
+          ? [{ id: '_pending', mode, startedAt, endedAt: null }, ...(s.statusPeriods || []).map(p => p.endedAt ? p : { ...p, endedAt: new Date().toISOString() })]
+          : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, startedAt } : p)
+        : shouldDelete
+          ? (s.statusPeriods || []).filter(p => !!p.endedAt)
+          : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: closedAt } : p);
+      return { ...s, statusMode: mode, statusModeSince: since, statusPeriods: updatedPeriods };
+    });
+    try {
+      if (modeChanged) {
+        if (mode) await LB.openStatusPeriod(userId, mode, startedAt);
+        else if (shouldDelete) await LB.supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null);
+        else      await LB.closeStatusPeriod(userId, closedAt);
+      } else {
+        await LB.updateStatusPeriodStart(userId, startedAt);
+      }
+    } catch (_) {}
+    if (coachingId && modeChanged) {
+      try {
+        const body = mode === 'sick'     ? 'Status: Sick — taking a break from training.'
+                   : mode === 'vacation' ? 'Status: Vacation — back soon!'
+                   : `Status: Back to normal (was ${current === 'sick' ? 'sick' : 'on vacation'}).`;
+        const threadId = await LB.getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
+        await LB.addCoachingNote(coachingId, 'general', null, null, body, userId, threadId);
+      } catch (_) {}
+    }
+  };
+
   const startFreestyleSession = () => {
     setWorkoutSubOpen(false);
     setQuickActionsOpen(false);
@@ -2597,6 +2641,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         date={LB.todayISO()}
         targets={LB.effectiveMacroTargets(store.settings?.macroTargets, null)}
         activeCoachingSchema={coachingSchema}
+        onSetStatus={handleSetStatus}
       />
 
       </div>{/* end swipe wrapper */}
