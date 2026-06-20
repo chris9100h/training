@@ -2509,7 +2509,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       {confirmEl}
 
       {/* Quick actions sheet — triggered by swipe-down */}
-      <Sheet open={quickActionsOpen} onClose={() => setQuickActionsOpen(false)} title="Quick actions">
+      <Sheet open={quickActionsOpen} onClose={() => setQuickActionsOpen(false)} title="Quick actions" titleColor="var(--accent)">
         {(() => {
           const actionBtn = (onClick, icon, label, sub) => (
             <button onClick={onClick} style={{
@@ -2518,7 +2518,7 @@ function HomeScreen({ store, setStore, go, userId }) {
               borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
               marginBottom: 8,
             }}>
-              <i className={`fa-solid ${icon}`} style={{ fontSize: 16, color: 'var(--accent)', width: 18, textAlign: 'center', flexShrink: 0 }} />
+              <i className={`fa-solid ${icon}`} style={{ fontSize: 20, color: 'var(--accent)', width: 22, textAlign: 'center', flexShrink: 0 }} />
               <div style={{ flex: 1, textAlign: 'left' }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', fontFamily: UI.fontUi }}>{label}</div>
                 <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>{sub}</div>
