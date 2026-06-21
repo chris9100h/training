@@ -17,7 +17,7 @@
 window.WHATS_NEW = [
   {
     id: 'v2.393',
-    title: 'Support inbox',
+    title: 'Under the hood',
     items: [
       'Push notification when a support message arrives, in both directions',
       'New message banner on the home screen takes you straight to the conversation',
