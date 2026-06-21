@@ -798,6 +798,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
             ? { ...t, lastMessageAt: note.created_at, lastMessageBody: body }
             : t
         )}));
+        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportActiveTicketId, preview: body });
       }
     } finally { setSupportSending(false); }
   };
@@ -824,6 +825,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
         setSupportActiveTicketId(coachingId);
         setSupportActiveNotes([note]);
         setSupportView('thread');
+        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId, preview: body });
       }
     } finally { setSupportSending(false); }
   };
@@ -837,7 +839,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
       const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
         id: LB.uid(), coaching_id: supportTicket.coachingId, author_id: userId, type: 'general', body,
       }).select('id, author_id, body, created_at').single();
-      if (!error && note) setSupportTicketNotes(prev => [...prev, note]);
+      if (!error && note) {
+        setSupportTicketNotes(prev => [...prev, note]);
+        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportTicket.coachingId, preview: body });
+      }
     } finally { setSupportAdminSending(false); }
   };
 
