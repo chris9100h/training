@@ -480,6 +480,37 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   })();
   const fmtDelta = d => (d >= 0 ? '+' : '') + d.toFixed(2).replace('.', ',') + ' ' + UI.unit();
 
+  const stepsDelta = (() => {
+    const cur = parseFloat(responses.steps), prev = parseFloat(prevCi?.responses?.steps);
+    if (isNaN(cur) || isNaN(prev)) return null;
+    return Math.round(cur - prev);
+  })();
+  const cardioMinDelta = (() => {
+    const cur = parseFloat(responses.cardio_minutes), prev = parseFloat(prevCi?.responses?.cardio_minutes);
+    if (isNaN(cur) || isNaN(prev)) return null;
+    return Math.round(cur - prev);
+  })();
+  const cardioDistDelta = (() => {
+    const cur = parseFloat(responses.cardio_distance_m), prev = parseFloat(prevCi?.responses?.cardio_distance_m);
+    if (isNaN(cur) || isNaN(prev)) return null;
+    return cur - prev;
+  })();
+  const paceDelta = (() => {
+    const parseP = p => { if (!p) return NaN; const [m, s] = String(p).split(':').map(Number); return isNaN(m) || isNaN(s) ? NaN : m * 60 + s; };
+    const cur = parseP(responses.cardio_pace), prev = parseP(prevCi?.responses?.cardio_pace);
+    if (isNaN(cur) || isNaN(prev)) return null;
+    return cur - prev; // negative = faster = better (lower_better)
+  })();
+  const fmtDistDelta = d => { const v = distUnit === 'mi' ? (d / 1609.344).toFixed(1) : (d / 1000).toFixed(1); return (d > 0 ? '+' : '') + v + ' ' + distUnit; };
+  const pillDeltaProps = f => {
+    if (f.key === 'weight_avg_last_week') return { delta: weightDelta };
+    if (f.key === 'steps') return { delta: stepsDelta, deltaStr: stepsDelta != null ? (stepsDelta > 0 ? '+' : '') + stepsDelta.toLocaleString() : undefined, deltaDir: 'higher_better' };
+    if (f.key === 'cardio_minutes') return { delta: cardioMinDelta, deltaStr: cardioMinDelta != null ? (cardioMinDelta > 0 ? '+' : '') + cardioMinDelta + ' min' : undefined, deltaDir: 'higher_better' };
+    if (f.key === 'cardio_distance_m') return { delta: cardioDistDelta, deltaStr: cardioDistDelta != null ? fmtDistDelta(cardioDistDelta) : undefined, deltaDir: 'higher_better' };
+    if (f.key === 'cardio_pace') return { delta: paceDelta, deltaDir: 'lower_better', arrowOnly: true };
+    return {};
+  };
+
   const buildText = () => {
     const lines = [`Week of ${fmtWeek(ci.weekStart)}`];
     sections.forEach(section => {
@@ -575,7 +606,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
               if (kind === 'pill') {
                 blocks.push(
                   <div key={`p-${items[0].key}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-                    {items.map(f => <StatPill key={f.key} label={f.label} value={fmtValue(f, responses[f.key])} delta={f.key === 'weight_avg_last_week' ? weightDelta : undefined} />)}
+                    {items.map(f => <StatPill key={f.key} label={f.label} value={fmtValue(f, responses[f.key])} {...pillDeltaProps(f)} />)}
                   </div>
                 );
               } else {
@@ -662,12 +693,26 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   );
 }
 
-function StatPill({ label, value, delta }) {
+function StatPill({ label, value, delta, deltaStr, deltaDir, arrowOnly }) {
+  const deltaColor = (() => {
+    if (delta == null || !deltaDir) return UI.inkSoft;
+    const good = deltaDir === 'higher_better' ? delta > 0 : delta < 0;
+    const bad  = deltaDir === 'higher_better' ? delta < 0 : delta > 0;
+    if (good) return 'var(--accent)';
+    if (bad)  return 'rgba(var(--danger-rgb),0.8)';
+    return UI.inkSoft;
+  })();
+  const arrow = delta == null ? null : delta === 0 ? '→' : (deltaDir === 'lower_better' ? (delta < 0 ? '↑' : '↓') : (delta > 0 ? '↑' : '↓'));
   return (
     <div style={{ background: UI.bgRaised, borderRadius: 6, padding: '7px 10px', border: `0.5px solid ${UI.hair}` }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
         <div className="num" style={{ fontSize: 15, color: UI.ink, fontWeight: 300 }}>{value}</div>
-        {delta != null && <div className="num" style={{ fontSize: 10, color: UI.inkSoft }}>{delta >= 0 ? '+' : ''}{delta.toFixed(2).replace('.', ',')}</div>}
+        {delta != null && arrowOnly && <div style={{ fontSize: 11, color: deltaColor }}>{arrow}</div>}
+        {delta != null && !arrowOnly && (
+          <div className="num" style={{ fontSize: 10, color: deltaColor }}>
+            {deltaStr ?? ((delta >= 0 ? '+' : '') + delta.toFixed(2).replace('.', ','))}
+          </div>
+        )}
       </div>
       <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', marginTop: 1 }}>{label}</div>
     </div>
