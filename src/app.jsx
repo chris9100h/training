@@ -928,11 +928,21 @@ function App() {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
-  // Retry a failed sync as soon as connectivity returns
+  // Connectivity tracking: offline → red immediately, online → retry or clear
   useEffectA(() => {
-    const onOnline = () => { if (userId) flushSync(userId); };
-    window.addEventListener('online', onOnline);
-    return () => window.removeEventListener('online', onOnline);
+    const onOffline = () => setSyncStatus('error');
+    const onOnline  = () => {
+      if (!userId) return;
+      if (pendingStore.current !== syncBase.current) flushSync(userId);
+      else setSyncStatus('synced');
+    };
+    if (!navigator.onLine) setSyncStatus('error');
+    window.addEventListener('offline', onOffline);
+    window.addEventListener('online',  onOnline);
+    return () => {
+      window.removeEventListener('offline', onOffline);
+      window.removeEventListener('online',  onOnline);
+    };
   }, [userId, flushSync]);
 
   // Keep nextReminderAt in sync whenever reminder settings or schedule state changes.
