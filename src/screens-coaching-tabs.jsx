@@ -681,6 +681,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             if (showPlanRow && lastMacroPillBlockIdx >= 0) {
               const planRow = (
                 <div key="plan-row" style={{ background: UI.bgRaised, borderRadius: 6, border: `0.5px solid ${UI.hair}`, padding: '8px 10px' }}>
+                  <div style={{ fontSize: 9, color: 'var(--accent)', fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase', fontWeight: 700, textAlign: 'center', marginBottom: 6 }}>Planned avg</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 6px' }}>
                     {[{v: planCal, u: 'kcal'}, {v: planProt, u: 'g'}, {v: planCarb, u: 'g'}, {v: planFat, u: 'g'}].map(({v, u}, i) => (
                       <div key={i} style={{ textAlign: 'center' }}>
@@ -693,7 +694,6 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
                       </div>
                     ))}
                   </div>
-                  <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase', marginTop: 6 }}>Planned avg</div>
                 </div>
               );
               blocks.splice(lastMacroPillBlockIdx + 1, 0, planRow);
