@@ -1745,11 +1745,11 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite) {
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_coaching_notes' }, p => {
       if (p.new.author_id !== userId) onCoachingNote?.(mapNote(p.new));
     })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `client_id=eq.${userId}` }, () => {
-      onCoachingInvite?.();
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `client_id=eq.${userId}` }, p => {
+      onCoachingInvite?.(p.eventType, p.old?.id ?? null);
     })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `coach_id=eq.${userId}` }, () => {
-      onCoachingInvite?.();
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `coach_id=eq.${userId}` }, p => {
+      onCoachingInvite?.(p.eventType, p.old?.id ?? null);
     })
     .subscribe();
   return () => { _supabase.removeChannel(_realtimeChannel); _realtimeChannel = null; };

@@ -837,7 +837,16 @@ function App() {
           };
         });
       },
-      () => {
+      (eventType, coachingId) => {
+        if (eventType === 'DELETE' && coachingId?.startsWith('support_')) {
+          // Admin deleted a support ticket — remove it from the user's list immediately
+          setStore(s => s ? {
+            ...s,
+            supportTickets: (s.supportTickets || []).filter(t => t.coachingId !== coachingId),
+            supportUnread: Math.max(0, (s.supportUnread || 0) - ((s.supportTickets || []).find(t => t.coachingId === coachingId)?.unreadCount || 0)),
+          } : s);
+          return;
+        }
         LB.reloadCoachingState(userId).then(coaching => {
           setStore(s => s ? { ...s, coaching } : s);
         }).catch(() => {});

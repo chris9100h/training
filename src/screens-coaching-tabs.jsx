@@ -4,9 +4,11 @@
 
 function CoachingBannerGroup({ store, setStore, userId, go }) {
   const [notesOpen, setNotesOpen] = useStateC(false);
-  const notes = store.coaching?.unreadNotes || [];
+  // Support-ticket notes must never appear in the coaching banner — they have
+  // their own badge/inbox in Settings. Filter defensively in case one leaks in.
+  const notes = (store.coaching?.unreadNotes || []).filter(n => !n.coachingId?.startsWith('support_'));
 
-  const clientIds = new Set((store.coaching?.asCoach || []).map(c => c.clientId));
+  const clientIds = new Set((store.coaching?.asCoach || []).filter(c => !c.id?.startsWith('support_')).map(c => c.clientId));
   const fromClient = notes.some(n => clientIds.has(n.authorId));
 
   // Keep mounted while sheet is open so ChatThread isn't destroyed mid-read
@@ -15,7 +17,7 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
   const handleOpen = () => {
     if (fromClient && go) {
       const note = notes.find(n => clientIds.has(n.authorId));
-      const client = note && (store.coaching?.asCoach || []).find(c => c.clientId === note.authorId);
+      const client = note && (store.coaching?.asCoach || []).find(c => c.clientId === note.authorId && !c.id?.startsWith('support_'));
       if (client) {
         go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName, initialTab: 'notes' });
         return;

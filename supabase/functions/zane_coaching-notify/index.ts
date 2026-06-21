@@ -92,8 +92,9 @@ Deno.serve(async (req) => {
     threadName = thread[0]?.name ?? '';
   }
 
-  const title   = threadName ? `Zane · ${threadName}` : 'Zane · New message';
-  const message = (preview ?? 'New message from your coach').split('\n')[0].slice(0, 100);
+  const isSupport = coachingId.startsWith('support_');
+  const title   = isSupport ? 'Zane · Support' : (threadName ? `Zane · ${threadName}` : 'Zane · New message');
+  const message = (preview ?? (isSupport ? 'New support ticket message' : 'New message from your coach')).split('\n')[0].slice(0, 100);
 
   // Pushover (if configured)
   if (settings[0].pushover_user_key) {
