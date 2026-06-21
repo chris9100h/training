@@ -1626,8 +1626,16 @@ function nextDay(state) {
 // - A fresh session without entries (outside the boot window) keeps the cached
 //   entries — windowing must never wipe history already on the device.
 function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
+  const baseIds = baseSessions ? new Set(baseSessions.map(s => s.id)) : null;
+  // Sessions deleted locally: once confirmed synced (in base) but no longer in
+  // cur. Exclude them from fresh so the merge doesn't resurrect them while the
+  // syncStore deletion is still propagating to the server.
+  const curIdSet = new Set((curSessions || []).map(s => s.id));
+  const locallyDeletedIds = baseIds
+    ? new Set([...baseIds].filter(id => !curIdSet.has(id)))
+    : null;
   const serverIds = new Set(freshSessions.map(s => s.id));
-  const sessions = freshSessions.map(s => {
+  const sessions = freshSessions.filter(s => !locallyDeletedIds?.has(s.id)).map(s => {
     const mem = (curSessions || []).find(x => x.id === s.id);
     if (!mem) return s;
     const isActive = s.id === inProgressId;
@@ -1649,7 +1657,6 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
   // a never-synced session would lose data. Only recent ended sessions
   // qualify; the in-progress session is always kept regardless of its date
   // (other ended=null sessions are orphans).
-  const baseIds = baseSessions ? new Set(baseSessions.map(s => s.id)) : null;
   const cutoff = new Date(now); cutoff.setDate(cutoff.getDate() - 2);
   const cutoffISO = cutoff.toISOString().slice(0, 10);
   const localOnly = (curSessions || []).filter(x =>
@@ -2494,6 +2501,33 @@ async function updateStatusPeriodStart(userId, startedAt) {
   await _supabase.from('zane_status_periods').update({ started_at: startedAt }).eq('user_id', userId).is('ended_at', null);
 }
 
+async function refreshHealthLogs(userId) {
+  const [dailyRes, cardioRes] = await Promise.all([
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
+  ]);
+  if (dailyRes.error || cardioRes.error) return null;
+  return {
+    dailyLogs: (dailyRes.data || []).map(l => ({
+      id: l.id, date: l.date,
+      weight: l.weight ?? null, steps: l.steps ?? null,
+      calories: l.calories ?? null, protein: l.protein ?? null,
+      carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
+      waterMl: l.water_ml ?? null, note: l.note ?? null,
+      offPlanNote: l.off_plan_note ?? null,
+      adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
+      coachFields: l.daily_coach_fields ?? null,
+      createdAt: l.created_at,
+    })),
+    cardioLogs: (cardioRes.data || []).map(l => ({
+      id: l.id, date: l.date, type: l.type ?? null,
+      durationMinutes: l.duration_minutes, distanceM: l.distance_m ?? null,
+      paceFeeling: l.pace_feeling ?? null, effort: l.effort ?? null,
+      note: l.note ?? null, sessionId: l.session_id ?? null, createdAt: l.created_at,
+    })),
+  };
+}
+
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
@@ -2516,4 +2550,5 @@ window.LB = {
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill, detectCardioPRs,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
+  refreshHealthLogs,
 };

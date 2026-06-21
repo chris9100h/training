@@ -340,8 +340,10 @@ function App() {
   const syncing                   = useRefA(false); // true while a sync is in flight
   const localDirty                = useRefA(false); // true if user changed store after cache load
   const userIdRef                 = useRefA(null);  // current userId for stale-closure contexts
+  const phaseRef                  = useRefA('init'); // current phase for stale-closure contexts
 
   useEffectA(() => { userIdRef.current = userId; }, [userId]);
+  useEffectA(() => { phaseRef.current = phase; }, [phase]);
 
   useEffectA(() => {
     if (store?.user?.email && store?.user?.name) {
@@ -376,22 +378,43 @@ function App() {
   }, [store?.settings?.darkMode]);
 
   useEffectA(() => {
-    const THRESHOLD = 30 * 60 * 1000;
+    const THRESHOLD      = 30 * 60 * 1000; // full reload after 30 min
+    const SOFT_THRESHOLD = 30 * 1000; // data-only refresh after 30 s
     const KEY = 'logbook-bg-ts';
+
+    const softRefresh = () => {
+      const uid = userIdRef.current;
+      if (phaseRef.current !== 'ready' || !uid) return;
+      LB.refreshHealthLogs(uid).then(fresh => {
+        if (!fresh) return;
+        setStore(s => {
+          const serverDailyIds  = new Set(fresh.dailyLogs.map(l => l.id));
+          const serverCardioIds = new Set(fresh.cardioLogs.map(l => l.id));
+          const localOnlyDaily  = (s.dailyLogs  || []).filter(l => !serverDailyIds.has(l.id));
+          const localOnlyCardio = (s.cardioLogs || []).filter(l => !serverCardioIds.has(l.id));
+          return { ...s, dailyLogs: [...localOnlyDaily, ...fresh.dailyLogs], cardioLogs: [...localOnlyCardio, ...fresh.cardioLogs] };
+        });
+      }).catch(() => {});
+    };
 
     const onHide = () => localStorage.setItem(KEY, Date.now());
     const onShow = (e) => {
       if (!e.persisted) return;
       const ts = localStorage.getItem(KEY);
-      if (ts && Date.now() - Number(ts) > THRESHOLD) window.location.reload();
+      const elapsed = ts ? Date.now() - Number(ts) : 0;
+      if (elapsed > THRESHOLD) { window.location.reload(); return; }
+      if (elapsed > SOFT_THRESHOLD) softRefresh();
       swReg.current?.update().catch(() => {});
     };
     // visibilitychange as additional fallback
     const onVisibility = () => {
-      if (document.hidden) localStorage.setItem(KEY, Date.now());
-      else {
+      if (document.hidden) {
+        localStorage.setItem(KEY, Date.now());
+      } else {
         const ts = localStorage.getItem(KEY);
-        if (ts && Date.now() - Number(ts) > THRESHOLD) window.location.reload();
+        const elapsed = ts ? Date.now() - Number(ts) : 0;
+        if (elapsed > THRESHOLD) { window.location.reload(); return; }
+        if (elapsed > SOFT_THRESHOLD) softRefresh();
         swReg.current?.update().catch(() => {});
       }
     };
@@ -510,8 +533,6 @@ function App() {
       setPhase('ready');
       LB.loadFromSupabase(uid)
         .then(fresh => {
-          // Skip if the user made local changes while the fetch was in flight
-          if (localDirty.current) return;
           const cur = prevStore.current;
           // fresh is the pristine server state — use it as the sync diff base
           syncBase.current = fresh;
@@ -537,12 +558,27 @@ function App() {
             const serverSchIds = new Set(fresh.schedules.map(s => s.id));
             const baseSchIds = base ? new Set((base.schedules || []).map(s => s.id)) : null;
             const localOnlySchedules = (cur.schedules || []).filter(x => !serverSchIds.has(x.id) && !baseSchIds?.has(x.id));
-            // Skips offline gesetzt aber noch nicht gesynct: erhalten, damit der
-            // Reload-Merge sie nicht mit den Server-Skips überschreibt (sie werden
-            // über syncStore's skips-Diff nachgeschoben).
             const serverSkipIds = new Set((fresh.skips || []).map(s => s.id));
             const baseSkipIds = base ? new Set((base.skips || []).map(s => s.id)) : null;
             const localOnlySkips = (cur.skips || []).filter(x => !serverSkipIds.has(x.id) && !baseSkipIds?.has(x.id));
+            const serverDailyIds = new Set((fresh.dailyLogs || []).map(l => l.id));
+            const baseDailyIds = base ? new Set((base.dailyLogs || []).map(l => l.id)) : null;
+            const localOnlyDailyLogs = (cur.dailyLogs || []).filter(x => !serverDailyIds.has(x.id) && !baseDailyIds?.has(x.id));
+            const serverCardioIds = new Set((fresh.cardioLogs || []).map(l => l.id));
+            const baseCardioIds = base ? new Set((base.cardioLogs || []).map(l => l.id)) : null;
+            const localOnlyCardioLogs = (cur.cardioLogs || []).filter(x => !serverCardioIds.has(x.id) && !baseCardioIds?.has(x.id));
+            // Locally-deleted items (in base but not in cur): exclude from fresh
+            // so they aren't resurrected while syncStore deletion is in flight.
+            const curExIdSet = new Set((cur.exercises || []).map(e => e.id));
+            const delExIds = baseExIds ? new Set([...baseExIds].filter(id => !curExIdSet.has(id))) : null;
+            const curSchIdSet = new Set((cur.schedules || []).map(s => s.id));
+            const delSchIds = baseSchIds ? new Set([...baseSchIds].filter(id => !curSchIdSet.has(id))) : null;
+            const curSkipIdSet = new Set((cur.skips || []).map(s => s.id));
+            const delSkipIds = baseSkipIds ? new Set([...baseSkipIds].filter(id => !curSkipIdSet.has(id))) : null;
+            const curDailyIdSet = new Set((cur.dailyLogs || []).map(l => l.id));
+            const delDailyIds = baseDailyIds ? new Set([...baseDailyIds].filter(id => !curDailyIdSet.has(id))) : null;
+            const curCardioIdSet = new Set((cur.cardioLogs || []).map(l => l.id));
+            const delCardioIds = baseCardioIds ? new Set([...baseCardioIds].filter(id => !curCardioIdSet.has(id))) : null;
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
@@ -560,9 +596,11 @@ function App() {
               user: cur.user?.name ? { ...fresh.user, name: cur.user.name } : fresh.user,
               inProgress: activeExists ? inProgressId : null,
               sessions,
-              exercises: [...localOnlyExercises, ...fresh.exercises],
-              schedules: [...localOnlySchedules, ...fresh.schedules],
-              skips: [...localOnlySkips, ...(fresh.skips || [])],
+              exercises: [...localOnlyExercises, ...fresh.exercises.filter(e => !delExIds?.has(e.id))],
+              schedules: [...localOnlySchedules, ...fresh.schedules.filter(s => !delSchIds?.has(s.id))],
+              skips: [...localOnlySkips, ...(fresh.skips || []).filter(s => !delSkipIds?.has(s.id))],
+              dailyLogs: [...localOnlyDailyLogs, ...(fresh.dailyLogs || []).filter(l => !delDailyIds?.has(l.id))],
+              cardioLogs: [...localOnlyCardioLogs, ...(fresh.cardioLogs || []).filter(l => !delCardioIds?.has(l.id))],
             };
           }
           if (!fresh.user.approved) { setPhase('pending'); return; }

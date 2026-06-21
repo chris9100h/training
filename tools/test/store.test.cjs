@@ -237,6 +237,17 @@ async function testAsync(name, fn) {
     const { sessions } = LB.mergeSessions([], [sess], null, [{ id: 'other' }], now);
     assert.strictEqual(sessions.map(s => s.id).join(','), 'new');
   });
+  test('mergeSessions does NOT resurrect a session deleted locally (in base, not in cur, still on server)', () => {
+    const sess = { id: 'del', date: '2026-06-09', ended: 'x', entries: [] };
+    // fresh still has it (sync delete not yet propagated), cur doesn't (user deleted it), base has it
+    const { sessions } = LB.mergeSessions([sess], [], null, [sess], now);
+    assert.strictEqual(sessions.length, 0, 'locally deleted → must not come back from server');
+  });
+  test('mergeSessions includes new server sessions not in cur or base (cross-device created)', () => {
+    const sess = { id: 'new', date: '2026-06-09', ended: 'x', entries: [] };
+    const { sessions } = LB.mergeSessions([sess], [], null, [], now);
+    assert.strictEqual(sessions.map(s => s.id).join(','), 'new', 'new session from another device must appear');
+  });
 
   // ── sessionToRow keeps client-only fields out of the DB row ──────────────
   // agg* / entries are attached at load time; writing them would 400 on
