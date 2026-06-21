@@ -636,10 +636,12 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             const kindOf = f => f.type === 'stepper' ? 'stepper' : f.type === 'text' ? 'text' : 'pill';
             const blocks = [];
             let run = [], runKind = null;
+            let lastMacroPillBlockIdx = -1;
             const flush = () => {
               if (!run.length) return;
               const items = run; run = []; const kind = runKind; runKind = null;
               if (kind === 'pill') {
+                if (items.some(f => macroResponseKeys.includes(f.key))) lastMacroPillBlockIdx = blocks.length;
                 blocks.push(
                   <div key={`p-${items[0].key}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
                     {items.map(f => <StatPill key={f.key} label={f.label} value={fmtValue(f, responses[f.key])} {...pillDeltaProps(f)} />)}
@@ -675,6 +677,27 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
               run.push(f);
             });
             flush();
+            // Insert planned avg card right after the last macro pill block (before any text fields).
+            if (showPlanRow && lastMacroPillBlockIdx >= 0) {
+              const planRow = (
+                <div key="plan-row" style={{ background: UI.bgRaised, borderRadius: 6, border: `0.5px solid ${UI.hair}`, padding: '8px 10px' }}>
+                  <div style={{ fontSize: 9, color: UI.inkGhost, fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 6 }}>Planned avg</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 6px' }}>
+                    {[{v: planCal, u: 'kcal'}, {v: planProt, u: 'g'}, {v: planCarb, u: 'g'}, {v: planFat, u: 'g'}].map(({v, u}, i) => (
+                      <div key={i}>
+                        <div className="num" style={{ fontSize: 15, color: UI.inkGhost, fontWeight: 300 }}>
+                          {v != null ? v : '—'}
+                        </div>
+                        <div style={{ fontSize: 9, color: UI.inkGhost, fontFamily: UI.fontUi, letterSpacing: '0.07em', marginTop: 1 }}>
+                          {['Cal', 'Protein', 'Carbs', 'Fat'][i]} {u}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+              blocks.splice(lastMacroPillBlockIdx + 1, 0, planRow);
+            }
             return (
               <div key={section.id}>
                 <div className="knurl" style={{ margin: '0 0 6px' }} />
@@ -684,27 +707,6 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
               </div>
             );
           })}
-
-          {/* Planned macro avg row — shown when coaching macros exist and macro fields were reported */}
-          {showPlanRow && (
-            <div>
-              <div className="knurl" style={{ margin: '0 0 6px' }} />
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>PLANNED AVG</div>
-              <div className="knurl" style={{ margin: '0 0 8px' }} />
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 6px' }}>
-                {[{v: planCal, u: 'kcal'}, {v: planProt, u: 'g'}, {v: planCarb, u: 'g'}, {v: planFat, u: 'g'}].map(({v, u}, i) => (
-                  <div key={i} style={{ textAlign: 'center' }}>
-                    <div className="num" style={{ fontSize: 13, color: v != null ? UI.inkGhost : UI.inkGhost, fontWeight: 300 }}>
-                      {v != null ? v : '—'}<span style={{ fontSize: 9, color: UI.inkGhost }}>{u}</span>
-                    </div>
-                    <div style={{ fontSize: 8, color: UI.inkGhost, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 1 }}>
-                      {['Cal', 'Protein', 'Carbs', 'Fat'][i]}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Submitted fields no longer in the schema — kept visible, never dropped */}
           {extraKeys.length > 0 && (
