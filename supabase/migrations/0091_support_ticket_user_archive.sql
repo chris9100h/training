@@ -20,7 +20,8 @@ END;
 $$;
 
 -- get_user_support_chats: now returns archived + archived_at
-CREATE OR REPLACE FUNCTION get_user_support_chats()
+DROP FUNCTION IF EXISTS get_user_support_chats();
+CREATE FUNCTION get_user_support_chats()
 RETURNS TABLE (
   coaching_id       text,
   support_status    text,
