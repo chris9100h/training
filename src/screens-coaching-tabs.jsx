@@ -552,9 +552,8 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
       if (!fields.length) return;
       const headLabel = section.label.toUpperCase() + (section.sectionHint ? ` (${section.sectionHint})` : '');
       lines.push('', headLabel);
-      let sectionHadMacro = false;
-      fields.forEach(f => {
-        if (macroFieldKeys.has(f.key)) sectionHadMacro = true;
+      let planRowInserted = false;
+      fields.forEach((f, fi) => {
         const v = responses[f.key];
         if (f.type === 'stepper') lines.push(`${f.label}: ${v}/${f.max ?? 10}`);
         else if (f.type === 'text') lines.push('', `${f.label.toUpperCase()}`, String(v));
@@ -565,15 +564,20 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             : fmtTextDelta(f.key);
           lines.push(base + delta);
         }
+        // Insert planned avg right after the last macro field in this section
+        if (!planRowInserted && macroFieldKeys.has(f.key) && showPlanRow) {
+          const nextIsMacro = fi + 1 < fields.length && macroFieldKeys.has(fields[fi + 1].key);
+          if (!nextIsMacro) {
+            const parts = [];
+            if (planCal  != null) parts.push(`Cal: ${planCal} kcal`);
+            if (planProt != null) parts.push(`Protein: ${planProt} g`);
+            if (planCarb != null) parts.push(`Carbs: ${planCarb} g`);
+            if (planFat  != null) parts.push(`Fat: ${planFat} g`);
+            if (parts.length) lines.push(`Planned avg: ${parts.join(' · ')}`);
+            planRowInserted = true;
+          }
+        }
       });
-      if (sectionHadMacro && showPlanRow) {
-        const parts = [];
-        if (planCal  != null) parts.push(`Cal: ${planCal} kcal`);
-        if (planProt != null) parts.push(`Protein: ${planProt} g`);
-        if (planCarb != null) parts.push(`Carbs: ${planCarb} g`);
-        if (planFat  != null) parts.push(`Fat: ${planFat} g`);
-        if (parts.length) lines.push(`Planned avg: ${parts.join(' · ')}`);
-      }
     });
     if (extraKeys.length) {
       lines.push('', 'ADDITIONAL');
