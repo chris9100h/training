@@ -219,49 +219,59 @@ function WhatsNewModal({ entries, onDismiss }) {
   );
 }
 
-// Small, unobtrusive sync/storage status. Hidden when everything is synced.
-// 'pending' is faint (normal operation); an error or a full local cache shows
-// a tappable amber pill so a silent sync failure can't go unnoticed.
-// Default: fixed top-center overlay. `inline` renders just the compact pill
-// for embedding into a screen's own header (the training screen puts it in
-// the day-name row, where the overlay would cover the session/rest timers).
+// Persistent connection/sync status dot. Always visible — green pulsing = synced,
+// amber = saving, red = error (tappable). Replaces the pop-up "Saving…" pill.
+// `inline` variant for the training screen header keeps a small pill with text.
 function SyncIndicator({ status, storageFull, onRetry, inline = false }) {
-  if (status === 'synced' && !storageFull) return null;
   const isProblem = storageFull || status === 'error';
-  const label = storageFull
-    ? 'Device storage full'
-    : status === 'error' ? 'Not synced — tap to retry' : 'Saving…';
-  const pill = (
-    <button
-      onClick={isProblem ? onRetry : undefined}
-      style={{
+  const isSaving  = status === 'pending' && !storageFull;
+
+  // Inline (train screen): keep compact pill with text for errors/saving only
+  if (inline) {
+    if (status === 'synced' && !storageFull) return null;
+    const label = storageFull ? 'Device storage full' : status === 'error' ? 'Not synced — tap to retry' : 'Saving…';
+    return (
+      <button onClick={isProblem ? onRetry : undefined} style={{
         pointerEvents: isProblem ? 'auto' : 'none',
-        display: 'flex', alignItems: 'center', gap: inline ? 6 : 7,
-        padding: inline ? '3px 9px' : '6px 12px', borderRadius: 999,
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '3px 9px', borderRadius: 999,
         background: isProblem ? 'rgba(var(--danger-rgb),0.16)' : 'rgba(var(--bg-rgb),0.85)',
         border: `1px solid ${isProblem ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`,
         backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
         color: isProblem ? UI.danger : UI.inkFaint,
-        fontFamily: UI.fontUi, fontSize: inline ? 10 : 11, fontWeight: 600, letterSpacing: '0.04em',
+        fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
         cursor: isProblem ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent',
       }}>
-      <span style={{
-        width: inline ? 6 : 7, height: inline ? 6 : 7, borderRadius: '50%', flexShrink: 0,
-        background: isProblem ? UI.danger : UI.inkFaint,
-        ...(status === 'pending' && !storageFull ? { animation: 'pulseDot 1.4s ease-in-out infinite' } : {}),
-      }} />
-      {label}
-    </button>
-  );
-  if (inline) return pill;
+        <span style={{
+          width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+          background: isProblem ? UI.danger : UI.inkFaint,
+          ...(isSaving ? { animation: 'pulseDot 1.4s ease-in-out infinite' } : {}),
+        }} />
+        {label}
+      </button>
+    );
+  }
+
+  // Fixed dot: always visible, no text — just color + pulse
+  const dotColor = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
+  const pulse    = isProblem ? 'none' : 'pulseDot 2.4s ease-in-out infinite';
   return (
     <div style={{
-      position: 'fixed', left: 0, right: 0,
-      top: 'calc(env(safe-area-inset-top, 0px) + 8px)',
-      display: 'flex', justifyContent: 'center',
-      zIndex: 90, pointerEvents: 'none',
+      position: 'fixed',
+      right: 'calc(env(safe-area-inset-right, 0px) + 16px)',
+      top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
+      zIndex: 90, pointerEvents: isProblem ? 'auto' : 'none',
     }}>
-      {pill}
+      <button
+        onClick={isProblem ? onRetry : undefined}
+        title={isProblem ? (storageFull ? 'Device storage full — tap to retry' : 'Not synced — tap to retry') : isSaving ? 'Saving…' : 'Connected'}
+        style={{
+          width: 8, height: 8, borderRadius: '50%', padding: 0, border: 'none',
+          background: dotColor, cursor: isProblem ? 'pointer' : 'default',
+          animation: pulse, WebkitTapHighlightColor: 'transparent',
+          boxShadow: isProblem ? `0 0 0 3px rgba(var(--danger-rgb),0.2)` : 'none',
+        }}
+      />
     </div>
   );
 }
