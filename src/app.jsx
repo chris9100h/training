@@ -340,8 +340,10 @@ function App() {
   const syncing                   = useRefA(false); // true while a sync is in flight
   const localDirty                = useRefA(false); // true if user changed store after cache load
   const userIdRef                 = useRefA(null);  // current userId for stale-closure contexts
+  const phaseRef                  = useRefA('init'); // current phase for stale-closure contexts
 
   useEffectA(() => { userIdRef.current = userId; }, [userId]);
+  useEffectA(() => { phaseRef.current = phase; }, [phase]);
 
   useEffectA(() => {
     if (store?.user?.email && store?.user?.name) {
@@ -376,22 +378,43 @@ function App() {
   }, [store?.settings?.darkMode]);
 
   useEffectA(() => {
-    const THRESHOLD = 30 * 60 * 1000;
+    const THRESHOLD      = 30 * 60 * 1000; // full reload after 30 min
+    const SOFT_THRESHOLD =  2 * 60 * 1000; // data-only refresh after 2 min
     const KEY = 'logbook-bg-ts';
+
+    const softRefresh = () => {
+      const uid = userIdRef.current;
+      if (phaseRef.current !== 'ready' || !uid) return;
+      LB.refreshHealthLogs(uid).then(fresh => {
+        if (!fresh) return;
+        setStore(s => {
+          const serverDailyIds  = new Set(fresh.dailyLogs.map(l => l.id));
+          const serverCardioIds = new Set(fresh.cardioLogs.map(l => l.id));
+          const localOnlyDaily  = (s.dailyLogs  || []).filter(l => !serverDailyIds.has(l.id));
+          const localOnlyCardio = (s.cardioLogs || []).filter(l => !serverCardioIds.has(l.id));
+          return { ...s, dailyLogs: [...localOnlyDaily, ...fresh.dailyLogs], cardioLogs: [...localOnlyCardio, ...fresh.cardioLogs] };
+        });
+      }).catch(() => {});
+    };
 
     const onHide = () => localStorage.setItem(KEY, Date.now());
     const onShow = (e) => {
       if (!e.persisted) return;
       const ts = localStorage.getItem(KEY);
-      if (ts && Date.now() - Number(ts) > THRESHOLD) window.location.reload();
+      const elapsed = ts ? Date.now() - Number(ts) : 0;
+      if (elapsed > THRESHOLD) { window.location.reload(); return; }
+      if (elapsed > SOFT_THRESHOLD) softRefresh();
       swReg.current?.update().catch(() => {});
     };
     // visibilitychange as additional fallback
     const onVisibility = () => {
-      if (document.hidden) localStorage.setItem(KEY, Date.now());
-      else {
+      if (document.hidden) {
+        localStorage.setItem(KEY, Date.now());
+      } else {
         const ts = localStorage.getItem(KEY);
-        if (ts && Date.now() - Number(ts) > THRESHOLD) window.location.reload();
+        const elapsed = ts ? Date.now() - Number(ts) : 0;
+        if (elapsed > THRESHOLD) { window.location.reload(); return; }
+        if (elapsed > SOFT_THRESHOLD) softRefresh();
         swReg.current?.update().catch(() => {});
       }
     };
