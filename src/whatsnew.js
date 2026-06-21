@@ -16,6 +16,17 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.393',
+    title: 'Support inbox',
+    items: [
+      'Push notification when a support message arrives, in both directions',
+      'New message banner on the home screen takes you straight to the conversation',
+      'Ticket status changes and deletions sync instantly across devices',
+      'Resolved tickets automatically move to an archive section after 7 days',
+      'Fixed some bugs to make room for new ones',
+    ],
+  },
+  {
     id: 'v2.390',
     title: 'Flexible Plans',
     items: [
