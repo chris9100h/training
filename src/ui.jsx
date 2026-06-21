@@ -52,7 +52,7 @@ function SyncDot() {
   const isProblem = s.storageFull || s.status === 'error';
   const isSaving  = s.status === 'pending' && !s.storageFull;
   const color     = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
-  const pulse     = isProblem ? 'none' : 'pulseDot 1.6s ease-in-out infinite';
+  const pulse     = isProblem ? 'pulseDot 1.6s ease-in-out infinite' : 'none';
   return (
     <div
       onClick={isProblem ? () => window.__onRetrySync?.() : undefined}
