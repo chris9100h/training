@@ -1989,7 +1989,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               const isProblem = storageFull || syncStatus === 'error';
               const isSaving  = syncStatus === 'pending' && !storageFull;
               const color = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
-              const pulse = !isProblem ? 'pulseDot 2.4s ease-in-out infinite' : 'none';
+              const pulse = isProblem ? 'pulseDot 1.4s ease-in-out infinite' : 'none';
               return (
                 <i
                   className="fa-solid fa-dumbbell"
