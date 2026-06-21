@@ -543,6 +543,13 @@ function App() {
             const serverSkipIds = new Set((fresh.skips || []).map(s => s.id));
             const baseSkipIds = base ? new Set((base.skips || []).map(s => s.id)) : null;
             const localOnlySkips = (cur.skips || []).filter(x => !serverSkipIds.has(x.id) && !baseSkipIds?.has(x.id));
+            // Same resurrection guard for daily and cardio logs.
+            const serverDailyIds = new Set((fresh.dailyLogs || []).map(l => l.id));
+            const baseDailyIds = base ? new Set((base.dailyLogs || []).map(l => l.id)) : null;
+            const localOnlyDailyLogs = (cur.dailyLogs || []).filter(x => !serverDailyIds.has(x.id) && !baseDailyIds?.has(x.id));
+            const serverCardioIds = new Set((fresh.cardioLogs || []).map(l => l.id));
+            const baseCardioIds = base ? new Set((base.cardioLogs || []).map(l => l.id)) : null;
+            const localOnlyCardioLogs = (cur.cardioLogs || []).filter(x => !serverCardioIds.has(x.id) && !baseCardioIds?.has(x.id));
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
@@ -563,6 +570,8 @@ function App() {
               exercises: [...localOnlyExercises, ...fresh.exercises],
               schedules: [...localOnlySchedules, ...fresh.schedules],
               skips: [...localOnlySkips, ...(fresh.skips || [])],
+              dailyLogs: [...localOnlyDailyLogs, ...(fresh.dailyLogs || [])],
+              cardioLogs: [...localOnlyCardioLogs, ...(fresh.cardioLogs || [])],
             };
           }
           if (!fresh.user.approved) { setPhase('pending'); return; }
