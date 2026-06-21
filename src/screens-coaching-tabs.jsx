@@ -32,7 +32,7 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
   return (
     <div style={{ flexShrink: 0, padding: (notes.length > 0 || adminSupportUnread > 0) ? '0 22px 10px' : 0 }}>
       {adminSupportUnread > 0 && (
-        <button onClick={() => go?.({ name: 'settings' })} style={{
+        <button onClick={() => go?.({ name: 'settings', openSupportInbox: true })} style={{
           display: 'flex', alignItems: 'center', gap: 10, width: '100%',
           background: 'rgba(var(--accent-rgb),0.12)', border: 'none', borderRadius: 6,
           padding: '10px 14px', cursor: 'pointer', marginBottom: notes.length > 0 ? 8 : 0,

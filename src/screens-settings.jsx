@@ -344,7 +344,7 @@ function PasskeySheet({ open, onClose }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go, userId }) {
+function SettingsScreen({ store, setStore, go, userId, openSupportInbox }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
 
@@ -453,6 +453,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const [bgPreviewSheet, setBgPreviewSheet] = useStateSet(false);
   const [adminSheet, setAdminSheet] = useStateSet(false);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
+
+  useEffectSet(() => {
+    if (openSupportInbox && isAdmin) setSupportInboxSheet(true);
+  }, []);
 
   useEffectSet(() => {
     let mounted = true;
