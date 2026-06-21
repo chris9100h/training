@@ -344,7 +344,7 @@ function PasskeySheet({ open, onClose }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go, userId, openSupportInbox }) {
+function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSupportSheet }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
 
@@ -456,6 +456,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox }) {
 
   useEffectSet(() => {
     if (openSupportInbox && isAdmin) setSupportInboxSheet(true);
+    if (openSupportSheet && !isAdmin) setSupportSheet(true);
   }, []);
 
   useEffectSet(() => {
@@ -496,13 +497,15 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox }) {
     }).catch(() => {});
   }, [pushSheet]);
 
-  // Reset support navigation when sheet closes
+  // Reset support navigation when sheet closes; clear unread badge when opened
   useEffectSet(() => {
     if (!supportSheet) {
       setSupportView('list');
       setSupportActiveTicketId(null);
       setSupportActiveNotes([]);
       setSupportDraft('');
+    } else {
+      setStore(s => s ? { ...s, supportUnread: 0 } : s);
     }
   }, [supportSheet]);
 

@@ -11,9 +11,11 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
   const clientIds = new Set((store.coaching?.asCoach || []).filter(c => !c.id?.startsWith('support_')).map(c => c.clientId));
   const fromClient = notes.some(n => clientIds.has(n.authorId));
   const adminSupportUnread = store.adminSupportUnread || 0;
+  const userSupportUnread  = store.supportUnread || 0;
+  const hasSupportBanner   = adminSupportUnread > 0 || userSupportUnread > 0;
 
   // Keep mounted while sheet is open so ChatThread isn't destroyed mid-read
-  if (!notes.length && !notesOpen && !adminSupportUnread) return null;
+  if (!notes.length && !notesOpen && !hasSupportBanner) return null;
 
   const handleOpen = () => {
     if (fromClient && go) {
@@ -29,24 +31,33 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
     }
   };
 
+  const renderSupportBanner = (count, onClick, label) => (
+    <button onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+      background: 'rgba(var(--accent-rgb),0.12)', border: 'none', borderRadius: 6,
+      padding: '10px 14px', cursor: 'pointer', marginBottom: notes.length > 0 ? 8 : 0,
+    }}>
+      <i className="fa-solid fa-headset" style={{ color: 'var(--accent)', fontSize: 14 }} />
+      <span style={{ flex: 1, textAlign: 'left', fontSize: 13, color: UI.ink }}>{label}</span>
+      <span style={{
+        background: 'var(--accent)', color: '#fff', borderRadius: 999,
+        fontSize: 11, fontWeight: 700, minWidth: 18, height: 18,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px',
+      }}>{count}</span>
+    </button>
+  );
+
   return (
-    <div style={{ flexShrink: 0, padding: (notes.length > 0 || adminSupportUnread > 0) ? '0 22px 10px' : 0 }}>
-      {adminSupportUnread > 0 && (
-        <button onClick={() => go?.({ name: 'settings', openSupportInbox: true })} style={{
-          display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-          background: 'rgba(var(--accent-rgb),0.12)', border: 'none', borderRadius: 6,
-          padding: '10px 14px', cursor: 'pointer', marginBottom: notes.length > 0 ? 8 : 0,
-        }}>
-          <i className="fa-solid fa-headset" style={{ color: 'var(--accent)', fontSize: 14 }} />
-          <span style={{ flex: 1, textAlign: 'left', fontSize: 13, color: UI.ink }}>
-            {adminSupportUnread} new support {adminSupportUnread === 1 ? 'message' : 'messages'}
-          </span>
-          <span style={{
-            background: 'var(--accent)', color: '#fff', borderRadius: 999,
-            fontSize: 11, fontWeight: 700, minWidth: 18, height: 18,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px',
-          }}>{adminSupportUnread}</span>
-        </button>
+    <div style={{ flexShrink: 0, padding: (notes.length > 0 || hasSupportBanner) ? '0 22px 10px' : 0 }}>
+      {adminSupportUnread > 0 && renderSupportBanner(
+        adminSupportUnread,
+        () => go?.({ name: 'settings', openSupportInbox: true }),
+        `${adminSupportUnread} new support ${adminSupportUnread === 1 ? 'message' : 'messages'}`,
+      )}
+      {userSupportUnread > 0 && renderSupportBanner(
+        userSupportUnread,
+        () => go?.({ name: 'settings', openSupportSheet: true }),
+        `Support replied to your ${userSupportUnread === 1 ? 'ticket' : 'tickets'}`,
       )}
       {notes.length > 0 && (
         <CoachingUnreadBanner store={store} setStore={setStore} userId={userId} onOpen={handleOpen} />
