@@ -431,7 +431,7 @@ function MarkerRow({ label, value, onChange, readOnly }) {
   );
 }
 
-function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacros = null }) {
+function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacrosHistory = null }) {
   const [open, setOpen] = useStateC(defaultOpen);
   const [exportMode, setExportMode] = useStateC(null); // null | 'pick' | 'exporting'
   const cardRef = useRefC(null);
@@ -441,14 +441,22 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch (_) { return 'km'; } })();
 
   // Planned macro avg row — mirrors HealthWeekCard logic.
-  // Use days_trained from the check-in as the training-day count for the weighted average.
+  // Resolve the macro entry that was active at the END of this check-in week
+  // (Sunday = weekStart + 6 days) so past check-ins use the targets from that time.
+  const activeMacros = (() => {
+    if (!coachingMacrosHistory?.length) return null;
+    const weekEnd = new Date(new Date(ci.weekStart + 'T12:00:00').getTime() + 6 * 86400000).toISOString().slice(0, 10);
+    // History is sorted newest-first; first entry whose set_at date ≤ Sunday of this week.
+    return coachingMacrosHistory.find(m => m.setAt.slice(0, 10) <= weekEnd) || null;
+  })();
+  // Use days_trained from the check-in as the training/rest split for the weighted average.
   const macroResponseKeys = ['calories_avg', 'protein_avg', 'carbs_avg', 'fat_avg'];
   const hasMacroResponse = macroResponseKeys.some(k => has(responses[k]));
   const planTDays = responses.days_trained != null ? (parseInt(responses.days_trained) || 0) : 3;
   const planRDays = 7 - planTDays;
   const planMacro = (tk, rk) => {
-    if (!coachingMacros) return null;
-    const tv = coachingMacros[tk], rv = coachingMacros[rk];
+    if (!activeMacros) return null;
+    const tv = activeMacros[tk], rv = activeMacros[rk];
     if (tv == null && rv == null) return null;
     return Math.round(((tv || 0) * planTDays + (rv || 0) * planRDays) / 7);
   };
@@ -1126,13 +1134,13 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   const [pastOpen, setPastOpen] = useStateC(false);
   const [builderOpen, setBuilderOpen] = useStateC(false);
   const [previewOpen, setPreviewOpen] = useStateC(false);
-  const [coachingMacros, setCoachingMacros] = useStateC(null);
+  const [coachingMacrosHistory, setCoachingMacrosHistory] = useStateC(null);
 
   const load = () => LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
   useEffectC(() => {
     load();
     LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
-    LB.loadCoachingMacros(coachingId).then(data => setCoachingMacros(data[0] || null)).catch(() => {});
+    LB.loadCoachingMacros(coachingId).then(data => setCoachingMacrosHistory(data)).catch(() => {});
   }, [coachingId]);
 
   const thisWeek = (checkins || []).find(c => c.weekStart === weekStart);
@@ -1254,7 +1262,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               schema={resolvedSchema}
               defaultOpen={true}
               embedded={true}
-              coachingMacros={coachingMacros}
+              coachingMacrosHistory={coachingMacrosHistory}
             />
           </div>
         )}
@@ -1272,7 +1280,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           </div>
         )}
         {thisWeek ? (
-          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} coachingMacros={coachingMacros} />
+          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} coachingMacrosHistory={coachingMacrosHistory} />
         ) : null}
 
         {past.length > 0 && (
@@ -1293,7 +1301,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               <div style={{ paddingLeft: 16 }}>
                 {past.map(ci => (
                   <div key={ci.id} style={{ borderTop: `0.5px solid ${UI.hair}` }}>
-                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} coachingMacros={coachingMacros} />
+                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} coachingMacrosHistory={coachingMacrosHistory} />
                   </div>
                 ))}
               </div>
