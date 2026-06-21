@@ -545,13 +545,16 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
       if (key === 'cardio_pace'       && paceDelta       != null) return ` (${paceDelta === 0 ? '→' : paceDelta < 0 ? '↑ faster' : '↓ slower'})`;
       return '';
     };
+    const macroFieldKeys = new Set(['calories_avg', 'protein_avg', 'carbs_avg', 'fat_avg']);
     const lines = [`Week of ${fmtWeek(ci.weekStart)}`];
     sections.forEach(section => {
       const fields = (section.fields || []).filter(f => has(responses[f.key]));
       if (!fields.length) return;
       const headLabel = section.label.toUpperCase() + (section.sectionHint ? ` (${section.sectionHint})` : '');
       lines.push('', headLabel);
+      let sectionHadMacro = false;
       fields.forEach(f => {
+        if (macroFieldKeys.has(f.key)) sectionHadMacro = true;
         const v = responses[f.key];
         if (f.type === 'stepper') lines.push(`${f.label}: ${v}/${f.max ?? 10}`);
         else if (f.type === 'text') lines.push('', `${f.label.toUpperCase()}`, String(v));
@@ -563,6 +566,14 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
           lines.push(base + delta);
         }
       });
+      if (sectionHadMacro && showPlanRow) {
+        const parts = [];
+        if (planCal  != null) parts.push(`Cal: ${planCal} kcal`);
+        if (planProt != null) parts.push(`Protein: ${planProt} g`);
+        if (planCarb != null) parts.push(`Carbs: ${planCarb} g`);
+        if (planFat  != null) parts.push(`Fat: ${planFat} g`);
+        if (parts.length) lines.push(`Planned avg: ${parts.join(' · ')}`);
+      }
     });
     if (extraKeys.length) {
       lines.push('', 'ADDITIONAL');
