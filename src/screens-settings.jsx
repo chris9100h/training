@@ -859,6 +859,33 @@ function SettingsScreen({ store, setStore, go, userId }) {
     setSupportAdminDraft('');
   };
 
+  const [deletingTicket, setDeletingTicket] = useStateSet(false);
+  const [confirmDeleteTicket, setConfirmDeleteTicket] = useStateSet(false);
+
+  const handleDeleteTicket = async () => {
+    if (!supportTicket) return;
+    const coachingId = supportTicket.coachingId;
+    setDeletingTicket(true);
+    try {
+      // Notify user BEFORE deleting (coaching row must still exist)
+      const { data: { session } } = await LB.supabase.auth.getSession();
+      if (session?.access_token) {
+        await fetch(`https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/zane_coaching-notify`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ coachingId, preview: 'Your support ticket has been removed by support.' }),
+        }).catch(() => {});
+      }
+      await LB.supabase.rpc('delete_support_ticket', { p_coaching_id: coachingId });
+      setSupportInbox(prev => prev.filter(t => t.coaching_id !== coachingId));
+      setSupportTicket(null);
+      setSupportAdminDraft('');
+      setConfirmDeleteTicket(false);
+    } finally {
+      setDeletingTicket(false);
+    }
+  };
+
   const handleChangePassword = async () => {
     if (pwLoading) return;
     if (pwNew.length < 6) { setPwMsg({ text: 'Password must be at least 6 characters', ok: false }); return; }
@@ -1955,6 +1982,18 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   {currentStatus === 'resolved' && (
                     <Btn kind="ghost" onClick={handleArchiveTicket} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: UI.inkFaint, borderColor: UI.hairStrong }}>
                       <i className="fa-solid fa-box-archive" style={{ fontSize: 12 }} /> Archive ticket
+                    </Btn>
+                  )}
+                  {confirmDeleteTicket ? (
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(false)} style={{ flex: 1, color: UI.inkFaint, borderColor: UI.hairStrong }}>Cancel</Btn>
+                      <Btn onClick={handleDeleteTicket} disabled={deletingTicket} style={{ flex: 1, background: 'rgba(var(--danger-rgb),0.15)', color: 'rgba(var(--danger-rgb),1)', border: '0.5px solid rgba(var(--danger-rgb),0.3)' }}>
+                        {deletingTicket ? 'Deleting…' : 'Confirm delete'}
+                      </Btn>
+                    </div>
+                  ) : (
+                    <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: 'rgba(var(--danger-rgb),0.7)', borderColor: 'rgba(var(--danger-rgb),0.25)' }}>
+                      <i className="fa-solid fa-trash" style={{ fontSize: 12 }} /> Delete ticket
                     </Btn>
                   )}
                 </div>
