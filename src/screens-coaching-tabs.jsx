@@ -573,7 +573,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             if (planProt != null) parts.push(`Protein: ${planProt} g`);
             if (planCarb != null) parts.push(`Carbs: ${planCarb} g`);
             if (planFat  != null) parts.push(`Fat: ${planFat} g`);
-            if (parts.length) lines.push(`Planned avg: ${parts.join(' · ')}`);
+            if (parts.length) lines.push('', `Planned avg: ${parts.join(' · ')}`);
             planRowInserted = true;
           }
         }
