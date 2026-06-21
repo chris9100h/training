@@ -512,6 +512,13 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   };
 
   const buildText = () => {
+    const fmtTextDelta = key => {
+      if (key === 'steps'             && stepsDelta     != null) return ` (${stepsDelta > 0 ? '+' : ''}${stepsDelta.toLocaleString()})`;
+      if (key === 'cardio_minutes'    && cardioMinDelta  != null) return ` (${cardioMinDelta > 0 ? '+' : ''}${cardioMinDelta} min)`;
+      if (key === 'cardio_distance_m' && cardioDistDelta != null) return ` (${fmtDistDelta(cardioDistDelta)})`;
+      if (key === 'cardio_pace'       && paceDelta       != null) return ` (${paceDelta === 0 ? '→' : paceDelta < 0 ? '↑ faster' : '↓ slower'})`;
+      return '';
+    };
     const lines = [`Week of ${fmtWeek(ci.weekStart)}`];
     sections.forEach(section => {
       const fields = (section.fields || []).filter(f => has(responses[f.key]));
@@ -521,10 +528,13 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
       fields.forEach(f => {
         const v = responses[f.key];
         if (f.type === 'stepper') lines.push(`${f.label}: ${v}/${f.max ?? 10}`);
-        else if (f.type === 'text') lines.push(`${f.label.toUpperCase()}`, String(v));
+        else if (f.type === 'text') lines.push('', `${f.label.toUpperCase()}`, String(v));
         else {
           const base = `${f.label}: ${fmtValue(f, v)}`;
-          lines.push(f.key === 'weight_avg_last_week' && weightDelta != null ? `${base} (${fmtDelta(weightDelta)} to previous week)` : base);
+          const delta = f.key === 'weight_avg_last_week' && weightDelta != null
+            ? ` (${fmtDelta(weightDelta)} to previous week)`
+            : fmtTextDelta(f.key);
+          lines.push(base + delta);
         }
       });
     });
