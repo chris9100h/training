@@ -192,28 +192,6 @@ function HealthMacroChart({ series, from, to }) {
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
 
-  // Build a smooth catmull-rom path through target points
-  const targetPts = pts
-    .filter(p => p.targetCal != null && p.targetCal > 0)
-    .map(p => ({ x: xOf(p.date), y: yOf(p.targetCal) }));
-  const smoothTargetPath = (() => {
-    const tp = targetPts;
-    if (tp.length < 2) return null;
-    let d = `M ${tp[0].x.toFixed(1)} ${tp[0].y.toFixed(1)}`;
-    for (let i = 0; i < tp.length - 1; i++) {
-      const p0 = tp[Math.max(0, i - 1)];
-      const p1 = tp[i];
-      const p2 = tp[i + 1];
-      const p3 = tp[Math.min(tp.length - 1, i + 2)];
-      const cp1x = p1.x + (p2.x - p0.x) / 6;
-      const cp1y = p1.y + (p2.y - p0.y) / 6;
-      const cp2x = p2.x - (p3.x - p1.x) / 6;
-      const cp2y = p2.y - (p3.y - p1.y) / 6;
-      d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
-    }
-    return d;
-  })();
-
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
       {gridVals.map((v, i) => (
@@ -236,14 +214,11 @@ function HealthMacroChart({ series, from, to }) {
           yCursor -= h;
           return <rect key={si} x={x.toFixed(1)} y={yCursor.toFixed(1)} width={bw.toFixed(1)} height={Math.max(0, h).toFixed(1)} fill={s.color} opacity="0.85" />;
         });
-        return <g key={i}>{rects}</g>;
+        const tick = (p.targetCal != null && p.targetCal > 0) ? (
+          <line x1={(x - 1).toFixed(1)} y1={yOf(p.targetCal).toFixed(1)} x2={(x + bw + 1).toFixed(1)} y2={yOf(p.targetCal).toFixed(1)} stroke={UI.ink} strokeWidth="1.2" />
+        ) : null;
+        return <g key={i}>{rects}{tick}</g>;
       })}
-      {smoothTargetPath && (
-        <path d={smoothTargetPath} fill="none" stroke={UI.ink} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.9" />
-      )}
-      {targetPts.length === 1 && (
-        <circle cx={targetPts[0].x.toFixed(1)} cy={targetPts[0].y.toFixed(1)} r="2" fill={UI.ink} opacity="0.9" />
-      )}
     </svg>
   );
 }
