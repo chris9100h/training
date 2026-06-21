@@ -219,62 +219,6 @@ function WhatsNewModal({ entries, onDismiss }) {
   );
 }
 
-// Persistent connection/sync status dot. Always visible — green pulsing = synced,
-// amber = saving, red = error (tappable). Replaces the pop-up "Saving…" pill.
-// `inline` variant for the training screen header keeps a small pill with text.
-function SyncIndicator({ status, storageFull, onRetry, inline = false }) {
-  const isProblem = storageFull || status === 'error';
-  const isSaving  = status === 'pending' && !storageFull;
-
-  // Inline (train screen): keep compact pill with text for errors/saving only
-  if (inline) {
-    if (status === 'synced' && !storageFull) return null;
-    const label = storageFull ? 'Device storage full' : status === 'error' ? 'Not synced — tap to retry' : 'Saving…';
-    return (
-      <button onClick={isProblem ? onRetry : undefined} style={{
-        pointerEvents: isProblem ? 'auto' : 'none',
-        display: 'flex', alignItems: 'center', gap: 6,
-        padding: '3px 9px', borderRadius: 999,
-        background: isProblem ? 'rgba(var(--danger-rgb),0.16)' : 'rgba(var(--bg-rgb),0.85)',
-        border: `1px solid ${isProblem ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`,
-        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-        color: isProblem ? UI.danger : UI.inkFaint,
-        fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
-        cursor: isProblem ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent',
-      }}>
-        <span style={{
-          width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-          background: isProblem ? UI.danger : UI.inkFaint,
-          ...(isSaving ? { animation: 'pulseDot 1.4s ease-in-out infinite' } : {}),
-        }} />
-        {label}
-      </button>
-    );
-  }
-
-  // Fixed dot: always visible, no text — just color + pulse
-  const dotColor = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
-  const pulse    = isProblem ? 'none' : 'pulseDot 2.4s ease-in-out infinite';
-  return (
-    <div style={{
-      position: 'fixed',
-      right: 'calc(env(safe-area-inset-right, 0px) + 16px)',
-      top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
-      zIndex: 90, pointerEvents: isProblem ? 'auto' : 'none',
-    }}>
-      <button
-        onClick={isProblem ? onRetry : undefined}
-        title={isProblem ? (storageFull ? 'Device storage full — tap to retry' : 'Not synced — tap to retry') : isSaving ? 'Saving…' : 'Connected'}
-        style={{
-          width: 8, height: 8, borderRadius: '50%', padding: 0, border: 'none',
-          background: dotColor, cursor: isProblem ? 'pointer' : 'default',
-          animation: pulse, WebkitTapHighlightColor: 'transparent',
-          boxShadow: isProblem ? `0 0 0 3px rgba(var(--danger-rgb),0.2)` : 'none',
-        }}
-      />
-    </div>
-  );
-}
 
 function LoadingScreen() {
   return (
@@ -1019,8 +963,7 @@ function App() {
   // The training screen embeds the status in its own header (the overlay would
   // sit on top of the session/rest timers), so hand it a ready-made inline pill
   // and suppress the global overlay there.
-  const syncPillInline = <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} inline />;
-  const props = { store, setStore, go, userId, syncPill: syncPillInline, syncStatus, storageFull, onRetrySync };
+  const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync };
   const tabRoutes = ['home', 'plan', 'lib', 'hist', 'health', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
   // Library lives under the merged "Plan" tab — keep that tab lit on the lib route.

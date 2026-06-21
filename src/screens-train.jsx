@@ -312,7 +312,7 @@ function TrainingScreen(props) {
   return <TrainingScreenInner {...props} session={session} />;
 }
 
-function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, syncPill }) {
+function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, syncStatus, storageFull, onRetrySync }) {
   // Refresh the all-time best-e1RM aggregate once per training mount so the
   // "NEW BEST" overlay compares against an up-to-date baseline (covers
   // sessions finished on other devices since boot). Offline keeps the cached
@@ -1820,7 +1820,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
           {/* session time / warmup indicator */}
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
-            <div style={{ width: 6, height: 6, borderRadius: 3, background: UI.gold, animation: 'pulseDot 1.6s ease-in-out infinite' }} />
+            {(() => {
+              const isProblem = storageFull || syncStatus === 'error';
+              const isSaving  = syncStatus === 'pending' && !storageFull;
+              const dotColor  = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
+              const pulse     = isProblem ? 'none' : 'pulseDot 1.6s ease-in-out infinite';
+              return <div onClick={isProblem ? onRetrySync : undefined} style={{ width: 6, height: 6, borderRadius: 3, background: dotColor, animation: pulse, cursor: isProblem ? 'pointer' : 'default', flexShrink: 0 }} />;
+            })()}
             {warmupActive
               ? <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>WARMUP</span>
               : <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }}>{sessionTimeStr}</span>
@@ -1894,9 +1900,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           (the global top-center overlay would cover the timers above). */}
       <div style={{ flexShrink: 0, padding: '6px 22px 10px', position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span className="micro-gold">{session.dayName}</span>
-        <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)', display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
-          <div style={{ pointerEvents: 'auto' }}>{syncPill}</div>
-        </div>
         <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
           {String(exIdx + 1).padStart(2, '0')} <span style={{ color: UI.hair }}>/</span> {String(session.entries.length).padStart(2, '0')}
         </span>
@@ -2763,7 +2766,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 6, height: 6, borderRadius: 3, background: UI.gold, animation: 'pulseDot 1.6s ease-in-out infinite' }} />
+                {(() => {
+                  const isProblem = storageFull || syncStatus === 'error';
+                  const isSaving  = syncStatus === 'pending' && !storageFull;
+                  const dotColor  = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
+                  const pulse     = isProblem ? 'none' : 'pulseDot 1.6s ease-in-out infinite';
+                  return <div onClick={isProblem ? onRetrySync : undefined} style={{ width: 6, height: 6, borderRadius: 3, background: dotColor, animation: pulse, cursor: isProblem ? 'pointer' : 'default', flexShrink: 0 }} />;
+                })()}
                 <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>WARMUP</span>
               </div>
               <button onClick={skipWarmup} style={{
