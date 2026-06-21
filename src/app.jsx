@@ -889,6 +889,11 @@ function App() {
     };
   }, [userId, flushSync]);
 
+  // Broadcast sync status to SyncDot in TopBar via custom event.
+  useEffectA(() => {
+    window.dispatchEvent(new CustomEvent('zane-sync-status', { detail: { status: syncStatus, storageFull } }));
+  }, [syncStatus, storageFull]);
+
   // Keep nextReminderAt in sync whenever reminder settings or schedule state changes.
   useEffectA(() => {
     if (!store || phase !== 'ready') return;
@@ -961,10 +966,6 @@ function App() {
   const go    = (r) => setRoute(r);
   const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
   window.__onRetrySync = onRetrySync;
-
-  useEffectA(() => {
-    window.dispatchEvent(new CustomEvent('zane-sync-status', { detail: { status: syncStatus, storageFull } }));
-  }, [syncStatus, storageFull]);
 
   const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync };
   const tabRoutes = ['home', 'plan', 'lib', 'hist', 'health', 'coaching'];
