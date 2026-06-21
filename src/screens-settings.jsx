@@ -19,6 +19,19 @@ const fmtAgo = (iso) => {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 };
 
+function UserArchivedSection({ tickets, renderTicket }) {
+  const [open, setOpen] = useStateSet(false);
+  return (
+    <div>
+      <button onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' }}>
+        <i className={`fa-solid fa-chevron-${open ? 'up' : 'down'}`} style={{ fontSize: 9 }} />
+        Archived ({tickets.length})
+      </button>
+      {open && <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>{tickets.map(renderTicket)}</div>}
+    </div>
+  );
+}
+
 function Toggle({ on, onToggle }) {
   return (
     <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
@@ -1816,34 +1829,42 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
           // ── LIST VIEW (default) ──────────────────────────────────────
           const statusBorder = { open: UI.danger, in_progress: UI.gold, resolved: UI.inkFaint };
+          const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+          const isUserArchived = t => t.archived && t.status === 'resolved' && t.archivedAt && new Date(t.archivedAt).getTime() <= sevenDaysAgo;
+          const activeTickets   = tickets.filter(t => !isUserArchived(t));
+          const archivedTickets = tickets.filter(t =>  isUserArchived(t));
+          const renderTicket = t => (
+            <button key={t.coachingId}
+              onClick={() => { setSupportActiveTicketId(t.coachingId); setSupportView('thread'); }}
+              style={{ width: '100%', background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderLeft: `3px solid ${statusBorder[t.status] || UI.hairStrong}`, borderRadius: 8, padding: '11px 14px', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="micro" style={{ color: statusBorder[t.status] || UI.inkFaint }}>{statusLabel[t.status] || t.status}</span>
+                  <span className="micro" style={{ color: UI.inkFaint }}>· {CATS.find(c => c.key === t.category)?.label}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {t.unreadCount > 0 && <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />}
+                  <span className="micro" style={{ color: UI.inkGhost }}>{fmtAgo(t.lastMessageAt || t.createdAt)}</span>
+                </div>
+              </div>
+              {t.lastMessageBody ? (
+                <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.lastMessageBody}</div>
+              ) : (
+                <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No messages yet</div>
+              )}
+            </button>
+          );
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', flex: 1 }}>
-              {tickets.length === 0 && (
+              {activeTickets.length === 0 && archivedTickets.length === 0 && (
                 <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '24px 0' }}>
                   No tickets yet. Tap "+ New ticket" if you need help.
                 </div>
               )}
-              {tickets.map(t => (
-                <button key={t.coachingId}
-                  onClick={() => { setSupportActiveTicketId(t.coachingId); setSupportView('thread'); }}
-                  style={{ width: '100%', background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderLeft: `3px solid ${statusBorder[t.status] || UI.hairStrong}`, borderRadius: 8, padding: '11px 14px', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span className="micro" style={{ color: statusBorder[t.status] || UI.inkFaint }}>{statusLabel[t.status] || t.status}</span>
-                      <span className="micro" style={{ color: UI.inkFaint }}>· {CATS.find(c => c.key === t.category)?.label}</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      {t.unreadCount > 0 && <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />}
-                      <span className="micro" style={{ color: UI.inkGhost }}>{fmtAgo(t.lastMessageAt || t.createdAt)}</span>
-                    </div>
-                  </div>
-                  {t.lastMessageBody ? (
-                    <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.lastMessageBody}</div>
-                  ) : (
-                    <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No messages yet</div>
-                  )}
-                </button>
-              ))}
+              {activeTickets.map(renderTicket)}
+              {archivedTickets.length > 0 && (
+                <UserArchivedSection tickets={archivedTickets} renderTicket={renderTicket} />
+              )}
               <div style={{ flexGrow: 1 }} />
               <Btn onClick={() => { setSupportView('new'); setSupportDraft(''); setSupportCategoryDraft('question'); }} style={{ width: '100%', marginBottom: 'env(safe-area-inset-bottom, 0px)' }}>+ New ticket</Btn>
             </div>

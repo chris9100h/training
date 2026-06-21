@@ -686,6 +686,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       lastMessageAt: t.last_message_at,
       lastMessageBody: t.last_message_body,
       unreadCount: Number(t.unread_count || 0),
+      archived: t.archived || false,
+      archivedAt: t.archived_at || null,
     })),
     supportUnread: (supportTicketsRes?.data || []).reduce((s, t) => s + Number(t.unread_count || 0), 0),
   };
