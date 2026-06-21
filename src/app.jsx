@@ -960,9 +960,12 @@ function App() {
 
   const go    = (r) => setRoute(r);
   const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
-  // The training screen embeds the status in its own header (the overlay would
-  // sit on top of the session/rest timers), so hand it a ready-made inline pill
-  // and suppress the global overlay there.
+  window.__onRetrySync = onRetrySync;
+
+  useEffectA(() => {
+    window.dispatchEvent(new CustomEvent('zane-sync-status', { detail: { status: syncStatus, storageFull } }));
+  }, [syncStatus, storageFull]);
+
   const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync };
   const tabRoutes = ['home', 'plan', 'lib', 'hist', 'health', 'coaching'];
   const showTab = tabRoutes.includes(route.name);

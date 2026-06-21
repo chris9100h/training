@@ -42,6 +42,26 @@ function Screen({ children, scroll = true, style = {} }) {
 }
 
 // ─── TopBar ─────────────────────────────────────────────────────────
+function SyncDot() {
+  const [s, setS] = React.useState(() => ({ status: 'synced', storageFull: false }));
+  React.useEffect(() => {
+    const h = (e) => setS(e.detail);
+    window.addEventListener('zane-sync-status', h);
+    return () => window.removeEventListener('zane-sync-status', h);
+  }, []);
+  const isProblem = s.storageFull || s.status === 'error';
+  const isSaving  = s.status === 'pending' && !s.storageFull;
+  const color     = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
+  const pulse     = isProblem ? 'none' : 'pulseDot 1.6s ease-in-out infinite';
+  return (
+    <div
+      onClick={isProblem ? () => window.__onRetrySync?.() : undefined}
+      title={isProblem ? 'Not synced — tap to retry' : isSaving ? 'Saving…' : 'Connected'}
+      style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: color, animation: pulse, cursor: isProblem ? 'pointer' : 'default' }}
+    />
+  );
+}
+
 function TopBar({ title, sub, onBack, right }) {
   return (
     <div style={{
@@ -74,6 +94,7 @@ function TopBar({ title, sub, onBack, right }) {
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>{title}</div>
         </div>
+        <SyncDot />
         {right}
       </div>
       <div className="knurl" style={{ marginLeft: -22, marginRight: -22 }} />
