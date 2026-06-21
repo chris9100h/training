@@ -557,6 +557,21 @@ function CheckInFormPreview({ schema }) {
 // These four fields are always shown/removed as a group — the coach always wants all or none.
 const MACRO_GROUP_KEYS = new Set(['calories_avg', 'protein_avg', 'carbs_avg', 'fat_avg']);
 
+// Build a flat view for ReorderList where the 4 macro fields collapse into 1 group item.
+// Each item: { isMacroGroup: true, arrayIdx } | { isMacroGroup: false, arrayIdx }
+function buildFieldView(fields) {
+  const view = [];
+  let macroSeen = false;
+  (fields || []).forEach((f, i) => {
+    if (MACRO_GROUP_KEYS.has(f.key)) {
+      if (!macroSeen) { view.push({ isMacroGroup: true, arrayIdx: i }); macroSeen = true; }
+    } else {
+      view.push({ isMacroGroup: false, arrayIdx: i });
+    }
+  });
+  return view;
+}
+
 function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClose }) {
   const [draft, setDraft] = useStateC(() => JSON.parse(JSON.stringify(initial || CHECKIN_DEFAULT_SCHEMA)));
   const [view, setView] = useStateC('list');
@@ -708,6 +723,26 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
   const reorderSections = (from, to) => { if (from === to) return; setDraft(s => { const n = JSON.parse(JSON.stringify(s)); const [m] = n.splice(from, 1); n.splice(to, 0, m); return n; }); };
   const removeSection = (i) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); n.splice(i, 1); return n; });
   const reorderFields = (si, from, to) => { if (from === to) return; setDraft(s => { const n = JSON.parse(JSON.stringify(s)); const flds = n[si].fields; const [m] = flds.splice(from, 1); flds.splice(to, 0, m); return n; }); };
+  // View-aware reorder: moves the macro group as a unit; non-macro fields move individually.
+  const reorderByView = (si, fromV, toV) => {
+    if (fromV === toV) return;
+    setDraft(s => {
+      const n = JSON.parse(JSON.stringify(s));
+      const flds = n[si].fields;
+      const view = buildFieldView(flds);
+      const macroFields = flds.filter(f => MACRO_GROUP_KEYS.has(f.key));
+      const nonMacroFields = flds.filter(f => !MACRO_GROUP_KEYS.has(f.key));
+      // Apply the move on the view level, then reconstruct the fields array.
+      const newView = [...view];
+      const [moved] = newView.splice(fromV, 1);
+      newView.splice(toV, 0, moved);
+      let nonMacroIdx = 0;
+      n[si].fields = newView.map(item =>
+        item.isMacroGroup ? macroFields : [nonMacroFields[nonMacroIdx++]]
+      ).flat();
+      return n;
+    });
+  };
   const removeField = (si, fi) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); n[si].fields.splice(fi, 1); return n; });
   const removeMacroGroup = (si) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); n[si].fields = n[si].fields.filter(f => !MACRO_GROUP_KEYS.has(f.key)); return n; });
   const addMacroGroup = (defSection) => {
@@ -1209,15 +1244,13 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
                 </button>
               </div>
             </div>
-            <ReorderList onReorder={(from, to) => reorderFields(sIdx, from, to)}>
-              {(sec.fields || []).map((f, fIdx) => {
-                if (MACRO_GROUP_KEYS.has(f.key)) {
-                  // Render all 4 macro fields as a single grouped row (first occurrence only).
-                  const firstMacroIdx = (sec.fields || []).findIndex(mf => MACRO_GROUP_KEYS.has(mf.key));
-                  if (fIdx !== firstMacroIdx) return null;
-                  const presentMacros = (sec.fields || []).filter(mf => MACRO_GROUP_KEYS.has(mf.key));
+            <ReorderList onReorder={(fromV, toV) => reorderByView(sIdx, fromV, toV)}>
+              {buildFieldView(sec.fields).map((item, viewIdx) => {
+                if (item.isMacroGroup) {
+                  const presentMacros = (sec.fields || []).filter(f => MACRO_GROUP_KEYS.has(f.key));
                   return (
-                    <div key="macro-group" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 8px 14px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                    <div key="macro-group" data-reorder-item="true" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 8px 6px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                      <DragHandle style={{ height: 22, width: 18, marginRight: 4 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                           <i className="fa-solid fa-fire" style={{ fontSize: 11, color: UI.inkGhost, flexShrink: 0 }} />
@@ -1233,6 +1266,8 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
                     </div>
                   );
                 }
+                const f = (sec.fields || [])[item.arrayIdx];
+                const fIdx = item.arrayIdx;
                 return (
                   <div key={f.key || fIdx} data-reorder-item="true" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 8px 6px', borderBottom: `0.5px solid ${UI.hair}` }}>
                     <DragHandle style={{ height: 22, width: 18, marginRight: 4 }} />
