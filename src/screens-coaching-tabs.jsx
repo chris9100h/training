@@ -431,7 +431,7 @@ function MarkerRow({ label, value, onChange, readOnly }) {
   );
 }
 
-function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false }) {
+function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacros = null }) {
   const [open, setOpen] = useStateC(defaultOpen);
   const [exportMode, setExportMode] = useStateC(null); // null | 'pick' | 'exporting'
   const cardRef = useRefC(null);
@@ -439,6 +439,24 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   const responses = ci.responses || {};
   const has = v => v != null && v !== '';
   const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch (_) { return 'km'; } })();
+
+  // Planned macro avg row — mirrors HealthWeekCard logic.
+  // Use days_trained from the check-in as the training-day count for the weighted average.
+  const macroResponseKeys = ['calories_avg', 'protein_avg', 'carbs_avg', 'fat_avg'];
+  const hasMacroResponse = macroResponseKeys.some(k => has(responses[k]));
+  const planTDays = responses.days_trained != null ? (parseInt(responses.days_trained) || 0) : 3;
+  const planRDays = 7 - planTDays;
+  const planMacro = (tk, rk) => {
+    if (!coachingMacros) return null;
+    const tv = coachingMacros[tk], rv = coachingMacros[rk];
+    if (tv == null && rv == null) return null;
+    return Math.round(((tv || 0) * planTDays + (rv || 0) * planRDays) / 7);
+  };
+  const planCal  = planMacro('caloriesTraining', 'caloriesRest');
+  const planProt = planMacro('proteinTraining',  'proteinRest');
+  const planCarb = planMacro('carbsTraining',    'carbsRest');
+  const planFat  = planMacro('fatTraining',      'fatRest');
+  const showPlanRow = hasMacroResponse && (planCal != null || planProt != null || planCarb != null || planFat != null);
 
   // Format one field's stored value for display (mirrors the trend-card formatter).
   const fmtValue = (f, v) => {
@@ -658,6 +676,27 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
               </div>
             );
           })}
+
+          {/* Planned macro avg row — shown when coaching macros exist and macro fields were reported */}
+          {showPlanRow && (
+            <div>
+              <div className="knurl" style={{ margin: '0 0 6px' }} />
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>PLANNED AVG</div>
+              <div className="knurl" style={{ margin: '0 0 8px' }} />
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 6px' }}>
+                {[{v: planCal, u: 'kcal'}, {v: planProt, u: 'g'}, {v: planCarb, u: 'g'}, {v: planFat, u: 'g'}].map(({v, u}, i) => (
+                  <div key={i} style={{ textAlign: 'center' }}>
+                    <div className="num" style={{ fontSize: 13, color: v != null ? UI.inkGhost : UI.inkGhost, fontWeight: 300 }}>
+                      {v != null ? v : '—'}<span style={{ fontSize: 9, color: UI.inkGhost }}>{u}</span>
+                    </div>
+                    <div style={{ fontSize: 8, color: UI.inkGhost, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 1 }}>
+                      {['Cal', 'Protein', 'Carbs', 'Fat'][i]}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Submitted fields no longer in the schema — kept visible, never dropped */}
           {extraKeys.length > 0 && (
@@ -1087,11 +1126,13 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   const [pastOpen, setPastOpen] = useStateC(false);
   const [builderOpen, setBuilderOpen] = useStateC(false);
   const [previewOpen, setPreviewOpen] = useStateC(false);
+  const [coachingMacros, setCoachingMacros] = useStateC(null);
 
   const load = () => LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
   useEffectC(() => {
     load();
     LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
+    LB.loadCoachingMacros(coachingId).then(data => setCoachingMacros(data[0] || null)).catch(() => {});
   }, [coachingId]);
 
   const thisWeek = (checkins || []).find(c => c.weekStart === weekStart);
@@ -1213,6 +1254,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               schema={resolvedSchema}
               defaultOpen={true}
               embedded={true}
+              coachingMacros={coachingMacros}
             />
           </div>
         )}
@@ -1230,7 +1272,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           </div>
         )}
         {thisWeek ? (
-          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} />
+          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} coachingMacros={coachingMacros} />
         ) : null}
 
         {past.length > 0 && (
@@ -1251,7 +1293,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               <div style={{ paddingLeft: 16 }}>
                 {past.map(ci => (
                   <div key={ci.id} style={{ borderTop: `0.5px solid ${UI.hair}` }}>
-                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
+                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} coachingMacros={coachingMacros} />
                   </div>
                 ))}
               </div>

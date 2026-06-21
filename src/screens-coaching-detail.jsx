@@ -1240,10 +1240,12 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
   const [checkins, setCheckins] = useStateC(null);
   const [schema, setSchema] = useStateC(null);
   const [builderOpen, setBuilderOpen] = useStateC(false);
+  const [coachingMacros, setCoachingMacros] = useStateC(null);
 
   useEffectC(() => {
     LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
     LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
+    LB.loadCoachingMacros(coachingId).then(data => setCoachingMacros(data[0] || null)).catch(() => {});
   }, [coachingId]);
 
   const resolvedSchema = schema || store?.settings?.defaultCheckinSchema || CHECKIN_DEFAULT_SCHEMA;
@@ -1323,7 +1325,7 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
             <div className="knurl" style={{ margin: '4px 0' }} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
-              {checkins.map((ci, i) => <CheckInCard key={ci.id} ci={ci} prevCi={checkins[i + 1]} schema={resolvedSchema} />)}
+              {checkins.map((ci, i) => <CheckInCard key={ci.id} ci={ci} prevCi={checkins[i + 1]} schema={resolvedSchema} coachingMacros={coachingMacros} />)}
             </div>
           </div>
         </div>
