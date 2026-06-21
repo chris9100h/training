@@ -847,13 +847,21 @@ function App() {
           };
         });
       },
-      (eventType, coachingId) => {
+      (eventType, coachingId, newRow) => {
         if (eventType === 'DELETE' && coachingId?.startsWith('support_')) {
-          // Admin deleted a support ticket — remove it from the user's list immediately
           setStore(s => s ? {
             ...s,
             supportTickets: (s.supportTickets || []).filter(t => t.coachingId !== coachingId),
             supportUnread: Math.max(0, (s.supportUnread || 0) - ((s.supportTickets || []).find(t => t.coachingId === coachingId)?.unreadCount || 0)),
+          } : s);
+          return;
+        }
+        if (eventType === 'UPDATE' && coachingId?.startsWith('support_') && newRow?.support_status) {
+          setStore(s => s ? {
+            ...s,
+            supportTickets: (s.supportTickets || []).map(t =>
+              t.coachingId === coachingId ? { ...t, status: newRow.support_status } : t
+            ),
           } : s);
           return;
         }
