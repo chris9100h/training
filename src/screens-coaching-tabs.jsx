@@ -681,14 +681,14 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             if (showPlanRow && lastMacroPillBlockIdx >= 0) {
               const planRow = (
                 <div key="plan-row" style={{ background: UI.bgRaised, borderRadius: 6, border: `0.5px solid ${UI.hair}`, padding: '8px 10px' }}>
-                  <div style={{ fontSize: 9, color: UI.inkGhost, fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 6 }}>Planned avg</div>
+                  <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 6 }}>Planned avg</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 6px' }}>
                     {[{v: planCal, u: 'kcal'}, {v: planProt, u: 'g'}, {v: planCarb, u: 'g'}, {v: planFat, u: 'g'}].map(({v, u}, i) => (
-                      <div key={i}>
-                        <div className="num" style={{ fontSize: 15, color: UI.inkGhost, fontWeight: 300 }}>
+                      <div key={i} style={{ textAlign: 'center' }}>
+                        <div className="num" style={{ fontSize: 15, color: UI.inkSoft, fontWeight: 300 }}>
                           {v != null ? v : '—'}
                         </div>
-                        <div style={{ fontSize: 9, color: UI.inkGhost, fontFamily: UI.fontUi, letterSpacing: '0.07em', marginTop: 1 }}>
+                        <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', marginTop: 1 }}>
                           {['Cal', 'Protein', 'Carbs', 'Fat'][i]} {u}
                         </div>
                       </div>
