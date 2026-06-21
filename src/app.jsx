@@ -1088,7 +1088,6 @@ function App() {
       {updateAvailable && !store?.inProgress && !onboardingState && <UpdateBanner onUpdate={applyUpdate} />}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
-      {route.name !== 'train' && route.name !== 'home' && <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
       {onboardingState?.phase === 'prompt' && (
         <window.Screens.OnboardingPrompt
