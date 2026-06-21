@@ -731,7 +731,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
 
   const e1rmForSet = (s) => {
     if (s.kg == null) return 0;
-    if (s.repsL != null || s.repsR != null) return LB.e1rm(s.kg, Math.max(s.repsL || 0, s.repsR || 0));
+    if (s.repsL != null || s.repsR != null) return LB.e1rm(s.kg, Math.min(s.repsL ?? 0, s.repsR ?? 0));
     return s.reps ? LB.e1rm(s.kg, s.reps) : 0;
   };
 
@@ -1405,10 +1405,10 @@ function StatsTab({ store, sessions, go }) {
       s.date.slice(0, 10) < min ? s.date.slice(0, 10) : min, relevant[0].date.slice(0, 10));
     const anchor = planStart ?? LB.parseDate(oldest);
     // Monday of the anchor week
-    const anchorDay = anchor.getDay() === 0 ? 6 : anchor.getDay() - 1;
+    const anchorDay = LB.isoWd(anchor);
     const anchorMonday = new Date(anchor); anchorMonday.setDate(anchor.getDate() - anchorDay); anchorMonday.setHours(0,0,0,0);
     // Monday of the current week
-    const todayDay = today.getDay() === 0 ? 6 : today.getDay() - 1;
+    const todayDay = LB.isoWd(today);
     const currentMonday = new Date(today); currentMonday.setDate(today.getDate() - todayDay); currentMonday.setHours(0,0,0,0);
     const weeks = Math.round((currentMonday - anchorMonday) / (7 * 86400000)) + 1;
     return (relevant.length / Math.max(1, weeks)).toFixed(1);
@@ -1659,7 +1659,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
       schSessions.forEach(s => {
         const sDate = new Date(s.date.slice(0, 10) + 'T12:00:00');
         if (isWd) {
-          const startWd = (startD.getDay() + 6) % 7;
+          const startWd = LB.isoWd(startD);
           const startMon = new Date(startD); startMon.setDate(startD.getDate() - startWd); startMon.setHours(0,0,0,0);
           const weekNum = Math.floor((sDate - startMon) / (7 * 86400000)) + 1;
           if (weekNum > 0) map.set(s.id, `Week ${weekNum}`);

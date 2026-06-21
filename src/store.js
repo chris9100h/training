@@ -712,7 +712,7 @@ async function autoArchiveMissedDays(userId, state) {
     let trainingDay = null;
     if (isWd) {
       if (state.weekPlanStartDate && dateKey < state.weekPlanStartDate) continue;
-      const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      const wd = isoWd(d);
       trainingDay = activeSch.days.find(day => day.weekday === wd && (day.items || []).length > 0) || null;
     } else {
       const days = getPlanDaysForDate(activeSch, dateKey);
@@ -1044,7 +1044,7 @@ function computeNextTrainingDate(state) {
     const dateStr = d.toISOString().slice(0, 10);
     let training = false;
     if (wdPlan) {
-      const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      const wd = isoWd(d);
       const day = sch.days.find(x => x.weekday === wd);
       training = !!(day && (day.items || []).length > 0);
     } else {
@@ -1086,7 +1086,7 @@ function computeNextReminderAt(state) {
     const dateStr = d.toISOString().slice(0, 10);
     let training = false;
     if (wdPlan) {
-      const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      const wd = isoWd(d);
       const day = sch.days.find(x => x.weekday === wd);
       training = !!(day && (day.items || []).length > 0);
     } else {
@@ -1127,6 +1127,14 @@ function findExercise(state, exId) {
 function parseDate(s) {
   if (!s) return null;
   return new Date(s.slice(0, 10) + 'T12:00:00');
+}
+
+// ISO weekday from a Date: 0=Mon … 6=Sun
+function isoWd(d) { return (d.getDay() + 6) % 7; }
+
+// Sunday of the week that starts on weekStart (YYYY-MM-DD) → YYYY-MM-DD
+function weekEnd(weekStart) {
+  return new Date(new Date(weekStart + 'T12:00:00').getTime() + 6 * 86400000).toISOString().slice(0, 10);
 }
 
 // Effective reps for a set — for unilateral sets, the weaker side is the bottleneck.
@@ -2288,7 +2296,7 @@ function plannedTrainingDay(state, dateStr) {
   if (isWeekdayPlan(sch)) {
     if (state.weekPlanStartDate && ds < state.weekPlanStartDate) return null;
     const dd = new Date(ds + 'T12:00:00');
-    const wd = dd.getDay() === 0 ? 6 : dd.getDay() - 1;
+    const wd = isoWd(dd);
     const vDays = getPlanDaysForDate(sch, ds);
     return vDays.find(d => d.weekday === wd && d.items?.length > 0) || null;
   }
@@ -2536,7 +2544,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
+  uid, todayISO, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,

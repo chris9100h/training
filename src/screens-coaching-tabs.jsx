@@ -445,7 +445,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   // (Sunday = weekStart + 6 days) so past check-ins use the targets from that time.
   const activeMacros = (() => {
     if (!coachingMacrosHistory?.length) return null;
-    const weekEnd = new Date(new Date(ci.weekStart + 'T12:00:00').getTime() + 6 * 86400000).toISOString().slice(0, 10);
+    const weekEnd = LB.weekEnd(ci.weekStart);
     // History is sorted newest-first; first entry whose set_at date ≤ Sunday of this week.
     return coachingMacrosHistory.find(m => m.setAt.slice(0, 10) <= weekEnd) || null;
   })();

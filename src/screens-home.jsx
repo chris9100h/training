@@ -1162,7 +1162,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         const now = new Date(); now.setHours(12, 0, 0, 0);
         const currentMondayMs = now.getTime() - todayWd * 86400000;
         const start = LB.parseDate(startDateStr);
-        const planMondayMs = start.getTime() - ((start.getDay() + 6) % 7) * 86400000;
+        const planMondayMs = start.getTime() - LB.isoWd(start) * 86400000;
         const week0MondayMs = planMondayMs - 7 * 86400000;
         return Math.round((week0MondayMs - currentMondayMs) / (7 * 86400000));
       }
@@ -1177,7 +1177,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       const oldestDayCount = oldestVersionStart
         ? (sch.versions[sch.versions.length - 1]?.days?.length || dayCount)
         : dayCount;
-      const startWd = (trueStart.getDay() + 6) % 7;
+      const startWd = LB.isoWd(trueStart);
       const startMondayMs = trueStart.getTime() - startWd * 86400000 - oldestDayCount * 86400000;
       return Math.round((startMondayMs - currentMondayMs) / (7 * 86400000));
     }
@@ -1335,7 +1335,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
         const start = LB.parseDate(store.weekPlanStartDate);
         const startMonday = new Date(start);
-        startMonday.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+        startMonday.setDate(start.getDate() - LB.isoWd(start));
         startMonday.setHours(12, 0, 0, 0);
         const weekNum = Math.floor(Math.round((monday - startMonday) / 86400000) / 7) + 1;
         if (weekNum >= 0) return `WEEK ${weekNum}`;
@@ -1579,7 +1579,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       let trainingDay = null;
       if (weekdayMode) {
         if (store.weekPlanStartDate && dateKey < store.weekPlanStartDate) continue;
-        const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+        const wd = LB.isoWd(d);
         trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
       } else if (store.cycleStartDate) {
         const vDays = LB.getPlanDaysForDate(sch, dateKey);
@@ -1617,7 +1617,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       let trainingDay = null;
       if (weekdayMode) {
         if (store.weekPlanStartDate && dateKey < store.weekPlanStartDate) continue;
-        const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+        const wd = LB.isoWd(d);
         trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
       } else if (store.cycleStartDate) {
         const vDays = LB.getPlanDaysForDate(sch, dateKey);

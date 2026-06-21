@@ -321,7 +321,7 @@ function CheckInTrendCards({ recent, schema }) {
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
           <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{format(last)}</span>
           {delta != null && Math.abs(delta) > 0.001 && (
-            <span style={{ fontSize: 10, color: arrowColor, fontFamily: UI.fontUi }}>{up ? '▲' : '▼'} {format(Math.abs(delta))}</span>
+            <span style={{ fontSize: 10, color: arrowColor, fontFamily: UI.fontUi }}>{up ? '↑' : '↓'} {format(Math.abs(delta))}</span>
           )}
         </div>
         {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, textAlign: 'center' }}>{sub}</div>}
@@ -378,7 +378,7 @@ function CheckInTrendCards({ recent, schema }) {
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
             <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last.responses.cardio_minutes} min</span>
             {delta != null && Math.abs(delta) > 0 && (
-              <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
+              <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '↑' : '↓'} {Math.abs(delta)}</span>
             )}
           </div>
           <div style={{ flex: 1 }} />
