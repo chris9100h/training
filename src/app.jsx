@@ -351,6 +351,15 @@ function App() {
     }
   }, [store?.user?.email, store?.user?.name]);
 
+  // Boot-time admin support unread count
+  useEffectA(() => {
+    if (store?.user?.email !== 'office@btc-prime.biz') return;
+    LB.supabase.rpc('get_support_chats').then(({ data }) => {
+      const unread = (data || []).reduce((s, t) => s + Number(t.unread_count || 0), 0);
+      setStore(s => s ? { ...s, adminSupportUnread: unread } : s);
+    }).catch(() => {});
+  }, [store?.user?.email]);
+
   // Auto-seed the system CARDIO exercise once per user (if missing or deleted).
   useEffectA(() => {
     if (phase !== 'ready' || !userId) return;
@@ -828,7 +837,8 @@ function App() {
                 ),
               };
             }
-            return s; // Admin sees someone else's support note — ignore Realtime
+            // Admin inbox: increment admin unread counter
+            return { ...s, adminSupportUnread: (s.adminSupportUnread || 0) + 1 };
           }
           if ((s.coaching.unreadNotes || []).some(n => n.id === note.id)) return s;
           return {

@@ -576,6 +576,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   useEffectSet(() => {
     if (!supportInboxSheet || !isAdmin) return;
     setSupportInboxLoading(true);
+    setStore(s => s ? { ...s, adminSupportUnread: 0 } : s);
     LB.supabase.rpc('get_support_chats').then(({ data }) => { setSupportInbox(data || []); setSupportInboxLoading(false); }).catch(() => setSupportInboxLoading(false));
   }, [supportInboxSheet]);
 
