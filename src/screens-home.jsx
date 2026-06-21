@@ -1078,7 +1078,7 @@ const TRAIN_BG_OVERRIDES = {
   'test@test.com':             'icons/phoenix.png',
 };
 
-function HomeScreen({ store, setStore, go, userId }) {
+function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRetrySync }) {
   const [confirmEl, confirm] = useConfirm();
   const _userEmail = (store.user?.email || '').toLowerCase();
   const _adminPreviewBg = _userEmail === 'office@btc-prime.biz'
@@ -1985,7 +1985,20 @@ function HomeScreen({ store, setStore, go, userId }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontFamily: UI.fontDisplay, fontSize: 34, fontWeight: 900, letterSpacing: '0.10em', color: UI.gold, lineHeight: 1 }}>ZANE</span>
-            <i className="fa-solid fa-dumbbell" style={{ fontSize: 18, color: UI.inkFaint }} />
+            {(() => {
+              const isProblem = storageFull || syncStatus === 'error';
+              const isSaving  = syncStatus === 'pending' && !storageFull;
+              const color = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
+              const pulse = !isProblem ? 'pulseDot 2.4s ease-in-out infinite' : 'none';
+              return (
+                <i
+                  className="fa-solid fa-dumbbell"
+                  onClick={isProblem ? onRetrySync : undefined}
+                  title={isProblem ? 'Not synced — tap to retry' : isSaving ? 'Saving…' : 'Connected'}
+                  style={{ fontSize: 18, color, animation: pulse, cursor: isProblem ? 'pointer' : 'default' }}
+                />
+              );
+            })()}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
             <div style={{ textAlign: 'right', minWidth: 0 }}>

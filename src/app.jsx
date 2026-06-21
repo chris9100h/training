@@ -1010,7 +1010,7 @@ function App() {
   // sit on top of the session/rest timers), so hand it a ready-made inline pill
   // and suppress the global overlay there.
   const syncPillInline = <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} inline />;
-  const props = { store, setStore, go, userId, syncPill: syncPillInline };
+  const props = { store, setStore, go, userId, syncPill: syncPillInline, syncStatus, storageFull, onRetrySync };
   const tabRoutes = ['home', 'plan', 'lib', 'hist', 'health', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
   // Library lives under the merged "Plan" tab — keep that tab lit on the lib route.
@@ -1088,7 +1088,7 @@ function App() {
       {updateAvailable && !store?.inProgress && !onboardingState && <UpdateBanner onUpdate={applyUpdate} />}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
-      {route.name !== 'train' && <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} />}
+      {route.name !== 'train' && route.name !== 'home' && <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
       {onboardingState?.phase === 'prompt' && (
         <window.Screens.OnboardingPrompt
