@@ -379,7 +379,7 @@ function App() {
 
   useEffectA(() => {
     const THRESHOLD      = 30 * 60 * 1000; // full reload after 30 min
-    const SOFT_THRESHOLD =  2 * 60 * 1000; // data-only refresh after 2 min
+    const SOFT_THRESHOLD = 30 * 1000; // data-only refresh after 30 s
     const KEY = 'logbook-bg-ts';
 
     const softRefresh = () => {
