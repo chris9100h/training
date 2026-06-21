@@ -1824,7 +1824,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               const isProblem = storageFull || syncStatus === 'error';
               const isSaving  = syncStatus === 'pending' && !storageFull;
               const dotColor  = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
-              const pulse     = isProblem ? 'pulseDot 1.6s ease-in-out infinite' : 'none';
+              const pulse     = 'pulseDot 1.6s ease-in-out infinite';
               return <div onClick={isProblem ? onRetrySync : undefined} style={{ width: 6, height: 6, borderRadius: 3, background: dotColor, animation: pulse, cursor: isProblem ? 'pointer' : 'default', flexShrink: 0 }} />;
             })()}
             {warmupActive
@@ -2770,7 +2770,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   const isProblem = storageFull || syncStatus === 'error';
                   const isSaving  = syncStatus === 'pending' && !storageFull;
                   const dotColor  = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
-                  const pulse     = isProblem ? 'pulseDot 1.6s ease-in-out infinite' : 'none';
+                  const pulse     = 'pulseDot 1.6s ease-in-out infinite';
                   return <div onClick={isProblem ? onRetrySync : undefined} style={{ width: 6, height: 6, borderRadius: 3, background: dotColor, animation: pulse, cursor: isProblem ? 'pointer' : 'default', flexShrink: 0 }} />;
                 })()}
                 <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>WARMUP</span>
