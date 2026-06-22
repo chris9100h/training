@@ -2496,7 +2496,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </div>
 
       {/* finish confirmation */}
-      <Sheet open={finishOpen} onClose={() => { setFinishOpen(false); setFinishStep('confirm'); setPendingFeel(null); }} title={finishStep === 'confirm' ? "End session?" : finishStep === 'name' ? "Name this workout" : "Rate workout effort"}>
+      <Sheet open={finishOpen} onClose={() => { setFinishOpen(false); setFinishStep('confirm'); setPendingFeel(null); }} title={finishStep === 'confirm' ? "End session?" : finishStep === 'name' ? "Name this workout" : finishStep === 'cycle' ? "Wrap up" : "Rate workout effort"}>
         {finishStep === 'confirm' ? (<>
           <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 18, lineHeight: 1.6 }}>
             {(() => {
