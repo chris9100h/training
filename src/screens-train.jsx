@@ -544,7 +544,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
       const cE1rm = (completed?.kg != null && cReps != null && cReps > 0) ? LB.e1rm(completed.kg, cReps) : 0;
-      const priorBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
+      const priorBest = LB.bestE1rmForExercise(store, entry.exId, session.id, session.dayId);
       const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;

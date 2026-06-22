@@ -1171,18 +1171,17 @@ function isDecline(curr, prev) {
   return (curr.kg < prev.kg && rA <= rB) || (curr.kg === prev.kg && rA < rB);
 }
 
-// Best estimated 1RM ever recorded for an exercise across all ended sessions
-// (any day), optionally excluding a session (e.g. the live one). Returns 0 when
-// there's no history — callers treat 0 as "no record to beat yet".
+// Best estimated 1RM ever recorded for an exercise across all ended sessions,
+// optionally excluding a session (e.g. the live one) and optionally restricted
+// to sessions with a matching dayId. Returns 0 when there's no history.
 // Since boot only loads a recent window of sets, the local scan is combined
-// with the cached get_exercise_best_e1rm aggregate (state.exerciseBests). The
-// aggregate covers everything ended server-side; the scan covers sessions
-// ended on this device since the aggregate was fetched. The excluded (live)
-// session is never part of the aggregate because it isn't ended yet.
-function bestE1rmForExercise(state, exId, excludeSessionId = null) {
-  let best = (state.exerciseBests || {})[exId] || 0;
+// with the cached get_exercise_best_e1rm aggregate (state.exerciseBests) —
+// but only when dayId is null, because the aggregate is day-agnostic.
+function bestE1rmForExercise(state, exId, excludeSessionId = null, dayId = null) {
+  let best = dayId ? 0 : ((state.exerciseBests || {})[exId] || 0);
   for (const s of state.sessions || []) {
     if (!s.ended || (excludeSessionId && s.id === excludeSessionId)) continue;
+    if (dayId && s.dayId !== dayId) continue;
     for (const e of (s.entries || [])) {
       if (e.exId !== exId) continue;
       for (const st of (e.sets || [])) {
