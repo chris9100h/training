@@ -1091,7 +1091,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const _adminPreviewBg = _userEmail === 'office@btc-prime.biz'
     ? ({ mike: 'icons/IMG_6389.png', phoenix: 'icons/phoenix.png', marine: 'icons/marine.png', prince_abu: 'icons/prince_abu.png' })[localStorage.getItem('logbook-admin-bg-preview')]
     : undefined;
-  const trainBg = (_adminPreviewBg || (store.settings?.onboardingCompleted ? TRAIN_BG_OVERRIDES[_userEmail] : null)) || 'icons/zane-logo.png';
+  const trainBg = _adminPreviewBg || TRAIN_BG_OVERRIDES[_userEmail] || 'icons/zane-logo.png';
   const isCustomBg = trainBg !== 'icons/zane-logo.png';
   const today = LB.todaysDay(store);
   const sch = today?.schedule;
