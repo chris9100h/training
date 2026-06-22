@@ -351,20 +351,34 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const entry = session.entries[exIdx];
   const exercise = entry ? LB.findExercise(store, entry.exId) : null;
 
-  // "Last time" reference. The local window covers recently trained exercises;
-  // when an exercise has no local history (last logged before the boot
-  // window), fetch its most recent session from the server once and keep it in
-  // local state (exId → { entry } | null while resolved, undefined = not asked).
+  // "Last time" reference + remote best e1RM for this day type.
+  // The local window covers recently trained exercises; when an exercise has
+  // no local history (last logged before the boot window), fetch its recent
+  // sessions from the server once. limit=20 covers both the "last session"
+  // (for improve/regress) and a broad enough window for the day-specific
+  // best-e1RM comparison (for NEW BEST).
   const [remoteLast, setRemoteLast] = useStateT({});
+  const remoteBestE1rmRef = useRefT({}); // exId → best day-specific e1RM from server
   const localLast = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayId) : null;
   useEffectT(() => {
     const exId = entry?.exId;
-    if (!exId || localLast || remoteLast[exId] !== undefined) return;
+    if (!exId || remoteLast[exId] !== undefined) return;
     let on = true;
-    LB.fetchExerciseHistory(exId, session.dayId, 1, userId)
+    LB.fetchExerciseHistory(exId, session.dayId, 20, userId)
       .then(rows => {
         if (!on) return;
-        const row = (rows || []).find(r => r.sessionId !== session.id);
+        const filtered = (rows || []).filter(r => r.sessionId !== session.id);
+        // best e1RM across all fetched sessions for this day type
+        let best = 0;
+        for (const r of filtered) {
+          for (const st of (r.sets || [])) {
+            if (st.warmup || st.skipped || st.kg == null) continue;
+            const reps = LB.effReps(st);
+            if (reps > 0) { const v = LB.e1rm(st.kg, reps); if (v > best) best = v; }
+          }
+        }
+        remoteBestE1rmRef.current[exId] = best;
+        const row = filtered[0];
         setRemoteLast(m => ({ ...m, [exId]: row ? { entry: { sets: row.sets } } : null }));
       })
       .catch(() => { if (on) setRemoteLast(m => ({ ...m, [exId]: null })); });
@@ -544,7 +558,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
       const cE1rm = (completed?.kg != null && cReps != null && cReps > 0) ? LB.e1rm(completed.kg, cReps) : 0;
-      const priorBest = LB.bestE1rmForExercise(store, entry.exId, session.id, session.dayId);
+      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id, session.dayId);
+      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
       const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
