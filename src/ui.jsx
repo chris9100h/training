@@ -364,8 +364,8 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
   // gold), topped by a thin gold rail. Inactive tabs are faint icon+label.
   const n = tabs.length;
   // Geometry of the sliding key plate, kept in sync with the icon zone below.
-  const KEY = 44;        // plate width/height (square, radius-6 key)
-  const KEY_TOP = 6;     // distance from the row top to the plate
+  const KEY = 38;        // plate width/height (square, radius-6 key)
+  const KEY_TOP = 5;     // distance from the row top to the plate
   return (
     <div style={{
       flexShrink: 0,
@@ -380,12 +380,12 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
         WebkitBackdropFilter: 'blur(24px) saturate(130%)',
         border: `1px solid ${UI.hairStrong}`,
         borderRadius: 8,
-        padding: '8px 6px',
+        padding: '6px 6px',
         boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
       }}>
         {/* knurled top edge — grip texture, signature of the kit */}
-        <div className="knurl" style={{ position: 'absolute', top: 8, left: 14, right: 14 }} />
-        <div style={{ display: 'flex', position: 'relative', paddingTop: 6 }}>
+        <div className="knurl" style={{ position: 'absolute', top: 6, left: 14, right: 14 }} />
+        <div style={{ display: 'flex', position: 'relative', paddingTop: 5 }}>
           {/* Sliding gold key plate behind the active icon */}
           {idx >= 0 && (
             <div style={{
@@ -422,8 +422,8 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
             return (
               <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => onChange(t.id)} style={{
                 flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
-                padding: `${KEY_TOP}px 4px 6px`,
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                padding: `${KEY_TOP}px 4px 4px`,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
                 color: on ? UI.gold : UI.inkFaint,
                 fontFamily: UI.fontUi,
                 fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
