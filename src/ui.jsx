@@ -443,7 +443,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                   position: 'relative', width: KEY, height: ICON_H,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   color: on ? '#0a0805' : UI.inkFaint,
-                  transform: on ? 'scale(1.08)' : 'scale(1)',
+                  transform: on ? 'scale(1.2)' : 'scale(1)',
                   transition: 'color 0.2s, transform 0.25s cubic-bezier(0.34,1.4,0.64,1)',
                 }}>
                   {TAB_ICONS[t.id]}
