@@ -820,24 +820,44 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // If user chose "continue from picked day", jump cycle to that day's index + 1.
     const pickedSch = store.schedules?.find(s => s.id === session.scheduleId);
     const pickedDayIdx = cycleFromPickedDay ? (pickedSch?.days?.findIndex(d => d.id === session.dayId) ?? -1) : -1;
-    // For date-driven plans (cycleStartDate), shift the start date so today = pickedDayIdx.
-    // Flex plans use cycleIndex directly, so only update cycleStartDate for non-flex plans.
-    let newCycleStartDate = null;
-    if (pickedDayIdx >= 0 && store.cycleStartDate && !LB.isFlexPlan(activeSch)) {
-      const t = new Date(); t.setHours(12, 0, 0, 0);
-      const shifted = new Date(t.getTime() - pickedDayIdx * 86400000);
-      newCycleStartDate = shifted.toISOString().slice(0, 10);
-    }
-    setStore(s => ({
-      ...s,
-      inProgress: null,
-      ...(shouldAdvance && !isWeekdayMode && !activeIsWeekday && !flexBlocks && {
-        cycleIndex: pickedDayIdx >= 0 ? pickedDayIdx + 1 : s.cycleIndex + 1,
-        ...(newCycleStartDate ? { cycleStartDate: newCycleStartDate } : {}),
-      }),
-      lastAdvancedDate: LB.todayISO(),
-      ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
-    }));
+    setStore(s => {
+      // For date-driven plans: insert a schedule version starting today with days rotated
+      // so pickedDayIdx is position 0 → today = picked day, tomorrow = day after, no gaps.
+      // Flex plans use cycleIndex directly, so skip version logic there.
+      let schedulesUpdate = s.schedules;
+      if (pickedDayIdx >= 0 && !LB.isFlexPlan(activeSch)) {
+        const curSch = s.schedules.find(sch2 => sch2.id === session.scheduleId);
+        if (curSch) {
+          const todayStr = LB.todayISO();
+          const baseDays = curSch.versions?.length
+            ? LB.getPlanDaysForDate(curSch, todayStr)
+            : curSch.days;
+          const rotated = [...baseDays.slice(pickedDayIdx), ...baseDays.slice(0, pickedDayIdx)];
+          let newVersions;
+          if (curSch.versions?.length) {
+            newVersions = LB.dedupeVersionsByDate([{ validFrom: todayStr, days: rotated }, ...curSch.versions]);
+          } else {
+            // Anchor history so past dates stay on the original day order.
+            const genesis = s.cycleStartDate || todayStr;
+            newVersions = LB.dedupeVersionsByDate([
+              { validFrom: todayStr, days: rotated },
+              { validFrom: genesis, days: curSch.days },
+            ]);
+          }
+          schedulesUpdate = s.schedules.map(sch2 => sch2.id === curSch.id ? { ...sch2, versions: newVersions } : sch2);
+        }
+      }
+      return {
+        ...s,
+        schedules: schedulesUpdate,
+        inProgress: null,
+        ...(shouldAdvance && !isWeekdayMode && !activeIsWeekday && !flexBlocks && {
+          cycleIndex: pickedDayIdx >= 0 ? pickedDayIdx + 1 : s.cycleIndex + 1,
+        }),
+        lastAdvancedDate: LB.todayISO(),
+        ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
+      };
+    });
     go({ name: 'session', sessionId: session.id, justFinished: true });
   };
 
