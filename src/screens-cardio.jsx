@@ -1005,8 +1005,8 @@ function CardioPlanScreen({ store, setStore, go }) {
           </div>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>{descriptor}</div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {CP_WEEKDAY_KEYS.filter(k => plan.days[k]).map((k, i) => (
-              <Pill key={k} gold={today && plan.days[cpTodayKey(todayISO)] === true && k === cpTodayKey(todayISO)}>
+            {CP_WEEKDAY_KEYS.map(k => (
+              <Pill key={k} gold={!!plan.days[k]}>
                 {CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(k)].slice(0,3).toUpperCase()}
               </Pill>
             ))}
