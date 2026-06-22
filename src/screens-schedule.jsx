@@ -93,8 +93,15 @@ function PlanScreen({ store, setStore, go }) {
           </div>
         }
       />
-      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'lib', label: 'Exercises', icon: 'fa-book' }]}
-        active="plan" onChange={() => go({ name: 'lib' })} />
+      <SubTabBar
+        tabs={[
+          { id: 'plan',   label: 'Plan',      icon: 'fa-calendar-days' },
+          { id: 'lib',    label: 'Exercises', icon: 'fa-book' },
+          { id: 'cardio', label: 'Cardio',    icon: 'fa-person-running' },
+        ]}
+        active="plan"
+        onChange={id => { if (id === 'lib') go({ name: 'lib' }); else if (id === 'cardio') go({ name: 'cardio-plans' }); }}
+      />
       <div style={{ padding: '14px 22px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {store.schedules.length === 0 && (
           <Empty title="No plans yet"

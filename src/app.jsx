@@ -987,6 +987,7 @@ function App() {
     case 'schedule-edit': screen = <window.Screens.ScheduleEditScreen {...props} scheduleId={route.scheduleId} versionFrom={route.versionFrom} />; break;
     case 'train':         screen = <window.Screens.TrainingScreen {...props} sessionId={route.sessionId} />; break;
     case 'lib':           screen = <window.Screens.LibraryScreen {...props} />; break;
+    case 'cardio-plans':  screen = <window.Screens.CardioPlanScreen {...props} />; break;
     case 'exercise':      screen = <window.Screens.ExerciseDetailScreen key={route.exId} {...props} exId={route.exId} back={route.back} editQueue={route.editQueue || []} editQueueTotal={route.editQueueTotal || 0} autoEdit={!!route.autoEdit} />; break;
     case 'hist':          screen = <window.Screens.HistoryScreen {...props} initialTab={route.initialTab} />; break;
     case 'health':        screen = <window.Screens.HealthScreen {...props} />; break;

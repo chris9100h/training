@@ -639,7 +639,7 @@ function CardioPROverlay({ pr, onDone }) {
   );
 }
 
-function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, onPR }) {
+function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, onPR, prefill }) {
   const getDistUnit = () => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } };
   const [distUnit, setDistUnitState] = useState(getDistUnit);
   const setDistUnit = (u) => { try { localStorage.setItem(CARDIO_DIST_KEY, u); } catch (_) {} setDistUnitState(u); };
@@ -663,7 +663,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
         note: editLog.note || '',
       });
     } else {
-      setForm(empty());
+      setForm({ ...empty(), type: prefill?.type || '' });
     }
   }, [open, editLog?.id]);
 
@@ -2437,6 +2437,17 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
           </button>
         </div>
+      )}
+
+      {/* Cardio plan widget — today's scheduled cardio targets */}
+      {window.Screens?.TodayCardioWidget && (
+        <window.Screens.TodayCardioWidget
+          store={store}
+          setStore={setStore}
+          todayISO={LB.todayISO()}
+          userId={userId}
+          onPR={setCardioPR}
+        />
       )}
 
       {/* Last session + not-logged strip — fixed above tab bar */}

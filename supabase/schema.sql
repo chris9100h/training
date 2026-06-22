@@ -1230,3 +1230,28 @@ CREATE TRIGGER zane_profiles_consume_budget
 
 ALTER PUBLICATION supabase_realtime ADD TABLE zane_coaching;
 ALTER PUBLICATION supabase_realtime ADD TABLE zane_coaching_notes;
+
+-- ── Cardio plans (migration 0094) ──────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS zane_cardio_plans (
+  id              text        PRIMARY KEY,
+  user_id         uuid        REFERENCES auth.users NOT NULL,
+  name            text        NOT NULL,
+  activity_type   text        NOT NULL,
+  archived        boolean     NOT NULL DEFAULT false,
+  mode            text        NOT NULL DEFAULT 'manual',
+  days            jsonb       NOT NULL DEFAULT '{}',
+  manual_targets  jsonb,
+  goal            jsonb,
+  goal_due_date   date,
+  start_fitness   jsonb,
+  generated_weeks jsonb,
+  plan_start_date date,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE zane_cardio_plans ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_cardio_plans_own"
+  ON zane_cardio_plans FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
