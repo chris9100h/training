@@ -581,8 +581,8 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
     sections.forEach(section => {
       const fields = (section.fields || []).filter(f => has(responses[f.key]));
       if (!fields.length) return;
-      const headLabel = section.label.toUpperCase() + (section.sectionHint ? ` (${section.sectionHint})` : '');
-      lines.push('', headLabel);
+      const headLabel = `// ${section.label.toUpperCase()}${section.sectionHint ? ` (${section.sectionHint})` : ''} //`;
+      lines.push('', headLabel, '─'.repeat(headLabel.length));
       let planRowInserted = false;
       fields.forEach((f, fi) => {
         const v = responses[f.key];
@@ -611,7 +611,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
       });
     });
     if (extraKeys.length) {
-      lines.push('', 'ADDITIONAL');
+      lines.push('', '// ADDITIONAL //', '─'.repeat('// ADDITIONAL //'.length));
       extraKeys.forEach(k => lines.push(`${k.replace(/_/g, ' ')}: ${responses[k]}`));
     }
     return lines.join('\n');
