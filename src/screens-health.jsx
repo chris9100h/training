@@ -1759,9 +1759,19 @@ function ExportSheet({ open, onClose, store }) {
           @page{margin:15mm 0}
           html,body{background:${bg}!important}
           body{color:#e5e2ef;font-family:system-ui,-apple-system,sans-serif;padding:16px 20px;max-width:600px;margin:0 auto}
+          .toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+          .toolbar button{background:rgba(255,255,255,0.08);border:0.5px solid rgba(255,255,255,0.15);border-radius:6px;color:#e5e2ef;font-family:system-ui,sans-serif;font-size:12px;font-weight:600;padding:8px 14px;cursor:pointer}
+          h1{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${accent};font-weight:600}
+          @media print{.toolbar{display:none}}
         </style>
       </head><body>
-        <h1 style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${accent};margin-bottom:16px;font-weight:600">Health &middot; ${from} &ndash; ${to}</h1>
+        <div class="toolbar">
+          <h1>Health &middot; ${from} &ndash; ${to}</h1>
+          <div style="display:flex;gap:8px">
+            <button onclick="window.print()">Save as PDF</button>
+            <button onclick="window.close()">← Close</button>
+          </div>
+        </div>
         ${cardsHtml}
         <script>window.onload=()=>{window.print()}<\/script>
       </body></html>`;
