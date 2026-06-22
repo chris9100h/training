@@ -76,6 +76,15 @@ function cpGenerateWeeks(goal, startFitness, goalDueDate, planStartDate, planDay
   if (!sessDates.length) return [];
   const total = sessDates.length;
 
+  // Pre-compute deload flags (every 4th calendar week, but never the last 2 sessions)
+  const deloadFlags = sessDates.map((d, si) => {
+    const weekOfPlan = Math.floor((d - start) / (7 * 86400000));
+    return (weekOfPlan + 1) % 4 === 0 && si < total - 2;
+  });
+  // nActive = sessions where cur advances; rate uses nActive-1 steps so
+  // first session = startValue and last non-deload session = targetValue
+  const nActive = deloadFlags.filter(x => !x).length;
+
   // Cap per-session rate to ≤10% per week equivalent
   const daysActive = CP_WEEKDAY_KEYS.filter(k => planDays[k]).length;
   const maxSessRate = Math.pow(1.10, 1 / Math.max(1, daysActive));
@@ -84,11 +93,10 @@ function cpGenerateWeeks(goal, startFitness, goalDueDate, planStartDate, planDay
     if (!goal.target_duration_minutes) return [];
     const startDur  = Math.max(5, startFitness.duration_minutes || 10);
     const targetDur = goal.target_duration_minutes;
-    const rate      = Math.min(Math.pow(targetDur / startDur, 1 / total), maxSessRate);
+    const rate      = Math.min(Math.pow(targetDur / startDur, 1 / Math.max(1, nActive - 1)), maxSessRate);
     let cur = startDur;
     return sessDates.map((d, si) => {
-      const weekOfPlan = Math.floor((d - start) / (7 * 86400000));
-      const isDeload   = (weekOfPlan + 1) % 4 === 0 && si < total - 2;
+      const isDeload = deloadFlags[si];
       const val = Math.round(isDeload ? cur * 0.88 : cur);
       if (!isDeload) cur = Math.min(targetDur, cur * rate);
       return { distance_m: null, duration_minutes: val, pace_s_per_km: null };
@@ -98,16 +106,15 @@ function cpGenerateWeeks(goal, startFitness, goalDueDate, planStartDate, planDay
   if (!goal.target_distance_m) return [];
   const startDist  = Math.max(100, startFitness.distance_m || 500);
   const targetDist = goal.target_distance_m;
-  const rate       = Math.min(Math.pow(targetDist / startDist, 1 / total), maxSessRate);
+  const rate       = Math.min(Math.pow(targetDist / startDist, 1 / Math.max(1, nActive - 1)), maxSessRate);
   let cur = startDist;
   return sessDates.map((d, si) => {
-    const weekOfPlan = Math.floor((d - start) / (7 * 86400000));
-    const isDeload   = (weekOfPlan + 1) % 4 === 0 && si < total - 2;
+    const isDeload = deloadFlags[si];
     const distM = Math.round(isDeload ? cur * 0.88 : cur);
     let pace = null;
     if (goal.type === 'pace' && startFitness.pace_s_per_km && goal.target_duration_minutes) {
       const tgtPace = (goal.target_duration_minutes * 60) / (targetDist / 1000);
-      const t = total <= 1 ? 1 : si / (total - 1);
+      const t = nActive <= 1 ? 1 : (deloadFlags.slice(0, si).filter(x => !x).length) / (nActive - 1);
       pace = Math.max(tgtPace, Math.round(startFitness.pace_s_per_km + t * (tgtPace - startFitness.pace_s_per_km)));
     }
     if (!isDeload) cur = Math.min(targetDist, cur * rate);
@@ -764,10 +771,8 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
 
           <div>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>DUE DATE</div>
-            <div style={{ overflow: 'hidden' }}>
-              <input type="date" value={goalDue} min={LB.todayISO()} onChange={e => setGoalDue(e.target.value)}
-                style={{ ...inputStyle, colorScheme: 'dark', maxWidth: '100%' }} />
-            </div>
+            <input type="date" value={goalDue} min={LB.todayISO()} onChange={e => setGoalDue(e.target.value)}
+              style={{ ...inputStyle, colorScheme: 'dark', WebkitAppearance: 'none', appearance: 'none' }} />
           </div>
 
           <div>
