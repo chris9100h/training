@@ -1114,7 +1114,11 @@ function TodayCardioWidget({ store, setStore, todayISO, userId, onPR }) {
 
   return (
     <div style={{ padding: '2px 22px 0' }}>
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>CARDIO PLAN</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        <div style={{ flex: 1, height: 3, borderRadius: 2, background: 'repeating-linear-gradient(90deg, rgba(var(--accent-rgb),0.55) 0, rgba(var(--accent-rgb),0.55) 2px, transparent 0, transparent 5px)' }} />
+        <div className="micro" style={{ color: 'var(--accent)', fontWeight: 700, flexShrink: 0 }}>CARDIO PLAN</div>
+        <div style={{ flex: 1, height: 3, borderRadius: 2, background: 'repeating-linear-gradient(90deg, rgba(var(--accent-rgb),0.55) 0, rgba(var(--accent-rgb),0.55) 2px, transparent 0, transparent 5px)' }} />
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {slots.map(({ plan, target, doneLog }) => {
           const act = cpActivity(plan.activityType);
