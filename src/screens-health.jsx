@@ -1752,10 +1752,11 @@ function ExportSheet({ open, onClose, store }) {
           *{margin:0;padding:0;box-sizing:border-box}
           @page{margin:12mm}
           body{font-family:system-ui,-apple-system,sans-serif;background:#fff;padding:0;max-width:600px;margin:0 auto}
-          h1{font-size:13px;letter-spacing:0.1em;text-transform:uppercase;color:${accent};font-weight:700;margin-bottom:14px}
         </style>
       </head><body>
-        <h1>Health &middot; ${from} &ndash; ${to}</h1>
+        <div style="background:${cardBg};border:1px solid ${hairDiv};border-radius:999px;padding:8px 20px;margin-bottom:14px;text-align:center;-webkit-print-color-adjust:exact;print-color-adjust:exact">
+          <span style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${accent};font-weight:700">Health &middot; ${from} &ndash; ${to}</span>
+        </div>
         ${cardsHtml}
         <script>
           var isIOS=/iPhone|iPad|iPod/.test(navigator.userAgent)&&!window.MSStream;
