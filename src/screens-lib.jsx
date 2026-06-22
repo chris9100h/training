@@ -143,7 +143,7 @@ function LibraryScreen({ store, setStore, go }) {
       <TopBar title="Exercises" right={topBarRight} />
       <SubTabBar
         tabs={[
-          { id: 'plan',   label: 'Workout',   icon: 'fa-dumbbell' },
+          { id: 'plan',   label: 'Plan',      icon: 'fa-calendar-days' },
           { id: 'lib',    label: 'Exercises', icon: 'fa-book' },
           { id: 'cardio', label: 'Cardio',    icon: 'fa-person-running' },
         ]}
