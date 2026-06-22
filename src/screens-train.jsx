@@ -820,11 +820,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // If user chose "continue from picked day", jump cycle to that day's index + 1.
     const pickedSch = store.schedules?.find(s => s.id === session.scheduleId);
     const pickedDayIdx = cycleFromPickedDay ? (pickedSch?.days?.findIndex(d => d.id === session.dayId) ?? -1) : -1;
+    // For date-driven plans (cycleStartDate), shift the start date so today = pickedDayIdx.
+    // Flex plans use cycleIndex directly, so only update cycleStartDate for non-flex plans.
+    let newCycleStartDate = null;
+    if (pickedDayIdx >= 0 && store.cycleStartDate && !LB.isFlexPlan(activeSch)) {
+      const t = new Date(); t.setHours(12, 0, 0, 0);
+      const shifted = new Date(t.getTime() - pickedDayIdx * 86400000);
+      newCycleStartDate = shifted.toISOString().slice(0, 10);
+    }
     setStore(s => ({
       ...s,
       inProgress: null,
       ...(shouldAdvance && !isWeekdayMode && !activeIsWeekday && !flexBlocks && {
         cycleIndex: pickedDayIdx >= 0 ? pickedDayIdx + 1 : s.cycleIndex + 1,
+        ...(newCycleStartDate ? { cycleStartDate: newCycleStartDate } : {}),
       }),
       lastAdvancedDate: LB.todayISO(),
       ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
