@@ -244,15 +244,15 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
           <Btn kind="ghost" onClick={() => setStore(s => ({ ...s, activeCardioPlanId: null }))} style={{ width: '100%', fontSize: 12 }}>Deactivate</Btn>
         )}
 
-        {/* Day chips — horizontal scrollable, today dot, same as workout viewer */}
-        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none', margin: '0 -4px', padding: '0 4px' }}>
+        {/* Day chips — full width, today dot */}
+        <div style={{ display: 'flex', gap: 4 }}>
           {CP_WEEKDAY_KEYS.map(k => {
             const isTraining = !!plan.days[k];
             const isToday    = k === todayKey;
             const isSel      = k === selDay;
             return (
               <button key={k} onClick={() => setSelDay(k)} style={{
-                flexShrink: 0, padding: '6px 12px 4px', borderRadius: 4,
+                flex: 1, padding: '6px 0 4px', borderRadius: 4,
                 border: `1px solid ${isSel ? UI.gold : isToday ? UI.goldSoft : UI.hairStrong}`,
                 background: isSel ? UI.goldFaint : 'transparent',
                 cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
@@ -260,8 +260,9 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
                 <div style={{
                   fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em', fontWeight: 600,
                   color: isSel ? UI.gold : isTraining ? UI.inkSoft : UI.inkFaint,
+                  textAlign: 'center',
                 }}>
-                  {CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(k)].slice(0,3).toUpperCase()}
+                  {CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(k)].slice(0,2).toUpperCase()}
                 </div>
                 <div style={{ height: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', marginTop: 2 }}>
                   {isToday && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold }} />}
@@ -273,9 +274,6 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
 
         {/* Selected day content */}
         <div>
-          <div className={isTodaySel ? 'micro-gold' : 'micro'} style={{ marginBottom: 6, color: isTodaySel ? undefined : UI.inkFaint }}>
-            {CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(selDay)].toUpperCase()}{isTodaySel ? ' · TODAY' : ''}
-          </div>
           {!isTrainingDay ? (
             <div className="display" style={{ fontSize: 28, color: UI.inkSoft, fontStyle: 'italic' }}>Rest</div>
           ) : selTarget && !selTarget.freeSession ? (
