@@ -1938,7 +1938,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   if (!sch) {
     const hasPlans = store.schedules?.length > 0;
     return (
-      <Screen>
+      <Screen style={{ position: 'relative' }}>
+        {isCustomBg && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+            <img src={trainBg} style={{ width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' }} />
+          </div>
+        )}
         <TopBar
           title={<span>HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span></span>}
           sub={new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
