@@ -1600,7 +1600,19 @@ function ExportSheet({ open, onClose, store }) {
   const cardioByDay = () => {
     const m = {};
     (store.cardioLogs || []).filter(l => l.date >= from && l.date <= to).forEach(l => {
-      m[l.date] = (m[l.date] || 0) + (l.durationMinutes || 0);
+      if (!m[l.date]) m[l.date] = { min: 0, distM: null };
+      m[l.date].min += (l.durationMinutes || 0);
+      if (l.distanceM != null) m[l.date].distM = (m[l.date].distM || 0) + l.distanceM;
+    });
+    return m;
+  };
+
+  const sessionsByDay = () => {
+    const m = {};
+    (store.sessions || []).filter(s => s.ended && s.date >= from && s.date <= to).forEach(s => {
+      const d = typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10);
+      if (!m[d]) m[d] = [];
+      m[d].push(s);
     });
     return m;
   };
@@ -1611,6 +1623,7 @@ function ExportSheet({ open, onClose, store }) {
       const unit = store.settings?.unit || 'kg';
       const logs = logsInRange();
       const cardio = cardioByDay();
+      const sessions = sessionsByDay();
       const netCarbs = store.settings?.netCarbs;
 
       const esc = v => {
@@ -1633,9 +1646,17 @@ function ExportSheet({ open, onClose, store }) {
         { label: 'Carbs (g)',        fn: l => l.carbs },
         netCarbs ? { label: 'Fiber (g)', fn: l => l.fiber } : null,
         { label: 'Fat (g)',          fn: l => l.fat },
-        { label: 'Water (L)',        fn: l => l.waterMl != null ? (l.waterMl / 1000).toFixed(2) : null },
+        { label: 'Water (ml)',        fn: l => l.waterMl != null ? l.waterMl : null },
         { label: 'Adherence (%)',    fn: l => l.adherence != null ? Math.round(l.adherence) : null },
-        { label: 'Cardio (min)',     fn: l => cardio[l.date] || null },
+        { label: 'Cardio (min)',     fn: l => cardio[l.date]?.min || null },
+        { label: store.settings?.unit === 'lbs' ? 'Cardio dist (mi)' : 'Cardio dist (km)',
+          fn: l => cardio[l.date]?.distM != null
+            ? store.settings?.unit === 'lbs'
+              ? Math.round(cardio[l.date].distM / 1609.344 * 100) / 100
+              : Math.round(cardio[l.date].distM / 10) / 100
+            : null },
+        { label: 'Training',         fn: l => (sessions[l.date] || []).map(s => s.dayName || s.day_name || '').filter(Boolean).join(', ') || null },
+        { label: 'Training (min)',   fn: l => (sessions[l.date] || []).reduce((sum, s) => sum + (s.durationMinutes || s.duration_minutes || 0), 0) || null },
         { label: 'Note',             fn: l => l.note || null },
         { label: 'Off-plan note',    fn: l => l.offPlanNote || null },
       ].filter(Boolean);
@@ -1663,6 +1684,7 @@ function ExportSheet({ open, onClose, store }) {
     try {
       const logs = logsInRange();
       const cardio = cardioByDay();
+      const sessions = sessionsByDay();
       const unit = store.settings?.unit || 'kg';
       const cs = getComputedStyle(document.documentElement);
       const v = k => cs.getPropertyValue(k).trim();
@@ -1683,9 +1705,10 @@ function ExportSheet({ open, onClose, store }) {
         : logs.map(l => {
           const date = new Date(l.date + 'T12:00:00');
           const dateLabel = date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-          const cardioMin = cardio[l.date];
+          const cardioMin = cardio[l.date]?.min;
           const adh = l.adherence != null ? Math.round(l.adherence) : null;
-          const trained = LB.isLoggedTrainingDay(store.sessions, l.date);
+          const daySessions = sessions[l.date] || [];
+          const trained = daySessions.length > 0;
           const hasCardio = !!cardioMin;
           const ac = adhColor(adh);
 
@@ -1712,9 +1735,12 @@ function ExportSheet({ open, onClose, store }) {
                </div>`
             : '';
 
+          const sessionNames = daySessions.map(s => s.dayName || s.day_name || '').filter(Boolean).join(', ');
+          const sessionDur = daySessions.reduce((sum, s) => sum + (s.durationMinutes || s.duration_minutes || 0), 0);
+
           return `<div style="background:${bgCard};border:1px solid ${hairStrong};border-radius:8px;padding:16px;margin-bottom:12px;page-break-inside:avoid">
             <div style="font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#e5e2ef;margin-bottom:${(trained || hasCardio) ? 8 : 12}px">${dateLabel}</div>
-            ${(trained || hasCardio) ? `<div style="display:flex;gap:6px;margin-bottom:10px">${trained ? badge('🏋', 'Trained') : ''}${hasCardio ? badge('🏃', 'Cardio') : ''}</div>` : ''}
+            ${(trained || hasCardio) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:${sessionNames ? 6 : 10}px">${trained ? badge('🏋', sessionNames ? `${sessionNames}${sessionDur ? ` · ${sessionDur} min` : ''}` : 'Trained') : ''}${hasCardio ? badge('🏃', 'Cardio') : ''}</div>` : ''}
             ${adhBar}
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 6px">
               ${stat(`Weight (${unit})`, l.weight)}
