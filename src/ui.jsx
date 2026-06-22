@@ -144,7 +144,7 @@ const TAB_ICONS = {
 function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoaching = false, coachingBadge = null, showHealth = false }) {
   const tabs = [
     { id: 'home', label: 'Train' },
-    { id: 'plan', label: 'Workout' },
+    { id: 'plan', label: 'Plan' },
     { id: 'hist', label: 'History' },
     ...(showHealth ? [{ id: 'health', label: 'Health' }] : []),
     ...(showCoaching ? [{ id: 'coaching', label: 'Coaching' }] : []),
