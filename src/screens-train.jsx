@@ -589,9 +589,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
     const group = entry.supersetGroup;
     if (group) {
-      const newDoneCount = updatedSets.filter(s => s.done).length;
       const partners = session.entries.map((e, i) => ({ e, i })).filter(({ e, i }) => e.supersetGroup === group && i !== exIdx);
-      const nextPartner = partners.find(({ e }) => e.sets.filter(s => s.done).length < newDoneCount);
+      const nextPartner = partners.find(({ e }) => e.sets[setIdx]?.done === false);
       if (nextPartner) {
         // Mid-round: jump to partner, no rest
         setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), 300);
