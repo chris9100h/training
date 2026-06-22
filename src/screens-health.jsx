@@ -1651,7 +1651,7 @@ function ExportSheet({ open, onClose, store }) {
         { label: 'Cardio (min)',     fn: l => cardio[l.date]?.min || null },
         { label: 'Cardio dist (m)',
           fn: l => cardio[l.date]?.distM != null ? Math.round(cardio[l.date].distM) : null },
-        { label: 'Training',         fn: l => (sessions[l.date] || []).map(s => s.dayName || s.day_name || '').filter(Boolean).join(', ') || null },
+        { label: 'Training',         fn: l => (sessions[l.date] || []).map(s => s.dayName || s.day_name || '').filter(Boolean).join(', ') || 'REST' },
         { label: 'Training (min)',   fn: l => (sessions[l.date] || []).reduce((sum, s) => sum + (s.durationMinutes || s.duration_minutes || 0), 0) || null },
         { label: 'Note',             fn: l => l.note || null },
         { label: 'Off-plan note',    fn: l => l.offPlanNote || null },
@@ -1756,13 +1756,12 @@ function ExportSheet({ open, onClose, store }) {
         <title>Health Export ${from} – ${to}</title>
         <style>
           *,*::before,*::after{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
-          html,body{background:${bg}!important;min-height:100vh}
-          body{color:#e5e2ef;font-family:system-ui,-apple-system,sans-serif;padding:20px;max-width:600px;margin:0 auto}
-          h1{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${accent};margin-bottom:16px;font-weight:600}
-          @page{margin:12mm}
+          @page{margin:15mm 0}
+          html,body{background:${bg}!important}
+          body{color:#e5e2ef;font-family:system-ui,-apple-system,sans-serif;padding:16px 20px;max-width:600px;margin:0 auto}
         </style>
       </head><body>
-        <h1>Health &middot; ${from} &ndash; ${to}</h1>
+        <h1 style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${accent};margin-bottom:16px;font-weight:600">Health &middot; ${from} &ndash; ${to}</h1>
         ${cardsHtml}
         <script>window.onload=()=>{window.print()}<\/script>
       </body></html>`;
