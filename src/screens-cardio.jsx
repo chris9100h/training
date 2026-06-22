@@ -159,6 +159,17 @@ function cpTodayTarget(plan, todayISO) {
   return null;
 }
 
+// ISO date of the nearest upcoming occurrence of weekday key k (today if k == today)
+function cpNearestDateForKey(k, todayISO) {
+  const todayIdx  = CP_WEEKDAY_KEYS.indexOf(cpTodayKey(todayISO));
+  const targetIdx = CP_WEEKDAY_KEYS.indexOf(k);
+  let daysAhead = targetIdx - todayIdx;
+  if (daysAhead < 0) daysAhead += 7;
+  const d = new Date(todayISO + 'T12:00:00');
+  d.setDate(d.getDate() + daysAhead);
+  return d.toISOString().slice(0, 10);
+}
+
 function cpTodayLog(plan, cardioLogs, todayISO) {
   return (cardioLogs || []).find(l => l.date === todayISO && l.type === plan.activityType) || null;
 }
@@ -187,12 +198,11 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
     weekNum != null ? `Session ${weekNum}/${totalWeeks}` : null,
   ].filter(Boolean).join(' · ').toUpperCase();
 
-  // Target for the selected day
+  // Target for the selected day — use nearest upcoming date for that weekday so
+  // goal plan progression and manual targets are both computed correctly.
   const selTarget = (() => {
     if (!plan.days[selDay]) return null;
-    if (plan.mode === 'manual') return plan.manualTargets?.[selDay] || null;
-    // goal plan: same weekly target for all training days — compute via todayISO
-    return cpTodayTarget(plan, todayISO);
+    return cpTodayTarget(plan, cpNearestDateForKey(selDay, todayISO));
   })();
   const selDoneLog = selDay === todayKey ? cpTodayLog(plan, store.cardioLogs, todayISO) : null;
   const isTodaySel = selDay === todayKey;
@@ -310,14 +320,10 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
         )}
 
         {/* Delete */}
-        <button onClick={async () => {
+        <Btn kind="ghost" onClick={async () => {
           if (!await confirm('Delete this cardio plan?', { ok: 'Delete', danger: true })) return;
           onDelete();
-        }} style={{
-          background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0',
-          fontFamily: UI.fontUi, fontSize: 11, color: UI.danger, letterSpacing: '0.08em',
-          textTransform: 'uppercase', textAlign: 'center', width: '100%',
-        }}>Delete plan</button>
+        }} style={{ width: '100%', fontSize: 12, color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)' }}>Delete plan</Btn>
       </div>
     </Sheet>
   );
