@@ -545,9 +545,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const cReps = LB.effReps(completed);
       const cE1rm = (completed?.kg != null && cReps != null && cReps > 0) ? LB.e1rm(completed.kg, cReps) : 0;
       const priorBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
-      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[exIdx];
+      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
-        newBestShownRef.current[exIdx] = true;
+        newBestShownRef.current[entry.exId] = true;
         setNewBestSet(true);
         setTimeout(() => setNewBestSet(false), 2500);
       } else if (isImprovement(completed, prevSet)) {
@@ -952,7 +952,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [improvedSet, setImprovedSet] = useStateT(false);
   const [regressionSet, setRegressionSet] = useStateT(false);
   const [newBestSet, setNewBestSet] = useStateT(false);
-  const newBestShownRef = useRefT({}); // exIdx → true once a NEW BEST flashed (max once per exercise)
+  const newBestShownRef = useRefT({}); // exId → true once a NEW BEST flashed (max once per exercise per session)
   const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
   const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(() => {
