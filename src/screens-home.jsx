@@ -1572,16 +1572,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     return (store.cardioLogs || []).filter(l => l.date === dateKey);
   }, [store.cardioLogs, sessionDate]);
 
-  // Pre-fill for CardioQuickLogSheet: first active plan with a target today
+  // Pre-fill for CardioQuickLogSheet: first active plan with a target on the selected date
   const cardioPlanPrefill = useMemo(() => {
     const plans = (store.cardioPlans || []).filter(p => !p.archived);
     if (!plans.length) return null;
-    const todayISO = LB.todayISO();
-    const d = new Date(todayISO + 'T12:00:00');
-    const dow = d.getDay();
+    const dateISO = sessionDate.toISOString().slice(0, 10);
+    const dow = sessionDate.getDay();
     const wkKeys = ['mon','tue','wed','thu','fri','sat','sun'];
     const wk = wkKeys[dow === 0 ? 6 : dow - 1];
     for (const plan of plans) {
+      if (plan.planStartDate && dateISO < plan.planStartDate) continue;
       if (!plan.days[wk]) continue;
       if (plan.mode === 'manual') {
         const t = plan.manualTargets?.[wk];
@@ -1593,7 +1593,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       }
     }
     return null;
-  }, [store.cardioPlans]);
+  }, [store.cardioPlans, sessionDate]);
 
   const recentBannerDay = useMemo(() => {
     if (!sch) return null;
@@ -2442,12 +2442,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       </div>
 
 
-      {/* Cardio plan widget — today's scheduled cardio targets */}
+      {/* Cardio plan widget — targets for the selected day in the strip */}
       {window.Screens?.TodayCardioWidget && (
         <window.Screens.TodayCardioWidget
           store={store}
           setStore={setStore}
-          todayISO={LB.todayISO()}
+          todayISO={sessionDate.toISOString().slice(0, 10)}
           userId={userId}
           onPR={setCardioPR}
         />
