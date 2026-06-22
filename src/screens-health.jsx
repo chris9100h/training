@@ -1683,10 +1683,15 @@ function ExportSheet({ open, onClose, store }) {
       const sessions = sessionsByDay();
       const unit = store.settings?.unit || 'kg';
       const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c9a961';
-      const adhColor = adh => adh == null ? '#aaa' : adh >= 90 ? '#16a34a' : adh >= 75 ? '#d97706' : '#dc2626';
+      const cardBg  = '#201e2c';
+      const inkText = '#e5e2ef';
+      const inkSoft = '#9b97a8';
+      const inkFaint= '#5c5969';
+      const hairDiv = '#3d3a4e';
+      const adhColor = adh => adh == null ? inkFaint : adh >= 90 ? '#22c55e' : adh >= 75 ? '#d97706' : '#ef4444';
 
       const cardsHtml = logs.length === 0
-        ? `<p style="color:#888;font-size:14px;text-align:center;padding:40px">No data in this range.</p>`
+        ? `<p style="color:${inkFaint};font-size:14px;text-align:center;padding:40px">No data in this range.</p>`
         : logs.map(l => {
           const date = new Date(l.date + 'T12:00:00');
           const dateLabel = date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -1699,21 +1704,21 @@ function ExportSheet({ open, onClose, store }) {
 
           const stat = (label, value, unit) => value != null
             ? `<div style="text-align:center;min-width:0">
-                 <div style="font-size:17px;font-weight:500;color:#1c1c1e;font-family:monospace">${value}${unit ? `<span style="font-size:9px;color:#888;margin-left:2px">${unit}</span>` : ''}</div>
-                 <div style="font-size:8px;text-transform:uppercase;letter-spacing:0.08em;color:#888;margin-top:2px">${label}</div>
+                 <div style="font-size:17px;font-weight:300;color:${inkText};font-family:monospace">${value}${unit ? `<span style="font-size:9px;color:${inkFaint};margin-left:2px">${unit}</span>` : ''}</div>
+                 <div style="font-size:8px;text-transform:uppercase;letter-spacing:0.08em;color:${inkFaint};margin-top:2px">${label}</div>
                </div>`
             : '';
 
           const badge = (icon, label) =>
-            `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:rgba(0,0,0,0.05);border:0.5px solid rgba(0,0,0,0.1);font-size:9px;letter-spacing:0.07em;text-transform:uppercase;color:#555">
+            `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.06);border:0.5px solid rgba(255,255,255,0.12);font-size:9px;letter-spacing:0.07em;text-transform:uppercase;color:${inkSoft}">
                <span>${icon}</span>${label}
              </span>`;
 
           const adhBar = adh != null
             ? `<div style="margin-bottom:12px">
                  <div style="display:flex;align-items:center;gap:8px">
-                   <div style="height:4px;flex:1;background:#e5e5e5;border-radius:999px;overflow:hidden">
-                     <div style="height:100%;width:${Math.min(100, adh)}%;background:${ac};border-radius:999px;-webkit-print-color-adjust:exact;print-color-adjust:exact"></div>
+                   <div style="height:4px;flex:1;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;-webkit-print-color-adjust:exact;print-color-adjust:exact">
+                     <div style="height:100%;width:${Math.min(100, adh)}%;background:${ac};border-radius:999px"></div>
                    </div>
                    <span style="font-size:10px;color:${ac};font-weight:700;font-family:monospace;flex-shrink:0">${adh}%</span>
                  </div>
@@ -1723,8 +1728,8 @@ function ExportSheet({ open, onClose, store }) {
           const sessionNames = daySessions.map(s => s.dayName || s.day_name || '').filter(Boolean).join(', ');
           const sessionDur = daySessions.reduce((sum, s) => sum + (s.durationMinutes || s.duration_minutes || 0), 0);
 
-          return `<div style="background:#f4f4f6;border:1px solid #e0e0e0;border-radius:8px;padding:14px 16px;margin-bottom:12px;page-break-inside:avoid">
-            <div style="font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#1c1c1e;margin-bottom:${(trained || hasCardio) ? 8 : 12}px">${dateLabel}</div>
+          return `<div style="background:${cardBg};border:1px solid ${hairDiv};border-radius:8px;padding:14px 16px;margin-bottom:12px;-webkit-print-color-adjust:exact;print-color-adjust:exact;page-break-inside:avoid">
+            <div style="font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${inkText};margin-bottom:${(trained || hasCardio) ? 8 : 12}px">${dateLabel}</div>
             ${(trained || hasCardio) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:${sessionNames ? 6 : 10}px">${trained ? badge('🏋', sessionNames ? `${sessionNames}${sessionDur ? ` · ${sessionDur} min` : ''}` : 'Trained') : ''}${hasCardio ? badge('🏃', 'Cardio') : ''}</div>` : ''}
             ${adhBar}
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 6px">
@@ -1737,7 +1742,7 @@ function ExportSheet({ open, onClose, store }) {
               ${stat('Carbs', l.carbs, 'g')}
               ${stat('Fat', l.fat, 'g')}
             </div>
-            ${l.note || l.offPlanNote ? `<div style="margin-top:10px;padding-top:10px;border-top:0.5px solid #e0e0e0;font-size:11px;color:#666;line-height:1.5">${[l.note, l.offPlanNote].filter(Boolean).join(' · ')}</div>` : ''}
+            ${l.note || l.offPlanNote ? `<div style="margin-top:10px;padding-top:10px;border-top:0.5px solid ${hairDiv};font-size:11px;color:${inkSoft};line-height:1.5">${[l.note, l.offPlanNote].filter(Boolean).join(' · ')}</div>` : ''}
           </div>`;
         }).join('');
 
@@ -1746,7 +1751,7 @@ function ExportSheet({ open, onClose, store }) {
         <style>
           *{margin:0;padding:0;box-sizing:border-box}
           @page{margin:12mm}
-          body{font-family:system-ui,-apple-system,sans-serif;color:#1c1c1e;padding:0;background:#fff}
+          body{font-family:system-ui,-apple-system,sans-serif;background:#fff;padding:0}
           h1{font-size:13px;letter-spacing:0.1em;text-transform:uppercase;color:${accent};font-weight:700;margin-bottom:14px}
         </style>
       </head><body>
