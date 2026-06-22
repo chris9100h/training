@@ -1649,12 +1649,8 @@ function ExportSheet({ open, onClose, store }) {
         { label: 'Water (ml)',        fn: l => l.waterMl != null ? l.waterMl : null },
         { label: 'Adherence (%)',    fn: l => l.adherence != null ? Math.round(l.adherence) : null },
         { label: 'Cardio (min)',     fn: l => cardio[l.date]?.min || null },
-        { label: store.settings?.unit === 'lbs' ? 'Cardio dist (mi)' : 'Cardio dist (km)',
-          fn: l => cardio[l.date]?.distM != null
-            ? store.settings?.unit === 'lbs'
-              ? Math.round(cardio[l.date].distM / 1609.344 * 100) / 100
-              : Math.round(cardio[l.date].distM / 10) / 100
-            : null },
+        { label: 'Cardio dist (m)',
+          fn: l => cardio[l.date]?.distM != null ? Math.round(cardio[l.date].distM) : null },
         { label: 'Training',         fn: l => (sessions[l.date] || []).map(s => s.dayName || s.day_name || '').filter(Boolean).join(', ') || null },
         { label: 'Training (min)',   fn: l => (sessions[l.date] || []).reduce((sum, s) => sum + (s.durationMinutes || s.duration_minutes || 0), 0) || null },
         { label: 'Note',             fn: l => l.note || null },
@@ -1759,10 +1755,11 @@ function ExportSheet({ open, onClose, store }) {
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
         <title>Health Export ${from} – ${to}</title>
         <style>
-          *{margin:0;padding:0;box-sizing:border-box}
-          body{background:${bg};color:#e5e2ef;font-family:system-ui,-apple-system,sans-serif;padding:20px;max-width:600px;margin:0 auto}
+          *,*::before,*::after{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
+          html,body{background:${bg}!important;min-height:100vh}
+          body{color:#e5e2ef;font-family:system-ui,-apple-system,sans-serif;padding:20px;max-width:600px;margin:0 auto}
           h1{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${accent};margin-bottom:16px;font-weight:600}
-          @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{margin:12mm}}
+          @page{margin:12mm}
         </style>
       </head><body>
         <h1>Health &middot; ${from} &ndash; ${to}</h1>
