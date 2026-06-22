@@ -815,10 +815,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // day must leave the next-up pointer where it is.
     const flexBlocks = LB.isFlexPlan(activeSch) &&
       (session.isFreestyle || session.scheduleId !== activeSch?.id || session.dayId !== LB.todaysDay(store)?.day?.id);
+    // If user chose "continue from picked day", jump cycle to that day's index + 1.
+    const pickedSch = store.schedules?.find(s => s.id === session.scheduleId);
+    const pickedDayIdx = cycleFromPickedDay ? (pickedSch?.days?.findIndex(d => d.id === session.dayId) ?? -1) : -1;
     setStore(s => ({
       ...s,
       inProgress: null,
-      ...(shouldAdvance && !isWeekdayMode && !activeIsWeekday && !flexBlocks && { cycleIndex: s.cycleIndex + 1 }),
+      ...(shouldAdvance && !isWeekdayMode && !activeIsWeekday && !flexBlocks && {
+        cycleIndex: pickedDayIdx >= 0 ? pickedDayIdx + 1 : s.cycleIndex + 1,
+      }),
       lastAdvancedDate: LB.todayISO(),
       ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
     }));
@@ -981,6 +986,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [freestyleName, setFreestyleName] = useStateT('');
   const [showCycleStep, setShowCycleStep] = useStateT(false);
   const [advanceCycle, setAdvanceCycle] = useStateT(false);
+  const [cycleFromPickedDay, setCycleFromPickedDay] = useStateT(false);
   const [notePicker, setNotePicker] = useStateT(false);
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
@@ -1498,6 +1504,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const hasTodayTraining = (todayData?.day?.items?.length ?? 0) > 0 && !alreadyDoneToday;
       setShowCycleStep(hasTodayTraining);
       setAdvanceCycle(false);
+      setCycleFromPickedDay(false);
       if (session.isFreestyle) {
         setFreestyleName('');
         setFinishStep('name');
@@ -2558,10 +2565,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             {(() => { const n = LB.todaysDay(store)?.day?.name; return n ? `Today is ${n} day. Did this session replace it, or was it extra?` : 'Today is a scheduled training day. Did this session replace it, or was it extra?'; })()}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <Btn onClick={() => { setAdvanceCycle(true); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
-              Replaces it — advance my cycle
+            <Btn onClick={() => { setAdvanceCycle(true); setCycleFromPickedDay(true); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
+              Replaces it — continue from {session.dayName}
             </Btn>
-            <Btn kind="ghost" onClick={() => { setAdvanceCycle(false); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
+            <Btn kind="ghost" onClick={() => { setAdvanceCycle(true); setCycleFromPickedDay(false); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
+              Replaces it — keep cycle on track
+            </Btn>
+            <Btn kind="ghost" onClick={() => { setAdvanceCycle(false); setCycleFromPickedDay(false); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
               Extra session — keep as bonus
             </Btn>
           </div>
