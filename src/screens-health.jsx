@@ -1612,12 +1612,6 @@ function ExportSheet({ open, onClose, store }) {
       const logs = logsInRange();
       const cardio = cardioByDay();
       const netCarbs = store.settings?.netCarbs;
-      const headers = [
-        'Date', `Weight (${unit})`, 'Steps',
-        'Calories (kcal)', 'Protein (g)', 'Carbs (g)', netCarbs ? 'Fiber (g)' : null, 'Fat (g)',
-        'Water (L)', 'Adherence (%)', 'Cardio (min)',
-        'Note', 'Off-plan note',
-      ].filter(Boolean);
 
       const esc = v => {
         if (v == null || v === '') return '';
@@ -1625,23 +1619,33 @@ function ExportSheet({ open, onClose, store }) {
         return (s.includes(',') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
       };
 
-      const rows = logs.map(l => [
-        l.date,
-        l.weight != null ? l.weight : '',
-        l.steps != null ? l.steps : '',
-        l.calories != null ? l.calories : '',
-        l.protein != null ? l.protein : '',
-        l.carbs != null ? l.carbs : '',
-        netCarbs ? (l.fiber != null ? l.fiber : '') : null,
-        l.fat != null ? l.fat : '',
-        l.waterMl != null ? (l.waterMl / 1000).toFixed(2) : '',
-        l.adherence != null ? Math.round(l.adherence) : '',
-        cardio[l.date] || '',
-        l.note || '',
-        l.offPlanNote || '',
-      ].filter((_, i) => netCarbs ? true : i !== 6).map(esc).join(','));
+      // Transposed: column A = metric label, columns B… = one per date (ascending).
+      // Row 1 = date header row (A1 empty).
+      const dates = logs.map(l => l.date);
+      const byDate = {};
+      logs.forEach(l => { byDate[l.date] = l; });
 
-      const csv = [headers.join(','), ...rows].join('\r\n');
+      const metrics = [
+        { label: `Weight (${unit})`, fn: l => l.weight },
+        { label: 'Steps',            fn: l => l.steps },
+        { label: 'Calories (kcal)',  fn: l => l.calories },
+        { label: 'Protein (g)',      fn: l => l.protein },
+        { label: 'Carbs (g)',        fn: l => l.carbs },
+        netCarbs ? { label: 'Fiber (g)', fn: l => l.fiber } : null,
+        { label: 'Fat (g)',          fn: l => l.fat },
+        { label: 'Water (L)',        fn: l => l.waterMl != null ? (l.waterMl / 1000).toFixed(2) : null },
+        { label: 'Adherence (%)',    fn: l => l.adherence != null ? Math.round(l.adherence) : null },
+        { label: 'Cardio (min)',     fn: l => cardio[l.date] || null },
+        { label: 'Note',             fn: l => l.note || null },
+        { label: 'Off-plan note',    fn: l => l.offPlanNote || null },
+      ].filter(Boolean);
+
+      const headerRow = ['', ...dates].map(esc).join(',');
+      const metricRows = metrics.map(m =>
+        [m.label, ...dates.map(d => m.fn(byDate[d]))].map(esc).join(',')
+      );
+
+      const csv = [headerRow, ...metricRows].join('\r\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
