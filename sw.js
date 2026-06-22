@@ -26,6 +26,7 @@ const ASSETS = [
   BASE + '/icons/icon-512.png',
   BASE + '/icons/IMG_6389.png',
   BASE + '/icons/phoenix.png',
+  BASE + '/icons/prince_abu.png',
 ];
 
 // CDN libraries the app boots with. Precached best-effort so the app is fully
