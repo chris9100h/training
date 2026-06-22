@@ -618,6 +618,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // with the windowed sessions, so PR detection stays exact mid-session.
     exerciseBests,
     activeScheduleId: sett.active_schedule_id ?? null,
+    activeCardioPlanId: sett.active_cardio_plan_id ?? null,
     cycleIndex: sett.cycle_index ?? 0,
     cycleStartDate: sett.cycle_start_date ?? null,
     weekPlanStartDate: sett.week_plan_start_date ?? null,
@@ -1002,12 +1003,14 @@ async function syncStore(prev, next, userId) {
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
     prev.nextReminderAt                   !== next.nextReminderAt   ||
     prev.statusMode                       !== next.statusMode       ||
-    prev.statusModeSince                  !== next.statusModeSince;
+    prev.statusModeSince                  !== next.statusModeSince  ||
+    prev.activeCardioPlanId               !== next.activeCardioPlanId;
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
       user_id: userId,
       active_schedule_id: next.activeScheduleId ?? null,
+      active_cardio_plan_id: next.activeCardioPlanId ?? null,
       cycle_index: next.cycleIndex ?? 0,
       cycle_start_date: next.cycleStartDate ?? null,
       week_plan_start_date: next.weekPlanStartDate ?? null,

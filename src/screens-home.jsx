@@ -1575,7 +1575,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   // Pre-fill for CardioQuickLogSheet: first active plan with a target on the selected date
   const cardioPlanPrefill = useMemo(() => {
-    const plans = (store.cardioPlans || []).filter(p => !p.archived);
+    const activePlanId = store.activeCardioPlanId;
+    const plans = (store.cardioPlans || []).filter(p => !p.archived && p.id === activePlanId);
     if (!plans.length) return null;
     const dateISO = sessionDate.toISOString().slice(0, 10);
     const dow = sessionDate.getDay();
@@ -1594,7 +1595,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       }
     }
     return null;
-  }, [store.cardioPlans, sessionDate]);
+  }, [store.cardioPlans, store.activeCardioPlanId, sessionDate]);
 
   const recentBannerDay = useMemo(() => {
     if (!sch) return null;

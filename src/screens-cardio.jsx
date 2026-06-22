@@ -164,7 +164,7 @@ function cpTodayLog(plan, cardioLogs, todayISO) {
 }
 
 // ─── CardioPlanDetailSheet ─────────────────────────────────────────────────
-function CardioPlanDetailSheet({ plan, store, todayISO, distUnit, onClose, onEdit, onArchive, onUnarchive, onDelete }) {
+function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, todayISO, distUnit, onClose, onEdit, onArchive, onUnarchive, onDelete }) {
   const [confirmEl, confirm] = useConfirm();
   const act        = cpActivity(plan.activityType);
   const target     = cpTodayTarget(plan, todayISO);
@@ -291,6 +291,13 @@ function CardioPlanDetailSheet({ plan, store, todayISO, distUnit, onClose, onEdi
           </div>
         )}
 
+        {!plan.archived && (
+          activeCardioPlanId === plan.id ? (
+            <Btn kind="ghost" onClick={() => setStore(s => ({ ...s, activeCardioPlanId: null }))} style={{ width: '100%' }}>Deactivate plan</Btn>
+          ) : (
+            <Btn onClick={() => setStore(s => ({ ...s, activeCardioPlanId: plan.id }))} style={{ width: '100%' }}>Activate plan</Btn>
+          )
+        )}
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
           <Btn kind="ghost" onClick={onEdit} style={{ flex: 1 }}>Edit</Btn>
           {plan.archived
@@ -480,7 +487,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
     if (editPlan) {
       setStore(s => ({ ...s, cardioPlans: (s.cardioPlans || []).map(p => p.id === editPlan.id ? plan : p) }));
     } else {
-      setStore(s => ({ ...s, cardioPlans: [plan, ...(s.cardioPlans || [])] }));
+      setStore(s => ({ ...s, cardioPlans: [plan, ...(s.cardioPlans || [])], activeCardioPlanId: plan.id }));
     }
     onClose();
   };
@@ -969,10 +976,11 @@ function CardioPlanScreen({ store, setStore, go }) {
   const doDelete    = (p) => { setDetailPlan(null); setStore(s => ({ ...s, cardioPlans: (s.cardioPlans||[]).filter(x => x.id !== p.id) })); };
 
   function PlanCard({ plan }) {
-    const act    = cpActivity(plan.activityType);
-    const target = cpTodayTarget(plan, todayISO);
-    const done   = target ? cpTodayLog(plan, store.cardioLogs, todayISO) : null;
-    const today  = !!target;
+    const act      = cpActivity(plan.activityType);
+    const target   = cpTodayTarget(plan, todayISO);
+    const done     = target ? cpTodayLog(plan, store.cardioLogs, todayISO) : null;
+    const today    = !!target;
+    const isActive = plan.id === store.activeCardioPlanId;
 
     let weekLabel = null;
     if (plan.mode === 'goal' && plan.generatedWeeks?.length) {
@@ -997,7 +1005,10 @@ function CardioPlanScreen({ store, setStore, go }) {
           <i className={`fa-solid ${act.icon}`} style={{ fontSize: 15, color: today ? 'var(--accent)' : UI.inkFaint }} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{plan.name}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{plan.name}</div>
+            {isActive && <span className="micro" style={{ color: 'var(--accent)', flexShrink: 0 }}>ACTIVE</span>}
+          </div>
           <div className="micro" style={{ color: UI.inkFaint, marginTop: 2 }}>
             {CP_WEEKDAY_KEYS.filter(k => plan.days[k]).map(k => CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(k)].slice(0,2)).join(' · ')}
             {weekLabel ? ` · ${weekLabel}` : ''}
@@ -1071,6 +1082,8 @@ function CardioPlanScreen({ store, setStore, go }) {
         <CardioPlanDetailSheet
           plan={detailPlan}
           store={store}
+          setStore={setStore}
+          activeCardioPlanId={store.activeCardioPlanId}
           todayISO={todayISO}
           distUnit={distUnit}
           onClose={() => setDetailPlan(null)}
@@ -1099,8 +1112,9 @@ function TodayCardioWidget({ store, setStore, todayISO, userId, onPR }) {
   const du = cpDistUnit();
 
   const slots = useMemoCard(() => {
+    const activePlanId = store.activeCardioPlanId;
     return (store.cardioPlans || [])
-      .filter(p => !p.archived)
+      .filter(p => !p.archived && p.id === activePlanId)
       .map(plan => {
         const target = cpTodayTarget(plan, todayISO);
         if (!target) return null;
@@ -1108,7 +1122,7 @@ function TodayCardioWidget({ store, setStore, todayISO, userId, onPR }) {
         return { plan, target, doneLog };
       })
       .filter(Boolean);
-  }, [store.cardioPlans, store.cardioLogs, todayISO]);
+  }, [store.cardioPlans, store.cardioLogs, store.activeCardioPlanId, todayISO]);
 
   if (!slots.length) return null;
 
