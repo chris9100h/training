@@ -139,6 +139,7 @@ function cpSessionIndex(planStartDate, planDays, todayISO) {
 }
 
 function cpTodayTarget(plan, todayISO) {
+  if (plan.planStartDate && todayISO < plan.planStartDate) return null;
   const wk = cpTodayKey(todayISO);
   if (!plan.days[wk]) return null;
   if (plan.mode === 'manual') {
@@ -1029,7 +1030,7 @@ function CardioPlanScreen({ store, setStore, go }) {
       } />
       <SubTabBar
         tabs={[
-          { id: 'plan',   label: 'Plan',      icon: 'fa-calendar-days' },
+          { id: 'plan',   label: 'Workout',   icon: 'fa-dumbbell' },
           { id: 'lib',    label: 'Exercises', icon: 'fa-book' },
           { id: 'cardio', label: 'Cardio',    icon: 'fa-person-running' },
         ]}

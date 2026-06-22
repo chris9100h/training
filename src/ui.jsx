@@ -121,10 +121,7 @@ const TAB_ICONS = {
     </svg>
   ),
   plan: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="5" width="18" height="16" rx="1.5"/>
-      <path d="M16 3v4M8 3v4M3 11h18"/>
-    </svg>
+    <i className="fa-solid fa-dumbbell" style={{ fontSize: 18 }} />
   ),
   lib: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -147,7 +144,7 @@ const TAB_ICONS = {
 function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoaching = false, coachingBadge = null, showHealth = false }) {
   const tabs = [
     { id: 'home', label: 'Train' },
-    { id: 'plan', label: 'Plan' },
+    { id: 'plan', label: 'Workout' },
     { id: 'hist', label: 'History' },
     ...(showHealth ? [{ id: 'health', label: 'Health' }] : []),
     ...(showCoaching ? [{ id: 'coaching', label: 'Coaching' }] : []),
