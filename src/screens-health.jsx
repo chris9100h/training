@@ -899,6 +899,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   const [coachingMacros, setCoachingMacros] = useStateH(null);
   const [tf, setTf] = useStateH('1W');
   const [capturing, setCapturing] = useStateH(false);
+  const [exportOpen, setExportOpen] = useStateH(false);
   const captureRef = useRefH(null);
 
   const takeScreenshot = async () => {
@@ -1296,14 +1297,24 @@ function HealthScreen({ store, setStore, go, userId }) {
   return (
     <Screen>
       <TopBar title="HEALTH" right={
-        <button onClick={takeScreenshot} disabled={capturing} style={{
-          background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-          borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
-          color: capturing ? UI.inkGhost : UI.inkSoft, lineHeight: 1,
-          WebkitTapHighlightColor: 'transparent',
-        }}>
-          {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => setExportOpen(true)} style={{
+            background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 4, padding: '5px 10px', cursor: 'pointer',
+            color: UI.inkSoft, lineHeight: 1,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <i className="fa-solid fa-file-export" style={{ fontSize: 11 }} />
+          </button>
+          <button onClick={takeScreenshot} disabled={capturing} style={{
+            background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
+            color: capturing ? UI.inkGhost : UI.inkSoft, lineHeight: 1,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
+          </button>
+        </div>
       } />
       {store.statusMode && !capturing && (
         <div onClick={() => { setSelectedDate(today); setLogOpen(true); }} style={{
@@ -1343,6 +1354,7 @@ function HealthScreen({ store, setStore, go, userId }) {
 
       <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
+      <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} />
     </Screen>
   );
 }
@@ -1566,6 +1578,234 @@ function HealthClientLogs({ clientStore }) {
         </ReorderList>
       </div>
     </div>
+  );
+}
+
+// ─── Export sheet ─────────────────────────────────────────────────────────────
+
+function ExportSheet({ open, onClose, store }) {
+  const today = LB.todayISO();
+  const [from, setFrom] = useStateH(() => healthShiftISO(today, -29));
+  const [to, setTo] = useStateH(today);
+  const [exporting, setExporting] = useStateH(null); // 'csv' | 'pdf' | null
+
+  const applyPreset = (days) => {
+    setFrom(healthShiftISO(today, -(days - 1)));
+    setTo(today);
+  };
+
+  const logsInRange = () =>
+    (store.dailyLogs || []).filter(l => l.date >= from && l.date <= to).sort((a, b) => a.date < b.date ? -1 : 1);
+
+  const cardioByDay = () => {
+    const m = {};
+    (store.cardioLogs || []).filter(l => l.date >= from && l.date <= to).forEach(l => {
+      m[l.date] = (m[l.date] || 0) + (l.durationMinutes || 0);
+    });
+    return m;
+  };
+
+  const doExportCSV = () => {
+    setExporting('csv');
+    try {
+      const unit = store.settings?.unit || 'kg';
+      const logs = logsInRange();
+      const cardio = cardioByDay();
+      const netCarbs = store.settings?.netCarbs;
+      const headers = [
+        'Date', `Weight (${unit})`, 'Steps',
+        'Calories (kcal)', 'Protein (g)', 'Carbs (g)', netCarbs ? 'Fiber (g)' : null, 'Fat (g)',
+        'Water (L)', 'Adherence (%)', 'Cardio (min)',
+        'Note', 'Off-plan note',
+      ].filter(Boolean);
+
+      const esc = v => {
+        if (v == null || v === '') return '';
+        const s = String(v);
+        return (s.includes(',') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+
+      const rows = logs.map(l => [
+        l.date,
+        l.weight != null ? l.weight : '',
+        l.steps != null ? l.steps : '',
+        l.calories != null ? l.calories : '',
+        l.protein != null ? l.protein : '',
+        l.carbs != null ? l.carbs : '',
+        netCarbs ? (l.fiber != null ? l.fiber : '') : null,
+        l.fat != null ? l.fat : '',
+        l.waterMl != null ? (l.waterMl / 1000).toFixed(2) : '',
+        l.adherence != null ? Math.round(l.adherence) : '',
+        cardio[l.date] || '',
+        l.note || '',
+        l.offPlanNote || '',
+      ].filter((_, i) => netCarbs ? true : i !== 6).map(esc).join(','));
+
+      const csv = [headers.join(','), ...rows].join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `health-${from}-${to}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      onClose();
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const doExportPDF = () => {
+    setExporting('pdf');
+    try {
+      const logs = logsInRange();
+      const cardio = cardioByDay();
+      const unit = store.settings?.unit || 'kg';
+      const cs = getComputedStyle(document.documentElement);
+      const v = k => cs.getPropertyValue(k).trim();
+      const bg      = v('--bg')      || '#1a1820';
+      const bgCard  = v('--bg-raised') || '#201e2c';
+      const accent  = v('--accent')  || '#c9a961';
+      const inkSoft = v('--ink-soft')|| '#9b97a8';
+      const inkFaint= v('--ink-faint')|| '#5c5969';
+      const hair    = v('--hair')    || '#2e2b3d';
+      const ok      = v('--ok')      || '#22c55e';
+      const danger  = v('--danger')  || '#ef4444';
+
+      const adhColor = adh => adh == null ? inkFaint : adh >= 90 ? ok : adh >= 75 ? '#d97706' : danger;
+
+      const cardsHtml = logs.length === 0
+        ? `<div style="color:${inkFaint};font-size:14px;text-align:center;padding:40px">No data in this range.</div>`
+        : logs.map(l => {
+          const date = new Date(l.date + 'T12:00:00');
+          const dateLabel = date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+          const cardioMin = cardio[l.date];
+          const adh = l.adherence != null ? Math.round(l.adherence) : null;
+          const trained = LB.isLoggedTrainingDay(store.sessions, l.date);
+          const hasCardio = !!cardioMin;
+
+          const stat = (label, value, unit) => value != null
+            ? `<div style="text-align:center;min-width:0">
+                 <div style="font-size:18px;font-weight:300;color:#e5e2ef;font-family:monospace">${value}${unit ? `<span style="font-size:9px;color:${inkFaint};margin-left:2px">${unit}</span>` : ''}</div>
+                 <div style="font-size:8px;text-transform:uppercase;letter-spacing:0.08em;color:${inkFaint};margin-top:2px">${label}</div>
+               </div>`
+            : '';
+
+          const badge = (icon, label) =>
+            `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.06);font-size:9px;letter-spacing:0.07em;text-transform:uppercase;color:${inkSoft}">
+               <span>${icon}</span>${label}
+             </span>`;
+
+          return `<div style="background:${bgCard};border:0.5px solid ${hair};border-radius:8px;padding:16px;margin-bottom:12px;page-break-inside:avoid">
+            <div style="font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#e5e2ef;margin-bottom:${(trained || hasCardio) ? 8 : 12}px">${dateLabel}</div>
+            ${(trained || hasCardio) ? `<div style="display:flex;gap:6px;margin-bottom:10px">${trained ? badge('🏋', 'Trained') : ''}${hasCardio ? badge('🏃', 'Cardio') : ''}</div>` : ''}
+            ${adh != null ? `<div style="font-size:11px;color:${adhColor(adh)};font-weight:600;margin-bottom:10px">${adh}% adherence</div>` : ''}
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 6px">
+              ${stat(`Weight (${unit})`, l.weight)}
+              ${stat('Steps', l.steps != null ? l.steps.toLocaleString() : null)}
+              ${stat('Cardio', cardioMin || null, 'min')}
+              ${stat('Water', l.waterMl != null ? (Math.round(l.waterMl / 100) / 10).toFixed(1) : null, 'L')}
+              ${stat('Calories', l.calories, 'kcal')}
+              ${stat('Protein', l.protein, 'g')}
+              ${stat('Carbs', l.carbs, 'g')}
+              ${stat('Fat', l.fat, 'g')}
+            </div>
+            ${l.note || l.offPlanNote ? `<div style="margin-top:10px;padding-top:10px;border-top:0.5px solid ${hair};font-size:11px;color:${inkSoft};line-height:1.5">${[l.note, l.offPlanNote].filter(Boolean).join(' · ')}</div>` : ''}
+          </div>`;
+        }).join('');
+
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+        <title>Health Export ${from} – ${to}</title>
+        <style>
+          *{margin:0;padding:0;box-sizing:border-box}
+          body{background:${bg};color:#e5e2ef;font-family:system-ui,-apple-system,sans-serif;padding:20px;max-width:600px;margin:0 auto}
+          h1{font-size:13px;letter-spacing:0.1em;text-transform:uppercase;color:${inkFaint};margin-bottom:16px}
+          @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{margin:12mm}}
+        </style>
+      </head><body>
+        <h1>Health · ${from} – ${to}</h1>
+        ${cardsHtml}
+        <script>window.onload=()=>{window.print()}<\/script>
+      </body></html>`;
+
+      const w = window.open('', '_blank', 'width=680,height=900');
+      if (w) { w.document.write(html); w.document.close(); }
+      onClose();
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const presets = [
+    { label: '7 days',  days: 7 },
+    { label: '30 days', days: 30 },
+    { label: '90 days', days: 90 },
+  ];
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Export">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+        <div>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>TIME RANGE</div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            {presets.map(p => (
+              <button key={p.days} onClick={() => applyPreset(p.days)} style={{
+                flex: 1, padding: '7px 4px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`,
+                background: from === healthShiftISO(today, -(p.days - 1)) && to === today ? 'var(--accent)' : UI.bgInset,
+                color: from === healthShiftISO(today, -(p.days - 1)) && to === today ? '#0a0805' : UI.inkSoft,
+                fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+              }}>{p.label}</button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <div style={{ flex: 1 }}>
+              <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>FROM</div>
+              <input type="date" value={from} max={to}
+                onChange={e => e.target.value && setFrom(e.target.value)}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+            </div>
+            <div style={{ color: UI.inkFaint, fontSize: 11, paddingTop: 16 }}>→</div>
+            <div style={{ flex: 1 }}>
+              <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>TO</div>
+              <input type="date" value={to} min={from} max={today}
+                onChange={e => e.target.value && setTo(e.target.value)}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+            </div>
+          </div>
+          {(() => {
+            const count = (store.dailyLogs || []).filter(l => l.date >= from && l.date <= to).length;
+            return <div style={{ marginTop: 8, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{count} day{count !== 1 ? 's' : ''} logged in this range</div>;
+          })()}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <button onClick={doExportCSV} disabled={!!exporting} style={{
+            width: '100%', padding: '13px 0', borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`,
+            background: UI.bgInset, color: exporting ? UI.inkGhost : UI.ink,
+            fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: exporting ? 'default' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <i className="fa-solid fa-file-csv" style={{ fontSize: 13 }} />
+            {exporting === 'csv' ? 'Exporting…' : 'Export as CSV'}
+          </button>
+          <button onClick={doExportPDF} disabled={!!exporting} style={{
+            width: '100%', padding: '13px 0', borderRadius: 6, border: 'none',
+            background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+            boxShadow: '0 6px 20px rgba(var(--accent-rgb),0.35)',
+            color: '#0a0805', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, cursor: exporting ? 'default' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            WebkitTapHighlightColor: 'transparent',
+            opacity: exporting ? 0.6 : 1,
+          }}>
+            <i className="fa-solid fa-file-pdf" style={{ fontSize: 13 }} />
+            {exporting === 'pdf' ? 'Opening…' : 'Export as PDF'}
+          </button>
+        </div>
+
+      </div>
+    </Sheet>
   );
 }
 
