@@ -289,7 +289,7 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
                 {selTarget.distanceM      != null && <span className="num" style={{ fontSize: 28, color: UI.ink }}>{cpFmtDist(selTarget.distanceM, distUnit)}</span>}
                 {selTarget.durationMinutes != null && <span className="num" style={{ fontSize: 28, color: UI.ink }}>{selTarget.durationMinutes} min</span>}
                 {selTarget.paceSecPerKm   != null && <span className="num" style={{ fontSize: 14, color: UI.inkSoft }}>@ {cpFmtPace(selTarget.paceSecPerKm, distUnit)}</span>}
-                {selTarget.paceSecPerKm   != null && <span style={{ fontSize: 14, color: UI.hairStrong, fontFamily: UI.fontNum }}>·</span>}
+                {selTarget.paceSecPerKm   != null && <span style={{ fontSize: 14, color: UI.inkFaint, fontFamily: UI.fontNum }}>·</span>}
                 {selTarget.paceSecPerKm   != null && <span className="num" style={{ fontSize: 14, color: UI.inkFaint }}>{cpFmtSpeed(selTarget.paceSecPerKm, distUnit)}</span>}
               </div>
               {isTodaySel && selDoneLog && (
