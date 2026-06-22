@@ -989,43 +989,42 @@ function CardioPlanScreen({ store, setStore, go }) {
       weekLabel = `Session ${si}/${tot}`;
     }
 
+    const dayLabels = CP_WEEKDAY_KEYS.filter(k => plan.days[k]).map(k => CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(k)].slice(0,2).toUpperCase());
+    const descriptor = [
+      plan.mode === 'goal' ? 'GOAL PLAN' : 'MANUAL PLAN',
+      act.label.toUpperCase(),
+      ...(weekLabel ? [weekLabel.toUpperCase()] : []),
+    ].join(' · ');
+
+    if (isActive) {
+      return (
+        <BracketFrame gold onClick={() => setDetailPlan(plan)} style={{ cursor: 'pointer' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1 }}>{plan.name}</div>
+            <Pill gold>active</Pill>
+          </div>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>{descriptor}</div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {CP_WEEKDAY_KEYS.filter(k => plan.days[k]).map((k, i) => (
+              <Pill key={k} gold={today && plan.days[cpTodayKey(todayISO)] === true && k === cpTodayKey(todayISO)}>
+                {CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(k)].slice(0,3).toUpperCase()}
+              </Pill>
+            ))}
+          </div>
+        </BracketFrame>
+      );
+    }
+
     return (
-      <div onClick={() => setDetailPlan(plan)} style={{
-        padding: '12px 14px', background: UI.bgInset,
-        border: `0.5px solid ${today ? 'rgba(var(--accent-rgb),0.3)' : UI.hair}`,
-        borderRadius: 6, cursor: 'pointer',
-        display: 'flex', alignItems: 'center', gap: 12,
-      }}>
-        <div style={{
-          width: 34, height: 34, borderRadius: 6, flexShrink: 0,
-          background: today ? 'rgba(var(--accent-rgb),0.12)' : UI.bg,
-          border: `0.5px solid ${today ? 'rgba(var(--accent-rgb),0.3)' : UI.hairStrong}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <i className={`fa-solid ${act.icon}`} style={{ fontSize: 15, color: today ? 'var(--accent)' : UI.inkFaint }} />
+      <Frame onClick={() => setDetailPlan(plan)} style={{ cursor: 'pointer', padding: '14px 16px' }}>
+        <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1, marginBottom: 6 }}>{plan.name}</div>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{descriptor}</div>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {CP_WEEKDAY_KEYS.filter(k => plan.days[k]).map(k => (
+            <Pill key={k}>{CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(k)].slice(0,3).toUpperCase()}</Pill>
+          ))}
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{plan.name}</div>
-            {isActive && <span className="micro" style={{ color: 'var(--accent)', flexShrink: 0 }}>ACTIVE</span>}
-          </div>
-          <div className="micro" style={{ color: UI.inkFaint, marginTop: 2 }}>
-            {CP_WEEKDAY_KEYS.filter(k => plan.days[k]).map(k => CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(k)].slice(0,2)).join(' · ')}
-            {weekLabel ? ` · ${weekLabel}` : ''}
-          </div>
-        </div>
-        {today && target && (
-          done ? (
-            <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.ok} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
-          ) : (
-            <div style={{ textAlign: 'right', flexShrink: 0 }}>
-              {target.distanceM    != null && <div className="num" style={{ fontSize: 13, color: 'var(--accent)', lineHeight: 1.2 }}>{cpFmtDist(target.distanceM, distUnit)}</div>}
-              {target.durationMinutes != null && <div className="num" style={{ fontSize: 13, color: 'var(--accent)', lineHeight: 1.2 }}>{target.durationMinutes} min</div>}
-            </div>
-          )
-        )}
-        <ChevronRight />
-      </div>
+      </Frame>
     );
   }
 
