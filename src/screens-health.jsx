@@ -1666,14 +1666,15 @@ function ExportSheet({ open, onClose, store }) {
       const unit = store.settings?.unit || 'kg';
       const cs = getComputedStyle(document.documentElement);
       const v = k => cs.getPropertyValue(k).trim();
-      const bg      = v('--bg')      || '#1a1820';
-      const bgCard  = v('--bg-raised') || '#201e2c';
-      const accent  = v('--accent')  || '#c9a961';
-      const inkSoft = v('--ink-soft')|| '#9b97a8';
-      const inkFaint= v('--ink-faint')|| '#5c5969';
-      const hair    = v('--hair')    || '#2e2b3d';
-      const ok      = v('--ok')      || '#22c55e';
-      const danger  = v('--danger')  || '#ef4444';
+      const bg        = v('--bg')         || '#1a1820';
+      const bgCard    = v('--bg-raised')   || '#201e2c';
+      const accent    = v('--accent')      || '#c9a961';
+      const hairStrong= v('--hair-strong') || '#3d3a4e';
+      const inkSoft   = v('--ink-soft')    || '#9b97a8';
+      const inkFaint  = v('--ink-faint')   || '#5c5969';
+      const hair      = v('--hair')        || '#2e2b3d';
+      const ok        = v('--ok')          || '#22c55e';
+      const danger    = v('--danger')      || '#ef4444';
 
       const adhColor = adh => adh == null ? inkFaint : adh >= 90 ? ok : adh >= 75 ? '#d97706' : danger;
 
@@ -1686,6 +1687,7 @@ function ExportSheet({ open, onClose, store }) {
           const adh = l.adherence != null ? Math.round(l.adherence) : null;
           const trained = LB.isLoggedTrainingDay(store.sessions, l.date);
           const hasCardio = !!cardioMin;
+          const ac = adhColor(adh);
 
           const stat = (label, value, unit) => value != null
             ? `<div style="text-align:center;min-width:0">
@@ -1695,14 +1697,25 @@ function ExportSheet({ open, onClose, store }) {
             : '';
 
           const badge = (icon, label) =>
-            `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.06);font-size:9px;letter-spacing:0.07em;text-transform:uppercase;color:${inkSoft}">
+            `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.06);border:0.5px solid rgba(255,255,255,0.08);font-size:9px;letter-spacing:0.07em;text-transform:uppercase;color:${inkSoft}">
                <span>${icon}</span>${label}
              </span>`;
 
-          return `<div style="background:${bgCard};border:0.5px solid ${hair};border-radius:8px;padding:16px;margin-bottom:12px;page-break-inside:avoid">
+          const adhBar = adh != null
+            ? `<div style="margin-bottom:12px">
+                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+                   <div style="height:4px;flex:1;background:rgba(255,255,255,0.07);border-radius:999px;overflow:hidden">
+                     <div style="height:100%;width:${Math.min(100, adh)}%;background:${ac};border-radius:999px"></div>
+                   </div>
+                   <span style="font-size:10px;color:${ac};font-weight:700;font-family:monospace;flex-shrink:0">${adh}%</span>
+                 </div>
+               </div>`
+            : '';
+
+          return `<div style="background:${bgCard};border:1px solid ${hairStrong};border-radius:8px;padding:16px;margin-bottom:12px;page-break-inside:avoid">
             <div style="font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#e5e2ef;margin-bottom:${(trained || hasCardio) ? 8 : 12}px">${dateLabel}</div>
             ${(trained || hasCardio) ? `<div style="display:flex;gap:6px;margin-bottom:10px">${trained ? badge('🏋', 'Trained') : ''}${hasCardio ? badge('🏃', 'Cardio') : ''}</div>` : ''}
-            ${adh != null ? `<div style="font-size:11px;color:${adhColor(adh)};font-weight:600;margin-bottom:10px">${adh}% adherence</div>` : ''}
+            ${adhBar}
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 6px">
               ${stat(`Weight (${unit})`, l.weight)}
               ${stat('Steps', l.steps != null ? l.steps.toLocaleString() : null)}
@@ -1722,11 +1735,11 @@ function ExportSheet({ open, onClose, store }) {
         <style>
           *{margin:0;padding:0;box-sizing:border-box}
           body{background:${bg};color:#e5e2ef;font-family:system-ui,-apple-system,sans-serif;padding:20px;max-width:600px;margin:0 auto}
-          h1{font-size:13px;letter-spacing:0.1em;text-transform:uppercase;color:${inkFaint};margin-bottom:16px}
+          h1{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${accent};margin-bottom:16px;font-weight:600}
           @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{margin:12mm}}
         </style>
       </head><body>
-        <h1>Health · ${from} – ${to}</h1>
+        <h1>Health &middot; ${from} &ndash; ${to}</h1>
         ${cardsHtml}
         <script>window.onload=()=>{window.print()}<\/script>
       </body></html>`;
