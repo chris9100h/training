@@ -1761,29 +1761,31 @@ function ExportSheet({ open, onClose, store }) {
           body{color:#e5e2ef;font-family:system-ui,-apple-system,sans-serif;padding:16px 20px;max-width:600px;margin:0 auto}
           .toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
           .toolbar button{background:rgba(255,255,255,0.08);border:0.5px solid rgba(255,255,255,0.15);border-radius:6px;color:#e5e2ef;font-family:system-ui,sans-serif;font-size:12px;font-weight:600;padding:8px 14px;cursor:pointer}
-          .ios-hint{display:none;font-size:11px;color:rgba(229,226,239,0.5);margin-bottom:12px;line-height:1.5}
           h1{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${accent};font-weight:600}
-          @media print{.toolbar{display:none}.ios-hint{display:none}}
+          @media print{.toolbar{display:none}}
         </style>
       </head><body>
         <div class="toolbar">
           <h1>Health &middot; ${from} &ndash; ${to}</h1>
           <div style="display:flex;gap:8px">
-            <button id="pdf-btn" onclick="window.print()">Save as PDF</button>
+            <button id="pdf-btn">Save as PDF</button>
             <button onclick="window.close()">← Close</button>
           </div>
         </div>
-        <div class="ios-hint" id="ios-hint">To save as PDF: tap the Share button ↑ → Print (then pinch out on the preview)</div>
         ${cardsHtml}
         <script>
           var isIOS=/iPhone|iPad|iPod/.test(navigator.userAgent)&&!window.MSStream;
-          if(isIOS){document.getElementById('pdf-btn').style.display='none';document.getElementById('ios-hint').style.display='block';}
-          else{window.onload=function(){window.print()};}
+          document.getElementById('pdf-btn').addEventListener('click',function(){
+            if(isIOS&&navigator.share){navigator.share({title:document.title,url:location.href});}
+            else{window.print();}
+          });
+          if(!isIOS){window.onload=function(){window.print()};}
         <\/script>
       </body></html>`;
 
-      const w = window.open('', '_blank', 'width=680,height=900');
-      if (w) { w.document.write(html); w.document.close(); }
+      const blob = new Blob([html], { type: 'text/html' });
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank');
       onClose();
     } finally {
       setExporting(null);
