@@ -1321,7 +1321,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
       const last = LB.bestRecentEntry(s, newExId, session.dayId);
       const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
-      const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+      const mother = targetIdx !== null ? sess.entries[targetIdx] : null;
+      const setCount = mother ? (mother.plannedSets ?? mother.sets?.length ?? 3) : 3;
+      const seedSets = LB.buildSeedSets({ sets: setCount, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
       const currentIdx = sess.currentExIdx || 0;
       const insertIdx = targetIdx !== null ? targetIdx + 1 : currentIdx + 1;
       const group = targetIdx !== null
@@ -1330,7 +1332,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const newEntry = {
         exId: newExId,
         name: newEx?.name || newExId,
-        plannedSets: 3,
+        plannedSets: setCount,
         plannedReps: null,
         plannedRepsPerSet: null,
         sets: seedSets,
