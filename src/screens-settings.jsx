@@ -2107,6 +2107,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
             { key: 'standard', label: 'Standard', sub: 'Zane logo watermark' },
             { key: 'mike',     label: 'Mike',     sub: 'mikeapicelli777' },
             { key: 'phoenix',  label: 'Phoenix',  sub: 'mb2489' },
+            { key: 'marine',   label: 'Marine',   sub: 'marine.png' },
           ].map(({ key, label, sub }) => {
             const active = adminBgPreview === key;
             return (
