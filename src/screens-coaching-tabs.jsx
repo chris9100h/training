@@ -582,7 +582,8 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
       const fields = (section.fields || []).filter(f => has(responses[f.key]));
       if (!fields.length) return;
       const headLabel = `// ${section.label.toUpperCase()}${section.sectionHint ? ` (${section.sectionHint})` : ''} //`;
-      lines.push('', headLabel, '─'.repeat(headLabel.length));
+      const headBase = `// ${section.label.toUpperCase()} //`;
+      lines.push('', headLabel, '─'.repeat(headBase.length));
       let planRowInserted = false;
       fields.forEach((f, fi) => {
         const v = responses[f.key];
