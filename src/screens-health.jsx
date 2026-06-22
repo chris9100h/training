@@ -1734,7 +1734,7 @@ function ExportSheet({ open, onClose, store }) {
           const sessionNames = daySessions.map(s => s.dayName || s.day_name || '').filter(Boolean).join(', ');
           const sessionDur = daySessions.reduce((sum, s) => sum + (s.durationMinutes || s.duration_minutes || 0), 0);
 
-          return `<div style="background:${bgCard};border:1px solid ${hairStrong};border-radius:8px;padding:16px;margin-bottom:12px;page-break-inside:avoid">
+          return `<div style="background:${bgCard};border:1px solid ${hairStrong};border-radius:8px;padding:16px;margin:10px 0;page-break-inside:avoid">
             <div style="font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#e5e2ef;margin-bottom:${(trained || hasCardio) ? 8 : 12}px">${dateLabel}</div>
             ${(trained || hasCardio) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:${sessionNames ? 6 : 10}px">${trained ? badge('🏋', sessionNames ? `${sessionNames}${sessionDur ? ` · ${sessionDur} min` : ''}` : 'Trained') : ''}${hasCardio ? badge('🏃', 'Cardio') : ''}</div>` : ''}
             ${adhBar}
@@ -1758,8 +1758,8 @@ function ExportSheet({ open, onClose, store }) {
           *,*::before,*::after{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
           @page{margin:15mm 0}
           html,body{background:${bg}!important}
-          body{color:#e5e2ef;font-family:system-ui,-apple-system,sans-serif;padding:16px 20px;max-width:600px;margin:0 auto}
-          h1{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${accent};font-weight:600;margin-bottom:16px}
+          body{color:#e5e2ef;font-family:system-ui,-apple-system,sans-serif;padding:10px 20px}
+          h1{font-size:14px;letter-spacing:0.1em;text-transform:uppercase;color:${accent};font-weight:700;margin-bottom:14px}
         </style>
       </head><body>
         <h1>Health &middot; ${from} &ndash; ${to}</h1>
