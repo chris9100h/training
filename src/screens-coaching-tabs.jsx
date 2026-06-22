@@ -1061,7 +1061,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
 
 // ─── CheckInForm ──────────────────────────────────────────────────────────────
 
-function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefill, dailyPrefill, onSaved, schema }) {
+function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefill, dailyPrefill, perfPrefill, onSaved, schema }) {
   const sections = schema || CHECKIN_DEFAULT_SCHEMA;
   const allFields = sections.flatMap(s => s.fields || []);
 
@@ -1084,6 +1084,11 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
     // protein_avg, macro_adherence, …). Only apply keys the schema actually has.
     if (dailyPrefill) {
       allFields.forEach(f => { if (dailyPrefill[f.key] != null) base[f.key] = String(dailyPrefill[f.key]); });
+    }
+    // Performance-vs-last-week is derived from logged sessions (the same source
+    // the live preview uses), not from daily/cardio logs — apply it on top.
+    if (perfPrefill != null && allFields.some(f => f.key === 'performance_vs_last_week')) {
+      base.performance_vs_last_week = perfPrefill;
     }
     return base;
   });
@@ -1131,11 +1136,13 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {(prefill || dailyPrefill) && !existing && (
+      {(prefill || dailyPrefill || perfPrefill != null) && !existing && (
         <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.08)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
           {dailyPrefill
             ? `Prefilled from your daily logs${prefill ? ' & cardio' : ''} this week — review before submitting`
-            : `Cardio prefilled from ${prefill.count} log${prefill.count !== 1 ? 's' : ''} this week`}
+            : prefill
+              ? `Cardio prefilled from ${prefill.count} log${prefill.count !== 1 ? 's' : ''} this week`
+              : `Prefilled from this week's training — review before submitting`}
         </div>
       )}
       {sections.map(section => {
@@ -1252,6 +1259,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           existing={target}
           prefill={!target ? LB.cardioWeekPrefill(store?.cardioLogs, formWeek, store?.settings?.unit) : undefined}
           dailyPrefill={!target ? LB.dailyLogsWeekPrefill(store?.dailyLogs, formWeek, store?.sessions, resolvedSchema) : undefined}
+          perfPrefill={!target ? LB.weekPerformanceSignal(store, formWeek) : undefined}
           onSaved={() => { setEditTarget(null); load(); }}
           schema={resolvedSchema}
         />
