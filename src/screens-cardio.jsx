@@ -285,7 +285,7 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
             <div className="display" style={{ fontSize: 28, color: UI.inkSoft, fontStyle: 'italic' }}>Rest</div>
           ) : selTarget && !selTarget.freeSession ? (
             <div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
                 {selTarget.distanceM      != null && <span className="num" style={{ fontSize: 28, color: UI.ink }}>{cpFmtDist(selTarget.distanceM, distUnit)}</span>}
                 {selTarget.durationMinutes != null && <span className="num" style={{ fontSize: 28, color: UI.ink }}>{selTarget.durationMinutes} min</span>}
                 {selTarget.paceSecPerKm   != null && <span className="num" style={{ fontSize: 14, color: UI.inkSoft }}>@ {cpFmtPace(selTarget.paceSecPerKm, distUnit)}</span>}
@@ -305,7 +305,7 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
 
         {/* Goal summary */}
         {plan.mode === 'goal' && plan.goal && (
-          <div style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, textAlign: 'center' }}>
+          <div style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>GOAL</div>
             <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>
               {plan.goal.type === 'duration'
