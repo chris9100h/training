@@ -2439,7 +2439,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               </div>
             )}
 
-            {cardioBanner}
+            {!cardioPlanPrefill && cardioBanner}
 
             </div>{/* end fixed header */}
 
