@@ -385,7 +385,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
         WebkitBackdropFilter: 'blur(24px) saturate(130%)',
         border: `1px solid ${UI.hairStrong}`,
         borderRadius: 8,
-        padding: '6px 6px',
+        padding: '6px 6px 3px',
         boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
       }}>
         {/* knurled top edge — grip texture, signature of the kit */}
@@ -427,7 +427,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
             return (
               <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => onChange(t.id)} style={{
                 flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
-                padding: `${PAD_TOP}px 4px 4px`,
+                padding: `${PAD_TOP}px 4px 2px`,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
                 color: on ? UI.gold : UI.inkFaint,
                 fontFamily: UI.fontUi,
