@@ -1751,7 +1751,7 @@ function ExportSheet({ open, onClose, store }) {
         <style>
           *{margin:0;padding:0;box-sizing:border-box}
           @page{margin:12mm}
-          body{font-family:system-ui,-apple-system,sans-serif;background:#fff;padding:0}
+          body{font-family:system-ui,-apple-system,sans-serif;background:#fff;padding:0;max-width:600px;margin:0 auto}
           h1{font-size:13px;letter-spacing:0.1em;text-transform:uppercase;color:${accent};font-weight:700;margin-bottom:14px}
         </style>
       </head><body>
