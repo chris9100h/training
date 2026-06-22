@@ -363,9 +363,14 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
   // key — a solid gold plate that slides under the active icon (dark glyph on
   // gold), topped by a thin gold rail. Inactive tabs are faint icon+label.
   const n = tabs.length;
-  // Geometry of the sliding key plate, kept in sync with the icon zone below.
-  const KEY = 38;        // plate width/height (square, radius-6 key)
-  const KEY_TOP = 5;     // distance from the row top to the plate
+  // Geometry. The gold plate is absolutely positioned (its size doesn't affect
+  // the label), while the in-flow ICON_H is kept tight so the label sits right
+  // under the glyph. PLATE/PAD_TOP/ICON_H are tuned so the plate stays centred
+  // on the glyph and its bottom edge meets (never overlaps) the label.
+  const KEY = 30;        // gold plate width/height (square, radius-6 key)
+  const KEY_TOP = 5;     // plate offset from the row top
+  const PAD_TOP = 4;     // button top padding
+  const ICON_H = 22;     // icon-zone height — drives the icon→label gap
   return (
     <div style={{
       flexShrink: 0,
@@ -422,7 +427,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
             return (
               <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => onChange(t.id)} style={{
                 flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
-                padding: `${KEY_TOP}px 4px 4px`,
+                padding: `${PAD_TOP}px 4px 4px`,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
                 color: on ? UI.gold : UI.inkFaint,
                 fontFamily: UI.fontUi,
@@ -435,7 +440,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                 {/* Icon zone — matches the key plate footprint so the glyph
                     sits centred on the gold plate when active. */}
                 <div style={{
-                  position: 'relative', width: KEY, height: KEY,
+                  position: 'relative', width: KEY, height: ICON_H,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   color: on ? '#0a0805' : UI.inkFaint,
                   transform: on ? 'scale(1.08)' : 'scale(1)',
