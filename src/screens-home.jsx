@@ -639,7 +639,7 @@ function CardioPROverlay({ pr, onDone }) {
   );
 }
 
-function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, onPR }) {
+function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, onPR, prefill }) {
   const getDistUnit = () => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } };
   const [distUnit, setDistUnitState] = useState(getDistUnit);
   const setDistUnit = (u) => { try { localStorage.setItem(CARDIO_DIST_KEY, u); } catch (_) {} setDistUnitState(u); };
@@ -663,7 +663,13 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
         note: editLog.note || '',
       });
     } else {
-      setForm(empty());
+      const du = getDistUnit();
+      setForm({
+        ...empty(),
+        type: prefill?.type || '',
+        duration: prefill?.durationMinutes ? String(prefill.durationMinutes) : '',
+        distance: prefill?.distanceM != null ? mToDisplay(prefill.distanceM, du) : '',
+      });
     }
   }, [open, editLog?.id]);
 
@@ -1076,13 +1082,14 @@ const TRAIN_BG_OVERRIDES = {
   'mikeapicelli777@gmail.com': 'icons/IMG_6389.png',
   'mb2489@protonmail.com':     'icons/phoenix.png',
   'test@test.com':             'icons/phoenix.png',
+  'aboagyeboadi@yahoo.com':    'icons/prince_abu.png',
 };
 
 function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRetrySync }) {
   const [confirmEl, confirm] = useConfirm();
   const _userEmail = (store.user?.email || '').toLowerCase();
   const _adminPreviewBg = _userEmail === 'office@btc-prime.biz'
-    ? ({ mike: 'icons/IMG_6389.png', phoenix: 'icons/phoenix.png', marine: 'icons/marine.png' })[localStorage.getItem('logbook-admin-bg-preview')]
+    ? ({ mike: 'icons/IMG_6389.png', phoenix: 'icons/phoenix.png', marine: 'icons/marine.png', prince_abu: 'icons/prince_abu.png' })[localStorage.getItem('logbook-admin-bg-preview')]
     : undefined;
   const trainBg = _adminPreviewBg || TRAIN_BG_OVERRIDES[_userEmail] || 'icons/zane-logo.png';
   const isCustomBg = trainBg !== 'icons/zane-logo.png';
@@ -1566,6 +1573,30 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     return (store.cardioLogs || []).filter(l => l.date === dateKey);
   }, [store.cardioLogs, sessionDate]);
 
+  // Pre-fill for CardioQuickLogSheet: first active plan with a target on the selected date
+  const cardioPlanPrefill = useMemo(() => {
+    const activePlanId = store.activeCardioPlanId;
+    const plans = (store.cardioPlans || []).filter(p => !p.archived && p.id === activePlanId);
+    if (!plans.length) return null;
+    const dateISO = sessionDate.toISOString().slice(0, 10);
+    const dow = sessionDate.getDay();
+    const wkKeys = ['mon','tue','wed','thu','fri','sat','sun'];
+    const wk = wkKeys[dow === 0 ? 6 : dow - 1];
+    for (const plan of plans) {
+      if (plan.planStartDate && dateISO < plan.planStartDate) continue;
+      if (!plan.days[wk]) continue;
+      if (plan.mode === 'manual') {
+        const t = plan.manualTargets?.[wk];
+        if (t && (t.distance_m || t.duration_minutes)) {
+          return { type: plan.activityType, distanceM: t.distance_m ?? null, durationMinutes: t.duration_minutes ?? null };
+        }
+      } else if (plan.mode === 'goal') {
+        return { type: plan.activityType };
+      }
+    }
+    return null;
+  }, [store.cardioPlans, store.activeCardioPlanId, sessionDate]);
+
   const recentBannerDay = useMemo(() => {
     if (!sch) return null;
     const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
@@ -1908,7 +1939,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   if (!sch) {
     const hasPlans = store.schedules?.length > 0;
     return (
-      <Screen>
+      <Screen style={{ position: 'relative' }}>
+        {isCustomBg && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+            <img src={trainBg} style={{ width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' }} />
+          </div>
+        )}
         <TopBar
           title={<span>HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span></span>}
           sub={new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
@@ -2250,18 +2286,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 <Btn kind="ghost" onClick={handleClearStatus} style={{ flex: 1 }}>Back to normal</Btn>
               )}
             </div>
-            <button onClick={() => setCardioPopoverOpen(true)} style={{
-              width: '100%', marginTop: 8, padding: '9px 16px',
-              background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-              border: '1px solid rgba(var(--accent-rgb),0.6)',
-              borderRadius: 8, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-              WebkitTapHighlightColor: 'transparent',
-            }}>
-              <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: 'rgba(10,8,5,0.6)' }} />
-              <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
-            </button>
-            {cardioBanner}
+            {!cardioPlanPrefill && cardioBanner}
           </BracketFrame>
         ) : (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
@@ -2415,7 +2440,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               </div>
             )}
 
-            {cardioBanner}
+            {!cardioPlanPrefill && cardioBanner}
 
             </div>{/* end fixed header */}
 
@@ -2423,23 +2448,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         )}
       </div>
 
-      {!isActiveRest && (
-        <div style={{ flexShrink: 0, padding: '6px 22px', paddingBottom: isPad ? 'calc(env(safe-area-inset-bottom, 0px) + 16px)' : 0 }}>
-          <button onClick={() => setCardioPopoverOpen(true)} style={{
-            width: '100%', padding: '9px 16px',
-            background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-            border: '1px solid rgba(var(--accent-rgb),0.6)',
-            borderRadius: 8, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            WebkitTapHighlightColor: 'transparent',
-          }}>
-            <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: 'rgba(10,8,5,0.6)' }} />
-            <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
-          </button>
-        </div>
-      )}
 
-      {/* Last session + not-logged strip — fixed above tab bar */}
+      {/* Last session + not-logged strip */}
       {(lastSession || (recentBannerDay && !store.inProgress && !store.statusMode)) && (
         <div style={{ flexShrink: 0, padding: '10px 22px' }}>
           {lastSession && recentBannerDay && !store.inProgress && !store.statusMode ? (
@@ -2464,6 +2474,17 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             <RecentBannerDay banner={recentBannerDay} store={store} setStore={setStore} go={go} sch={sch} userId={userId} onOpenSkipSheet={setSkipReasonModal} />
           )}
         </div>
+      )}
+
+      {/* Cardio plan widget — targets for the selected day in the strip */}
+      {window.Screens?.TodayCardioWidget && (
+        <window.Screens.TodayCardioWidget
+          store={store}
+          setStore={setStore}
+          todayISO={sessionDate.toISOString().slice(0, 10)}
+          userId={userId}
+          onPR={setCardioPR}
+        />
       )}
 
 
@@ -2514,7 +2535,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
       <CardioFinishFlow open={cardioFinishOpen} durationMin={cardioFinishDuration} store={store} setStore={setStore} onClose={() => setCardioFinishOpen(false)} onPR={setCardioPR} />
 
-      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} onPR={setCardioPR} />
+      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} onPR={setCardioPR} prefill={editingCardioLog ? null : cardioPlanPrefill} />
       <CardioPROverlay pr={cardioPR} onDone={() => setCardioPR(null)} />
 
       {/* Coach message banner */}

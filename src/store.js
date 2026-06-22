@@ -461,6 +461,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
     // Cardio quick-logs — all records for the user (typically < a few hundred rows)
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    // Cardio training plans — manual weekly targets or progressive goal plans
+    _supabase.from('zane_cardio_plans').select('id, name, activity_type, archived, mode, days, manual_targets, goal, goal_due_date, start_fitness, generated_weeks, plan_start_date, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Daily health logs (weight / steps / macros / water) — one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, created_at').eq('user_id', userId).order('date', { ascending: false }),
@@ -473,7 +475,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
-         cardioLogsRes, dailyLogsRes, statusPeriodsRes,
+         cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
@@ -585,6 +587,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       paceFeeling: l.pace_feeling ?? null, effort: l.effort ?? null,
       note: l.note ?? null, sessionId: l.session_id ?? null, createdAt: l.created_at,
     })),
+    cardioPlans: (cardioPlansRes?.data || []).map(p => ({
+      id: p.id, name: p.name, activityType: p.activity_type,
+      archived: p.archived, mode: p.mode,
+      days: p.days ?? {}, manualTargets: p.manual_targets ?? {},
+      goal: p.goal ?? null, goalDueDate: p.goal_due_date ?? null,
+      startFitness: p.start_fitness ?? null,
+      generatedWeeks: p.generated_weeks ?? [],
+      planStartDate: p.plan_start_date ?? null,
+      createdAt: p.created_at,
+    })),
     // Daily health logs (tolerate RPC/table errors before the migration runs —
     // an empty list just means the Health tab shows no history yet).
     dailyLogs: (dailyLogsRes?.data || []).map(l => ({
@@ -606,6 +618,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // with the windowed sessions, so PR detection stays exact mid-session.
     exerciseBests,
     activeScheduleId: sett.active_schedule_id ?? null,
+    activeCardioPlanId: sett.active_cardio_plan_id ?? null,
     cycleIndex: sett.cycle_index ?? 0,
     cycleStartDate: sett.cycle_start_date ?? null,
     weekPlanStartDate: sett.week_plan_start_date ?? null,
@@ -911,6 +924,23 @@ async function syncStore(prev, next, userId) {
     if (removed.length) ops.push(_supabase.from('zane_cardio_logs').delete().in('id', removed.map(l => l.id)));
   }
 
+  if (prev.cardioPlans !== next.cardioPlans) {
+    const upsert = (next.cardioPlans || []).filter(p => {
+      const old = (prev.cardioPlans || []).find(x => x.id === p.id);
+      return !old || JSON.stringify(old) !== JSON.stringify(p);
+    });
+    const removed = (prev.cardioPlans || []).filter(p => !(next.cardioPlans || []).find(x => x.id === p.id));
+    if (upsert.length) ops.push(_supabase.from('zane_cardio_plans').upsert(upsert.map(p => ({
+      id: p.id, user_id: userId, name: p.name, activity_type: p.activityType,
+      archived: p.archived, mode: p.mode,
+      days: p.days, manual_targets: p.manualTargets,
+      goal: p.goal, goal_due_date: p.goalDueDate,
+      start_fitness: p.startFitness, generated_weeks: p.generatedWeeks,
+      plan_start_date: p.planStartDate,
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_cardio_plans').delete().in('id', removed.map(p => p.id)));
+  }
+
   if (prev.dailyLogs !== next.dailyLogs) {
     const upsert = (next.dailyLogs || []).filter(l => {
       const p = (prev.dailyLogs || []).find(x => x.id === l.id);
@@ -973,12 +1003,14 @@ async function syncStore(prev, next, userId) {
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
     prev.nextReminderAt                   !== next.nextReminderAt   ||
     prev.statusMode                       !== next.statusMode       ||
-    prev.statusModeSince                  !== next.statusModeSince;
+    prev.statusModeSince                  !== next.statusModeSince  ||
+    prev.activeCardioPlanId               !== next.activeCardioPlanId;
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
       user_id: userId,
       active_schedule_id: next.activeScheduleId ?? null,
+      active_cardio_plan_id: next.activeCardioPlanId ?? null,
       cycle_index: next.cycleIndex ?? 0,
       cycle_start_date: next.cycleStartDate ?? null,
       week_plan_start_date: next.weekPlanStartDate ?? null,

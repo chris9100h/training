@@ -141,8 +141,15 @@ function LibraryScreen({ store, setStore, go }) {
   return (
     <Screen>
       <TopBar title="Exercises" right={topBarRight} />
-      <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'lib', label: 'Exercises', icon: 'fa-book' }]}
-        active="lib" onChange={() => go({ name: 'plan' })} />
+      <SubTabBar
+        tabs={[
+          { id: 'plan',   label: 'Workout',   icon: 'fa-dumbbell' },
+          { id: 'lib',    label: 'Exercises', icon: 'fa-book' },
+          { id: 'cardio', label: 'Cardio',    icon: 'fa-person-running' },
+        ]}
+        active="lib"
+        onChange={id => { if (id === 'plan') go({ name: 'plan' }); else if (id === 'cardio') go({ name: 'cardio-plans' }); }}
+      />
 
       {/* Tab strip */}
       <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0, marginTop: 8 }}>

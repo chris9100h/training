@@ -1716,7 +1716,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
                   Open registration for a batch — auto-approved until used up, then turns back on.
                 </div>
                 <NavRow label="Recent sign-ups" hint={unseenCount > 0 ? `${unseenCount} new` : `${recentSignups.length}`} onTap={() => setSignupsSheet(true)} />
-                <NavRow label="Background preview" hint={{ standard: 'Standard', mike: 'Mike', phoenix: 'Phoenix' }[adminBgPreview] || 'Change'} onTap={() => setBgPreviewSheet(true)} />
+                <NavRow label="Background preview" hint={{ standard: 'Standard', mike: 'Mike', phoenix: 'Phoenix', marine: 'Marine', prince_abu: 'Prince Abu' }[adminBgPreview] || 'Change'} onTap={() => setBgPreviewSheet(true)} />
               </Frame>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
                 <Btn onClick={() => setSupportInboxSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', fontSize: 15, padding: '14px 16px' }}>
@@ -2104,10 +2104,11 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
       <SettingsSheet open={bgPreviewSheet} onClose={() => setBgPreviewSheet(false)} title="Background">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {[
-            { key: 'standard', label: 'Standard', sub: 'Zane logo watermark' },
-            { key: 'mike',     label: 'Mike',     sub: 'mikeapicelli777' },
-            { key: 'phoenix',  label: 'Phoenix',  sub: 'mb2489' },
-            { key: 'marine',   label: 'Marine',   sub: 'marine.png' },
+            { key: 'standard',   label: 'Standard',   sub: 'Zane logo watermark' },
+            { key: 'mike',       label: 'Mike',       sub: 'mikeapicelli777' },
+            { key: 'phoenix',    label: 'Phoenix',    sub: 'mb2489' },
+            { key: 'marine',     label: 'Marine',     sub: 'marine.png' },
+            { key: 'prince_abu', label: 'Prince Abu', sub: 'prince_abu.png' },
           ].map(({ key, label, sub }) => {
             const active = adminBgPreview === key;
             return (

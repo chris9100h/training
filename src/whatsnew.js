@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.395',
+    title: 'Cardio Plans',
+    items: [
+      'Set a running, cycling or any cardio goal — target distance, due date, days per week — and the app builds a week-by-week progression that gets you there. Load increases gradually with a built-in recovery week every four weeks.',
+      'Prefer full control? Manual mode lets you set the exact target for each training day yourself, activity by activity.',
+      'Your plan target pre-fills automatically when you log a cardio session on a scheduled day — adjust the distance or duration if needed, then save.',
+      'Find Cardio Plans under the Plan tab → Plans. Tap any active plan to see this week\'s target and the full progression ahead.',
+    ],
+  },
+  {
     id: 'v2.394',
     title: 'Flexible session replacement',
     items: [
