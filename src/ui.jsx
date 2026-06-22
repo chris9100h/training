@@ -358,6 +358,14 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
     );
   }
 
+  // ── Bottom dock — "gold key" active indicator ──────────────────────
+  // A floating industrial bar: the active tab reads like a pressed mechanical
+  // key — a solid gold plate that slides under the active icon (dark glyph on
+  // gold), topped by a thin gold rail. Inactive tabs are faint icon+label.
+  const n = tabs.length;
+  // Geometry of the sliding key plate, kept in sync with the icon zone below.
+  const KEY = 44;        // plate width/height (square, radius-6 key)
+  const KEY_TOP = 6;     // distance from the row top to the plate
   return (
     <div style={{
       flexShrink: 0,
@@ -366,72 +374,87 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
       zIndex: 20,
     }}>
       <div style={{
+        position: 'relative',
         background: 'rgba(var(--bg-rgb),0.92)',
         backdropFilter: 'blur(24px) saturate(130%)',
         WebkitBackdropFilter: 'blur(24px) saturate(130%)',
         border: `1px solid ${UI.hairStrong}`,
-        borderRadius: 6,
-        padding: 6,
+        borderRadius: 8,
+        padding: '8px 6px',
         boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
       }}>
-        <div style={{ display: 'flex', position: 'relative' }}>
-        {idx >= 0 && (
-          <div style={{
-            position: 'absolute',
-            left: `calc(${(idx * 100) / tabs.length}% + 4px)`,
-            top: 0, bottom: 0,
-            width: `calc(${100 / tabs.length}% - 8px)`,
-            background: `rgba(var(--accent-rgb),0.15)`,
-            border: `1px solid ${UI.goldSoft}`,
-            borderRadius: 6,
-            transition: 'left 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
-            pointerEvents: 'none',
-          }} />
-        )}
-        {idx >= 0 && (
-          <div style={{
-            position: 'absolute',
-            left: `${(idx + 0.5) * 100 / tabs.length}%`,
-            top: -3,
-            transform: 'translateX(-50%)',
-            width: 20, height: 2, borderRadius: 1,
-            background: UI.gold,
-            transition: 'left 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
-            pointerEvents: 'none',
-            zIndex: 2,
-          }} />
-        )}
-        {tabs.map(t => {
-          const on = t.id === active;
-          const badge = t.id === 'coaching' ? coachingBadge : null;
-          return (
-            <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => onChange(t.id)} style={{
-              flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
-              padding: '10px 6px 8px',
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-              color: on ? UI.gold : UI.inkFaint,
-              fontFamily: UI.fontUi,
-              fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
-              fontWeight: on ? 700 : 500,
-              position: 'relative', zIndex: 1,
-              transition: 'color 0.25s',
-              WebkitTapHighlightColor: 'transparent',
-            }}>
-              <div style={{ position: 'relative', display: 'inline-flex' }}>
-                {TAB_ICONS[t.id]}
-                {badge?.live && (
-                  <div style={{ position: 'absolute', top: -2, right: -2, width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: '1.5px solid var(--bg)' }} />
-                )}
-                {!badge?.live && badge?.count > 0 && (
-                  <div style={{ position: 'absolute', top: -4, right: -6, minWidth: 14, height: 14, borderRadius: 7, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--bg)' }}>
-                    <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: '#0a0805', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
-                  </div>
-                )}
-              </div>
-              {t.label}
-            </button>
-          );
-        })}
+        {/* knurled top edge — grip texture, signature of the kit */}
+        <div className="knurl" style={{ position: 'absolute', top: 8, left: 14, right: 14 }} />
+        <div style={{ display: 'flex', position: 'relative', paddingTop: 6 }}>
+          {/* Sliding gold key plate behind the active icon */}
+          {idx >= 0 && (
+            <div style={{
+              position: 'absolute',
+              left: `${(idx + 0.5) * 100 / n}%`,
+              top: KEY_TOP,
+              transform: 'translateX(-50%)',
+              width: KEY, height: KEY, borderRadius: 6,
+              background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
+              border: '1px solid var(--accent-deep)',
+              boxShadow: '0 5px 16px rgba(var(--accent-rgb),0.35), inset 0 1px 0 rgba(255,240,200,0.45)',
+              transition: 'left 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+              pointerEvents: 'none',
+              zIndex: 0,
+            }} />
+          )}
+          {/* Top rail above the active plate — mechanical selector cue */}
+          {idx >= 0 && (
+            <div style={{
+              position: 'absolute',
+              left: `${(idx + 0.5) * 100 / n}%`,
+              top: KEY_TOP - 5,
+              transform: 'translateX(-50%)',
+              width: 24, height: 2, borderRadius: 1,
+              background: UI.gold,
+              transition: 'left 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+              pointerEvents: 'none',
+              zIndex: 2,
+            }} />
+          )}
+          {tabs.map(t => {
+            const on = t.id === active;
+            const badge = t.id === 'coaching' ? coachingBadge : null;
+            return (
+              <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => onChange(t.id)} style={{
+                flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
+                padding: `${KEY_TOP}px 4px 6px`,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                color: on ? UI.gold : UI.inkFaint,
+                fontFamily: UI.fontUi,
+                fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
+                fontWeight: on ? 700 : 500,
+                position: 'relative', zIndex: 1,
+                transition: 'color 0.25s',
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                {/* Icon zone — matches the key plate footprint so the glyph
+                    sits centred on the gold plate when active. */}
+                <div style={{
+                  position: 'relative', width: KEY, height: KEY,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: on ? '#0a0805' : UI.inkFaint,
+                  transform: on ? 'scale(1.08)' : 'scale(1)',
+                  transition: 'color 0.2s, transform 0.25s cubic-bezier(0.34,1.4,0.64,1)',
+                }}>
+                  {TAB_ICONS[t.id]}
+                  {badge?.live && (
+                    <div style={{ position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: '50%', background: on ? '#0a0805' : 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}` }} />
+                  )}
+                  {!badge?.live && badge?.count > 0 && (
+                    <div style={{ position: 'absolute', top: 3, right: 1, minWidth: 14, height: 14, borderRadius: 7, background: on ? '#0a0805' : 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}`, padding: '0 3px' }}>
+                      <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: on ? 'var(--accent)' : '#0a0805', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
+                    </div>
+                  )}
+                </div>
+                {t.label}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
