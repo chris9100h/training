@@ -166,10 +166,12 @@ function cpTodayLog(plan, cardioLogs, todayISO) {
 // ─── CardioPlanDetailSheet ─────────────────────────────────────────────────
 function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, todayISO, distUnit, onClose, onEdit, onArchive, onUnarchive, onDelete }) {
   const [confirmEl, confirm] = useConfirm();
-  const act        = cpActivity(plan.activityType);
-  const target     = cpTodayTarget(plan, todayISO);
-  const doneLog    = target ? cpTodayLog(plan, store.cardioLogs, todayISO) : null;
-  const daysActive = CP_WEEKDAY_KEYS.filter(k => plan.days[k]);
+  const act      = cpActivity(plan.activityType);
+  const isActive = activeCardioPlanId === plan.id;
+  const todayKey = cpTodayKey(todayISO);
+
+  const defaultDay = plan.days[todayKey] ? todayKey : (CP_WEEKDAY_KEYS.find(k => plan.days[k]) || todayKey);
+  const [selDay, setSelDay] = useStateCard(defaultDay);
 
   let weekNum = null, totalWeeks = null;
   if (plan.mode === 'goal' && plan.generatedWeeks?.length) {
@@ -177,140 +179,144 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
     totalWeeks = plan.generatedWeeks.length;
   }
 
+  const trainingDayCount = CP_WEEKDAY_KEYS.filter(k => plan.days[k]).length;
+  const descriptor = [
+    `${trainingDayCount} day${trainingDayCount !== 1 ? 's' : ''}/week`,
+    act.label,
+    plan.mode === 'goal' ? 'Goal plan' : 'Manual plan',
+    weekNum != null ? `Session ${weekNum}/${totalWeeks}` : null,
+  ].filter(Boolean).join(' · ').toUpperCase();
+
+  // Target for the selected day
+  const selTarget = (() => {
+    if (!plan.days[selDay]) return null;
+    if (plan.mode === 'manual') return plan.manualTargets?.[selDay] || null;
+    // goal plan: same weekly target for all training days — compute via todayISO
+    return cpTodayTarget(plan, todayISO);
+  })();
+  const selDoneLog = selDay === todayKey ? cpTodayLog(plan, store.cardioLogs, todayISO) : null;
+  const isTodaySel = selDay === todayKey;
+  const isTrainingDay = !!plan.days[selDay];
+
   return (
     <Sheet open={true} onClose={onClose} title={plan.name}>
       {confirmEl}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <div style={{ padding: '7px 14px', background: 'rgba(var(--accent-rgb),0.08)', border: '0.5px solid rgba(var(--accent-rgb),0.25)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <i className={`fa-solid ${act.icon}`} style={{ fontSize: 13, color: 'var(--accent)' }} />
-            <span style={{ fontSize: 12, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600 }}>{act.label}</span>
+
+        {/* Descriptor */}
+        <div className="micro" style={{ color: UI.inkFaint }}>{descriptor}</div>
+
+        {/* Action buttons row — mirrors workout plan viewer */}
+        <div style={{ display: 'flex', gap: 8 }}>
+          {!plan.archived && (
+            isActive ? (
+              <div style={{
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                border: `1px solid ${UI.goldSoft}`, borderRadius: 4, background: UI.goldFaint,
+                padding: '10px 14px', minHeight: 44,
+              }}>
+                <span style={{ width: 6, height: 6, borderRadius: 2, background: UI.gold, flexShrink: 0 }} />
+                <span className="label" style={{ color: UI.gold, marginBottom: 0 }}>Active</span>
+              </div>
+            ) : (
+              <Btn onClick={() => setStore(s => ({ ...s, activeCardioPlanId: plan.id }))} style={{ flex: 1, fontSize: 12 }}>Activate</Btn>
+            )
+          )}
+          <Btn kind="ghost" onClick={onEdit} style={{ flex: 1, fontSize: 12 }}>Edit</Btn>
+          {plan.archived
+            ? <Btn kind="ghost" onClick={onUnarchive} style={{ flex: 1, fontSize: 12 }}>Restore</Btn>
+            : <Btn kind="ghost" onClick={onArchive} style={{ flex: 1, fontSize: 12 }}>Archive</Btn>
+          }
+        </div>
+
+        {/* Deactivate — secondary row when active */}
+        {isActive && !plan.archived && (
+          <Btn kind="ghost" onClick={() => setStore(s => ({ ...s, activeCardioPlanId: null }))} style={{ width: '100%', fontSize: 12 }}>Deactivate</Btn>
+        )}
+
+        {/* Day chips — horizontal scrollable, today dot, same as workout viewer */}
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none', margin: '0 -4px', padding: '0 4px' }}>
+          {CP_WEEKDAY_KEYS.map(k => {
+            const isTraining = !!plan.days[k];
+            const isToday    = k === todayKey;
+            const isSel      = k === selDay;
+            return (
+              <button key={k} onClick={() => setSelDay(k)} style={{
+                flexShrink: 0, padding: '6px 12px 4px', borderRadius: 4,
+                border: `1px solid ${isSel ? UI.gold : isToday ? UI.goldSoft : UI.hairStrong}`,
+                background: isSel ? UI.goldFaint : 'transparent',
+                cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              }}>
+                <div style={{
+                  fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em', fontWeight: 600,
+                  color: isSel ? UI.gold : isTraining ? UI.inkSoft : UI.inkFaint,
+                }}>
+                  {CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(k)].slice(0,3).toUpperCase()}
+                </div>
+                <div style={{ height: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', marginTop: 2 }}>
+                  {isToday && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold }} />}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Selected day content */}
+        <div>
+          <div className={isTodaySel ? 'micro-gold' : 'micro'} style={{ marginBottom: 6, color: isTodaySel ? undefined : UI.inkFaint }}>
+            {CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(selDay)].toUpperCase()}{isTodaySel ? ' · TODAY' : ''}
           </div>
-          <div style={{ padding: '7px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6 }}>
-            <span className="micro" style={{ color: UI.inkFaint }}>{plan.mode === 'goal' ? 'GOAL PLAN' : 'MANUAL PLAN'}</span>
-          </div>
-          {plan.archived && (
-            <div style={{ padding: '7px 14px', background: 'rgba(255,100,50,0.08)', border: '0.5px solid rgba(255,100,50,0.25)', borderRadius: 6 }}>
-              <span className="micro" style={{ color: UI.danger }}>ARCHIVED</span>
+          {!isTrainingDay ? (
+            <div className="display" style={{ fontSize: 28, color: UI.inkSoft, fontStyle: 'italic' }}>Rest</div>
+          ) : selTarget && !selTarget.freeSession ? (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                {selTarget.distanceM      != null && <span className="num" style={{ fontSize: 28, color: UI.ink }}>{cpFmtDist(selTarget.distanceM, distUnit)}</span>}
+                {selTarget.durationMinutes != null && <span className="num" style={{ fontSize: 28, color: UI.ink }}>{selTarget.durationMinutes} min</span>}
+                {selTarget.paceSecPerKm   != null && <span className="num" style={{ fontSize: 14, color: UI.inkSoft }}>@ {cpFmtPace(selTarget.paceSecPerKm, distUnit)}</span>}
+              </div>
+              {isTodaySel && selDoneLog && (
+                <div style={{ marginTop: 6, fontSize: 11, color: UI.ok, fontFamily: UI.fontUi }}>
+                  ✓ {selDoneLog.durationMinutes} min logged{selDoneLog.distanceM ? ` · ${cpFmtDist(selDoneLog.distanceM, distUnit)}` : ''}
+                </div>
+              )}
             </div>
+          ) : (
+            <div className="display" style={{ fontSize: 24, color: UI.inkFaint }}>Free session</div>
           )}
         </div>
 
-        {/* Days row */}
-        <div>
-          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>TRAINING DAYS</div>
-          <div style={{ display: 'flex', gap: 5 }}>
-            {CP_WEEKDAY_KEYS.map((k, i) => (
-              <div key={k} style={{
-                flex: 1, paddingTop: '6px', paddingBottom: '6px',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                borderRadius: 4, border: `0.5px solid ${plan.days[k] ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
-                background: plan.days[k] ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
-              }}>
-                <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em', color: plan.days[k] ? 'var(--accent)' : UI.inkGhost }}>
-                  {CP_WEEKDAY_LABELS[i].slice(0,2).toUpperCase()}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Today's target */}
-        {target && !target.freeSession && (
-          <div style={{ padding: '12px 14px', background: doneLog ? 'rgba(123,196,123,0.06)' : 'rgba(var(--accent-rgb),0.05)', border: `0.5px solid ${doneLog ? 'rgba(123,196,123,0.3)' : 'rgba(var(--accent-rgb),0.2)'}`, borderRadius: 6 }}>
-            <div className="micro" style={{ color: doneLog ? UI.ok : 'var(--accent)', marginBottom: 4 }}>{doneLog ? '✓ TODAY DONE' : "TODAY'S TARGET"}</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              {target.distanceM   != null && <span className="num" style={{ fontSize: 18, color: UI.ink }}>{cpFmtDist(target.distanceM, distUnit)}</span>}
-              {target.durationMinutes != null && <span className="num" style={{ fontSize: 18, color: UI.ink }}>{target.durationMinutes} min</span>}
-              {target.paceSecPerKm != null && <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>@ {cpFmtPace(target.paceSecPerKm, distUnit)}</span>}
-            </div>
-            {doneLog && (
-              <div style={{ marginTop: 4, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>
-                {doneLog.durationMinutes} min logged{doneLog.distanceM ? ` · ${cpFmtDist(doneLog.distanceM, distUnit)}` : ''}
-              </div>
-            )}
-          </div>
-        )}
-        {target?.freeSession && (
-          <div style={{ padding: '12px 14px', background: doneLog ? 'rgba(123,196,123,0.06)' : 'rgba(var(--accent-rgb),0.05)', border: `0.5px solid ${doneLog ? 'rgba(123,196,123,0.3)' : 'rgba(var(--accent-rgb),0.2)'}`, borderRadius: 6 }}>
-            <div className="micro" style={{ color: doneLog ? UI.ok : 'var(--accent)', marginBottom: 4 }}>{doneLog ? '✓ TODAY DONE' : 'SCHEDULED TODAY'}</div>
-            {doneLog ? (
-              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>
-                {doneLog.durationMinutes} min logged{doneLog.distanceM ? ` · ${cpFmtDist(doneLog.distanceM, distUnit)}` : ''}
-              </div>
-            ) : (
-              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Free session — no specific target</div>
-            )}
-          </div>
-        )}
-
         {/* Goal summary */}
         {plan.mode === 'goal' && plan.goal && (
-          <div>
-            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>GOAL</div>
-            <div style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
-              <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>
-                {plan.goal.type === 'duration'
-                  ? `${plan.goal.target_duration_minutes} min`
-                  : cpFmtDist(plan.goal.target_distance_m, distUnit) + (plan.goal.type === 'pace' && plan.goal.target_duration_minutes ? ` in ${plan.goal.target_duration_minutes} min` : '')
-                }
+          <div style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>GOAL</div>
+            <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>
+              {plan.goal.type === 'duration'
+                ? `${plan.goal.target_duration_minutes} min`
+                : cpFmtDist(plan.goal.target_distance_m, distUnit) + (plan.goal.type === 'pace' && plan.goal.target_duration_minutes ? ` in ${plan.goal.target_duration_minutes} min` : '')
+              }
+            </div>
+            {plan.goalDueDate && (
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 3 }}>
+                Due {plan.goalDueDate}{weekNum != null ? ` · Session ${weekNum}/${totalWeeks}` : ''}
               </div>
-              {plan.goalDueDate && (
-                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 3 }}>
-                  Due {plan.goalDueDate}
-                  {weekNum != null ? ` · Session ${weekNum}/${totalWeeks}` : ''}
-                </div>
-              )}
-              {plan.goal.type === 'pace' && plan.goal.target_duration_minutes && plan.goal.target_distance_m && (
-                <div className="num" style={{ fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>
-                  Target pace: {cpFmtPace((plan.goal.target_duration_minutes * 60) / (plan.goal.target_distance_m / 1000), distUnit)}
-                </div>
-              )}
-            </div>
+            )}
+            {plan.goal.type === 'pace' && plan.goal.target_duration_minutes && plan.goal.target_distance_m && (
+              <div className="num" style={{ fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>
+                Target pace: {cpFmtPace((plan.goal.target_duration_minutes * 60) / (plan.goal.target_distance_m / 1000), distUnit)}
+              </div>
+            )}
           </div>
         )}
 
-        {/* Manual daily targets */}
-        {plan.mode === 'manual' && daysActive.length > 0 && (
-          <div>
-            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>DAILY TARGETS</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {CP_WEEKDAY_KEYS.filter(k => plan.days[k]).map(k => {
-                const t = plan.manualTargets?.[k];
-                if (!t) return null;
-                return (
-                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: UI.bgInset, borderRadius: 4, border: `0.5px solid ${UI.hair}` }}>
-                    <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>{CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(k)]}</span>
-                    <span className="num" style={{ fontSize: 13, color: UI.ink }}>
-                      {t.distance_m ? cpFmtDist(t.distance_m, distUnit) : `${t.duration_minutes} min`}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {!plan.archived && (
-          activeCardioPlanId === plan.id ? (
-            <Btn kind="ghost" onClick={() => setStore(s => ({ ...s, activeCardioPlanId: null }))} style={{ width: '100%' }}>Deactivate plan</Btn>
-          ) : (
-            <Btn onClick={() => setStore(s => ({ ...s, activeCardioPlanId: plan.id }))} style={{ width: '100%' }}>Activate plan</Btn>
-          )
-        )}
-        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-          <Btn kind="ghost" onClick={onEdit} style={{ flex: 1 }}>Edit</Btn>
-          {plan.archived
-            ? <Btn kind="ghost" onClick={onUnarchive} style={{ flex: 1 }}>Restore</Btn>
-            : <Btn kind="ghost" onClick={onArchive} style={{ flex: 1 }}>Archive</Btn>
-          }
-        </div>
+        {/* Delete */}
         <button onClick={async () => {
           if (!await confirm('Delete this cardio plan?', { ok: 'Delete', danger: true })) return;
           onDelete();
         }} style={{
           background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0',
-          fontFamily: UI.fontUi, fontSize: 11, color: UI.danger, letterSpacing: '0.08em', textTransform: 'uppercase',
+          fontFamily: UI.fontUi, fontSize: 11, color: UI.danger, letterSpacing: '0.08em',
+          textTransform: 'uppercase', textAlign: 'center', width: '100%',
         }}>Delete plan</button>
       </div>
     </Sheet>
