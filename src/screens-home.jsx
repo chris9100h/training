@@ -2285,7 +2285,6 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 <Btn kind="ghost" onClick={handleClearStatus} style={{ flex: 1 }}>Back to normal</Btn>
               )}
             </div>
-            {cardioBanner}
           </BracketFrame>
         ) : (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
@@ -2473,6 +2472,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             <RecentBannerDay banner={recentBannerDay} store={store} setStore={setStore} go={go} sch={sch} userId={userId} onOpenSkipSheet={setSkipReasonModal} />
           )}
         </div>
+      )}
+
+      {/* Logged cardio summary on rest days — shown below Last Session, not inside the recover card */}
+      {isActiveRest && cardioBanner && (
+        <div style={{ padding: '0 22px' }}>{cardioBanner}</div>
       )}
 
       {/* Cardio plan widget — targets for the selected day in the strip */}
