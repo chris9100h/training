@@ -1754,7 +1754,7 @@ function ExportSheet({ open, onClose, store }) {
           body{font-family:system-ui,-apple-system,sans-serif;background:#fff;padding:0;max-width:600px;margin:0 auto}
         </style>
       </head><body>
-        <div style="background:${cardBg};border:1px solid ${hairDiv};border-radius:999px;padding:8px 20px;margin-bottom:14px;text-align:center;-webkit-print-color-adjust:exact;print-color-adjust:exact">
+        <div style="background:${cardBg};border:1px solid ${hairDiv};border-radius:6px;padding:8px 20px;margin-bottom:14px;text-align:center;-webkit-print-color-adjust:exact;print-color-adjust:exact">
           <span style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${accent};font-weight:700">Health &middot; ${from} &ndash; ${to}</span>
         </div>
         ${cardsHtml}
