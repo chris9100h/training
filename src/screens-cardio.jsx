@@ -305,7 +305,7 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
 
         {/* Goal summary */}
         {plan.mode === 'goal' && plan.goal && (
-          <div style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
+          <div style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, textAlign: 'center' }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>GOAL</div>
             <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>
               {plan.goal.type === 'duration'
