@@ -813,7 +813,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // the finished session is the current next-up day. A freestyle workout, a
     // session from another plan, or a catch-up of an earlier (skipped) rotation
     // day must leave the next-up pointer where it is.
-    const flexBlocks = LB.isFlexPlan(activeSch) &&
+    // Exception: if the user explicitly chose "continue from picked day", we honour
+    // that intent and let the cycleIndex jump even on a flex plan.
+    const flexBlocks = LB.isFlexPlan(activeSch) && !cycleFromPickedDay &&
       (session.isFreestyle || session.scheduleId !== activeSch?.id || session.dayId !== LB.todaysDay(store)?.day?.id);
     // If user chose "continue from picked day", jump cycle to that day's index + 1.
     const pickedSch = store.schedules?.find(s => s.id === session.scheduleId);
