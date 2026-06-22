@@ -16,6 +16,14 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.396',
+    title: 'Refreshed navigation bar',
+    items: [
+      'The bottom tab bar has a new industrial-style redesign — your active tab now reads like a pressed mechanical key, so you can see at a glance where you are.',
+      'Tighter, cleaner layout that gives your content a little more room.',
+    ],
+  },
+  {
     id: 'v2.395',
     title: 'Cardio Plans',
     items: [
