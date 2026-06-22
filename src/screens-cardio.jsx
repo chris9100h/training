@@ -45,6 +45,13 @@ function cpFmtPace(secPerKm, du) {
   return `${mins}:${String(secs).padStart(2,'0')}/${du}`;
 }
 
+function cpFmtSpeed(secPerKm, du) {
+  if (secPerKm == null || secPerKm <= 0) return '';
+  const kmh = 3600 / secPerKm;
+  if (du === 'mi') return `${(kmh / 1.60934).toFixed(1)} mph`;
+  return `${kmh.toFixed(1)} km/h`;
+}
+
 function cpTodayKey(todayISO) {
   const d = new Date(todayISO + 'T12:00:00');
   const dow = d.getDay(); // 0=Sun
@@ -282,6 +289,7 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
                 {selTarget.distanceM      != null && <span className="num" style={{ fontSize: 28, color: UI.ink }}>{cpFmtDist(selTarget.distanceM, distUnit)}</span>}
                 {selTarget.durationMinutes != null && <span className="num" style={{ fontSize: 28, color: UI.ink }}>{selTarget.durationMinutes} min</span>}
                 {selTarget.paceSecPerKm   != null && <span className="num" style={{ fontSize: 14, color: UI.inkSoft }}>@ {cpFmtPace(selTarget.paceSecPerKm, distUnit)}</span>}
+                {selTarget.paceSecPerKm   != null && <span className="num" style={{ fontSize: 14, color: UI.inkFaint }}>{cpFmtSpeed(selTarget.paceSecPerKm, distUnit)}</span>}
               </div>
               {isTodaySel && selDoneLog && (
                 <div style={{ marginTop: 6, fontSize: 11, color: UI.ok, fontFamily: UI.fontUi }}>
@@ -309,11 +317,14 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
                 Due {plan.goalDueDate}{weekNum != null ? ` · Session ${weekNum}/${totalWeeks}` : ''}
               </div>
             )}
-            {plan.goal.type === 'pace' && plan.goal.target_duration_minutes && plan.goal.target_distance_m && (
-              <div className="num" style={{ fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>
-                Target pace: {cpFmtPace((plan.goal.target_duration_minutes * 60) / (plan.goal.target_distance_m / 1000), distUnit)}
-              </div>
-            )}
+            {plan.goal.type === 'pace' && plan.goal.target_duration_minutes && plan.goal.target_distance_m && (() => {
+              const pSec = (plan.goal.target_duration_minutes * 60) / (plan.goal.target_distance_m / 1000);
+              return (
+                <div className="num" style={{ fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>
+                  Target pace: {cpFmtPace(pSec, distUnit)} · {cpFmtSpeed(pSec, distUnit)}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -1166,7 +1177,7 @@ function TodayCardioWidget({ store, setStore, todayISO, userId, onPR }) {
                     <>
                       {target.distanceM    != null && <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{cpFmtDist(target.distanceM, du)}</span>}
                       {target.durationMinutes != null && <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{target.durationMinutes} min</span>}
-                      {target.paceSecPerKm != null && <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>@ {cpFmtPace(target.paceSecPerKm, du)}</span>}
+                      {target.paceSecPerKm != null && <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>@ {cpFmtPace(target.paceSecPerKm, du)} · {cpFmtSpeed(target.paceSecPerKm, du)}</span>}
                     </>
                   )}
                 </div>
