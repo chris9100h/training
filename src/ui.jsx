@@ -457,7 +457,9 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                     </div>
                   )}
                 </div>
-                {t.label}
+                {/* -0.14em cancels the trailing letter-spacing after the last
+                    glyph so the visible text is pixel-centred under the plate. */}
+                <span style={{ marginRight: '-0.14em' }}>{t.label}</span>
               </button>
             );
           })}
