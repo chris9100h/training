@@ -487,7 +487,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
     if (editPlan) {
       setStore(s => ({ ...s, cardioPlans: (s.cardioPlans || []).map(p => p.id === editPlan.id ? plan : p) }));
     } else {
-      setStore(s => ({ ...s, cardioPlans: [plan, ...(s.cardioPlans || [])], activeCardioPlanId: plan.id }));
+      setStore(s => ({ ...s, cardioPlans: [plan, ...(s.cardioPlans || [])], activeCardioPlanId: s.activeCardioPlanId ?? plan.id }));
     }
     onClose();
   };
