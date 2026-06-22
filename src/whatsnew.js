@@ -16,6 +16,17 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.394',
+    title: 'Flexible session replacement',
+    items: [
+      'When you finish a session that wasn\'t on the plan, you now choose what happens to your cycle: continue from the day you just trained, keep the original cycle on track, or log it as a bonus without advancing',
+      'Useful when you swap days — e.g. doing Push instead of Legs. Pick "continue from Push" and the app rotates the plan so Pull comes up next, with no gaps or false missed-day warnings',
+      'Works in both regular cycle and flex mode',
+      'Duplicating a plan now always starts fresh — version history stays with the original',
+      'Several improvements to the check-in flow: export check-in data as formatted text or PDF, performance rating pre-filled from your health log, and more',
+    ],
+  },
+  {
     id: 'v2.393',
     title: 'Under the hood',
     items: [
