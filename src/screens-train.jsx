@@ -819,7 +819,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       (session.isFreestyle || session.scheduleId !== activeSch?.id || session.dayId !== LB.todaysDay(store)?.day?.id);
     // If user chose "continue from picked day", jump cycle to that day's index + 1.
     const pickedSch = store.schedules?.find(s => s.id === session.scheduleId);
-    const pickedDayIdx = cycleFromPickedDay ? (pickedSch?.days?.findIndex(d => d.id === session.dayId) ?? -1) : -1;
+    // Look up the day in the *current version's* days, not the original base array —
+    // after a prior rotation the original order no longer matches baseDays.
+    const pickedBaseDays = (() => {
+      if (!cycleFromPickedDay || !pickedSch) return null;
+      if (!LB.isFlexPlan(activeSch) && pickedSch.versions?.length)
+        return LB.getPlanDaysForDate(pickedSch, LB.todayISO());
+      return pickedSch.days;
+    })();
+    const pickedDayIdx = cycleFromPickedDay ? (pickedBaseDays?.findIndex(d => d.id === session.dayId) ?? -1) : -1;
     setStore(s => {
       // For date-driven plans: insert a schedule version starting today with days rotated
       // so pickedDayIdx is position 0 → today = picked day, tomorrow = day after, no gaps.
@@ -829,9 +837,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const curSch = s.schedules.find(sch2 => sch2.id === session.scheduleId);
         if (curSch) {
           const todayStr = LB.todayISO();
-          const baseDays = curSch.versions?.length
+          const baseDays = pickedBaseDays ?? (curSch.versions?.length
             ? LB.getPlanDaysForDate(curSch, todayStr)
-            : curSch.days;
+            : curSch.days);
           const rotated = [...baseDays.slice(pickedDayIdx), ...baseDays.slice(0, pickedDayIdx)];
           let newVersions;
           if (curSch.versions?.length) {
