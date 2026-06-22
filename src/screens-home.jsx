@@ -2448,18 +2448,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       </div>
 
 
-      {/* Cardio plan widget — targets for the selected day in the strip */}
-      {window.Screens?.TodayCardioWidget && (
-        <window.Screens.TodayCardioWidget
-          store={store}
-          setStore={setStore}
-          todayISO={sessionDate.toISOString().slice(0, 10)}
-          userId={userId}
-          onPR={setCardioPR}
-        />
-      )}
-
-      {/* Last session + not-logged strip — fixed above tab bar */}
+      {/* Last session + not-logged strip */}
       {(lastSession || (recentBannerDay && !store.inProgress && !store.statusMode)) && (
         <div style={{ flexShrink: 0, padding: '10px 22px' }}>
           {lastSession && recentBannerDay && !store.inProgress && !store.statusMode ? (
@@ -2484,6 +2473,17 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             <RecentBannerDay banner={recentBannerDay} store={store} setStore={setStore} go={go} sch={sch} userId={userId} onOpenSkipSheet={setSkipReasonModal} />
           )}
         </div>
+      )}
+
+      {/* Cardio plan widget — targets for the selected day in the strip */}
+      {window.Screens?.TodayCardioWidget && (
+        <window.Screens.TodayCardioWidget
+          store={store}
+          setStore={setStore}
+          todayISO={sessionDate.toISOString().slice(0, 10)}
+          userId={userId}
+          onPR={setCardioPR}
+        />
       )}
 
 
