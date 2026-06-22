@@ -771,8 +771,10 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
 
           <div>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>DUE DATE</div>
-            <input type="date" value={goalDue} min={LB.todayISO()} onChange={e => setGoalDue(e.target.value)}
-              style={{ ...inputStyle, colorScheme: 'dark', WebkitAppearance: 'none', appearance: 'none' }} />
+            <div style={{ width: '100%', overflow: 'hidden', borderRadius: 4 }}>
+              <input type="date" value={goalDue} min={LB.todayISO()} onChange={e => setGoalDue(e.target.value)}
+                style={{ ...inputStyle, colorScheme: 'dark' }} />
+            </div>
           </div>
 
           <div>
@@ -880,20 +882,21 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
           {picks.map(({ w, i }) => {
             const isDeload = (i + 1) % 4 === 0 && i < total - 2;
             const isGoal   = i === total - 1;
+            if (isDeload) return null;
             return (
               <div key={i} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '10px 14px', borderRadius: 6,
-                background: isGoal ? 'rgba(var(--accent-rgb),0.08)' : isDeload ? 'rgba(255,200,0,0.04)' : UI.bgInset,
-                border: `0.5px solid ${isGoal ? 'rgba(var(--accent-rgb),0.3)' : isDeload ? 'rgba(255,200,0,0.2)' : UI.hair}`,
+                background: isGoal ? 'rgba(var(--accent-rgb),0.08)' : UI.bgInset,
+                border: `0.5px solid ${isGoal ? 'rgba(var(--accent-rgb),0.3)' : UI.hair}`,
               }}>
                 <div>
                   <span style={{ fontSize: 12, color: isGoal ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontWeight: 600 }}>
                     Session {i+1}
                   </span>
-                  {(isDeload || isGoal) && (
-                    <span style={{ fontSize: 10, color: isGoal ? 'var(--accent)' : '#c9a000', fontFamily: UI.fontUi, marginLeft: 6 }}>
-                      {isGoal ? '· Goal' : '· Recovery week'}
+                  {isGoal && (
+                    <span style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, marginLeft: 6 }}>
+                      · Goal
                     </span>
                   )}
                 </div>
