@@ -1587,6 +1587,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         const cyclePosForDate = LB.getCyclePosForDate(sch, dateKey);
         let idx;
         if (cyclePosForDate !== null) {
+          const start = LB.parseDate(store.cycleStartDate);
+          if (Math.round((d.getTime() - start.getTime()) / 86400000) < 0) continue;
           idx = cyclePosForDate;
         } else {
           const start = LB.parseDate(store.cycleStartDate);
@@ -1625,6 +1627,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         const cyclePosForDate = LB.getCyclePosForDate(sch, dateKey);
         let idx;
         if (cyclePosForDate !== null) {
+          const start = LB.parseDate(store.cycleStartDate);
+          if (Math.round((d.getTime() - start.getTime()) / 86400000) < 0) continue;
           idx = cyclePosForDate;
         } else {
           const start = LB.parseDate(store.cycleStartDate);
