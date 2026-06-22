@@ -2285,7 +2285,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 <Btn kind="ghost" onClick={handleClearStatus} style={{ flex: 1 }}>Back to normal</Btn>
               )}
             </div>
-            {cardioBanner}
+            {!cardioPlanPrefill && cardioBanner}
           </BracketFrame>
         ) : (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
