@@ -95,7 +95,7 @@ function PlanScreen({ store, setStore, go }) {
       />
       <SubTabBar
         tabs={[
-          { id: 'plan',   label: 'Workout',   icon: 'fa-calendar-days' },
+          { id: 'plan',   label: 'Workout',   icon: 'fa-dumbbell' },
           { id: 'lib',    label: 'Exercises', icon: 'fa-book' },
           { id: 'cardio', label: 'Cardio',    icon: 'fa-person-running' },
         ]}

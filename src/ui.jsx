@@ -121,7 +121,9 @@ const TAB_ICONS = {
     </svg>
   ),
   plan: (
-    <i className="fa-solid fa-calendar-days" style={{ fontSize: 18 }} />
+    <div style={{ width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <i className="fa-solid fa-calendar-days" style={{ fontSize: 17 }} />
+    </div>
   ),
   lib: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
