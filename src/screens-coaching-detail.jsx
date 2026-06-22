@@ -321,7 +321,7 @@ function CheckInTrendCards({ recent, schema }) {
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
           <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{format(last)}</span>
           {delta != null && Math.abs(delta) > 0.001 && (
-            <span style={{ fontSize: 10, color: arrowColor, fontFamily: UI.fontUi }}>{up ? '▲' : '▼'} {format(Math.abs(delta))}</span>
+            <span style={{ fontSize: 10, color: arrowColor, fontFamily: UI.fontUi }}>{up ? '↑' : '↓'} {format(Math.abs(delta))}</span>
           )}
         </div>
         {sub && <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2, textAlign: 'center' }}>{sub}</div>}
@@ -378,7 +378,7 @@ function CheckInTrendCards({ recent, schema }) {
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
             <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{last.responses.cardio_minutes} min</span>
             {delta != null && Math.abs(delta) > 0 && (
-              <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}</span>
+              <span style={{ fontSize: 10, color: delta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{delta > 0 ? '↑' : '↓'} {Math.abs(delta)}</span>
             )}
           </div>
           <div style={{ flex: 1 }} />
@@ -554,6 +554,24 @@ function CheckInFormPreview({ schema }) {
 
 // ─── CheckInSchemaBuilder ──────────────────────────────────────────────────────
 
+// These four fields are always shown/removed as a group — the coach always wants all or none.
+const MACRO_GROUP_KEYS = new Set(['calories_avg', 'protein_avg', 'carbs_avg', 'fat_avg']);
+
+// Build a flat view for ReorderList where the 4 macro fields collapse into 1 group item.
+// Each item: { isMacroGroup: true, arrayIdx } | { isMacroGroup: false, arrayIdx }
+function buildFieldView(fields) {
+  const view = [];
+  let macroSeen = false;
+  (fields || []).forEach((f, i) => {
+    if (MACRO_GROUP_KEYS.has(f.key)) {
+      if (!macroSeen) { view.push({ isMacroGroup: true, arrayIdx: i }); macroSeen = true; }
+    } else {
+      view.push({ isMacroGroup: false, arrayIdx: i });
+    }
+  });
+  return view;
+}
+
 function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClose }) {
   const [draft, setDraft] = useStateC(() => JSON.parse(JSON.stringify(initial || CHECKIN_DEFAULT_SCHEMA)));
   const [view, setView] = useStateC('list');
@@ -705,7 +723,32 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
   const reorderSections = (from, to) => { if (from === to) return; setDraft(s => { const n = JSON.parse(JSON.stringify(s)); const [m] = n.splice(from, 1); n.splice(to, 0, m); return n; }); };
   const removeSection = (i) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); n.splice(i, 1); return n; });
   const reorderFields = (si, from, to) => { if (from === to) return; setDraft(s => { const n = JSON.parse(JSON.stringify(s)); const flds = n[si].fields; const [m] = flds.splice(from, 1); flds.splice(to, 0, m); return n; }); };
+  // View-aware reorder: moves the macro group as a unit; non-macro fields move individually.
+  const reorderByView = (si, fromV, toV) => {
+    if (fromV === toV) return;
+    setDraft(s => {
+      const n = JSON.parse(JSON.stringify(s));
+      const flds = n[si].fields;
+      const view = buildFieldView(flds);
+      const macroFields = flds.filter(f => MACRO_GROUP_KEYS.has(f.key));
+      const nonMacroFields = flds.filter(f => !MACRO_GROUP_KEYS.has(f.key));
+      // Apply the move on the view level, then reconstruct the fields array.
+      const newView = [...view];
+      const [moved] = newView.splice(fromV, 1);
+      newView.splice(toV, 0, moved);
+      let nonMacroIdx = 0;
+      n[si].fields = newView.map(item =>
+        item.isMacroGroup ? macroFields : [nonMacroFields[nonMacroIdx++]]
+      ).flat();
+      return n;
+    });
+  };
   const removeField = (si, fi) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); n[si].fields.splice(fi, 1); return n; });
+  const removeMacroGroup = (si) => setDraft(s => { const n = JSON.parse(JSON.stringify(s)); n[si].fields = n[si].fields.filter(f => !MACRO_GROUP_KEYS.has(f.key)); return n; });
+  const addMacroGroup = (defSection) => {
+    const macroDefFields = (defSection.fields || []).filter(f => MACRO_GROUP_KEYS.has(f.key));
+    macroDefFields.forEach(f => addDefaultField(defSection, f));
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -1098,22 +1141,34 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
             <div style={{ textAlign: 'center', padding: '48px 24px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
               All default fields are already in your form.
             </div>
-          ) : groups.map(({ section, fields }) => (
-            <div key={section.id} style={{ marginBottom: 18 }}>
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{section.label}</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {fields.map(f => (
-                  <button key={f.key} onClick={() => addDefaultField(section, f)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}>
-                    {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 13, color: UI.inkGhost, flexShrink: 0, width: 16, textAlign: 'center' }} />}
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{f.label}</span>
-                    <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkGhost, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
-                    <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} />
-                  </button>
-                ))}
+          ) : groups.map(({ section, fields }) => {
+            const macroFields = fields.filter(f => MACRO_GROUP_KEYS.has(f.key));
+            const nonMacroFields = fields.filter(f => !MACRO_GROUP_KEYS.has(f.key));
+            return (
+              <div key={section.id} style={{ marginBottom: 18 }}>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{section.label}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {nonMacroFields.map(f => (
+                    <button key={f.key} onClick={() => addDefaultField(section, f)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}>
+                      {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 13, color: UI.inkGhost, flexShrink: 0, width: 16, textAlign: 'center' }} />}
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{f.label}</span>
+                      <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkGhost, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
+                      <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} />
+                    </button>
+                  ))}
+                  {macroFields.length > 0 && (
+                    <button onClick={() => addMacroGroup(section)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}>
+                      <i className="fa-solid fa-fire" style={{ fontSize: 13, color: UI.inkGhost, flexShrink: 0, width: 16, textAlign: 'center' }} />
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Macros (Cal · Protein · Carbs · Fat)</span>
+                      <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} />
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     );
@@ -1189,32 +1244,56 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
                 </button>
               </div>
             </div>
-            <ReorderList onReorder={(from, to) => reorderFields(sIdx, from, to)}>
-              {(sec.fields || []).map((f, fIdx) => (
-                <div key={f.key || fIdx} data-reorder-item="true" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 8px 6px', borderBottom: `0.5px solid ${UI.hair}` }}>
-                  <DragHandle style={{ height: 22, width: 18, marginRight: 4 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                      {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 11, color: UI.inkGhost, flexShrink: 0 }} />}
-                      <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{f.label}</span>
-                      <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkGhost, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
-                      {f.width === 'half' && <span style={{ fontSize: 9, color: UI.inkGhost, fontFamily: UI.fontUi, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}` }}>½</span>}
-                      {f.required && <span style={{ fontSize: 11, color: 'var(--accent)', lineHeight: 1 }}>*</span>}
+            <ReorderList onReorder={(fromV, toV) => reorderByView(sIdx, fromV, toV)}>
+              {buildFieldView(sec.fields).map((item, viewIdx) => {
+                if (item.isMacroGroup) {
+                  const presentMacros = (sec.fields || []).filter(f => MACRO_GROUP_KEYS.has(f.key));
+                  return (
+                    <div key="macro-group" data-reorder-item="true" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 8px 6px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                      <DragHandle style={{ height: 22, width: 18, marginRight: 4 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                          <i className="fa-solid fa-fire" style={{ fontSize: 11, color: UI.inkGhost, flexShrink: 0 }} />
+                          <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Macros</span>
+                          <span style={{ fontSize: 9, color: UI.inkGhost, fontFamily: UI.fontUi, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}` }}>Cal · Protein · Carbs · Fat</span>
+                        </div>
+                        <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>{presentMacros.length} fields bundled</div>
+                      </div>
+                      <button data-reorder-ignore="true" onClick={async () => { if (await confirm('Remove macro fields (Cal / Protein / Carbs / Fat)?', { ok: 'Remove', danger: true })) removeMacroGroup(sIdx); }}
+                        style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 10 }}>
+                        <i className="fa-solid fa-xmark" />
+                      </button>
                     </div>
-                    <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>{f.key}</div>
+                  );
+                }
+                const f = (sec.fields || [])[item.arrayIdx];
+                const fIdx = item.arrayIdx;
+                return (
+                  <div key={f.key || fIdx} data-reorder-item="true" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 8px 6px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                    <DragHandle style={{ height: 22, width: 18, marginRight: 4 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                        {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 11, color: UI.inkGhost, flexShrink: 0 }} />}
+                        <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{f.label}</span>
+                        <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkGhost, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
+                        {f.width === 'half' && <span style={{ fontSize: 9, color: UI.inkGhost, fontFamily: UI.fontUi, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `0.5px solid ${UI.hair}` }}>½</span>}
+                        {f.required && <span style={{ fontSize: 11, color: 'var(--accent)', lineHeight: 1 }}>*</span>}
+                      </div>
+                      <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>{f.key}</div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                      <button data-reorder-ignore="true" onClick={() => openEditField(sIdx, fIdx)}
+                        style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: UI.inkFaint, fontSize: 10 }}>
+                        <i className="fa-solid fa-pen" />
+                      </button>
+                      <button data-reorder-ignore="true" onClick={async () => { if (await confirm('Remove "' + f.label + '"?', { ok: 'Remove', danger: true })) removeField(sIdx, fIdx); }}
+                        style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 10 }}>
+                        <i className="fa-solid fa-xmark" />
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                    <button data-reorder-ignore="true" onClick={() => openEditField(sIdx, fIdx)}
-                      style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: UI.inkFaint, fontSize: 10 }}>
-                      <i className="fa-solid fa-pen" />
-                    </button>
-                    <button data-reorder-ignore="true" onClick={async () => { if (await confirm('Remove "' + f.label + '"?', { ok: 'Remove', danger: true })) removeField(sIdx, fIdx); }}
-                      style={{ background: 'none', border: 'none', padding: '5px 6px', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 10 }}>
-                      <i className="fa-solid fa-xmark" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </ReorderList>
             <button data-reorder-ignore="true" onClick={() => openAddField(sIdx)}
               style={{ width: '100%', padding: '9px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12 }}>
@@ -1240,10 +1319,12 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
   const [checkins, setCheckins] = useStateC(null);
   const [schema, setSchema] = useStateC(null);
   const [builderOpen, setBuilderOpen] = useStateC(false);
+  const [coachingMacrosHistory, setCoachingMacrosHistory] = useStateC(null);
 
   useEffectC(() => {
     LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
     LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
+    LB.loadCoachingMacros(coachingId).then(data => setCoachingMacrosHistory(data)).catch(() => {});
   }, [coachingId]);
 
   const resolvedSchema = schema || store?.settings?.defaultCheckinSchema || CHECKIN_DEFAULT_SCHEMA;
@@ -1323,7 +1404,7 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
             <div className="knurl" style={{ margin: '4px 0' }} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
-              {checkins.map((ci, i) => <CheckInCard key={ci.id} ci={ci} prevCi={checkins[i + 1]} schema={resolvedSchema} />)}
+              {checkins.map((ci, i) => <CheckInCard key={ci.id} ci={ci} prevCi={checkins[i + 1]} schema={resolvedSchema} coachingMacrosHistory={coachingMacrosHistory} />)}
             </div>
           </div>
         </div>

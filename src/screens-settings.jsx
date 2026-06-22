@@ -19,6 +19,19 @@ const fmtAgo = (iso) => {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 };
 
+function UserArchivedSection({ tickets, renderTicket }) {
+  const [open, setOpen] = useStateSet(false);
+  return (
+    <div>
+      <button onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' }}>
+        <i className={`fa-solid fa-chevron-${open ? 'up' : 'down'}`} style={{ fontSize: 9 }} />
+        Archived ({tickets.length})
+      </button>
+      {open && <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>{tickets.map(renderTicket)}</div>}
+    </div>
+  );
+}
+
 function Toggle({ on, onToggle }) {
   return (
     <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
@@ -331,7 +344,7 @@ function PasskeySheet({ open, onClose }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go, userId }) {
+function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSupportSheet }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
 
@@ -442,6 +455,11 @@ function SettingsScreen({ store, setStore, go, userId }) {
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
 
   useEffectSet(() => {
+    if (openSupportInbox && isAdmin) setSupportInboxSheet(true);
+    if (openSupportSheet && !isAdmin) setSupportSheet(true);
+  }, []);
+
+  useEffectSet(() => {
     let mounted = true;
     LB.supabase.rpc('check_active_users_access')
       .then(({ data }) => { const val = !!data; localStorage.setItem('logbook-active-users-access', String(val)); if (mounted) setHasActiveUsersAccess(val); })
@@ -479,13 +497,15 @@ function SettingsScreen({ store, setStore, go, userId }) {
     }).catch(() => {});
   }, [pushSheet]);
 
-  // Reset support navigation when sheet closes
+  // Reset support navigation when sheet closes; clear unread badge when opened
   useEffectSet(() => {
     if (!supportSheet) {
       setSupportView('list');
       setSupportActiveTicketId(null);
       setSupportActiveNotes([]);
       setSupportDraft('');
+    } else {
+      setStore(s => s ? { ...s, supportUnread: 0 } : s);
     }
   }, [supportSheet]);
 
@@ -563,6 +583,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
   useEffectSet(() => {
     if (!supportInboxSheet || !isAdmin) return;
     setSupportInboxLoading(true);
+    setStore(s => s ? { ...s, adminSupportUnread: 0 } : s);
     LB.supabase.rpc('get_support_chats').then(({ data }) => { setSupportInbox(data || []); setSupportInboxLoading(false); }).catch(() => setSupportInboxLoading(false));
   }, [supportInboxSheet]);
 
@@ -785,6 +806,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
             ? { ...t, lastMessageAt: note.created_at, lastMessageBody: body }
             : t
         )}));
+        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportActiveTicketId, preview: body });
       }
     } finally { setSupportSending(false); }
   };
@@ -811,6 +833,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
         setSupportActiveTicketId(coachingId);
         setSupportActiveNotes([note]);
         setSupportView('thread');
+        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId, preview: body });
       }
     } finally { setSupportSending(false); }
   };
@@ -824,7 +847,10 @@ function SettingsScreen({ store, setStore, go, userId }) {
       const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
         id: LB.uid(), coaching_id: supportTicket.coachingId, author_id: userId, type: 'general', body,
       }).select('id, author_id, body, created_at').single();
-      if (!error && note) setSupportTicketNotes(prev => [...prev, note]);
+      if (!error && note) {
+        setSupportTicketNotes(prev => [...prev, note]);
+        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportTicket.coachingId, preview: body });
+      }
     } finally { setSupportAdminSending(false); }
   };
 
@@ -844,6 +870,33 @@ function SettingsScreen({ store, setStore, go, userId }) {
     setSupportInbox(prev => prev.filter(t => t.coaching_id !== coachingId));
     setSupportTicket(null);
     setSupportAdminDraft('');
+  };
+
+  const [deletingTicket, setDeletingTicket] = useStateSet(false);
+  const [confirmDeleteTicket, setConfirmDeleteTicket] = useStateSet(false);
+
+  const handleDeleteTicket = async () => {
+    if (!supportTicket) return;
+    const coachingId = supportTicket.coachingId;
+    setDeletingTicket(true);
+    try {
+      // Notify user BEFORE deleting (coaching row must still exist)
+      const { data: { session } } = await LB.supabase.auth.getSession();
+      if (session?.access_token) {
+        await fetch(`https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/zane_coaching-notify`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ coachingId, preview: 'Your support ticket has been removed by support.' }),
+        }).catch(() => {});
+      }
+      await LB.supabase.rpc('delete_support_ticket', { p_coaching_id: coachingId });
+      setSupportInbox(prev => prev.filter(t => t.coaching_id !== coachingId));
+      setSupportTicket(null);
+      setSupportAdminDraft('');
+      setConfirmDeleteTicket(false);
+    } finally {
+      setDeletingTicket(false);
+    }
   };
 
   const handleChangePassword = async () => {
@@ -1816,34 +1869,42 @@ function SettingsScreen({ store, setStore, go, userId }) {
 
           // ── LIST VIEW (default) ──────────────────────────────────────
           const statusBorder = { open: UI.danger, in_progress: UI.gold, resolved: UI.inkFaint };
+          const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+          const isUserArchived = t => t.archived && t.status === 'resolved' && t.archivedAt && new Date(t.archivedAt).getTime() <= sevenDaysAgo;
+          const activeTickets   = tickets.filter(t => !isUserArchived(t));
+          const archivedTickets = tickets.filter(t =>  isUserArchived(t));
+          const renderTicket = t => (
+            <button key={t.coachingId}
+              onClick={() => { setSupportActiveTicketId(t.coachingId); setSupportView('thread'); }}
+              style={{ width: '100%', background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderLeft: `3px solid ${statusBorder[t.status] || UI.hairStrong}`, borderRadius: 8, padding: '11px 14px', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="micro" style={{ color: statusBorder[t.status] || UI.inkFaint }}>{statusLabel[t.status] || t.status}</span>
+                  <span className="micro" style={{ color: UI.inkFaint }}>· {CATS.find(c => c.key === t.category)?.label}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {t.unreadCount > 0 && <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />}
+                  <span className="micro" style={{ color: UI.inkGhost }}>{fmtAgo(t.lastMessageAt || t.createdAt)}</span>
+                </div>
+              </div>
+              {t.lastMessageBody ? (
+                <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.lastMessageBody}</div>
+              ) : (
+                <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No messages yet</div>
+              )}
+            </button>
+          );
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', flex: 1 }}>
-              {tickets.length === 0 && (
+              {activeTickets.length === 0 && archivedTickets.length === 0 && (
                 <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '24px 0' }}>
                   No tickets yet. Tap "+ New ticket" if you need help.
                 </div>
               )}
-              {tickets.map(t => (
-                <button key={t.coachingId}
-                  onClick={() => { setSupportActiveTicketId(t.coachingId); setSupportView('thread'); }}
-                  style={{ width: '100%', background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderLeft: `3px solid ${statusBorder[t.status] || UI.hairStrong}`, borderRadius: 8, padding: '11px 14px', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span className="micro" style={{ color: statusBorder[t.status] || UI.inkFaint }}>{statusLabel[t.status] || t.status}</span>
-                      <span className="micro" style={{ color: UI.inkFaint }}>· {CATS.find(c => c.key === t.category)?.label}</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      {t.unreadCount > 0 && <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />}
-                      <span className="micro" style={{ color: UI.inkGhost }}>{fmtAgo(t.lastMessageAt || t.createdAt)}</span>
-                    </div>
-                  </div>
-                  {t.lastMessageBody ? (
-                    <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.lastMessageBody}</div>
-                  ) : (
-                    <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No messages yet</div>
-                  )}
-                </button>
-              ))}
+              {activeTickets.map(renderTicket)}
+              {archivedTickets.length > 0 && (
+                <UserArchivedSection tickets={archivedTickets} renderTicket={renderTicket} />
+              )}
               <div style={{ flexGrow: 1 }} />
               <Btn onClick={() => { setSupportView('new'); setSupportDraft(''); setSupportCategoryDraft('question'); }} style={{ width: '100%', marginBottom: 'env(safe-area-inset-bottom, 0px)' }}>+ New ticket</Btn>
             </div>
@@ -1934,6 +1995,18 @@ function SettingsScreen({ store, setStore, go, userId }) {
                   {currentStatus === 'resolved' && (
                     <Btn kind="ghost" onClick={handleArchiveTicket} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: UI.inkFaint, borderColor: UI.hairStrong }}>
                       <i className="fa-solid fa-box-archive" style={{ fontSize: 12 }} /> Archive ticket
+                    </Btn>
+                  )}
+                  {confirmDeleteTicket ? (
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(false)} style={{ flex: 1, color: UI.inkFaint, borderColor: UI.hairStrong }}>Cancel</Btn>
+                      <Btn onClick={handleDeleteTicket} disabled={deletingTicket} style={{ flex: 1, background: 'rgba(var(--danger-rgb),0.15)', color: 'rgba(var(--danger-rgb),1)', border: '0.5px solid rgba(var(--danger-rgb),0.3)' }}>
+                        {deletingTicket ? 'Deleting…' : 'Confirm delete'}
+                      </Btn>
+                    </div>
+                  ) : (
+                    <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: 'rgba(var(--danger-rgb),0.7)', borderColor: 'rgba(var(--danger-rgb),0.25)' }}>
+                      <i className="fa-solid fa-trash" style={{ fontSize: 12 }} /> Delete ticket
                     </Btn>
                   )}
                 </div>
@@ -2034,6 +2107,7 @@ function SettingsScreen({ store, setStore, go, userId }) {
             { key: 'standard', label: 'Standard', sub: 'Zane logo watermark' },
             { key: 'mike',     label: 'Mike',     sub: 'mikeapicelli777' },
             { key: 'phoenix',  label: 'Phoenix',  sub: 'mb2489' },
+            { key: 'marine',   label: 'Marine',   sub: 'marine.png' },
           ].map(({ key, label, sub }) => {
             const active = adminBgPreview === key;
             return (

@@ -4,18 +4,23 @@
 
 function CoachingBannerGroup({ store, setStore, userId, go }) {
   const [notesOpen, setNotesOpen] = useStateC(false);
-  const notes = store.coaching?.unreadNotes || [];
+  // Support-ticket notes must never appear in the coaching banner — they have
+  // their own badge/inbox in Settings. Filter defensively in case one leaks in.
+  const notes = (store.coaching?.unreadNotes || []).filter(n => !n.coachingId?.startsWith('support_'));
 
-  const clientIds = new Set((store.coaching?.asCoach || []).map(c => c.clientId));
+  const clientIds = new Set((store.coaching?.asCoach || []).filter(c => !c.id?.startsWith('support_')).map(c => c.clientId));
   const fromClient = notes.some(n => clientIds.has(n.authorId));
+  const adminSupportUnread = store.adminSupportUnread || 0;
+  const userSupportUnread  = store.supportUnread || 0;
+  const hasSupportBanner   = adminSupportUnread > 0 || userSupportUnread > 0;
 
   // Keep mounted while sheet is open so ChatThread isn't destroyed mid-read
-  if (!notes.length && !notesOpen) return null;
+  if (!notes.length && !notesOpen && !hasSupportBanner) return null;
 
   const handleOpen = () => {
     if (fromClient && go) {
       const note = notes.find(n => clientIds.has(n.authorId));
-      const client = note && (store.coaching?.asCoach || []).find(c => c.clientId === note.authorId);
+      const client = note && (store.coaching?.asCoach || []).find(c => c.clientId === note.authorId && !c.id?.startsWith('support_'));
       if (client) {
         go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName, initialTab: 'notes' });
         return;
@@ -26,8 +31,34 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
     }
   };
 
+  const renderSupportBanner = (count, onClick, label) => (
+    <button onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+      background: 'rgba(var(--accent-rgb),0.12)', border: 'none', borderRadius: 6,
+      padding: '10px 14px', cursor: 'pointer', marginBottom: notes.length > 0 ? 8 : 0,
+    }}>
+      <i className="fa-solid fa-headset" style={{ color: 'var(--accent)', fontSize: 14 }} />
+      <span style={{ flex: 1, textAlign: 'left', fontSize: 13, color: UI.ink }}>{label}</span>
+      <span style={{
+        background: 'var(--accent)', color: '#fff', borderRadius: 999,
+        fontSize: 11, fontWeight: 700, minWidth: 18, height: 18,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px',
+      }}>{count}</span>
+    </button>
+  );
+
   return (
-    <div style={{ flexShrink: 0, padding: notes.length > 0 ? '0 22px 10px' : 0 }}>
+    <div style={{ flexShrink: 0, padding: (notes.length > 0 || hasSupportBanner) ? '0 22px 10px' : 0 }}>
+      {adminSupportUnread > 0 && renderSupportBanner(
+        adminSupportUnread,
+        () => go?.({ name: 'settings', openSupportInbox: true }),
+        `${adminSupportUnread} new support ${adminSupportUnread === 1 ? 'message' : 'messages'}`,
+      )}
+      {userSupportUnread > 0 && renderSupportBanner(
+        userSupportUnread,
+        () => go?.({ name: 'settings', openSupportSheet: true }),
+        `Support replied to your ${userSupportUnread === 1 ? 'ticket' : 'tickets'}`,
+      )}
       {notes.length > 0 && (
         <CoachingUnreadBanner store={store} setStore={setStore} userId={userId} onOpen={handleOpen} />
       )}
@@ -431,7 +462,7 @@ function MarkerRow({ label, value, onChange, readOnly }) {
   );
 }
 
-function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false }) {
+function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacrosHistory = null }) {
   const [open, setOpen] = useStateC(defaultOpen);
   const [exportMode, setExportMode] = useStateC(null); // null | 'pick' | 'exporting'
   const cardRef = useRefC(null);
@@ -439,6 +470,32 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   const responses = ci.responses || {};
   const has = v => v != null && v !== '';
   const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch (_) { return 'km'; } })();
+
+  // Planned macro avg row — mirrors HealthWeekCard logic.
+  // Resolve the macro entry that was active at the END of this check-in week
+  // (Sunday = weekStart + 6 days) so past check-ins use the targets from that time.
+  const activeMacros = (() => {
+    if (!coachingMacrosHistory?.length) return null;
+    const weekEnd = LB.weekEnd(ci.weekStart);
+    // History is sorted newest-first; first entry whose set_at date ≤ Sunday of this week.
+    return coachingMacrosHistory.find(m => m.setAt.slice(0, 10) <= weekEnd) || null;
+  })();
+  // Use days_trained from the check-in as the training/rest split for the weighted average.
+  const macroResponseKeys = ['calories_avg', 'protein_avg', 'carbs_avg', 'fat_avg'];
+  const hasMacroResponse = macroResponseKeys.some(k => has(responses[k]));
+  const planTDays = responses.days_trained != null ? (parseInt(responses.days_trained) || 0) : 3;
+  const planRDays = 7 - planTDays;
+  const planMacro = (tk, rk) => {
+    if (!activeMacros) return null;
+    const tv = activeMacros[tk], rv = activeMacros[rk];
+    if (tv == null && rv == null) return null;
+    return Math.round(((tv || 0) * planTDays + (rv || 0) * planRDays) / 7);
+  };
+  const planCal  = planMacro('caloriesTraining', 'caloriesRest');
+  const planProt = planMacro('proteinTraining',  'proteinRest');
+  const planCarb = planMacro('carbsTraining',    'carbsRest');
+  const planFat  = planMacro('fatTraining',      'fatRest');
+  const showPlanRow = hasMacroResponse && (planCal != null || planProt != null || planCarb != null || planFat != null);
 
   // Format one field's stored value for display (mirrors the trend-card formatter).
   const fmtValue = (f, v) => {
@@ -519,13 +576,15 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
       if (key === 'cardio_pace'       && paceDelta       != null) return ` (${paceDelta === 0 ? '→' : paceDelta < 0 ? '↑ faster' : '↓ slower'})`;
       return '';
     };
+    const macroFieldKeys = new Set(['calories_avg', 'protein_avg', 'carbs_avg', 'fat_avg']);
     const lines = [`Week of ${fmtWeek(ci.weekStart)}`];
     sections.forEach(section => {
       const fields = (section.fields || []).filter(f => has(responses[f.key]));
       if (!fields.length) return;
-      const headLabel = section.label.toUpperCase() + (section.sectionHint ? ` (${section.sectionHint})` : '');
+      const headLabel = `// ${section.label.toUpperCase()}${section.sectionHint ? ` (${section.sectionHint})` : ''} //`;
       lines.push('', headLabel);
-      fields.forEach(f => {
+      let planRowInserted = false;
+      fields.forEach((f, fi) => {
         const v = responses[f.key];
         if (f.type === 'stepper') lines.push(`${f.label}: ${v}/${f.max ?? 10}`);
         else if (f.type === 'text') lines.push('', `${f.label.toUpperCase()}`, String(v));
@@ -536,10 +595,23 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             : fmtTextDelta(f.key);
           lines.push(base + delta);
         }
+        // Insert planned avg right after the last macro field in this section
+        if (!planRowInserted && macroFieldKeys.has(f.key) && showPlanRow) {
+          const nextIsMacro = fi + 1 < fields.length && macroFieldKeys.has(fields[fi + 1].key);
+          if (!nextIsMacro) {
+            const parts = [];
+            if (planCal  != null) parts.push(`Cal: ${planCal} kcal`);
+            if (planProt != null) parts.push(`Protein: ${planProt} g`);
+            if (planCarb != null) parts.push(`Carbs: ${planCarb} g`);
+            if (planFat  != null) parts.push(`Fat: ${planFat} g`);
+            if (parts.length) lines.push('', `Planned avg: ${parts.join(' · ')}`);
+            planRowInserted = true;
+          }
+        }
       });
     });
     if (extraKeys.length) {
-      lines.push('', 'ADDITIONAL');
+      lines.push('', '// ADDITIONAL //');
       extraKeys.forEach(k => lines.push(`${k.replace(/_/g, ' ')}: ${responses[k]}`));
     }
     return lines.join('\n');
@@ -610,10 +682,12 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             const kindOf = f => f.type === 'stepper' ? 'stepper' : f.type === 'text' ? 'text' : 'pill';
             const blocks = [];
             let run = [], runKind = null;
+            let lastMacroPillBlockIdx = -1;
             const flush = () => {
               if (!run.length) return;
               const items = run; run = []; const kind = runKind; runKind = null;
               if (kind === 'pill') {
+                if (items.some(f => macroResponseKeys.includes(f.key))) lastMacroPillBlockIdx = blocks.length;
                 blocks.push(
                   <div key={`p-${items[0].key}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
                     {items.map(f => <StatPill key={f.key} label={f.label} value={fmtValue(f, responses[f.key])} {...pillDeltaProps(f)} />)}
@@ -649,6 +723,27 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
               run.push(f);
             });
             flush();
+            // Insert planned avg card right after the last macro pill block (before any text fields).
+            if (showPlanRow && lastMacroPillBlockIdx >= 0) {
+              const planRow = (
+                <div key="plan-row" style={{ background: UI.bgRaised, borderRadius: 6, border: `0.5px solid ${UI.hair}`, padding: '8px 10px' }}>
+                  <div style={{ fontSize: 9, color: 'var(--accent)', fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase', fontWeight: 700, textAlign: 'center', marginBottom: 6 }}>Planned avg</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 6px' }}>
+                    {[{v: planCal, u: 'kcal'}, {v: planProt, u: 'g'}, {v: planCarb, u: 'g'}, {v: planFat, u: 'g'}].map(({v, u}, i) => (
+                      <div key={i} style={{ textAlign: 'center' }}>
+                        <div className="num" style={{ fontSize: 15, color: UI.inkSoft, fontWeight: 300 }}>
+                          {v != null ? v : '—'}
+                        </div>
+                        <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', marginTop: 1 }}>
+                          {['Cal', 'Protein', 'Carbs', 'Fat'][i]} {u}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+              blocks.splice(lastMacroPillBlockIdx + 1, 0, planRow);
+            }
             return (
               <div key={section.id}>
                 <div className="knurl" style={{ margin: '0 0 6px' }} />
@@ -966,7 +1061,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
 
 // ─── CheckInForm ──────────────────────────────────────────────────────────────
 
-function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefill, dailyPrefill, onSaved, schema }) {
+function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefill, dailyPrefill, perfPrefill, onSaved, schema }) {
   const sections = schema || CHECKIN_DEFAULT_SCHEMA;
   const allFields = sections.flatMap(s => s.fields || []);
 
@@ -989,6 +1084,11 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
     // protein_avg, macro_adherence, …). Only apply keys the schema actually has.
     if (dailyPrefill) {
       allFields.forEach(f => { if (dailyPrefill[f.key] != null) base[f.key] = String(dailyPrefill[f.key]); });
+    }
+    // Performance-vs-last-week is derived from logged sessions (the same source
+    // the live preview uses), not from daily/cardio logs — apply it on top.
+    if (perfPrefill != null && allFields.some(f => f.key === 'performance_vs_last_week')) {
+      base.performance_vs_last_week = perfPrefill;
     }
     return base;
   });
@@ -1036,11 +1136,13 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {(prefill || dailyPrefill) && !existing && (
+      {(prefill || dailyPrefill || perfPrefill != null) && !existing && (
         <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.08)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
           {dailyPrefill
             ? `Prefilled from your daily logs${prefill ? ' & cardio' : ''} this week — review before submitting`
-            : `Cardio prefilled from ${prefill.count} log${prefill.count !== 1 ? 's' : ''} this week`}
+            : prefill
+              ? `Cardio prefilled from ${prefill.count} log${prefill.count !== 1 ? 's' : ''} this week`
+              : `Prefilled from this week's training — review before submitting`}
         </div>
       )}
       {sections.map(section => {
@@ -1087,11 +1189,13 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   const [pastOpen, setPastOpen] = useStateC(false);
   const [builderOpen, setBuilderOpen] = useStateC(false);
   const [previewOpen, setPreviewOpen] = useStateC(false);
+  const [coachingMacrosHistory, setCoachingMacrosHistory] = useStateC(null);
 
   const load = () => LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
   useEffectC(() => {
     load();
     LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
+    LB.loadCoachingMacros(coachingId).then(data => setCoachingMacrosHistory(data)).catch(() => {});
   }, [coachingId]);
 
   const thisWeek = (checkins || []).find(c => c.weekStart === weekStart);
@@ -1155,6 +1259,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           existing={target}
           prefill={!target ? LB.cardioWeekPrefill(store?.cardioLogs, formWeek, store?.settings?.unit) : undefined}
           dailyPrefill={!target ? LB.dailyLogsWeekPrefill(store?.dailyLogs, formWeek, store?.sessions, resolvedSchema) : undefined}
+          perfPrefill={!target ? LB.weekPerformanceSignal(store, formWeek) : undefined}
           onSaved={() => { setEditTarget(null); load(); }}
           schema={resolvedSchema}
         />
@@ -1213,6 +1318,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               schema={resolvedSchema}
               defaultOpen={true}
               embedded={true}
+              coachingMacrosHistory={coachingMacrosHistory}
             />
           </div>
         )}
@@ -1230,7 +1336,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           </div>
         )}
         {thisWeek ? (
-          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} />
+          <CheckInCard ci={thisWeek} prevCi={past[0]} schema={resolvedSchema} onEdit={checkinEnabled ? () => setEditTarget(thisWeek) : undefined} onDelete={checkinEnabled ? () => handleDelete(thisWeek) : undefined} confirmingDelete={confirmDelete === thisWeek.id} coachingMacrosHistory={coachingMacrosHistory} />
         ) : null}
 
         {past.length > 0 && (
@@ -1251,7 +1357,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               <div style={{ paddingLeft: 16 }}>
                 {past.map(ci => (
                   <div key={ci.id} style={{ borderTop: `0.5px solid ${UI.hair}` }}>
-                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} />
+                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} coachingMacrosHistory={coachingMacrosHistory} />
                   </div>
                 ))}
               </div>

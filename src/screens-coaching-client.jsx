@@ -170,7 +170,7 @@ function getTodayDay(clientStore) {
   if (!activeSch) return null;
   const todayStr = LB.todayISO();
   if (LB.isWeekdayPlan(activeSch)) {
-    const todayWd = (new Date().getDay() + 6) % 7;
+    const todayWd = LB.isoWd(new Date());
     const vDays = LB.getPlanDaysForDate(activeSch, todayStr);
     return vDays.find(d => d.weekday === todayWd) || { id: 'rest-virtual', name: 'REST', items: [] };
   }
@@ -261,7 +261,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
     ?? (isWd ? clientStore.weekPlanStartDate : clientStore.cycleStartDate);
   if (activationDateStr) {
     const d = new Date(activationDateStr); d.setHours(12, 0, 0, 0);
-    const wd = (d.getDay() + 6) % 7;
+    const wd = LB.isoWd(d);
     planStartMonday = new Date(d);
     planStartMonday.setDate(d.getDate() - wd);
     planStartMonday.setHours(0, 0, 0, 0);
@@ -269,7 +269,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   } else if (planSessions.length > 0) {
     const earliestMs = Math.min(...planSessions.map(s => new Date(s.ended).getTime()));
     const earliest = new Date(earliestMs); earliest.setHours(12, 0, 0, 0);
-    const earliestWd = (earliest.getDay() + 6) % 7;
+    const earliestWd = LB.isoWd(earliest);
     planStartMonday = new Date(earliest);
     planStartMonday.setDate(earliest.getDate() - earliestWd);
     planStartMonday.setHours(0, 0, 0, 0);
@@ -278,7 +278,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   if (!planStartMonday) return [];
 
   const today = new Date(); today.setHours(12, 0, 0, 0);
-  const todayWd = (today.getDay() + 6) % 7; // 0=Mon
+  const todayWd = LB.isoWd(today); // 0=Mon
   const thisMonday = new Date(today);
   thisMonday.setDate(today.getDate() - todayWd);
 
@@ -318,7 +318,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
       let isTrainingDay = false;
 
       if (isWd) {
-        const wd = (date.getDay() + 6) % 7;
+        const wd = LB.isoWd(date);
         const daysForDate = getPlanDaysForDate(activeSch, dateStr);
         isTrainingDay = daysForDate.some(day => day.weekday === wd && day.items?.length > 0);
       } else {
@@ -395,7 +395,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
     if (!activeSch) return ended.slice(0, 5);
     if (LB.isWeekdayPlan(activeSch)) {
       const today = new Date(); today.setHours(23, 59, 59, 0);
-      const todayWd = (today.getDay() + 6) % 7;
+      const todayWd = LB.isoWd(today);
       const monday = new Date(today);
       monday.setDate(today.getDate() - todayWd);
       monday.setHours(0, 0, 0, 0);
@@ -684,7 +684,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
   const getGroupKey = (dateStr) => {
     const d = new Date(dateStr + 'T12:00:00');
     if (isWd) {
-      const wd = (d.getDay() + 6) % 7;
+      const wd = LB.isoWd(d);
       const mon = new Date(d); mon.setDate(d.getDate() - wd);
       return localDateKey(mon);
     }
@@ -807,18 +807,18 @@ function SessionsWeekChart({ sessions, planStartDate }) {
   const byWeek = {};
   ended.forEach(s => {
     const d = new Date(s.ended); d.setHours(12, 0, 0, 0);
-    const wd = (d.getDay() + 6) % 7;
+    const wd = LB.isoWd(d);
     const mon = new Date(d); mon.setDate(d.getDate() - wd); mon.setHours(0, 0, 0, 0);
     const key = localDateKey(mon);
     byWeek[key] = (byWeek[key] || 0) + 1;
   });
   const today = new Date(); today.setHours(12, 0, 0, 0);
-  const todayWd = (today.getDay() + 6) % 7;
+  const todayWd = LB.isoWd(today);
   const thisMonday = new Date(today); thisMonday.setDate(today.getDate() - todayWd); thisMonday.setHours(0, 0, 0, 0);
   let startMonday;
   if (cutoff) {
     const cd = new Date(cutoff + 'T12:00:00');
-    const cdWd = (cd.getDay() + 6) % 7;
+    const cdWd = LB.isoWd(cd);
     startMonday = new Date(cd); startMonday.setDate(cd.getDate() - cdWd); startMonday.setHours(0, 0, 0, 0);
   } else {
     startMonday = new Date(thisMonday); startMonday.setDate(thisMonday.getDate() - 11 * 7);

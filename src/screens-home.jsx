@@ -1078,11 +1078,11 @@ const TRAIN_BG_OVERRIDES = {
   'test@test.com':             'icons/phoenix.png',
 };
 
-function HomeScreen({ store, setStore, go, userId }) {
+function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRetrySync }) {
   const [confirmEl, confirm] = useConfirm();
   const _userEmail = (store.user?.email || '').toLowerCase();
   const _adminPreviewBg = _userEmail === 'office@btc-prime.biz'
-    ? ({ mike: 'icons/IMG_6389.png', phoenix: 'icons/phoenix.png' })[localStorage.getItem('logbook-admin-bg-preview')]
+    ? ({ mike: 'icons/IMG_6389.png', phoenix: 'icons/phoenix.png', marine: 'icons/marine.png' })[localStorage.getItem('logbook-admin-bg-preview')]
     : undefined;
   const trainBg = _adminPreviewBg || TRAIN_BG_OVERRIDES[_userEmail] || 'icons/zane-logo.png';
   const isCustomBg = trainBg !== 'icons/zane-logo.png';
@@ -1162,7 +1162,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         const now = new Date(); now.setHours(12, 0, 0, 0);
         const currentMondayMs = now.getTime() - todayWd * 86400000;
         const start = LB.parseDate(startDateStr);
-        const planMondayMs = start.getTime() - ((start.getDay() + 6) % 7) * 86400000;
+        const planMondayMs = start.getTime() - LB.isoWd(start) * 86400000;
         const week0MondayMs = planMondayMs - 7 * 86400000;
         return Math.round((week0MondayMs - currentMondayMs) / (7 * 86400000));
       }
@@ -1177,7 +1177,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       const oldestDayCount = oldestVersionStart
         ? (sch.versions[sch.versions.length - 1]?.days?.length || dayCount)
         : dayCount;
-      const startWd = (trueStart.getDay() + 6) % 7;
+      const startWd = LB.isoWd(trueStart);
       const startMondayMs = trueStart.getTime() - startWd * 86400000 - oldestDayCount * 86400000;
       return Math.round((startMondayMs - currentMondayMs) / (7 * 86400000));
     }
@@ -1335,7 +1335,7 @@ function HomeScreen({ store, setStore, go, userId }) {
         monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
         const start = LB.parseDate(store.weekPlanStartDate);
         const startMonday = new Date(start);
-        startMonday.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+        startMonday.setDate(start.getDate() - LB.isoWd(start));
         startMonday.setHours(12, 0, 0, 0);
         const weekNum = Math.floor(Math.round((monday - startMonday) / 86400000) / 7) + 1;
         if (weekNum >= 0) return `WEEK ${weekNum}`;
@@ -1579,7 +1579,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       let trainingDay = null;
       if (weekdayMode) {
         if (store.weekPlanStartDate && dateKey < store.weekPlanStartDate) continue;
-        const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+        const wd = LB.isoWd(d);
         trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
       } else if (store.cycleStartDate) {
         const vDays = LB.getPlanDaysForDate(sch, dateKey);
@@ -1587,6 +1587,8 @@ function HomeScreen({ store, setStore, go, userId }) {
         const cyclePosForDate = LB.getCyclePosForDate(sch, dateKey);
         let idx;
         if (cyclePosForDate !== null) {
+          const start = LB.parseDate(store.cycleStartDate);
+          if (Math.round((d.getTime() - start.getTime()) / 86400000) < 0) continue;
           idx = cyclePosForDate;
         } else {
           const start = LB.parseDate(store.cycleStartDate);
@@ -1617,7 +1619,7 @@ function HomeScreen({ store, setStore, go, userId }) {
       let trainingDay = null;
       if (weekdayMode) {
         if (store.weekPlanStartDate && dateKey < store.weekPlanStartDate) continue;
-        const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+        const wd = LB.isoWd(d);
         trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
       } else if (store.cycleStartDate) {
         const vDays = LB.getPlanDaysForDate(sch, dateKey);
@@ -1625,6 +1627,8 @@ function HomeScreen({ store, setStore, go, userId }) {
         const cyclePosForDate = LB.getCyclePosForDate(sch, dateKey);
         let idx;
         if (cyclePosForDate !== null) {
+          const start = LB.parseDate(store.cycleStartDate);
+          if (Math.round((d.getTime() - start.getTime()) / 86400000) < 0) continue;
           idx = cyclePosForDate;
         } else {
           const start = LB.parseDate(store.cycleStartDate);
@@ -1985,7 +1989,20 @@ function HomeScreen({ store, setStore, go, userId }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontFamily: UI.fontDisplay, fontSize: 34, fontWeight: 900, letterSpacing: '0.10em', color: UI.gold, lineHeight: 1 }}>ZANE</span>
-            <i className="fa-solid fa-dumbbell" style={{ fontSize: 18, color: UI.inkFaint }} />
+            {(() => {
+              const isProblem = storageFull || syncStatus === 'error';
+              const isSaving  = syncStatus === 'pending' && !storageFull;
+              const color = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
+              const pulse = isProblem ? 'pulseDot 1.4s ease-in-out infinite' : 'none';
+              return (
+                <i
+                  className="fa-solid fa-dumbbell"
+                  onClick={isProblem ? onRetrySync : undefined}
+                  title={isProblem ? 'Not synced — tap to retry' : isSaving ? 'Saving…' : 'Connected'}
+                  style={{ fontSize: 18, color, animation: pulse, cursor: isProblem ? 'pointer' : 'default' }}
+                />
+              );
+            })()}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
             <div style={{ textAlign: 'right', minWidth: 0 }}>

@@ -686,6 +686,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       lastMessageAt: t.last_message_at,
       lastMessageBody: t.last_message_body,
       unreadCount: Number(t.unread_count || 0),
+      archived: t.archived || false,
+      archivedAt: t.archived_at || null,
     })),
     supportUnread: (supportTicketsRes?.data || []).reduce((s, t) => s + Number(t.unread_count || 0), 0),
   };
@@ -712,7 +714,7 @@ async function autoArchiveMissedDays(userId, state) {
     let trainingDay = null;
     if (isWd) {
       if (state.weekPlanStartDate && dateKey < state.weekPlanStartDate) continue;
-      const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      const wd = isoWd(d);
       trainingDay = activeSch.days.find(day => day.weekday === wd && (day.items || []).length > 0) || null;
     } else {
       const days = getPlanDaysForDate(activeSch, dateKey);
@@ -1044,7 +1046,7 @@ function computeNextTrainingDate(state) {
     const dateStr = d.toISOString().slice(0, 10);
     let training = false;
     if (wdPlan) {
-      const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      const wd = isoWd(d);
       const day = sch.days.find(x => x.weekday === wd);
       training = !!(day && (day.items || []).length > 0);
     } else {
@@ -1086,7 +1088,7 @@ function computeNextReminderAt(state) {
     const dateStr = d.toISOString().slice(0, 10);
     let training = false;
     if (wdPlan) {
-      const wd = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      const wd = isoWd(d);
       const day = sch.days.find(x => x.weekday === wd);
       training = !!(day && (day.items || []).length > 0);
     } else {
@@ -1129,6 +1131,14 @@ function parseDate(s) {
   return new Date(s.slice(0, 10) + 'T12:00:00');
 }
 
+// ISO weekday from a Date: 0=Mon … 6=Sun
+function isoWd(d) { return (d.getDay() + 6) % 7; }
+
+// Sunday of the week that starts on weekStart (YYYY-MM-DD) → YYYY-MM-DD
+function weekEnd(weekStart) {
+  return new Date(new Date(weekStart + 'T12:00:00').getTime() + 6 * 86400000).toISOString().slice(0, 10);
+}
+
 // Effective reps for a set — for unilateral sets, the weaker side is the bottleneck.
 function effReps(st) {
   if (st.repsL != null || st.repsR != null) {
@@ -1161,18 +1171,17 @@ function isDecline(curr, prev) {
   return (curr.kg < prev.kg && rA <= rB) || (curr.kg === prev.kg && rA < rB);
 }
 
-// Best estimated 1RM ever recorded for an exercise across all ended sessions
-// (any day), optionally excluding a session (e.g. the live one). Returns 0 when
-// there's no history — callers treat 0 as "no record to beat yet".
+// Best estimated 1RM ever recorded for an exercise across all ended sessions,
+// optionally excluding a session (e.g. the live one) and optionally restricted
+// to sessions with a matching dayId. Returns 0 when there's no history.
 // Since boot only loads a recent window of sets, the local scan is combined
-// with the cached get_exercise_best_e1rm aggregate (state.exerciseBests). The
-// aggregate covers everything ended server-side; the scan covers sessions
-// ended on this device since the aggregate was fetched. The excluded (live)
-// session is never part of the aggregate because it isn't ended yet.
-function bestE1rmForExercise(state, exId, excludeSessionId = null) {
-  let best = (state.exerciseBests || {})[exId] || 0;
+// with the cached get_exercise_best_e1rm aggregate (state.exerciseBests) —
+// but only when dayId is null, because the aggregate is day-agnostic.
+function bestE1rmForExercise(state, exId, excludeSessionId = null, dayId = null) {
+  let best = dayId ? 0 : ((state.exerciseBests || {})[exId] || 0);
   for (const s of state.sessions || []) {
     if (!s.ended || (excludeSessionId && s.id === excludeSessionId)) continue;
+    if (dayId && s.dayId !== dayId) continue;
     for (const e of (s.entries || [])) {
       if (e.exId !== exId) continue;
       for (const st of (e.sets || [])) {
@@ -1735,11 +1744,11 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite) {
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_coaching_notes' }, p => {
       if (p.new.author_id !== userId) onCoachingNote?.(mapNote(p.new));
     })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `client_id=eq.${userId}` }, () => {
-      onCoachingInvite?.();
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `client_id=eq.${userId}` }, p => {
+      onCoachingInvite?.(p.eventType, p.old?.id ?? p.new?.id ?? null, p.new ?? null);
     })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `coach_id=eq.${userId}` }, () => {
-      onCoachingInvite?.();
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `coach_id=eq.${userId}` }, p => {
+      onCoachingInvite?.(p.eventType, p.old?.id ?? p.new?.id ?? null, p.new ?? null);
     })
     .subscribe();
   return () => { _supabase.removeChannel(_realtimeChannel); _realtimeChannel = null; };
@@ -2288,7 +2297,7 @@ function plannedTrainingDay(state, dateStr) {
   if (isWeekdayPlan(sch)) {
     if (state.weekPlanStartDate && ds < state.weekPlanStartDate) return null;
     const dd = new Date(ds + 'T12:00:00');
-    const wd = dd.getDay() === 0 ? 6 : dd.getDay() - 1;
+    const wd = isoWd(dd);
     const vDays = getPlanDaysForDate(sch, ds);
     return vDays.find(d => d.weekday === wd && d.items?.length > 0) || null;
   }
@@ -2536,7 +2545,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, parseDate, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
+  uid, todayISO, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,

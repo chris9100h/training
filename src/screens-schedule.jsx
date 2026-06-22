@@ -307,6 +307,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
     copy.name = copy.name + ' (Copy)';
     copy.days = copy.days.map(d => ({ ...d, id: LB.uid() }));
     copy.archived = false;
+    delete copy.versions;
     setStore(s => ({ ...s, schedules: [...s.schedules, copy] }));
     go({ name: 'plan-view', scheduleId: copy.id, fromPlan: true });
   };

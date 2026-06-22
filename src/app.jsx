@@ -219,52 +219,6 @@ function WhatsNewModal({ entries, onDismiss }) {
   );
 }
 
-// Small, unobtrusive sync/storage status. Hidden when everything is synced.
-// 'pending' is faint (normal operation); an error or a full local cache shows
-// a tappable amber pill so a silent sync failure can't go unnoticed.
-// Default: fixed top-center overlay. `inline` renders just the compact pill
-// for embedding into a screen's own header (the training screen puts it in
-// the day-name row, where the overlay would cover the session/rest timers).
-function SyncIndicator({ status, storageFull, onRetry, inline = false }) {
-  if (status === 'synced' && !storageFull) return null;
-  const isProblem = storageFull || status === 'error';
-  const label = storageFull
-    ? 'Device storage full'
-    : status === 'error' ? 'Not synced — tap to retry' : 'Saving…';
-  const pill = (
-    <button
-      onClick={isProblem ? onRetry : undefined}
-      style={{
-        pointerEvents: isProblem ? 'auto' : 'none',
-        display: 'flex', alignItems: 'center', gap: inline ? 6 : 7,
-        padding: inline ? '3px 9px' : '6px 12px', borderRadius: 999,
-        background: isProblem ? 'rgba(var(--danger-rgb),0.16)' : 'rgba(var(--bg-rgb),0.85)',
-        border: `1px solid ${isProblem ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`,
-        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-        color: isProblem ? UI.danger : UI.inkFaint,
-        fontFamily: UI.fontUi, fontSize: inline ? 10 : 11, fontWeight: 600, letterSpacing: '0.04em',
-        cursor: isProblem ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent',
-      }}>
-      <span style={{
-        width: inline ? 6 : 7, height: inline ? 6 : 7, borderRadius: '50%', flexShrink: 0,
-        background: isProblem ? UI.danger : UI.inkFaint,
-        ...(status === 'pending' && !storageFull ? { animation: 'pulseDot 1.4s ease-in-out infinite' } : {}),
-      }} />
-      {label}
-    </button>
-  );
-  if (inline) return pill;
-  return (
-    <div style={{
-      position: 'fixed', left: 0, right: 0,
-      top: 'calc(env(safe-area-inset-top, 0px) + 8px)',
-      display: 'flex', justifyContent: 'center',
-      zIndex: 90, pointerEvents: 'none',
-    }}>
-      {pill}
-    </div>
-  );
-}
 
 function LoadingScreen() {
   return (
@@ -350,6 +304,15 @@ function App() {
       LB.saveQsName(store.user.email, store.user.name);
     }
   }, [store?.user?.email, store?.user?.name]);
+
+  // Boot-time admin support unread count
+  useEffectA(() => {
+    if (store?.user?.email !== 'office@btc-prime.biz') return;
+    LB.supabase.rpc('get_support_chats').then(({ data }) => {
+      const unread = (data || []).reduce((s, t) => s + Number(t.unread_count || 0), 0);
+      setStore(s => s ? { ...s, adminSupportUnread: unread } : s);
+    }).catch(() => {});
+  }, [store?.user?.email]);
 
   // Auto-seed the system CARDIO exercise once per user (if missing or deleted).
   useEffectA(() => {
@@ -828,7 +791,8 @@ function App() {
                 ),
               };
             }
-            return s; // Admin sees someone else's support note — ignore Realtime
+            // Admin inbox: increment admin unread counter
+            return { ...s, adminSupportUnread: (s.adminSupportUnread || 0) + 1 };
           }
           if ((s.coaching.unreadNotes || []).some(n => n.id === note.id)) return s;
           return {
@@ -837,7 +801,24 @@ function App() {
           };
         });
       },
-      () => {
+      (eventType, coachingId, newRow) => {
+        if (eventType === 'DELETE' && coachingId?.startsWith('support_')) {
+          setStore(s => s ? {
+            ...s,
+            supportTickets: (s.supportTickets || []).filter(t => t.coachingId !== coachingId),
+            supportUnread: Math.max(0, (s.supportUnread || 0) - ((s.supportTickets || []).find(t => t.coachingId === coachingId)?.unreadCount || 0)),
+          } : s);
+          return;
+        }
+        if (eventType === 'UPDATE' && coachingId?.startsWith('support_') && newRow?.support_status) {
+          setStore(s => s ? {
+            ...s,
+            supportTickets: (s.supportTickets || []).map(t =>
+              t.coachingId === coachingId ? { ...t, status: newRow.support_status } : t
+            ),
+          } : s);
+          return;
+        }
         LB.reloadCoachingState(userId).then(coaching => {
           setStore(s => s ? { ...s, coaching } : s);
         }).catch(() => {});
@@ -891,11 +872,21 @@ function App() {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
-  // Retry a failed sync as soon as connectivity returns
+  // Connectivity tracking: offline → red immediately, online → retry or clear
   useEffectA(() => {
-    const onOnline = () => { if (userId) flushSync(userId); };
-    window.addEventListener('online', onOnline);
-    return () => window.removeEventListener('online', onOnline);
+    const onOffline = () => setSyncStatus('error');
+    const onOnline  = () => {
+      if (!userId) return;
+      if (pendingStore.current !== syncBase.current) flushSync(userId);
+      else setSyncStatus('synced');
+    };
+    if (!navigator.onLine) setSyncStatus('error');
+    window.addEventListener('offline', onOffline);
+    window.addEventListener('online',  onOnline);
+    return () => {
+      window.removeEventListener('offline', onOffline);
+      window.removeEventListener('online',  onOnline);
+    };
   }, [userId, flushSync]);
 
   // Keep nextReminderAt in sync whenever reminder settings or schedule state changes.
@@ -969,11 +960,8 @@ function App() {
 
   const go    = (r) => setRoute(r);
   const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
-  // The training screen embeds the status in its own header (the overlay would
-  // sit on top of the session/rest timers), so hand it a ready-made inline pill
-  // and suppress the global overlay there.
-  const syncPillInline = <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} inline />;
-  const props = { store, setStore, go, userId, syncPill: syncPillInline };
+
+  const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync };
   const tabRoutes = ['home', 'plan', 'lib', 'hist', 'health', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
   // Library lives under the merged "Plan" tab — keep that tab lit on the lib route.
@@ -1004,7 +992,7 @@ function App() {
     case 'health':        screen = <window.Screens.HealthScreen {...props} />; break;
     case 'session':          screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'exerciseHistory':  screen = <window.Screens.ExerciseHistoryScreen {...props} exId={route.exId} dayId={route.dayId} exName={route.exName} back={route.back} />; break;
-    case 'settings':          screen = <window.Screens.SettingsScreen {...props} />; break;
+    case 'settings':          screen = <window.Screens.SettingsScreen {...props} openSupportInbox={route.openSupportInbox} openSupportSheet={route.openSupportSheet} />; break;
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
     case 'coaching':            screen = <window.Screens.CoachingTabScreen {...props} initialClientTab={route.initialClientTab} />; break;
     case 'coaching-dashboard':  screen = <window.Screens.CoachingDashboard {...props} />; break;
@@ -1051,7 +1039,6 @@ function App() {
       {updateAvailable && !store?.inProgress && !onboardingState && <UpdateBanner onUpdate={applyUpdate} />}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
-      {route.name !== 'train' && <SyncIndicator status={syncStatus} storageFull={storageFull} onRetry={onRetrySync} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
       {onboardingState?.phase === 'prompt' && (
         <window.Screens.OnboardingPrompt

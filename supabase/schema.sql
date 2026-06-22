@@ -335,6 +335,8 @@ ALTER TABLE public.zane_checkins ADD CONSTRAINT zane_checkins_client_id_fkey FOR
 -- ── Indexes ───────────────────────────────────────────────────────────────────
 
 CREATE INDEX zane_coaching_client_id_idx ON public.zane_coaching USING btree (client_id);
+
+ALTER TABLE zane_coaching REPLICA IDENTITY FULL;
 CREATE INDEX zane_coaching_notes_coaching_id_created_at_idx ON public.zane_coaching_notes USING btree (coaching_id, created_at DESC);
 CREATE INDEX zane_coaching_notes_coaching_id_read_at_idx ON public.zane_coaching_notes USING btree (coaching_id, read_at) WHERE (read_at IS NULL);
 CREATE INDEX zane_coaching_notes_thread_id_idx ON public.zane_coaching_notes USING btree (thread_id) WHERE (thread_id IS NOT NULL);

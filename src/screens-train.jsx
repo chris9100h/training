@@ -312,7 +312,7 @@ function TrainingScreen(props) {
   return <TrainingScreenInner {...props} session={session} />;
 }
 
-function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, syncPill }) {
+function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, syncStatus, storageFull, onRetrySync }) {
   // Refresh the all-time best-e1RM aggregate once per training mount so the
   // "NEW BEST" overlay compares against an up-to-date baseline (covers
   // sessions finished on other devices since boot). Offline keeps the cached
@@ -351,20 +351,34 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const entry = session.entries[exIdx];
   const exercise = entry ? LB.findExercise(store, entry.exId) : null;
 
-  // "Last time" reference. The local window covers recently trained exercises;
-  // when an exercise has no local history (last logged before the boot
-  // window), fetch its most recent session from the server once and keep it in
-  // local state (exId → { entry } | null while resolved, undefined = not asked).
+  // "Last time" reference + remote best e1RM for this day type.
+  // The local window covers recently trained exercises; when an exercise has
+  // no local history (last logged before the boot window), fetch its recent
+  // sessions from the server once. limit=20 covers both the "last session"
+  // (for improve/regress) and a broad enough window for the day-specific
+  // best-e1RM comparison (for NEW BEST).
   const [remoteLast, setRemoteLast] = useStateT({});
+  const remoteBestE1rmRef = useRefT({}); // exId → best day-specific e1RM from server
   const localLast = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayId) : null;
   useEffectT(() => {
     const exId = entry?.exId;
-    if (!exId || localLast || remoteLast[exId] !== undefined) return;
+    if (!exId || remoteLast[exId] !== undefined) return;
     let on = true;
-    LB.fetchExerciseHistory(exId, session.dayId, 1, userId)
+    LB.fetchExerciseHistory(exId, session.dayId, 20, userId)
       .then(rows => {
         if (!on) return;
-        const row = (rows || []).find(r => r.sessionId !== session.id);
+        const filtered = (rows || []).filter(r => r.sessionId !== session.id);
+        // best e1RM across all fetched sessions for this day type
+        let best = 0;
+        for (const r of filtered) {
+          for (const st of (r.sets || [])) {
+            if (st.warmup || st.skipped || st.kg == null) continue;
+            const reps = LB.effReps(st);
+            if (reps > 0) { const v = LB.e1rm(st.kg, reps); if (v > best) best = v; }
+          }
+        }
+        remoteBestE1rmRef.current[exId] = best;
+        const row = filtered[0];
         setRemoteLast(m => ({ ...m, [exId]: row ? { entry: { sets: row.sets } } : null }));
       })
       .catch(() => { if (on) setRemoteLast(m => ({ ...m, [exId]: null })); });
@@ -544,10 +558,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
       const cE1rm = (completed?.kg != null && cReps != null && cReps > 0) ? LB.e1rm(completed.kg, cReps) : 0;
-      const priorBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
-      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[exIdx];
+      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id, session.dayId);
+      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
+      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
-        newBestShownRef.current[exIdx] = true;
+        newBestShownRef.current[entry.exId] = true;
         setNewBestSet(true);
         setTimeout(() => setNewBestSet(false), 2500);
       } else if (isImprovement(completed, prevSet)) {
@@ -574,9 +589,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
     const group = entry.supersetGroup;
     if (group) {
-      const newDoneCount = updatedSets.filter(s => s.done).length;
       const partners = session.entries.map((e, i) => ({ e, i })).filter(({ e, i }) => e.supersetGroup === group && i !== exIdx);
-      const nextPartner = partners.find(({ e }) => e.sets.filter(s => s.done).length < newDoneCount);
+      const nextPartner = partners.find(({ e }) => e.sets[setIdx]?.done === false);
       if (nextPartner) {
         // Mid-round: jump to partner, no rest
         setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), 300);
@@ -799,15 +813,59 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // the finished session is the current next-up day. A freestyle workout, a
     // session from another plan, or a catch-up of an earlier (skipped) rotation
     // day must leave the next-up pointer where it is.
-    const flexBlocks = LB.isFlexPlan(activeSch) &&
+    // Exception: if the user explicitly chose "continue from picked day", we honour
+    // that intent and let the cycleIndex jump even on a flex plan.
+    const flexBlocks = LB.isFlexPlan(activeSch) && !cycleFromPickedDay &&
       (session.isFreestyle || session.scheduleId !== activeSch?.id || session.dayId !== LB.todaysDay(store)?.day?.id);
-    setStore(s => ({
-      ...s,
-      inProgress: null,
-      ...(shouldAdvance && !isWeekdayMode && !activeIsWeekday && !flexBlocks && { cycleIndex: s.cycleIndex + 1 }),
-      lastAdvancedDate: LB.todayISO(),
-      ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
-    }));
+    // If user chose "continue from picked day", jump cycle to that day's index + 1.
+    const pickedSch = store.schedules?.find(s => s.id === session.scheduleId);
+    // Look up the day in the *current version's* days, not the original base array —
+    // after a prior rotation the original order no longer matches baseDays.
+    const pickedBaseDays = (() => {
+      if (!cycleFromPickedDay || !pickedSch) return null;
+      if (!LB.isFlexPlan(activeSch) && pickedSch.versions?.length)
+        return LB.getPlanDaysForDate(pickedSch, LB.todayISO());
+      return pickedSch.days;
+    })();
+    const pickedDayIdx = cycleFromPickedDay ? (pickedBaseDays?.findIndex(d => d.id === session.dayId) ?? -1) : -1;
+    setStore(s => {
+      // For date-driven plans: insert a schedule version starting today with days rotated
+      // so pickedDayIdx is position 0 → today = picked day, tomorrow = day after, no gaps.
+      // Flex plans use cycleIndex directly, so skip version logic there.
+      let schedulesUpdate = s.schedules;
+      if (pickedDayIdx >= 0 && !LB.isFlexPlan(activeSch)) {
+        const curSch = s.schedules.find(sch2 => sch2.id === session.scheduleId);
+        if (curSch) {
+          const todayStr = LB.todayISO();
+          const baseDays = pickedBaseDays ?? (curSch.versions?.length
+            ? LB.getPlanDaysForDate(curSch, todayStr)
+            : curSch.days);
+          const rotated = [...baseDays.slice(pickedDayIdx), ...baseDays.slice(0, pickedDayIdx)];
+          let newVersions;
+          if (curSch.versions?.length) {
+            newVersions = LB.dedupeVersionsByDate([{ validFrom: todayStr, days: rotated }, ...curSch.versions]);
+          } else {
+            // Anchor history so past dates stay on the original day order.
+            const genesis = s.cycleStartDate || todayStr;
+            newVersions = LB.dedupeVersionsByDate([
+              { validFrom: todayStr, days: rotated },
+              { validFrom: genesis, days: curSch.days },
+            ]);
+          }
+          schedulesUpdate = s.schedules.map(sch2 => sch2.id === curSch.id ? { ...sch2, versions: newVersions } : sch2);
+        }
+      }
+      return {
+        ...s,
+        schedules: schedulesUpdate,
+        inProgress: null,
+        ...(shouldAdvance && !isWeekdayMode && !activeIsWeekday && !flexBlocks && {
+          cycleIndex: pickedDayIdx >= 0 ? pickedDayIdx + 1 : s.cycleIndex + 1,
+        }),
+        lastAdvancedDate: LB.todayISO(),
+        ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
+      };
+    });
     go({ name: 'session', sessionId: session.id, justFinished: true });
   };
 
@@ -952,7 +1010,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [improvedSet, setImprovedSet] = useStateT(false);
   const [regressionSet, setRegressionSet] = useStateT(false);
   const [newBestSet, setNewBestSet] = useStateT(false);
-  const newBestShownRef = useRefT({}); // exIdx → true once a NEW BEST flashed (max once per exercise)
+  const newBestShownRef = useRefT({}); // exId → true once a NEW BEST flashed (max once per exercise per session)
   const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
   const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(() => {
@@ -967,6 +1025,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [freestyleName, setFreestyleName] = useStateT('');
   const [showCycleStep, setShowCycleStep] = useStateT(false);
   const [advanceCycle, setAdvanceCycle] = useStateT(false);
+  const [cycleFromPickedDay, setCycleFromPickedDay] = useStateT(false);
   const [notePicker, setNotePicker] = useStateT(false);
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
@@ -1306,7 +1365,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
       const last = LB.bestRecentEntry(s, newExId, session.dayId);
       const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
-      const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+      const mother = targetIdx !== null ? sess.entries[targetIdx] : null;
+      const setCount = mother ? (mother.plannedSets ?? mother.sets?.length ?? 3) : 3;
+      const seedSets = LB.buildSeedSets({ sets: setCount, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
       const currentIdx = sess.currentExIdx || 0;
       const insertIdx = targetIdx !== null ? targetIdx + 1 : currentIdx + 1;
       const group = targetIdx !== null
@@ -1315,7 +1376,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const newEntry = {
         exId: newExId,
         name: newEx?.name || newExId,
-        plannedSets: 3,
+        plannedSets: setCount,
         plannedReps: null,
         plannedRepsPerSet: null,
         sets: seedSets,
@@ -1482,6 +1543,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const hasTodayTraining = (todayData?.day?.items?.length ?? 0) > 0 && !alreadyDoneToday;
       setShowCycleStep(hasTodayTraining);
       setAdvanceCycle(false);
+      setCycleFromPickedDay(false);
       if (session.isFreestyle) {
         setFreestyleName('');
         setFinishStep('name');
@@ -1820,7 +1882,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
           {/* session time / warmup indicator */}
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
-            <div style={{ width: 6, height: 6, borderRadius: 3, background: UI.gold, animation: 'pulseDot 1.6s ease-in-out infinite' }} />
+            {(() => {
+              const isProblem = storageFull || syncStatus === 'error';
+              const isSaving  = syncStatus === 'pending' && !storageFull;
+              const dotColor  = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
+              const pulse     = 'pulseDot 1.6s ease-in-out infinite';
+              return <div onClick={isProblem ? onRetrySync : undefined} style={{ width: 6, height: 6, borderRadius: 3, background: dotColor, animation: pulse, cursor: isProblem ? 'pointer' : 'default', flexShrink: 0 }} />;
+            })()}
             {warmupActive
               ? <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>WARMUP</span>
               : <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }}>{sessionTimeStr}</span>
@@ -1894,9 +1962,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           (the global top-center overlay would cover the timers above). */}
       <div style={{ flexShrink: 0, padding: '6px 22px 10px', position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span className="micro-gold">{session.dayName}</span>
-        <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)', display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
-          <div style={{ pointerEvents: 'auto' }}>{syncPill}</div>
-        </div>
         <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
           {String(exIdx + 1).padStart(2, '0')} <span style={{ color: UI.hair }}>/</span> {String(session.entries.length).padStart(2, '0')}
         </span>
@@ -2468,7 +2533,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </div>
 
       {/* finish confirmation */}
-      <Sheet open={finishOpen} onClose={() => { setFinishOpen(false); setFinishStep('confirm'); setPendingFeel(null); }} title={finishStep === 'confirm' ? "End session?" : finishStep === 'name' ? "Name this workout" : "Rate workout effort"}>
+      <Sheet open={finishOpen} onClose={() => { setFinishOpen(false); setFinishStep('confirm'); setPendingFeel(null); }} title={finishStep === 'confirm' ? "End session?" : finishStep === 'name' ? "Name this workout" : finishStep === 'cycle' ? "Wrap up" : "Rate workout effort"}>
         {finishStep === 'confirm' ? (<>
           <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 18, lineHeight: 1.6 }}>
             {(() => {
@@ -2539,10 +2604,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             {(() => { const n = LB.todaysDay(store)?.day?.name; return n ? `Today is ${n} day. Did this session replace it, or was it extra?` : 'Today is a scheduled training day. Did this session replace it, or was it extra?'; })()}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <Btn onClick={() => { setAdvanceCycle(true); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
-              Replaces it — advance my cycle
+            <Btn onClick={() => { setAdvanceCycle(true); setCycleFromPickedDay(true); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
+              Replaces it — continue from {session.dayName}
             </Btn>
-            <Btn kind="ghost" onClick={() => { setAdvanceCycle(false); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
+            <Btn kind="ghost" onClick={() => { setAdvanceCycle(true); setCycleFromPickedDay(false); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
+              Replaces it — keep cycle on track
+            </Btn>
+            <Btn kind="ghost" onClick={() => { setAdvanceCycle(false); setCycleFromPickedDay(false); setFinishStep('feel'); setPendingFeel(null); }} style={{ width: '100%' }}>
               Extra session — keep as bonus
             </Btn>
           </div>
@@ -2763,7 +2831,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 6, height: 6, borderRadius: 3, background: UI.gold, animation: 'pulseDot 1.6s ease-in-out infinite' }} />
+                {(() => {
+                  const isProblem = storageFull || syncStatus === 'error';
+                  const isSaving  = syncStatus === 'pending' && !storageFull;
+                  const dotColor  = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
+                  const pulse     = 'pulseDot 1.6s ease-in-out infinite';
+                  return <div onClick={isProblem ? onRetrySync : undefined} style={{ width: 6, height: 6, borderRadius: 3, background: dotColor, animation: pulse, cursor: isProblem ? 'pointer' : 'default', flexShrink: 0 }} />;
+                })()}
                 <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>WARMUP</span>
               </div>
               <button onClick={skipWarmup} style={{

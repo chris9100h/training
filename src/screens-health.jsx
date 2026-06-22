@@ -899,6 +899,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   const [coachingMacros, setCoachingMacros] = useStateH(null);
   const [tf, setTf] = useStateH('1W');
   const [capturing, setCapturing] = useStateH(false);
+  const [exportOpen, setExportOpen] = useStateH(false);
   const captureRef = useRefH(null);
 
   const takeScreenshot = async () => {
@@ -1296,14 +1297,24 @@ function HealthScreen({ store, setStore, go, userId }) {
   return (
     <Screen>
       <TopBar title="HEALTH" right={
-        <button onClick={takeScreenshot} disabled={capturing} style={{
-          background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-          borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
-          color: capturing ? UI.inkGhost : UI.inkSoft, lineHeight: 1,
-          WebkitTapHighlightColor: 'transparent',
-        }}>
-          {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => setExportOpen(true)} style={{
+            background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 4, padding: '5px 10px', cursor: 'pointer',
+            color: UI.inkSoft, lineHeight: 1,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <i className="fa-solid fa-file-export" style={{ fontSize: 11 }} />
+          </button>
+          <button onClick={takeScreenshot} disabled={capturing} style={{
+            background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
+            color: capturing ? UI.inkGhost : UI.inkSoft, lineHeight: 1,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
+          </button>
+        </div>
       } />
       {store.statusMode && !capturing && (
         <div onClick={() => { setSelectedDate(today); setLogOpen(true); }} style={{
@@ -1343,6 +1354,7 @@ function HealthScreen({ store, setStore, go, userId }) {
 
       <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
+      <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} />
     </Screen>
   );
 }
@@ -1566,6 +1578,272 @@ function HealthClientLogs({ clientStore }) {
         </ReorderList>
       </div>
     </div>
+  );
+}
+
+// ─── Export sheet ─────────────────────────────────────────────────────────────
+
+function ExportSheet({ open, onClose, store }) {
+  const today = LB.todayISO();
+  const [from, setFrom] = useStateH(() => healthShiftISO(today, -29));
+  const [to, setTo] = useStateH(today);
+  const [exporting, setExporting] = useStateH(null); // 'csv' | 'pdf' | null
+
+  const applyPreset = (days) => {
+    setFrom(healthShiftISO(today, -(days - 1)));
+    setTo(today);
+  };
+
+  const logsInRange = () =>
+    (store.dailyLogs || []).filter(l => l.date >= from && l.date <= to).sort((a, b) => a.date < b.date ? -1 : 1);
+
+  const cardioByDay = () => {
+    const m = {};
+    (store.cardioLogs || []).filter(l => l.date >= from && l.date <= to).forEach(l => {
+      if (!m[l.date]) m[l.date] = { min: 0, distM: null };
+      m[l.date].min += (l.durationMinutes || 0);
+      if (l.distanceM != null) m[l.date].distM = (m[l.date].distM || 0) + l.distanceM;
+    });
+    return m;
+  };
+
+  const sessionsByDay = () => {
+    const m = {};
+    (store.sessions || []).filter(s => s.ended && s.date >= from && s.date <= to).forEach(s => {
+      const d = typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10);
+      if (!m[d]) m[d] = [];
+      m[d].push(s);
+    });
+    return m;
+  };
+
+  const doExportCSV = () => {
+    setExporting('csv');
+    try {
+      const unit = store.settings?.unit || 'kg';
+      const logs = logsInRange();
+      const cardio = cardioByDay();
+      const sessions = sessionsByDay();
+      const netCarbs = store.settings?.netCarbs;
+
+      const esc = v => {
+        if (v == null || v === '') return '';
+        const s = String(v);
+        return (s.includes(',') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+
+      // Transposed: column A = metric label, columns B… = one per date (ascending).
+      // Row 1 = date header row (A1 empty).
+      const dates = logs.map(l => l.date);
+      const byDate = {};
+      logs.forEach(l => { byDate[l.date] = l; });
+
+      const metrics = [
+        { label: `Weight (${unit})`, fn: l => l.weight },
+        { label: 'Steps',            fn: l => l.steps },
+        { label: 'Calories (kcal)',  fn: l => l.calories },
+        { label: 'Protein (g)',      fn: l => l.protein },
+        { label: 'Carbs (g)',        fn: l => l.carbs },
+        netCarbs ? { label: 'Fiber (g)', fn: l => l.fiber } : null,
+        { label: 'Fat (g)',          fn: l => l.fat },
+        { label: 'Water (ml)',        fn: l => l.waterMl != null ? l.waterMl : null },
+        { label: 'Adherence (%)',    fn: l => l.adherence != null ? Math.round(l.adherence) : null },
+        { label: 'Cardio (min)',     fn: l => cardio[l.date]?.min || null },
+        { label: 'Cardio dist (m)',
+          fn: l => cardio[l.date]?.distM != null ? Math.round(cardio[l.date].distM) : null },
+        { label: 'Training',         fn: l => (sessions[l.date] || []).map(s => s.dayName || s.day_name || '').filter(Boolean).join(', ') || 'REST' },
+        { label: 'Training (min)',   fn: l => (sessions[l.date] || []).reduce((sum, s) => sum + (s.durationMinutes || s.duration_minutes || 0), 0) || null },
+        { label: 'Note',             fn: l => l.note || null },
+        { label: 'Off-plan note',    fn: l => l.offPlanNote || null },
+      ].filter(Boolean);
+
+      const headerRow = ['', ...dates].map(esc).join(',');
+      const metricRows = metrics.map(m =>
+        [m.label, ...dates.map(d => m.fn(byDate[d]))].map(esc).join(',')
+      );
+
+      const csv = [headerRow, ...metricRows].join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `health-${from}-${to}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      onClose();
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const doExportPDF = () => {
+    setExporting('pdf');
+    try {
+      const logs = logsInRange();
+      const cardio = cardioByDay();
+      const sessions = sessionsByDay();
+      const unit = store.settings?.unit || 'kg';
+      const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c9a961';
+      const cardBg  = '#201e2c';
+      const inkText = '#e5e2ef';
+      const inkSoft = '#9b97a8';
+      const inkFaint= '#5c5969';
+      const hairDiv = '#3d3a4e';
+      const adhColor = adh => adh == null ? inkFaint : adh >= 90 ? '#22c55e' : adh >= 75 ? '#d97706' : '#ef4444';
+
+      const cardsHtml = logs.length === 0
+        ? `<p style="color:${inkFaint};font-size:14px;text-align:center;padding:40px">No data in this range.</p>`
+        : logs.map(l => {
+          const date = new Date(l.date + 'T12:00:00');
+          const dateLabel = date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+          const cardioMin = cardio[l.date]?.min;
+          const adh = l.adherence != null ? Math.round(l.adherence) : null;
+          const daySessions = sessions[l.date] || [];
+          const trained = daySessions.length > 0;
+          const hasCardio = !!cardioMin;
+          const ac = adhColor(adh);
+
+          const stat = (label, value, unit) => value != null
+            ? `<div style="text-align:center;min-width:0">
+                 <div style="font-size:17px;font-weight:300;color:${inkText};font-family:monospace">${value}${unit ? `<span style="font-size:9px;color:${inkFaint};margin-left:2px">${unit}</span>` : ''}</div>
+                 <div style="font-size:8px;text-transform:uppercase;letter-spacing:0.08em;color:${inkFaint};margin-top:2px">${label}</div>
+               </div>`
+            : '';
+
+          const badge = (icon, label) =>
+            `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.06);border:0.5px solid rgba(255,255,255,0.12);font-size:9px;letter-spacing:0.07em;text-transform:uppercase;color:${inkSoft}">
+               <span>${icon}</span>${label}
+             </span>`;
+
+          const adhBar = adh != null
+            ? `<div style="margin-bottom:12px">
+                 <div style="display:flex;align-items:center;gap:8px">
+                   <div style="height:4px;flex:1;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;-webkit-print-color-adjust:exact;print-color-adjust:exact">
+                     <div style="height:100%;width:${Math.min(100, adh)}%;background:${ac};border-radius:999px"></div>
+                   </div>
+                   <span style="font-size:10px;color:${ac};font-weight:700;font-family:monospace;flex-shrink:0">${adh}%</span>
+                 </div>
+               </div>`
+            : '';
+
+          const sessionNames = daySessions.map(s => s.dayName || s.day_name || '').filter(Boolean).join(', ');
+          const sessionDur = daySessions.reduce((sum, s) => sum + (s.durationMinutes || s.duration_minutes || 0), 0);
+
+          return `<div style="background:${cardBg};border:1px solid ${hairDiv};border-radius:8px;padding:14px 16px;margin-bottom:12px;-webkit-print-color-adjust:exact;print-color-adjust:exact;page-break-inside:avoid">
+            <div style="font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${inkText};margin-bottom:${(trained || hasCardio) ? 8 : 12}px">${dateLabel}</div>
+            ${(trained || hasCardio) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:${sessionNames ? 6 : 10}px">${trained ? badge('🏋', sessionNames ? `${sessionNames}${sessionDur ? ` · ${sessionDur} min` : ''}` : 'Trained') : ''}${hasCardio ? badge('🏃', 'Cardio') : ''}</div>` : ''}
+            ${adhBar}
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 6px">
+              ${stat(`Weight (${unit})`, l.weight)}
+              ${stat('Steps', l.steps != null ? l.steps.toLocaleString() : null)}
+              ${stat('Cardio', cardioMin || null, 'min')}
+              ${stat('Water', l.waterMl != null ? (Math.round(l.waterMl / 100) / 10).toFixed(1) : null, 'L')}
+              ${stat('Calories', l.calories, 'kcal')}
+              ${stat('Protein', l.protein, 'g')}
+              ${stat('Carbs', l.carbs, 'g')}
+              ${stat('Fat', l.fat, 'g')}
+            </div>
+            ${l.note || l.offPlanNote ? `<div style="margin-top:10px;padding-top:10px;border-top:0.5px solid ${hairDiv};font-size:11px;color:${inkSoft};line-height:1.5">${[l.note, l.offPlanNote].filter(Boolean).join(' · ')}</div>` : ''}
+          </div>`;
+        }).join('');
+
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+        <title>Health Export ${from} – ${to}</title>
+        <style>
+          *{margin:0;padding:0;box-sizing:border-box}
+          @page{margin:12mm}
+          body{font-family:system-ui,-apple-system,sans-serif;background:#fff;padding:0;max-width:600px;margin:0 auto}
+        </style>
+      </head><body>
+        <div style="background:${cardBg};border:1px solid ${hairDiv};border-radius:6px;padding:8px 20px;margin-bottom:14px;text-align:center;-webkit-print-color-adjust:exact;print-color-adjust:exact">
+          <span style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${accent};font-weight:700">Health &middot; ${from} &ndash; ${to}</span>
+        </div>
+        ${cardsHtml}
+        <script>
+          var isIOS=/iPhone|iPad|iPod/.test(navigator.userAgent)&&!window.MSStream;
+          if(!isIOS){window.onload=function(){window.print()};}
+        <\/script>
+      </body></html>`;
+
+      const blob = new Blob([html], { type: 'text/html' });
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank');
+      onClose();
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const presets = [
+    { label: '7 days',  days: 7 },
+    { label: '30 days', days: 30 },
+    { label: '90 days', days: 90 },
+  ];
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Export">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+        <div>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>TIME RANGE</div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            {presets.map(p => (
+              <button key={p.days} onClick={() => applyPreset(p.days)} style={{
+                flex: 1, padding: '7px 4px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`,
+                background: from === healthShiftISO(today, -(p.days - 1)) && to === today ? 'var(--accent)' : UI.bgInset,
+                color: from === healthShiftISO(today, -(p.days - 1)) && to === today ? '#0a0805' : UI.inkSoft,
+                fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+              }}>{p.label}</button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <div style={{ flex: 1 }}>
+              <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>FROM</div>
+              <input type="date" value={from} max={to}
+                onChange={e => e.target.value && setFrom(e.target.value)}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+            </div>
+            <div style={{ color: UI.inkFaint, fontSize: 11, paddingTop: 16 }}>→</div>
+            <div style={{ flex: 1 }}>
+              <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>TO</div>
+              <input type="date" value={to} min={from} max={today}
+                onChange={e => e.target.value && setTo(e.target.value)}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+            </div>
+          </div>
+          {(() => {
+            const count = (store.dailyLogs || []).filter(l => l.date >= from && l.date <= to).length;
+            return <div style={{ marginTop: 8, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{count} day{count !== 1 ? 's' : ''} logged in this range</div>;
+          })()}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <button onClick={doExportCSV} disabled={!!exporting} style={{
+            width: '100%', padding: '13px 0', borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`,
+            background: UI.bgInset, color: exporting ? UI.inkGhost : UI.ink,
+            fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: exporting ? 'default' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <i className="fa-solid fa-file-csv" style={{ fontSize: 13 }} />
+            {exporting === 'csv' ? 'Exporting…' : 'Export as CSV'}
+          </button>
+          <button onClick={doExportPDF} disabled={!!exporting} style={{
+            width: '100%', padding: '13px 0', borderRadius: 6, border: 'none',
+            background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+            boxShadow: '0 6px 20px rgba(var(--accent-rgb),0.35)',
+            color: '#0a0805', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, cursor: exporting ? 'default' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            WebkitTapHighlightColor: 'transparent',
+            opacity: exporting ? 0.6 : 1,
+          }}>
+            <i className="fa-solid fa-file-pdf" style={{ fontSize: 13 }} />
+            {exporting === 'pdf' ? 'Opening…' : 'Export as PDF'}
+          </button>
+        </div>
+
+      </div>
+    </Sheet>
   );
 }
 
