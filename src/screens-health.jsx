@@ -1759,26 +1759,13 @@ function ExportSheet({ open, onClose, store }) {
           @page{margin:15mm 0}
           html,body{background:${bg}!important}
           body{color:#e5e2ef;font-family:system-ui,-apple-system,sans-serif;padding:16px 20px;max-width:600px;margin:0 auto}
-          .toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
-          .toolbar button{background:rgba(255,255,255,0.08);border:0.5px solid rgba(255,255,255,0.15);border-radius:6px;color:#e5e2ef;font-family:system-ui,sans-serif;font-size:12px;font-weight:600;padding:8px 14px;cursor:pointer}
-          h1{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${accent};font-weight:600}
-          @media print{.toolbar{display:none}}
+          h1{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${accent};font-weight:600;margin-bottom:16px}
         </style>
       </head><body>
-        <div class="toolbar">
-          <h1>Health &middot; ${from} &ndash; ${to}</h1>
-          <div style="display:flex;gap:8px">
-            <button id="pdf-btn">Save as PDF</button>
-            <button onclick="window.close()">← Close</button>
-          </div>
-        </div>
+        <h1>Health &middot; ${from} &ndash; ${to}</h1>
         ${cardsHtml}
         <script>
           var isIOS=/iPhone|iPad|iPod/.test(navigator.userAgent)&&!window.MSStream;
-          document.getElementById('pdf-btn').addEventListener('click',function(){
-            if(isIOS&&navigator.share){navigator.share({title:document.title,url:location.href});}
-            else{window.print();}
-          });
           if(!isIOS){window.onload=function(){window.print()};}
         <\/script>
       </body></html>`;
