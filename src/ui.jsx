@@ -367,10 +367,11 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
   // the label), while the in-flow ICON_H is kept tight so the label sits right
   // under the glyph. PLATE/PAD_TOP/ICON_H are tuned so the plate stays centred
   // on the glyph and its bottom edge meets (never overlaps) the label.
-  const KEY = 30;        // gold plate width/height (square, radius-6 key)
-  const KEY_TOP = 5;     // plate offset from the row top
-  const PAD_TOP = 4;     // button top padding
-  const ICON_H = 22;     // icon-zone height — drives the icon→label gap
+  const KEY = 36;        // gold plate width/height (square, radius-6 key)
+  const KEY_TOP = 6;     // plate offset from the row top
+  const PAD_TOP = 5;     // button top padding
+  const ICON_H = 26;     // icon-zone height — drives the icon→label gap
+  const ICON_SZ = 24;    // glyph size in the bottom dock (sidebar untouched)
   return (
     <div style={{
       flexShrink: 0,
@@ -385,12 +386,12 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
         WebkitBackdropFilter: 'blur(24px) saturate(130%)',
         border: `1px solid ${UI.hairStrong}`,
         borderRadius: 8,
-        padding: '6px 6px 3px',
+        padding: '7px 6px 4px',
         boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
       }}>
         {/* knurled top edge — grip texture, signature of the kit */}
-        <div className="knurl" style={{ position: 'absolute', top: 6, left: 14, right: 14 }} />
-        <div style={{ display: 'flex', position: 'relative', paddingTop: 5 }}>
+        <div className="knurl" style={{ position: 'absolute', top: 7, left: 14, right: 14 }} />
+        <div style={{ display: 'flex', position: 'relative', paddingTop: 6 }}>
           {/* Sliding gold key plate behind the active icon */}
           {idx >= 0 && (
             <div style={{
@@ -414,7 +415,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
               left: `${(idx + 0.5) * 100 / n}%`,
               top: KEY_TOP - 5,
               transform: 'translateX(-50%)',
-              width: 24, height: 2, borderRadius: 1,
+              width: 28, height: 2, borderRadius: 1,
               background: UI.gold,
               transition: 'left 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
               pointerEvents: 'none',
@@ -428,10 +429,10 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
               <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => onChange(t.id)} style={{
                 flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
                 padding: `${PAD_TOP}px 4px 2px`,
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
                 color: on ? UI.gold : UI.inkFaint,
                 fontFamily: UI.fontUi,
-                fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
+                fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
                 fontWeight: on ? 700 : 500,
                 position: 'relative', zIndex: 1,
                 transition: 'color 0.25s',
@@ -446,13 +447,13 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                   transform: on ? 'scale(1.2)' : 'scale(1)',
                   transition: 'color 0.2s, transform 0.25s cubic-bezier(0.34,1.4,0.64,1)',
                 }}>
-                  {TAB_ICONS[t.id]}
+                  {React.cloneElement(TAB_ICONS[t.id], { width: ICON_SZ, height: ICON_SZ })}
                   {badge?.live && (
-                    <div style={{ position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: '50%', background: on ? '#0a0805' : 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}` }} />
+                    <div style={{ position: 'absolute', top: 5, right: 4, width: 8, height: 8, borderRadius: '50%', background: on ? '#0a0805' : 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}` }} />
                   )}
                   {!badge?.live && badge?.count > 0 && (
-                    <div style={{ position: 'absolute', top: 3, right: 1, minWidth: 14, height: 14, borderRadius: 7, background: on ? '#0a0805' : 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}`, padding: '0 3px' }}>
-                      <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: on ? 'var(--accent)' : '#0a0805', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
+                    <div style={{ position: 'absolute', top: 1, right: -2, minWidth: 16, height: 16, borderRadius: 8, background: on ? '#0a0805' : 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}`, padding: '0 3px' }}>
+                      <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: on ? 'var(--accent)' : '#0a0805', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
                     </div>
                   )}
                 </div>
