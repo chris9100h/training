@@ -962,10 +962,10 @@ function App() {
   const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
 
   const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync };
-  const tabRoutes = ['home', 'plan', 'lib', 'hist', 'health', 'coaching'];
+  const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
-  // Library lives under the merged "Plan" tab — keep that tab lit on the lib route.
-  const tabActive = route.name === 'lib' ? 'plan' : route.name;
+  // Library and cardio-plans live under the merged "Plan" tab — keep that tab lit.
+  const tabActive = (route.name === 'lib' || route.name === 'cardio-plans') ? 'plan' : route.name;
 
   const showCoaching = !!(
     store?.settings?.showCoachingTab ||

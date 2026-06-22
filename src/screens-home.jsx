@@ -663,7 +663,13 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
         note: editLog.note || '',
       });
     } else {
-      setForm({ ...empty(), type: prefill?.type || '' });
+      const du = getDistUnit();
+      setForm({
+        ...empty(),
+        type: prefill?.type || '',
+        duration: prefill?.durationMinutes ? String(prefill.durationMinutes) : '',
+        distance: prefill?.distanceM != null ? mToDisplay(prefill.distanceM, du) : '',
+      });
     }
   }, [open, editLog?.id]);
 
@@ -1566,6 +1572,29 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     return (store.cardioLogs || []).filter(l => l.date === dateKey);
   }, [store.cardioLogs, sessionDate]);
 
+  // Pre-fill for CardioQuickLogSheet: first active plan with a target today
+  const cardioPlanPrefill = useMemo(() => {
+    const plans = (store.cardioPlans || []).filter(p => !p.archived);
+    if (!plans.length) return null;
+    const todayISO = LB.todayISO();
+    const d = new Date(todayISO + 'T12:00:00');
+    const dow = d.getDay();
+    const wkKeys = ['mon','tue','wed','thu','fri','sat','sun'];
+    const wk = wkKeys[dow === 0 ? 6 : dow - 1];
+    for (const plan of plans) {
+      if (!plan.days[wk]) continue;
+      if (plan.mode === 'manual') {
+        const t = plan.manualTargets?.[wk];
+        if (t && (t.distance_m || t.duration_minutes)) {
+          return { type: plan.activityType, distanceM: t.distance_m ?? null, durationMinutes: t.duration_minutes ?? null };
+        }
+      } else if (plan.mode === 'goal') {
+        return { type: plan.activityType };
+      }
+    }
+    return null;
+  }, [store.cardioPlans]);
+
   const recentBannerDay = useMemo(() => {
     if (!sch) return null;
     const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
@@ -2250,17 +2279,6 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 <Btn kind="ghost" onClick={handleClearStatus} style={{ flex: 1 }}>Back to normal</Btn>
               )}
             </div>
-            <button onClick={() => setCardioPopoverOpen(true)} style={{
-              width: '100%', marginTop: 8, padding: '9px 16px',
-              background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-              border: '1px solid rgba(var(--accent-rgb),0.6)',
-              borderRadius: 8, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-              WebkitTapHighlightColor: 'transparent',
-            }}>
-              <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: 'rgba(10,8,5,0.6)' }} />
-              <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
-            </button>
             {cardioBanner}
           </BracketFrame>
         ) : (
@@ -2423,21 +2441,6 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         )}
       </div>
 
-      {!isActiveRest && (
-        <div style={{ flexShrink: 0, padding: '6px 22px', paddingBottom: isPad ? 'calc(env(safe-area-inset-bottom, 0px) + 16px)' : 0 }}>
-          <button onClick={() => setCardioPopoverOpen(true)} style={{
-            width: '100%', padding: '9px 16px',
-            background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-            border: '1px solid rgba(var(--accent-rgb),0.6)',
-            borderRadius: 8, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            WebkitTapHighlightColor: 'transparent',
-          }}>
-            <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: 'rgba(10,8,5,0.6)' }} />
-            <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
-          </button>
-        </div>
-      )}
 
       {/* Cardio plan widget — today's scheduled cardio targets */}
       {window.Screens?.TodayCardioWidget && (
@@ -2525,7 +2528,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
       <CardioFinishFlow open={cardioFinishOpen} durationMin={cardioFinishDuration} store={store} setStore={setStore} onClose={() => setCardioFinishOpen(false)} onPR={setCardioPR} />
 
-      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} onPR={setCardioPR} />
+      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} onPR={setCardioPR} prefill={editingCardioLog ? null : cardioPlanPrefill} />
       <CardioPROverlay pr={cardioPR} onDone={() => setCardioPR(null)} />
 
       {/* Coach message banner */}
