@@ -1082,6 +1082,7 @@ const TRAIN_BG_OVERRIDES = {
   'mikeapicelli777@gmail.com': 'icons/IMG_6389.png',
   'mb2489@protonmail.com':     'icons/phoenix.png',
   'aboagyeboadi@yahoo.com':    'icons/prince_abu.png',
+  'joshseymour23@yahoo.com':   'icons/marine.png',
 };
 
 function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRetrySync }) {
