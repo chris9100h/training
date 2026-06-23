@@ -16,13 +16,14 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
-    id: 'v2.399',
+    id: 'v2.400',
     title: 'Fresh paint & a tidy-up',
     items: [
       'Bottom nav bar got a glow-up: the active tab is now a bold, gold-filled key instead of a thin outline — same job, a lot more presence.',
       'Cardio plans, your way: pick one target for every day or a different one per day. Cleaner layout, your speed now shows right next to your pace, and the goal builder politely refuses half-filled forms.',
       'Your notification center can finally breathe — Zane clears out its own old pings when you reopen the app, instead of letting them stack up like dishes in the sink.',
       'Trained while under the weather? If Sick mode is on and you log a session, Zane gently asks "feeling better?" — so nobody accidentally stays "sick" for a month. 🤧',
+      'Sharing a workout? Your screenshots no longer behead the Zane avatar (or your VIP background) — the divider line now stops just shy of his head instead of slicing clean through. 🗿',
     ],
   },
   {
