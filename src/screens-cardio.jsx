@@ -353,6 +353,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
   const [preview,       setPreview]       = useStateCard(null);
   const [showCustom,    setShowCustom]    = useStateCard(false);
   const [useTargets,    setUseTargets]    = useStateCard(true);
+  const [targetMode,    setTargetMode]    = useStateCard('same'); // 'same' | 'per_day'
 
   const du = cpDistUnit();
 
@@ -379,12 +380,22 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       setPreview(null);
       setShowCustom(false);
       setUseTargets(editPlan.mode !== 'manual' || Object.keys(editPlan.manualTargets || {}).length > 0);
+      // Infer the target mode: if every chosen day carries the same target it
+      // was a "same every day" plan, otherwise it had per-day targets.
+      const mt = editPlan.manualTargets || {};
+      const activeKs = CP_WEEKDAY_KEYS.filter(k => (editPlan.days || {})[k] && mt[k]);
+      const base = activeKs.length ? mt[activeKs[0]] : null;
+      const allEqual = !base || activeKs.every(k =>
+        mt[k].target_type === base.target_type &&
+        mt[k].distance_m === base.distance_m &&
+        mt[k].duration_minutes === base.duration_minutes);
+      setTargetMode(allEqual ? 'same' : 'per_day');
       setStep(1);
     } else {
       setActivityType(''); setMode(''); setDays({}); setManualTargets({});
       setGoal({ type: 'distance', dist: '', dur: '' });
       setGoalDue(''); setFitness({ dist: '', dur: '' }); setPlanName(''); setPreview(null);
-      setShowCustom(false); setUseTargets(true);
+      setShowCustom(false); setUseTargets(true); setTargetMode('same');
       setStep(0);
     }
   }, [open]);
@@ -416,10 +427,12 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
     if (step === 1) return !!mode;
     if (mode === 'manual') {
       if (step === 2) return CP_WEEKDAY_KEYS.some(k => days[k]);
-      if (step === 3) return CP_WEEKDAY_KEYS.filter(k => days[k]).every(k => {
-        const t = manualTargets[k];
-        return t && (t.distance_m || t.duration_minutes);
-      });
+      if (step === 3) {
+        const active = CP_WEEKDAY_KEYS.filter(k => days[k]);
+        const filled = (t) => t && (t.distance_m || t.duration_minutes);
+        if (targetMode === 'same') return filled(manualTargets[active[0]]);
+        return active.every(k => filled(manualTargets[k]));
+      }
       if (step === 4) return !!planName.trim();
     }
     if (mode === 'goal') {
@@ -487,7 +500,13 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
 
     const cleanTargets = {};
     if (mode === 'manual') {
-      CP_WEEKDAY_KEYS.forEach(k => { if (days[k] && manualTargets[k]) cleanTargets[k] = manualTargets[k]; });
+      const active = CP_WEEKDAY_KEYS.filter(k => days[k]);
+      if (targetMode === 'same') {
+        const t = manualTargets[active[0]];
+        if (t) active.forEach(k => { cleanTargets[k] = { ...t }; });
+      } else {
+        CP_WEEKDAY_KEYS.forEach(k => { if (days[k] && manualTargets[k]) cleanTargets[k] = manualTargets[k]; });
+      }
     }
 
     const plan = {
@@ -516,7 +535,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
 
   const stepTitles = ['Choose activity', 'Plan type',
     ...(mode === 'goal' ? ['Set your goal', 'Current fitness', 'Plan preview', 'Name your plan']
-                        : ['Training days',  'Daily targets',  'Name your plan'])];
+                        : ['Training days',  'Targets',  'Name your plan'])];
   const sheetTitle = editPlan ? 'Edit plan' : (stepTitles[step] || 'New cardio plan');
 
   const inputStyle = {
@@ -669,67 +688,98 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
     /* Manual step 3 — targets */
     if (mode === 'manual' && step === 3) {
       const activeDays = CP_WEEKDAY_KEYS.filter(k => days[k]);
-      const fillAll = (src) => {
+
+      // One target editor card (type toggle + value input). `keyId` keeps the
+      // uncontrolled inputs distinct; `label` is the heading (weekday or "Every
+      // day"); `upd` writes the target object the caller owns.
+      const targetCard = (keyId, t, upd, label) => {
+        const isDist = t.target_type !== 'duration';
+        const dispDist = t.distance_m ? (du === 'mi' ? (t.distance_m / 1609.344).toFixed(2) : (t.distance_m / 1000).toFixed(1)) : '';
+        return (
+          <div key={keyId} style={{ padding: 12, background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+                {['distance','duration'].map(tt => {
+                  const active = isDist ? tt === 'distance' : tt === 'duration';
+                  return (
+                    <button key={tt} onClick={() => upd({ target_type: tt })} style={{
+                      padding: '4px 12px', cursor: 'pointer', border: 'none',
+                      background: active ? UI.inkFaint : 'transparent',
+                      fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
+                      color: active ? UI.bg : UI.inkFaint, WebkitTapHighlightColor: 'transparent',
+                    }}>{tt === 'distance' ? du.toUpperCase() : 'MIN'}</button>
+                  );
+                })}
+              </div>
+            </div>
+            {isDist ? (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input type="text" inputMode="decimal" defaultValue={dispDist}
+                  key={`${keyId}-dist-${t.distance_m ?? 'x'}`}
+                  onBlur={e => upd({ distance_m: cpDistToM(e.target.value, du), duration_minutes: null })}
+                  placeholder={du === 'mi' ? '3.1' : '5'} style={{ ...inputStyle, flex: 1 }} />
+                <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, flexShrink: 0 }}>{du}</span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input type="text" inputMode="numeric" defaultValue={t.duration_minutes || ''}
+                  key={`${keyId}-dur-${t.duration_minutes ?? 'x'}`}
+                  onBlur={e => upd({ duration_minutes: parseInt(e.target.value) || null, distance_m: null })}
+                  placeholder="30" style={{ ...inputStyle, flex: 1 }} />
+                <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, flexShrink: 0 }}>min</span>
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      // Same-mode: edit one target and mirror it onto every chosen day, so
+      // validation/save (which read per-day) work unchanged.
+      const sharedT = manualTargets[activeDays[0]] || { target_type: 'distance' };
+      const updShared = (v) => {
+        const merged = { ...sharedT, ...v };
         const filled = {};
-        activeDays.forEach(k => { filled[k] = { ...src }; });
+        activeDays.forEach(k => { filled[k] = { ...merged }; });
         setManualTargets(filled);
       };
-      return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div className="micro" style={{ color: UI.inkFaint }}>SET DAILY TARGETS</div>
-          {activeDays.map(k => {
-            const t = manualTargets[k] || { target_type: 'distance' };
-            const isDist = t.target_type !== 'duration';
-            const upd = (v) => setManualTargets(prev => ({ ...prev, [k]: { ...t, ...v } }));
-            const dispDist = t.distance_m ? (du === 'mi' ? (t.distance_m / 1609.344).toFixed(2) : (t.distance_m / 1000).toFixed(1)) : '';
+
+      const switcher = (
+        <div style={{ display: 'flex', gap: 6 }}>
+          {[
+            { id: 'same',    label: 'Same every day' },
+            { id: 'per_day', label: 'Different per day' },
+          ].map(o => {
+            const on = targetMode === o.id;
             return (
-              <div key={k} style={{ padding: 12, background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: UI.inkSoft, fontFamily: UI.fontUi }}>{CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(k)]}</span>
-                    {(t.distance_m || t.duration_minutes) && (
-                      <button onClick={() => fillAll({ ...t })} style={{
-                        background: 'none', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
-                        padding: '1px 6px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 8,
-                        fontWeight: 700, letterSpacing: '0.06em', color: UI.inkFaint,
-                        WebkitTapHighlightColor: 'transparent',
-                      }} title="Apply to all days">→ ALL</button>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
-                    {['distance','duration'].map(tt => {
-                      const active = isDist ? tt === 'distance' : tt === 'duration';
-                      return (
-                        <button key={tt} onClick={() => upd({ target_type: tt })} style={{
-                          padding: '4px 12px', cursor: 'pointer', border: 'none',
-                          background: active ? UI.inkFaint : 'transparent',
-                          fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
-                          color: active ? UI.bg : UI.inkFaint, WebkitTapHighlightColor: 'transparent',
-                        }}>{tt === 'distance' ? du.toUpperCase() : 'MIN'}</button>
-                      );
-                    })}
-                  </div>
-                </div>
-                {isDist ? (
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="text" inputMode="decimal" defaultValue={dispDist}
-                      key={`${k}-dist-${t.distance_m ?? 'x'}`}
-                      onBlur={e => upd({ distance_m: cpDistToM(e.target.value, du), duration_minutes: null })}
-                      placeholder={du === 'mi' ? '3.1' : '5'} style={{ ...inputStyle, flex: 1 }} />
-                    <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, flexShrink: 0 }}>{du}</span>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="text" inputMode="numeric" defaultValue={t.duration_minutes || ''}
-                      key={`${k}-dur-${t.duration_minutes ?? 'x'}`}
-                      onBlur={e => upd({ duration_minutes: parseInt(e.target.value) || null, distance_m: null })}
-                      placeholder="30" style={{ ...inputStyle, flex: 1 }} />
-                    <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, flexShrink: 0 }}>min</span>
-                  </div>
-                )}
-              </div>
+              <button key={o.id} onClick={() => {
+                if (on) return;
+                // Leaving same-mode keeps the mirrored values; entering it
+                // collapses every day onto the first day's target.
+                if (o.id === 'same') updShared({});
+                setTargetMode(o.id);
+              }} style={{
+                flex: 1, padding: '9px 8px', borderRadius: 6, cursor: on ? 'default' : 'pointer',
+                border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`,
+                background: on ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
+                fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
+                color: on ? 'var(--accent)' : UI.inkSoft, WebkitTapHighlightColor: 'transparent',
+              }}>{o.label}</button>
             );
           })}
+        </div>
+      );
+
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {switcher}
+          {targetMode === 'same'
+            ? targetCard('shared', sharedT, updShared, 'Every day')
+            : activeDays.map(k => {
+                const t = manualTargets[k] || { target_type: 'distance' };
+                const upd = (v) => setManualTargets(prev => ({ ...prev, [k]: { ...t, ...v } }));
+                return targetCard(k, t, upd, CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(k)]);
+              })}
         </div>
       );
     }
