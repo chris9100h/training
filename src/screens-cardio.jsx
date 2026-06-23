@@ -692,11 +692,11 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       // One target editor card (type toggle + value input). `keyId` keeps the
       // uncontrolled inputs distinct; `label` is the heading (weekday or "Every
       // day"); `upd` writes the target object the caller owns.
-      const targetCard = (keyId, t, upd, label) => {
+      const targetCard = (keyId, t, upd, label, span) => {
         const isDist = t.target_type !== 'duration';
         const dispDist = t.distance_m ? (du === 'mi' ? (t.distance_m / 1609.344).toFixed(2) : (t.distance_m / 1000).toFixed(1)) : '';
         return (
-          <div key={keyId} style={{ padding: 12, background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
+          <div key={keyId} style={{ padding: 12, background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, ...(span ? { gridColumn: '1 / -1' } : {}) }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
               <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
@@ -775,11 +775,17 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
           {switcher}
           {targetMode === 'same'
             ? targetCard('shared', sharedT, updShared, 'Every day')
-            : activeDays.map(k => {
-                const t = manualTargets[k] || { target_type: 'distance' };
-                const upd = (v) => setManualTargets(prev => ({ ...prev, [k]: { ...t, ...v } }));
-                return targetCard(k, t, upd, CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(k)]);
-              })}
+            : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                {activeDays.map((k, i) => {
+                  const t = manualTargets[k] || { target_type: 'distance' };
+                  const upd = (v) => setManualTargets(prev => ({ ...prev, [k]: { ...t, ...v } }));
+                  // Odd count → stretch the last card across the full row.
+                  const span = i === activeDays.length - 1 && activeDays.length % 2 === 1;
+                  return targetCard(k, t, upd, CP_WEEKDAY_LABELS[CP_WEEKDAY_KEYS.indexOf(k)], span);
+                })}
+              </div>
+            )}
         </div>
       );
     }
