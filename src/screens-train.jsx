@@ -480,7 +480,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         if (loggedReps > 0 && loggedReps < refReps / 3) {
           kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
           setKbField(null); setKbRaw(''); setKbFresh(false);
-          setRepOutlierConfirm({ setIdx, loggedReps, refReps });
+          setRepOutlierConfirm({ setIdx, loggedReps, refReps, high: false });
+          return;
+        }
+        if (loggedReps > refReps * 3) {
+          kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+          setKbField(null); setKbRaw(''); setKbFresh(false);
+          setRepOutlierConfirm({ setIdx, loggedReps, refReps, high: true });
           return;
         }
       }
@@ -1849,7 +1855,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, padding: '20px 20px 44px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <i className="fa-solid fa-triangle-exclamation" style={{ color: UI.gold, fontSize: 14 }} />
-              <span style={{ fontWeight: 700, fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>Only {repOutlierConfirm.loggedReps} {repOutlierConfirm.loggedReps === 1 ? 'rep' : 'reps'}?</span>
+              <span style={{ fontWeight: 700, fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>{repOutlierConfirm.high ? `${repOutlierConfirm.loggedReps} reps?` : `Only ${repOutlierConfirm.loggedReps} ${repOutlierConfirm.loggedReps === 1 ? 'rep' : 'reps'}?`}</span>
             </div>
             <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 22 }}>
               {entry.name} — {repOutlierConfirm.loggedReps} logged, {repOutlierConfirm.refReps} expected
