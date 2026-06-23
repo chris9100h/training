@@ -397,50 +397,25 @@ const EQUIPMENT_TYPES = [
   { key: 'barbell_single', label: 'Single plate' },
 ];
 
-const _chevronDown = (
-  <svg width="10" height="6" viewBox="0 0 10 6" fill="none" style={{ flexShrink: 0 }}>
-    <path d="M1 1l4 4 4-4" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>
-);
-const _checkmark = (
-  <svg width="12" height="9" viewBox="0 0 12 9" fill="none" style={{ flexShrink: 0 }}>
-    <path d="M1 4.5l3.5 3.5 6.5-7.5" stroke={UI.gold} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>
-);
+// Shared chip style for the always-visible muscle / equipment pickers below.
+// Replaces the expand-in-place dropdowns: a list that opened inside the
+// (position:fixed) sheet was hard to tap precisely while the keyboard was up on
+// iOS. Always-visible chips have no expand/scroll, so the hit area never drifts.
+const pickChipStyle = (on) => ({
+  padding: '9px 13px', borderRadius: 4, cursor: 'pointer',
+  border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`,
+  background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+  color: on ? 'var(--accent)' : UI.inkSoft,
+  fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, lineHeight: 1.1,
+  WebkitTapHighlightColor: 'transparent',
+});
 
-function InlineSelect({ value, onChange, options, placeholder = '— Select —' }) {
-  const [open, setOpen] = useStateL(false);
-  const current = options.find(o => o.key === (value || ''));
+function EquipmentPills({ value, onChange }) {
   return (
-    <div style={{ marginTop: 8 }}>
-      <button onClick={() => setOpen(v => !v)} style={{
-        width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '10px 12px', borderRadius: open ? '6px 6px 0 0' : 6,
-        background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`,
-        cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 14,
-        color: current ? UI.ink : UI.inkFaint,
-        WebkitTapHighlightColor: 'transparent', textAlign: 'left', gap: 8,
-      }}>
-        <span style={{ flex: 1 }}>{current?.label ?? placeholder}</span>
-        <div style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>{_chevronDown}</div>
-      </button>
-      {open && (
-        <div style={{ border: `1px solid ${UI.hairStrong}`, borderTop: 'none', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
-          {options.map((opt, i) => (
-            <button key={opt.key} onClick={() => { onChange(opt.key); setOpen(false); }} style={{
-              width: '100%', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              background: opt.key === value ? `rgba(var(--accent-rgb),0.1)` : UI.bgRaised,
-              color: opt.key === value ? UI.gold : UI.ink,
-              border: 'none', borderTop: `1px solid ${UI.hair}`,
-              cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 14, textAlign: 'left',
-              WebkitTapHighlightColor: 'transparent',
-            }}>
-              <span>{opt.label}</span>
-              {opt.key === value && _checkmark}
-            </button>
-          ))}
-        </div>
-      )}
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+      {EQUIPMENT_TYPES.map(o => (
+        <button key={o.key} onClick={() => onChange(o.key)} style={pickChipStyle(o.key === value)}>{o.label}</button>
+      ))}
     </div>
   );
 }
@@ -457,42 +432,13 @@ function blurKbOnControlTap(e) {
   }
 }
 
-function MuscleSelector({ value, onChange }) {
-  const [open, setOpen] = useStateL(false);
-  const label = value.length === 0 ? '— Select muscles —' : value.join(', ');
+function MusclePills({ value, onChange }) {
+  const toggle = (m) => onChange(value.includes(m) ? value.filter(x => x !== m) : [...value, m]);
   return (
-    <div style={{ marginTop: 8 }}>
-      <button onClick={() => setOpen(v => !v)} style={{
-        width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '10px 12px', borderRadius: open ? '6px 6px 0 0' : 6,
-        background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`,
-        cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 14,
-        color: value.length ? UI.ink : UI.inkFaint,
-        WebkitTapHighlightColor: 'transparent', gap: 8,
-      }}>
-        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}>{label}</span>
-        <div style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>{_chevronDown}</div>
-      </button>
-      {open && (
-        <div style={{ border: `1px solid ${UI.hairStrong}`, borderTop: 'none', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
-          {MUSCLES.map((m, i) => {
-            const sel = value.includes(m);
-            return (
-              <button key={m} onClick={() => onChange(sel ? value.filter(x => x !== m) : [...value, m])} style={{
-                width: '100%', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                background: sel ? `rgba(var(--accent-rgb),0.1)` : UI.bgRaised,
-                color: sel ? UI.gold : UI.ink,
-                border: 'none', borderTop: i > 0 ? `1px solid ${UI.hair}` : 'none',
-                cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 14, textAlign: 'left',
-                WebkitTapHighlightColor: 'transparent',
-              }}>
-                <span>{m}</span>
-                {sel && _checkmark}
-              </button>
-            );
-          })}
-        </div>
-      )}
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+      {MUSCLES.map(m => (
+        <button key={m} onClick={() => toggle(m)} style={pickChipStyle(value.includes(m))}>{m}</button>
+      ))}
     </div>
   );
 }
@@ -568,7 +514,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
         </Field>
         <div>
           <span className="label">Muscle group</span>
-          <MuscleSelector value={selectedTags} onChange={setSelectedTags} />
+          <MusclePills value={selectedTags} onChange={setSelectedTags} />
         </div>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -598,7 +544,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
         </div>
         <div>
           <span className="label">Equipment</span>
-          <InlineSelect value={equipment} onChange={handleEquipmentChange} options={EQUIPMENT_TYPES} />
+          <EquipmentPills value={equipment} onChange={handleEquipmentChange} />
         </div>
         <div>
           <span className="label">Movement type</span>
@@ -816,7 +762,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             </Field>
             <div>
               <span className="label">Muscle group</span>
-              <MuscleSelector value={editTags} onChange={setEditTags} />
+              <MusclePills value={editTags} onChange={setEditTags} />
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -846,7 +792,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             </div>
             <div>
               <span className="label">Equipment</span>
-              <InlineSelect value={editEquipment} onChange={handleEditEquipmentChange} options={EQUIPMENT_TYPES} />
+              <EquipmentPills value={editEquipment} onChange={handleEditEquipmentChange} />
             </div>
             <div>
               <span className="label">Movement type</span>
