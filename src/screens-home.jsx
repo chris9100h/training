@@ -1844,12 +1844,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     try {
       if (modeChanged) {
         if (mode) await LB.openStatusPeriod(userId, mode, startedAt);
-        else if (shouldDelete) await LB.supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null);
+        else if (shouldDelete) { const r = await LB.supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null); if (r.error) throw r.error; }
         else      await LB.closeStatusPeriod(userId, closedAt);
       } else {
         await LB.updateStatusPeriodStart(userId, startedAt);
       }
-    } catch (_) {}
+    } catch (e) { console.error('status period write failed', e); }
     if (coachingId && modeChanged) {
       try {
         const body = mode === 'sick'     ? 'Status: Sick — taking a break from training.'

@@ -2530,16 +2530,16 @@ function weekPerformanceSignal(state, weekStart) {
 }
 
 async function openStatusPeriod(userId, mode, startedAt) {
-  await _supabase.from('zane_status_periods').update({ ended_at: new Date().toISOString() }).eq('user_id', userId).is('ended_at', null);
-  await _supabase.from('zane_status_periods').insert({ id: uid(), user_id: userId, mode, started_at: startedAt });
+  await unwrap(_supabase.from('zane_status_periods').update({ ended_at: new Date().toISOString() }).eq('user_id', userId).is('ended_at', null));
+  await unwrap(_supabase.from('zane_status_periods').insert({ id: uid(), user_id: userId, mode, started_at: startedAt }));
 }
 
 async function closeStatusPeriod(userId, endedAt = null) {
-  await _supabase.from('zane_status_periods').update({ ended_at: endedAt || new Date().toISOString() }).eq('user_id', userId).is('ended_at', null);
+  await unwrap(_supabase.from('zane_status_periods').update({ ended_at: endedAt || new Date().toISOString() }).eq('user_id', userId).is('ended_at', null));
 }
 
 async function updateStatusPeriodStart(userId, startedAt) {
-  await _supabase.from('zane_status_periods').update({ started_at: startedAt }).eq('user_id', userId).is('ended_at', null);
+  await unwrap(_supabase.from('zane_status_periods').update({ started_at: startedAt }).eq('user_id', userId).is('ended_at', null));
 }
 
 // End the active sick/vacation status. Last status day = yesterday, so a session
@@ -2561,9 +2561,9 @@ async function clearStatusMode(userId, store, setStore) {
       : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: closedAt } : p),
   }));
   try {
-    if (shouldDelete) await _supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null);
+    if (shouldDelete) await unwrap(_supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null));
     else await closeStatusPeriod(userId, closedAt);
-  } catch (_) {}
+  } catch (e) { console.error('clearStatusMode: status period write failed', e); }
 }
 
 async function refreshHealthLogs(userId) {
