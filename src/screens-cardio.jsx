@@ -585,7 +585,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
               ) : (
                 customTypes.map(t => (
                   <button key={t} onClick={() => { setActivityType(t); setShowCustom(false); }} style={{
-                    padding: '10px 14px', borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+                    padding: '10px 14px', borderRadius: 6, cursor: 'pointer', textAlign: 'center',
                     border: `1px solid ${activityType === t ? 'var(--accent)' : UI.hairStrong}`,
                     background: activityType === t ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
                     fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
