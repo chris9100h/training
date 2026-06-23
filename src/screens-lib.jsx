@@ -420,6 +420,13 @@ function EquipmentPills({ value, onChange }) {
   );
 }
 
+// Single tappable chip matching the muscle/equipment pickers — used for the
+// smaller choices in the exercise editor (size, movement, rep target) so every
+// chip in the form is the same size.
+function Chip({ on, onClick, children }) {
+  return <button onClick={onClick} style={pickChipStyle(on)}>{children}</button>;
+}
+
 // Dismiss the soft keyboard the instant the user taps a non-text control inside
 // a sheet. On iOS an open keyboard desyncs position:fixed hit-testing from the
 // visual layout, so taps on controls below an autofocused input land offset
@@ -536,9 +543,9 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
               ))}
             </div>
           )}
-          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
             {EXERCISE_SIZES.map(([val, label]) => (
-              <Pill key={val} gold={category === val} onClick={() => setCategory(c => c === val ? null : val)} style={{ cursor: 'pointer' }}>{label}</Pill>
+              <Chip key={val} on={category === val} onClick={() => setCategory(c => c === val ? null : val)}>{label}</Chip>
             ))}
           </div>
         </div>
@@ -548,26 +555,26 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
         </div>
         <div>
           <span className="label">Movement type</span>
-          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
             {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
-              <Pill key={val} gold={movementType === val}
+              <Chip key={val} on={movementType === val}
                 onClick={() => { setMovementType(val); setNoWeightReps(val === 'mobility'); if (val === 'mobility') setEquipment('no_equipment'); }}
-                style={{ cursor: 'pointer' }}>{label}</Pill>
+              >{label}</Chip>
             ))}
           </div>
           {movementType === 'mobility' && (
-            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-              <Pill gold={noWeightReps} onClick={() => setNoWeightReps(true)} style={{ cursor: 'pointer' }}>Checkbox only</Pill>
-              <Pill gold={!noWeightReps} onClick={() => setNoWeightReps(false)} style={{ cursor: 'pointer' }}>Weight & Reps</Pill>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+              <Chip on={noWeightReps} onClick={() => setNoWeightReps(true)}>Checkbox only</Chip>
+              <Chip on={!noWeightReps} onClick={() => setNoWeightReps(false)}>Weight & Reps</Chip>
             </div>
           )}
         </div>
         <div>
           <span className="label">Rep target</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-            <Pill gold={progressionReps != null} onClick={() => setProgressionReps(v => v == null ? 12 : null)} style={{ cursor: 'pointer' }}>
+            <Chip on={progressionReps != null} onClick={() => setProgressionReps(v => v == null ? 12 : null)}>
               {progressionReps != null ? 'On' : 'Off'}
-            </Pill>
+            </Chip>
             {progressionReps != null
               ? <Stepper value={progressionReps} onChange={v => setProgressionReps(Math.max(1, Math.round(v)))} step={1} min={1} />
               : <span style={{ color: UI.inkFaint, fontSize: 13 }}>Uses planned reps per day</span>
@@ -784,9 +791,9 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                   ))}
                 </div>
               )}
-              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                 {EXERCISE_SIZES.map(([val, label]) => (
-                  <Pill key={val} gold={editCategory === val} onClick={() => setEditCategory(c => c === val ? null : val)} style={{ cursor: 'pointer' }}>{label}</Pill>
+                  <Chip key={val} on={editCategory === val} onClick={() => setEditCategory(c => c === val ? null : val)}>{label}</Chip>
                 ))}
               </div>
             </div>
@@ -796,26 +803,26 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             </div>
             <div>
               <span className="label">Movement type</span>
-              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                 {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
-                  <Pill key={val} gold={editMovementType === val}
+                  <Chip key={val} on={editMovementType === val}
                     onClick={() => { setEditMovementType(val); setEditNoWeightReps(val === 'mobility'); if (val === 'mobility') setEditEquipment('no_equipment'); }}
-                    style={{ cursor: 'pointer' }}>{label}</Pill>
+                  >{label}</Chip>
                 ))}
               </div>
               {editMovementType === 'mobility' && (
-                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                  <Pill gold={editNoWeightReps} onClick={() => setEditNoWeightReps(true)} style={{ cursor: 'pointer' }}>Checkbox only</Pill>
-                  <Pill gold={!editNoWeightReps} onClick={() => setEditNoWeightReps(false)} style={{ cursor: 'pointer' }}>Weight & Reps</Pill>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                  <Chip on={editNoWeightReps} onClick={() => setEditNoWeightReps(true)}>Checkbox only</Chip>
+                  <Chip on={!editNoWeightReps} onClick={() => setEditNoWeightReps(false)}>Weight & Reps</Chip>
                 </div>
               )}
             </div>
             <div>
               <span className="label">Rep target</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-                <Pill gold={editProgressionReps != null} onClick={() => setEditProgressionReps(v => v == null ? 12 : null)} style={{ cursor: 'pointer' }}>
+                <Chip on={editProgressionReps != null} onClick={() => setEditProgressionReps(v => v == null ? 12 : null)}>
                   {editProgressionReps != null ? 'On' : 'Off'}
-                </Pill>
+                </Chip>
                 {editProgressionReps != null
                   ? <Stepper value={editProgressionReps} onChange={v => setEditProgressionReps(Math.max(1, Math.round(v)))} step={1} min={1} />
                   : <span style={{ color: UI.inkFaint, fontSize: 13 }}>Uses planned reps per day</span>
