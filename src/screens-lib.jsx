@@ -508,8 +508,10 @@ function SvgKnurl({ style }) {
 // Canvas placeholder for between-exercise knurl dividers in screenshot mode.
 // takeScreenshot draws into these imperatively right before html2canvas runs,
 // so timing is guaranteed regardless of when React flushes the re-render.
-function KnurlCanvas({ style }) {
-  return <canvas data-knurl="1" style={{ display: 'block', width: '100%', height: 3, ...style }} />;
+// `inset` shortens the line on the right (px) so the last divider clears the
+// Zane avatar that sits in the bottom-right corner of the capture.
+function KnurlCanvas({ style, inset = 0 }) {
+  return <canvas data-knurl="1" data-knurl-inset={inset} style={{ display: 'block', width: '100%', height: 3, ...style }} />;
 }
 
 function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '' }) {
@@ -2171,8 +2173,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     // Draw knurl dividers imperatively — canvas elements placed by KnurlCanvas
     // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
     captureRef.current.querySelectorAll('canvas[data-knurl]').forEach(c => {
-      const w = c.parentElement ? c.parentElement.offsetWidth : 320;
-      if (!w) return;
+      const inset = parseInt(c.dataset.knurlInset) || 0;
+      const pw = c.parentElement ? c.parentElement.offsetWidth : 320;
+      const w = pw - inset;
+      if (w <= 0) return;
+      if (inset) c.style.width = w + 'px';
       c.width = w; c.height = 3;
       const ctx = c.getContext('2d');
       ctx.strokeStyle = 'rgba(236,228,208,0.20)';
@@ -2462,7 +2467,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       </div>
                     </div>
                   ) : renderEntry(g.entry, g.idx)}
-                  {gi < groups.length - 1 && (capturing ? <KnurlCanvas style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
+                  {gi < groups.length - 1 && (capturing ? <KnurlCanvas style={{ marginTop: 14 }} inset={gi === groups.length - 2 ? 104 : 0} /> : <Hairline style={{ marginTop: 14 }} />)}
                 </div>
               ));
             })()}
