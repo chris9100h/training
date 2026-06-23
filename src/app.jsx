@@ -392,12 +392,30 @@ function App() {
     };
   }, []);
 
+  // Dismiss already-shown notifications whenever the app is in the foreground.
+  // TTL on the push only governs *undelivered* messages; notifications that
+  // were shown while you were away keep piling up in the OS notification center
+  // otherwise. Returning to the app (visibilitychange) is the moment to clear
+  // them — it covers the "just logged a set" case and stale coaching pushes.
+  useEffectA(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const clearDelivered = () => {
+      if (document.visibilityState !== 'visible') return;
+      navigator.serviceWorker.ready
+        .then(reg => reg.getNotifications())
+        .then(ns => ns.forEach(n => n.close()))
+        .catch(() => {});
+    };
+    clearDelivered();
+    document.addEventListener('visibilitychange', clearDelivered);
+    return () => document.removeEventListener('visibilitychange', clearDelivered);
+  }, []);
+
   useEffectA(() => {
     if (!('serviceWorker' in navigator)) return;
     navigator.serviceWorker.ready.then(reg => {
       swReg.current = reg;
       reg.update().catch(() => {});
-
       const trackWorker = (worker) => {
         if (!worker) return;
         worker.addEventListener('statechange', () => {
