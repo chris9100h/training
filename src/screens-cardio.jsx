@@ -101,12 +101,13 @@ function cpGenerateWeeks(goal, startFitness, goalDueDate, planStartDate, planDay
     const startDur  = Math.max(5, startFitness.duration_minutes || 10);
     const targetDur = goal.target_duration_minutes;
     const rate      = Math.min(Math.pow(targetDur / startDur, 1 / Math.max(1, nActive - 1)), maxSessRate);
-    let cur = startDur;
+    // Degenerate single-session timeline: no room to progress, aim at the goal.
+    let cur = nActive <= 1 ? targetDur : startDur;
     return sessDates.map((d, si) => {
       const isDeload = deloadFlags[si];
       const val = Math.round(isDeload ? cur * 0.88 : cur);
       if (!isDeload) cur = Math.min(targetDur, cur * rate);
-      return { distance_m: null, duration_minutes: val, pace_s_per_km: null };
+      return { distance_m: null, duration_minutes: val, pace_s_per_km: null, deload: isDeload };
     });
   }
 
@@ -114,7 +115,8 @@ function cpGenerateWeeks(goal, startFitness, goalDueDate, planStartDate, planDay
   const startDist  = Math.max(100, startFitness.distance_m || 500);
   const targetDist = goal.target_distance_m;
   const rate       = Math.min(Math.pow(targetDist / startDist, 1 / Math.max(1, nActive - 1)), maxSessRate);
-  let cur = startDist;
+  // Degenerate single-session timeline: no room to progress, aim at the goal.
+  let cur = nActive <= 1 ? targetDist : startDist;
   return sessDates.map((d, si) => {
     const isDeload = deloadFlags[si];
     const distM = Math.round(isDeload ? cur * 0.88 : cur);
@@ -125,7 +127,7 @@ function cpGenerateWeeks(goal, startFitness, goalDueDate, planStartDate, planDay
       pace = Math.max(tgtPace, Math.round(startFitness.pace_s_per_km + t * (tgtPace - startFitness.pace_s_per_km)));
     }
     if (!isDeload) cur = Math.min(targetDist, cur * rate);
-    return { distance_m: distM, duration_minutes: null, pace_s_per_km: pace };
+    return { distance_m: distM, duration_minutes: null, pace_s_per_km: pace, deload: isDeload };
   });
 }
 
@@ -436,8 +438,16 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       if (step === 4) return !!planName.trim();
     }
     if (mode === 'goal') {
-      if (step === 2) return !!(goalDue && CP_WEEKDAY_KEYS.some(k => days[k]) && (goal.type === 'duration' ? goalDurMin : goalDistM));
-      if (step === 3) return goal.type === 'duration' ? !!fitDurMin : !!fitDistM;
+      if (step === 2) {
+        const hasDays   = CP_WEEKDAY_KEYS.some(k => days[k]);
+        const hasTarget = goal.type === 'duration' ? !!goalDurMin
+                        : goal.type === 'pace'     ? !!(goalDistM && goalDurMin)
+                        : !!goalDistM;
+        return !!(goalDue && hasDays && hasTarget);
+      }
+      if (step === 3) return goal.type === 'duration' ? !!fitDurMin
+                          : goal.type === 'pace'     ? !!(fitDistM && fitDurMin)
+                          : !!fitDistM;
       if (step === 4) return true;
       if (step === 5) return !!planName.trim();
     }
@@ -456,15 +466,16 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
     };
     const ws = cpGenerateWeeks(gObj, sfObj, goalDue, todayISO, days);
     const warnings = [];
-    const daysActive = CP_WEEKDAY_KEYS.filter(k => days[k]).length;
-    const maxSessRate = Math.pow(1.10, 1 / Math.max(1, daysActive));
-    if (goal.type !== 'duration' && ws.length && goalDistM && sfObj.distance_m) {
-      const raw = Math.pow(goalDistM / sfObj.distance_m, 1 / ws.length);
-      if (raw > maxSessRate) warnings.push(`Maximum progression applied — you may not fully reach ${cpFmtDist(goalDistM, du)} by the due date. Consider extending the timeline.`);
-    }
-    if (goal.type === 'duration' && ws.length && goalDurMin && sfObj.duration_minutes) {
-      const raw = Math.pow(goalDurMin / sfObj.duration_minutes, 1 / ws.length);
-      if (raw > maxSessRate) warnings.push(`Maximum progression applied — you may not reach ${goalDurMin} min by the due date. Consider extending the timeline.`);
+    // Warn straight off the generated plan: the last session is always
+    // non-deload, so if its value still falls short of the goal the
+    // progression was rate-capped and the goal won't be reached in time.
+    const last = ws[ws.length - 1];
+    if (last) {
+      if (goal.type === 'duration' && goalDurMin && last.duration_minutes < goalDurMin * 0.995) {
+        warnings.push(`Maximum progression applied — you may not reach ${goalDurMin} min by the due date. Consider extending the timeline.`);
+      } else if (goal.type !== 'duration' && goalDistM && last.distance_m < goalDistM * 0.995) {
+        warnings.push(`Maximum progression applied — you may not fully reach ${cpFmtDist(goalDistM, du)} by the due date. Consider extending the timeline.`);
+      }
     }
     setPreview({ weeks: ws, warnings });
   };
@@ -947,11 +958,14 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       const total = ws.length;
       const isDur = goal.type === 'duration';
       const totalWeeksPreview = cpWeeksUntil(goalDue, LB.todayISO());
-      const picks = total <= 6
-        ? ws.map((w, i) => ({ w, i }))
-        : [0, Math.floor(total*0.2), Math.floor(total*0.4), Math.floor(total*0.6), Math.floor(total*0.8), total-1]
+      // Only surface real (non-deload) sessions, sampled evenly so the goal
+      // session is always the last row. Deload flag comes from the generator.
+      const real = ws.map((w, i) => ({ w, i })).filter(({ w }) => !w.deload);
+      const picks = real.length <= 6
+        ? real
+        : [0, 0.2, 0.4, 0.6, 0.8, 1].map(f => Math.round(f * (real.length - 1)))
             .filter((v,idx,a) => a.indexOf(v) === idx)
-            .map(i => ({ w: ws[i], i }));
+            .map(si => real[si]);
       const actLabel = cpActivity(activityType).label;
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -966,9 +980,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
             </div>
           ))}
           {picks.map(({ w, i }) => {
-            const isDeload = (i + 1) % 4 === 0 && i < total - 2;
-            const isGoal   = i === total - 1;
-            if (isDeload) return null;
+            const isGoal = i === total - 1;
             return (
               <div key={i} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -1049,9 +1061,12 @@ function CardioPlanScreen({ store, setStore, go }) {
 
   const openCreate = (ep) => { setEditPlan(ep || null); setCreateOpen(true); };
 
-  const doArchive   = (p) => { setDetailPlan(null); setStore(s => ({ ...s, cardioPlans: (s.cardioPlans||[]).map(x => x.id===p.id ? {...x, archived:true}  : x) })); };
+  // Archiving or deleting the active plan must release activeCardioPlanId,
+  // otherwise it dangles on a hidden/gone plan and blocks auto-activation of
+  // the next new plan (which only fills the slot when it's null).
+  const doArchive   = (p) => { setDetailPlan(null); setStore(s => ({ ...s, cardioPlans: (s.cardioPlans||[]).map(x => x.id===p.id ? {...x, archived:true}  : x), activeCardioPlanId: s.activeCardioPlanId === p.id ? null : s.activeCardioPlanId })); };
   const doUnarchive = (p) => { setDetailPlan(null); setStore(s => ({ ...s, cardioPlans: (s.cardioPlans||[]).map(x => x.id===p.id ? {...x, archived:false} : x) })); };
-  const doDelete    = (p) => { setDetailPlan(null); setStore(s => ({ ...s, cardioPlans: (s.cardioPlans||[]).filter(x => x.id !== p.id) })); };
+  const doDelete    = (p) => { setDetailPlan(null); setStore(s => ({ ...s, cardioPlans: (s.cardioPlans||[]).filter(x => x.id !== p.id), activeCardioPlanId: s.activeCardioPlanId === p.id ? null : s.activeCardioPlanId })); };
 
   function PlanCard({ plan }) {
     const act      = cpActivity(plan.activityType);
