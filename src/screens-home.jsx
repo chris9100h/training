@@ -1547,26 +1547,32 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     return statusPeriodModeFor(sessionDate);
   }, [isViewingToday, isFutureSlot, store.statusMode, statusPeriodModeFor, sessionDate]);
 
-  const handleClearStatus = async () => {
-    const current = store.statusMode ?? null;
-    if (!current) return;
-    // Deactivating today = last sick/vacation day was yesterday
-    const d = new Date(LB.todayISO() + 'T12:00:00'); d.setDate(d.getDate() - 1);
-    const closedAt = d.toISOString();
-    const openPeriod = (store.statusPeriods || []).find(p => !p.endedAt);
-    // If the period started today, closedAt (yesterday) < startedAt → delete instead of creating an invalid record
-    const shouldDelete = !!openPeriod && closedAt < openPeriod.startedAt;
-    setStore(s => ({
-      ...s, statusMode: null, statusModeSince: null,
-      statusPeriods: shouldDelete
-        ? (s.statusPeriods || []).filter(p => !!p.endedAt)
-        : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: closedAt } : p),
-    }));
-    try {
-      if (shouldDelete) await LB.supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null);
-      else await LB.closeStatusPeriod(userId, closedAt);
-    } catch (_) {}
-  };
+  const handleClearStatus = () => LB.clearStatusMode(userId, store, setStore);
+
+  // After training while Sick mode is on, offer to end it — catches the common
+  // "forgot to toggle it off" case. Covers both strength and cardio sessions,
+  // sick only (training on vacation is normal). Asks at most once per day,
+  // whichever way the user answers.
+  const sickPromptShown = useRef(false);
+  useEffect(() => {
+    if (store?.statusMode !== 'sick' || sickPromptShown.current) return;
+    const today = LB.todayISO();
+    let dismissed = false;
+    try { dismissed = localStorage.getItem('logbook-sick-recover-prompt') === today; } catch (_) {}
+    if (dismissed) return;
+    const trainedToday = (store.sessions || []).some(s => s.ended && s.ended.slice(0, 10) === today)
+      || (store.cardioLogs || []).some(l => l.date === today);
+    if (!trainedToday) return;
+    sickPromptShown.current = true;
+    (async () => {
+      const yes = await confirm(
+        'You logged a session while Sick mode is on. Feeling better and ready to end it?',
+        { title: 'End sick mode?', ok: 'End sick mode', cancel: 'Stay in sick mode' },
+      );
+      try { localStorage.setItem('logbook-sick-recover-prompt', today); } catch (_) {}
+      if (yes) await LB.clearStatusMode(userId, store, setStore);
+    })();
+  }, [store?.statusMode, store?.sessions, store?.cardioLogs]);
 
   const selectedDayCardioLogs = useMemo(() => {
     const dateKey = sessionDate.toISOString().slice(0, 10);

@@ -2542,6 +2542,30 @@ async function updateStatusPeriodStart(userId, startedAt) {
   await _supabase.from('zane_status_periods').update({ started_at: startedAt }).eq('user_id', userId).is('ended_at', null);
 }
 
+// End the active sick/vacation status. Last status day = yesterday, so a session
+// logged today already counts as a normal training day. Mutates via setStore and
+// writes through to zane_status_periods. Shared by the home toggle and the
+// post-session "feeling better?" prompt.
+async function clearStatusMode(userId, store, setStore) {
+  if (!(store?.statusMode ?? null)) return;
+  const d = new Date(todayISO() + 'T12:00:00'); d.setDate(d.getDate() - 1);
+  const closedAt = d.toISOString();
+  const openPeriod = (store.statusPeriods || []).find(p => !p.endedAt);
+  // If the period started today, closedAt (yesterday) < startedAt → delete it
+  // instead of writing an invalid record.
+  const shouldDelete = !!openPeriod && closedAt < openPeriod.startedAt;
+  setStore(s => ({
+    ...s, statusMode: null, statusModeSince: null,
+    statusPeriods: shouldDelete
+      ? (s.statusPeriods || []).filter(p => !!p.endedAt)
+      : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: closedAt } : p),
+  }));
+  try {
+    if (shouldDelete) await _supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null);
+    else await closeStatusPeriod(userId, closedAt);
+  } catch (_) {}
+}
+
 async function refreshHealthLogs(userId) {
   const [dailyRes, cardioRes] = await Promise.all([
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, created_at').eq('user_id', userId).order('date', { ascending: false }),
@@ -2583,7 +2607,7 @@ window.LB = {
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover,
   subscribeToChanges,
-  openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart,
+  openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,
