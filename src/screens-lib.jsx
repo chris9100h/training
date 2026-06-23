@@ -445,6 +445,18 @@ function InlineSelect({ value, onChange, options, placeholder = '— Select —'
   );
 }
 
+// Dismiss the soft keyboard the instant the user taps a non-text control inside
+// a sheet. On iOS an open keyboard desyncs position:fixed hit-testing from the
+// visual layout, so taps on controls below an autofocused input land offset
+// ("you have to tap above where you think"). Blurring on pointerdown restores
+// the hit area for every following tap.
+function blurKbOnControlTap(e) {
+  const t = e.target;
+  if (t && t.closest && !t.closest('input, textarea, [contenteditable]')) {
+    try { if (document.activeElement) document.activeElement.blur(); } catch (_) {}
+  }
+}
+
 function MuscleSelector({ value, onChange }) {
   const [open, setOpen] = useStateL(false);
   const label = value.length === 0 ? '— Select muscles —' : value.join(', ');
@@ -550,7 +562,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   return (
     <>
     <Sheet open={true} onClose={requestClose} title="New exercise">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+      <div onPointerDown={blurKbOnControlTap} style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <Field label="Name">
           <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" autoFocus />
         </Field>
@@ -563,8 +575,8 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
             <span className="label">Exercise size</span>
             <button onClick={() => setShowSizeInfo(v => !v)} style={{
               background: 'none', border: `1px solid ${UI.hairStrong}`, borderRadius: '50%',
-              width: 14, height: 14, padding: 0, cursor: 'pointer', color: UI.inkFaint,
-              fontFamily: UI.fontUi, fontSize: 8, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 22, height: 22, padding: 0, cursor: 'pointer', color: UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
               WebkitTapHighlightColor: 'transparent', flexShrink: 0,
             }}>?</button>
           </div>
@@ -798,7 +810,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
 
       <div style={{ padding: '14px 22px 0' }}>
         {editMode ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div onPointerDown={blurKbOnControlTap} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <Field label="Name">
               <TextInput value={editName} onChange={v => setEditName(v.toUpperCase())} />
             </Field>
@@ -811,8 +823,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                 <span className="label">Exercise size</span>
                 <button onClick={() => setShowSizeInfoEdit(v => !v)} style={{
                   background: 'none', border: `1px solid ${UI.hairStrong}`, borderRadius: '50%',
-                  width: 14, height: 14, padding: 0, cursor: 'pointer', color: UI.inkFaint,
-                  fontFamily: UI.fontUi, fontSize: 8, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 22, height: 22, padding: 0, cursor: 'pointer', color: UI.inkFaint,
+                  fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
                   WebkitTapHighlightColor: 'transparent', flexShrink: 0,
                 }}>?</button>
               </div>
