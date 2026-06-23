@@ -356,6 +356,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
   const [showCustom,    setShowCustom]    = useStateCard(false);
   const [useTargets,    setUseTargets]    = useStateCard(true);
   const [targetMode,    setTargetMode]    = useStateCard('same'); // 'same' | 'per_day'
+  const [confirmEl, confirm] = useConfirm();
 
   const du = cpDistUnit();
 
@@ -489,6 +490,17 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
   const back = () => {
     if (mode === 'manual' && step === 4 && !useTargets) { setStep(2); return; }
     setStep(s => s - 1);
+  };
+
+  // Tapping the backdrop dismisses the sheet and drops the whole wizard, so
+  // confirm first once the user has started setting things up.
+  const requestClose = async () => {
+    const hasProgress = !!editPlan || step > 0 || !!activityType;
+    if (hasProgress && !(await confirm(
+      'Your plan setup will be discarded.',
+      { title: 'Discard plan?', ok: 'Discard', cancel: 'Keep editing', danger: true }
+    ))) return;
+    onClose();
   };
 
   const save = () => {
@@ -858,9 +870,13 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                   placeholder="60" style={{ ...inputStyle, flex: 1 }} />
                 <span style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, flexShrink: 0 }}>min</span>
               </div>
-              {goalDistM && goalDurMin && (
+              {goalDistM && goalDurMin ? (
                 <div className="num" style={{ fontSize: 11, color: UI.inkFaint, marginTop: 6 }}>
-                  Target pace: {cpFmtPace((goalDurMin * 60) / (goalDistM / 1000), du)}
+                  Target pace: {cpFmtPace((goalDurMin * 60) / (goalDistM / 1000), du)} · {cpFmtSpeed((goalDurMin * 60) / (goalDistM / 1000), du)}
+                </div>
+              ) : (
+                <div style={{ fontSize: 11, color: '#f0a830', fontFamily: UI.fontUi, marginTop: 6 }}>
+                  ⚠ Enter both a target distance and a target time to set a pace goal.
                 </div>
               )}
             </div>
@@ -942,11 +958,15 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                 placeholder="25" style={{ ...inputStyle, flex: 1 }} />
               <span style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, flexShrink: 0 }}>min</span>
             </div>
-            {fitDistM && fitDurMin && (
+            {fitDistM && fitDurMin ? (
               <div className="num" style={{ fontSize: 11, color: UI.inkFaint, marginTop: 6 }}>
-                Current pace: {cpFmtPace(fitPaceSec, du)}
+                Current pace: {cpFmtPace(fitPaceSec, du)} · {cpFmtSpeed(fitPaceSec, du)}
               </div>
-            )}
+            ) : goal.type === 'pace' ? (
+              <div style={{ fontSize: 11, color: '#f0a830', fontFamily: UI.fontUi, marginTop: 6 }}>
+                ⚠ Enter both distance and time so we can set your starting pace.
+              </div>
+            ) : null}
           </div>
         </div>
       );
@@ -1003,7 +1023,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                     ? <span className="num" style={{ fontSize: 15, color: isGoal ? 'var(--accent)' : UI.ink }}>{w.duration_minutes} min</span>
                     : <span className="num" style={{ fontSize: 15, color: isGoal ? 'var(--accent)' : UI.ink }}>{cpFmtDist(w.distance_m, du)}</span>
                   }
-                  {w.pace_s_per_km && <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>@ {cpFmtPace(w.pace_s_per_km, du)}</span>}
+                  {w.pace_s_per_km && <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>@ {cpFmtPace(w.pace_s_per_km, du)} · {cpFmtSpeed(w.pace_s_per_km, du)}</span>}
                 </div>
               </div>
             );
@@ -1024,7 +1044,8 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
   };
 
   return (
-    <Sheet open={open} onClose={onClose} title={sheetTitle}>
+    <Sheet open={open} onClose={requestClose} title={sheetTitle}>
+      {confirmEl}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
         {step > 0 && mode && (
           <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
