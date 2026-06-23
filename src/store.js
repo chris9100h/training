@@ -465,7 +465,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_cardio_plans').select('id, name, activity_type, archived, mode, days, manual_targets, goal, goal_due_date, start_fitness, generated_weeks, plan_start_date, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Daily health logs (weight / steps / macros / water) — one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     // Sick/vacation history periods — used for missed-workout stats and training adherence.
     // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
     _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
@@ -608,6 +608,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       offPlanNote: l.off_plan_note ?? null,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
+      updatedAt: l.updated_at ?? null,
       createdAt: l.created_at,
     })),
     statusPeriods: (statusPeriodsRes?.data || []).map(p => ({
@@ -947,8 +948,12 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(l);
     });
     const removed = (prev.dailyLogs || []).filter(l => !(next.dailyLogs || []).find(x => x.id === l.id));
-    if (upsert.length) ops.push(_supabase.from('zane_daily_logs').upsert(upsert.map(l => ({
-      id: l.id, user_id: userId, date: l.date,
+    // Batch RPC resolves conflicts on (user_id, date) keeping the existing id,
+    // and guards against stale (older updated_at) writes — so two devices
+    // editing the same day no longer collide on UNIQUE(user_id, date) and a
+    // stale offline edit can't clobber a newer one. See migration 0096.
+    if (upsert.length) ops.push(_supabase.rpc('sync_daily_logs_batch', { p_logs: upsert.map(l => ({
+      id: l.id, date: l.date,
       weight: l.weight ?? null, steps: l.steps ?? null,
       calories: l.calories ?? null, protein: l.protein ?? null,
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
@@ -956,7 +961,8 @@ async function syncStore(prev, next, userId) {
       off_plan_note: l.offPlanNote ?? null,
       adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
       daily_coach_fields: l.coachFields ?? null,
-    }))));
+      updated_at: l.updatedAt ?? new Date().toISOString(),
+    })) }));
     if (removed.length) ops.push(_supabase.from('zane_daily_logs').delete().in('id', removed.map(l => l.id)));
   }
 
@@ -2530,21 +2536,45 @@ function weekPerformanceSignal(state, weekStart) {
 }
 
 async function openStatusPeriod(userId, mode, startedAt) {
-  await _supabase.from('zane_status_periods').update({ ended_at: new Date().toISOString() }).eq('user_id', userId).is('ended_at', null);
-  await _supabase.from('zane_status_periods').insert({ id: uid(), user_id: userId, mode, started_at: startedAt });
+  await unwrap(_supabase.from('zane_status_periods').update({ ended_at: new Date().toISOString() }).eq('user_id', userId).is('ended_at', null));
+  await unwrap(_supabase.from('zane_status_periods').insert({ id: uid(), user_id: userId, mode, started_at: startedAt }));
 }
 
 async function closeStatusPeriod(userId, endedAt = null) {
-  await _supabase.from('zane_status_periods').update({ ended_at: endedAt || new Date().toISOString() }).eq('user_id', userId).is('ended_at', null);
+  await unwrap(_supabase.from('zane_status_periods').update({ ended_at: endedAt || new Date().toISOString() }).eq('user_id', userId).is('ended_at', null));
 }
 
 async function updateStatusPeriodStart(userId, startedAt) {
-  await _supabase.from('zane_status_periods').update({ started_at: startedAt }).eq('user_id', userId).is('ended_at', null);
+  await unwrap(_supabase.from('zane_status_periods').update({ started_at: startedAt }).eq('user_id', userId).is('ended_at', null));
+}
+
+// End the active sick/vacation status. Last status day = yesterday, so a session
+// logged today already counts as a normal training day. Mutates via setStore and
+// writes through to zane_status_periods. Shared by the home toggle and the
+// post-session "feeling better?" prompt.
+async function clearStatusMode(userId, store, setStore) {
+  if (!(store?.statusMode ?? null)) return;
+  const d = new Date(todayISO() + 'T12:00:00'); d.setDate(d.getDate() - 1);
+  const closedAt = d.toISOString();
+  const openPeriod = (store.statusPeriods || []).find(p => !p.endedAt);
+  // If the period started today, closedAt (yesterday) < startedAt → delete it
+  // instead of writing an invalid record.
+  const shouldDelete = !!openPeriod && closedAt < openPeriod.startedAt;
+  setStore(s => ({
+    ...s, statusMode: null, statusModeSince: null,
+    statusPeriods: shouldDelete
+      ? (s.statusPeriods || []).filter(p => !!p.endedAt)
+      : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: closedAt } : p),
+  }));
+  try {
+    if (shouldDelete) await unwrap(_supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null));
+    else await closeStatusPeriod(userId, closedAt);
+  } catch (e) { console.error('clearStatusMode: status period write failed', e); }
 }
 
 async function refreshHealthLogs(userId) {
   const [dailyRes, cardioRes] = await Promise.all([
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
   ]);
   if (dailyRes.error || cardioRes.error) return null;
@@ -2558,6 +2588,7 @@ async function refreshHealthLogs(userId) {
       offPlanNote: l.off_plan_note ?? null,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
+      updatedAt: l.updated_at ?? null,
       createdAt: l.created_at,
     })),
     cardioLogs: (cardioRes.data || []).map(l => ({
@@ -2583,7 +2614,7 @@ window.LB = {
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover,
   subscribeToChanges,
-  openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart,
+  openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
   loadCoachingMacros, addCoachingMacros,

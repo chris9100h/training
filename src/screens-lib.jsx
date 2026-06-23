@@ -397,90 +397,55 @@ const EQUIPMENT_TYPES = [
   { key: 'barbell_single', label: 'Single plate' },
 ];
 
-const _chevronDown = (
-  <svg width="10" height="6" viewBox="0 0 10 6" fill="none" style={{ flexShrink: 0 }}>
-    <path d="M1 1l4 4 4-4" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>
-);
-const _checkmark = (
-  <svg width="12" height="9" viewBox="0 0 12 9" fill="none" style={{ flexShrink: 0 }}>
-    <path d="M1 4.5l3.5 3.5 6.5-7.5" stroke={UI.gold} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>
-);
+// Shared chip style for the always-visible muscle / equipment pickers below.
+// Replaces the expand-in-place dropdowns: a list that opened inside the
+// (position:fixed) sheet was hard to tap precisely while the keyboard was up on
+// iOS. Always-visible chips have no expand/scroll, so the hit area never drifts.
+const pickChipStyle = (on) => ({
+  padding: '9px 13px', borderRadius: 4, cursor: 'pointer',
+  border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`,
+  background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+  color: on ? 'var(--accent)' : UI.inkSoft,
+  fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, lineHeight: 1.1,
+  WebkitTapHighlightColor: 'transparent',
+});
 
-function InlineSelect({ value, onChange, options, placeholder = '— Select —' }) {
-  const [open, setOpen] = useStateL(false);
-  const current = options.find(o => o.key === (value || ''));
+function EquipmentPills({ value, onChange }) {
   return (
-    <div style={{ marginTop: 8 }}>
-      <button onClick={() => setOpen(v => !v)} style={{
-        width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '10px 12px', borderRadius: open ? '6px 6px 0 0' : 6,
-        background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`,
-        cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 14,
-        color: current ? UI.ink : UI.inkFaint,
-        WebkitTapHighlightColor: 'transparent', textAlign: 'left', gap: 8,
-      }}>
-        <span style={{ flex: 1 }}>{current?.label ?? placeholder}</span>
-        <div style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>{_chevronDown}</div>
-      </button>
-      {open && (
-        <div style={{ border: `1px solid ${UI.hairStrong}`, borderTop: 'none', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
-          {options.map((opt, i) => (
-            <button key={opt.key} onClick={() => { onChange(opt.key); setOpen(false); }} style={{
-              width: '100%', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              background: opt.key === value ? `rgba(var(--accent-rgb),0.1)` : UI.bgRaised,
-              color: opt.key === value ? UI.gold : UI.ink,
-              border: 'none', borderTop: `1px solid ${UI.hair}`,
-              cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 14, textAlign: 'left',
-              WebkitTapHighlightColor: 'transparent',
-            }}>
-              <span>{opt.label}</span>
-              {opt.key === value && _checkmark}
-            </button>
-          ))}
-        </div>
-      )}
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+      {EQUIPMENT_TYPES.map(o => (
+        <button key={o.key} onClick={() => onChange(o.key)} style={pickChipStyle(o.key === value)}>{o.label}</button>
+      ))}
     </div>
   );
 }
 
-function MuscleSelector({ value, onChange }) {
-  const [open, setOpen] = useStateL(false);
-  const label = value.length === 0 ? '— Select muscles —' : value.join(', ');
+// Single tappable chip matching the muscle/equipment pickers — used for the
+// smaller choices in the exercise editor (size, movement, rep target) so every
+// chip in the form is the same size.
+function Chip({ on, onClick, children }) {
+  return <button onClick={onClick} style={pickChipStyle(on)}>{children}</button>;
+}
+
+// Dismiss the soft keyboard the instant the user taps a non-text control inside
+// a sheet. On iOS an open keyboard desyncs position:fixed hit-testing from the
+// visual layout, so taps on controls below an autofocused input land offset
+// ("you have to tap above where you think"). Blurring on pointerdown restores
+// the hit area for every following tap.
+function blurKbOnControlTap(e) {
+  const t = e.target;
+  if (t && t.closest && !t.closest('input, textarea, [contenteditable]')) {
+    try { if (document.activeElement) document.activeElement.blur(); } catch (_) {}
+  }
+}
+
+function MusclePills({ value, onChange }) {
+  const toggle = (m) => onChange(value.includes(m) ? value.filter(x => x !== m) : [...value, m]);
   return (
-    <div style={{ marginTop: 8 }}>
-      <button onClick={() => setOpen(v => !v)} style={{
-        width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '10px 12px', borderRadius: open ? '6px 6px 0 0' : 6,
-        background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`,
-        cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 14,
-        color: value.length ? UI.ink : UI.inkFaint,
-        WebkitTapHighlightColor: 'transparent', gap: 8,
-      }}>
-        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}>{label}</span>
-        <div style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>{_chevronDown}</div>
-      </button>
-      {open && (
-        <div style={{ border: `1px solid ${UI.hairStrong}`, borderTop: 'none', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
-          {MUSCLES.map((m, i) => {
-            const sel = value.includes(m);
-            return (
-              <button key={m} onClick={() => onChange(sel ? value.filter(x => x !== m) : [...value, m])} style={{
-                width: '100%', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                background: sel ? `rgba(var(--accent-rgb),0.1)` : UI.bgRaised,
-                color: sel ? UI.gold : UI.ink,
-                border: 'none', borderTop: i > 0 ? `1px solid ${UI.hair}` : 'none',
-                cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 14, textAlign: 'left',
-                WebkitTapHighlightColor: 'transparent',
-              }}>
-                <span>{m}</span>
-                {sel && _checkmark}
-              </button>
-            );
-          })}
-        </div>
-      )}
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+      {MUSCLES.map(m => (
+        <button key={m} onClick={() => toggle(m)} style={pickChipStyle(value.includes(m))}>{m}</button>
+      ))}
     </div>
   );
 }
@@ -507,7 +472,8 @@ function SvgKnurl({ style }) {
 
 // Canvas placeholder for between-exercise knurl dividers in screenshot mode.
 // takeScreenshot draws into these imperatively right before html2canvas runs,
-// so timing is guaranteed regardless of when React flushes the re-render.
+// so timing is guaranteed regardless of when React flushes the re-render. Lines
+// that overlap the avatar (bottom-right) are shortened there too, measured live.
 function KnurlCanvas({ style }) {
   return <canvas data-knurl="1" style={{ display: 'block', width: '100%', height: 3, ...style }} />;
 }
@@ -549,21 +515,21 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   return (
     <>
     <Sheet open={true} onClose={requestClose} title="New exercise">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+      <div onPointerDown={blurKbOnControlTap} style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <Field label="Name">
           <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" autoFocus />
         </Field>
         <div>
           <span className="label">Muscle group</span>
-          <MuscleSelector value={selectedTags} onChange={setSelectedTags} />
+          <MusclePills value={selectedTags} onChange={setSelectedTags} />
         </div>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="label">Exercise size</span>
             <button onClick={() => setShowSizeInfo(v => !v)} style={{
               background: 'none', border: `1px solid ${UI.hairStrong}`, borderRadius: '50%',
-              width: 14, height: 14, padding: 0, cursor: 'pointer', color: UI.inkFaint,
-              fontFamily: UI.fontUi, fontSize: 8, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 22, height: 22, padding: 0, cursor: 'pointer', color: UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
               WebkitTapHighlightColor: 'transparent', flexShrink: 0,
             }}>?</button>
           </div>
@@ -577,38 +543,38 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
               ))}
             </div>
           )}
-          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
             {EXERCISE_SIZES.map(([val, label]) => (
-              <Pill key={val} gold={category === val} onClick={() => setCategory(c => c === val ? null : val)} style={{ cursor: 'pointer' }}>{label}</Pill>
+              <Chip key={val} on={category === val} onClick={() => setCategory(c => c === val ? null : val)}>{label}</Chip>
             ))}
           </div>
         </div>
         <div>
           <span className="label">Equipment</span>
-          <InlineSelect value={equipment} onChange={handleEquipmentChange} options={EQUIPMENT_TYPES} />
+          <EquipmentPills value={equipment} onChange={handleEquipmentChange} />
         </div>
         <div>
           <span className="label">Movement type</span>
-          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
             {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
-              <Pill key={val} gold={movementType === val}
+              <Chip key={val} on={movementType === val}
                 onClick={() => { setMovementType(val); setNoWeightReps(val === 'mobility'); if (val === 'mobility') setEquipment('no_equipment'); }}
-                style={{ cursor: 'pointer' }}>{label}</Pill>
+              >{label}</Chip>
             ))}
           </div>
           {movementType === 'mobility' && (
-            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-              <Pill gold={noWeightReps} onClick={() => setNoWeightReps(true)} style={{ cursor: 'pointer' }}>Checkbox only</Pill>
-              <Pill gold={!noWeightReps} onClick={() => setNoWeightReps(false)} style={{ cursor: 'pointer' }}>Weight & Reps</Pill>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+              <Chip on={noWeightReps} onClick={() => setNoWeightReps(true)}>Checkbox only</Chip>
+              <Chip on={!noWeightReps} onClick={() => setNoWeightReps(false)}>Weight & Reps</Chip>
             </div>
           )}
         </div>
         <div>
           <span className="label">Rep target</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-            <Pill gold={progressionReps != null} onClick={() => setProgressionReps(v => v == null ? 12 : null)} style={{ cursor: 'pointer' }}>
+            <Chip on={progressionReps != null} onClick={() => setProgressionReps(v => v == null ? 12 : null)}>
               {progressionReps != null ? 'On' : 'Off'}
-            </Pill>
+            </Chip>
             {progressionReps != null
               ? <Stepper value={progressionReps} onChange={v => setProgressionReps(Math.max(1, Math.round(v)))} step={1} min={1} />
               : <span style={{ color: UI.inkFaint, fontSize: 13 }}>Uses planned reps per day</span>
@@ -797,21 +763,21 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
 
       <div style={{ padding: '14px 22px 0' }}>
         {editMode ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div onPointerDown={blurKbOnControlTap} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <Field label="Name">
               <TextInput value={editName} onChange={v => setEditName(v.toUpperCase())} />
             </Field>
             <div>
               <span className="label">Muscle group</span>
-              <MuscleSelector value={editTags} onChange={setEditTags} />
+              <MusclePills value={editTags} onChange={setEditTags} />
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span className="label">Exercise size</span>
                 <button onClick={() => setShowSizeInfoEdit(v => !v)} style={{
                   background: 'none', border: `1px solid ${UI.hairStrong}`, borderRadius: '50%',
-                  width: 14, height: 14, padding: 0, cursor: 'pointer', color: UI.inkFaint,
-                  fontFamily: UI.fontUi, fontSize: 8, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 22, height: 22, padding: 0, cursor: 'pointer', color: UI.inkFaint,
+                  fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
                   WebkitTapHighlightColor: 'transparent', flexShrink: 0,
                 }}>?</button>
               </div>
@@ -825,38 +791,38 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                   ))}
                 </div>
               )}
-              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                 {EXERCISE_SIZES.map(([val, label]) => (
-                  <Pill key={val} gold={editCategory === val} onClick={() => setEditCategory(c => c === val ? null : val)} style={{ cursor: 'pointer' }}>{label}</Pill>
+                  <Chip key={val} on={editCategory === val} onClick={() => setEditCategory(c => c === val ? null : val)}>{label}</Chip>
                 ))}
               </div>
             </div>
             <div>
               <span className="label">Equipment</span>
-              <InlineSelect value={editEquipment} onChange={handleEditEquipmentChange} options={EQUIPMENT_TYPES} />
+              <EquipmentPills value={editEquipment} onChange={handleEditEquipmentChange} />
             </div>
             <div>
               <span className="label">Movement type</span>
-              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                 {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
-                  <Pill key={val} gold={editMovementType === val}
+                  <Chip key={val} on={editMovementType === val}
                     onClick={() => { setEditMovementType(val); setEditNoWeightReps(val === 'mobility'); if (val === 'mobility') setEditEquipment('no_equipment'); }}
-                    style={{ cursor: 'pointer' }}>{label}</Pill>
+                  >{label}</Chip>
                 ))}
               </div>
               {editMovementType === 'mobility' && (
-                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                  <Pill gold={editNoWeightReps} onClick={() => setEditNoWeightReps(true)} style={{ cursor: 'pointer' }}>Checkbox only</Pill>
-                  <Pill gold={!editNoWeightReps} onClick={() => setEditNoWeightReps(false)} style={{ cursor: 'pointer' }}>Weight & Reps</Pill>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                  <Chip on={editNoWeightReps} onClick={() => setEditNoWeightReps(true)}>Checkbox only</Chip>
+                  <Chip on={!editNoWeightReps} onClick={() => setEditNoWeightReps(false)}>Weight & Reps</Chip>
                 </div>
               )}
             </div>
             <div>
               <span className="label">Rep target</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-                <Pill gold={editProgressionReps != null} onClick={() => setEditProgressionReps(v => v == null ? 12 : null)} style={{ cursor: 'pointer' }}>
+                <Chip on={editProgressionReps != null} onClick={() => setEditProgressionReps(v => v == null ? 12 : null)}>
                   {editProgressionReps != null ? 'On' : 'Off'}
-                </Pill>
+                </Chip>
                 {editProgressionReps != null
                   ? <Stepper value={editProgressionReps} onChange={v => setEditProgressionReps(Math.max(1, Math.round(v)))} step={1} min={1} />
                   : <span style={{ color: UI.inkFaint, fontSize: 13 }}>Uses planned reps per day</span>
@@ -2061,7 +2027,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // first → shared global scope). A real avatar isn't mirrored.
   const _shotEmail = (store.user?.email || '').toLowerCase();
   const _shotAdminPreview = _shotEmail === 'office@btc-prime.biz'
-    ? ({ mike: 'icons/IMG_6389.png', phoenix: 'icons/phoenix.png', marine: 'icons/marine.png' })[localStorage.getItem('logbook-admin-bg-preview')]
+    ? ({ mike: 'icons/IMG_6389.png', phoenix: 'icons/phoenix.png', marine: 'icons/marine.png', prince_abu: 'icons/prince_abu.png' })[localStorage.getItem('logbook-admin-bg-preview')]
     : undefined;
   const _shotLogo = _shotAdminPreview || TRAIN_BG_OVERRIDES[_shotEmail] || 'icons/zane-logo-2.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo-2.png';
@@ -2170,9 +2136,34 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     // Draw knurl dividers imperatively — canvas elements placed by KnurlCanvas
     // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
+    // Shorten any knurl divider that overlaps the avatar (bottom-right) so the
+    // line stops just before it. Measured live, so it's correct for any avatar /
+    // background aspect ratio — not just the last divider.
+    const avatarEl = captureRef.current.querySelector('img[data-shot-avatar]');
+    // The avatar is a freshly-mounted <img>; on first capture it may not have
+    // decoded within the 2 RAFs above, so its box would measure 0 and no line
+    // would be trimmed. Wait for it to load before measuring.
+    if (avatarEl && !avatarEl.complete) {
+      await new Promise(res => {
+        avatarEl.addEventListener('load', res, { once: true });
+        avatarEl.addEventListener('error', res, { once: true });
+      });
+      await new Promise(r => requestAnimationFrame(r));
+    }
+    const avatarRect = (avatarEl && avatarEl.getBoundingClientRect().height) ? avatarEl.getBoundingClientRect() : null;
+    const KNURL_GAP = 14;
     captureRef.current.querySelectorAll('canvas[data-knurl]').forEach(c => {
-      const w = c.parentElement ? c.parentElement.offsetWidth : 320;
-      if (!w) return;
+      const pw = c.parentElement ? c.parentElement.offsetWidth : 320;
+      let w = pw;
+      if (avatarRect) {
+        const r = c.getBoundingClientRect();
+        // Vertical overlap with the avatar band → trim to just left of it.
+        if (r.bottom > avatarRect.top && r.top < avatarRect.bottom) {
+          w = Math.min(w, Math.round(pw - (r.right - avatarRect.left) - KNURL_GAP));
+        }
+      }
+      if (w <= 0) return;
+      if (w < pw) c.style.width = w + 'px';
       c.width = w; c.height = 3;
       const ctx = c.getContext('2d');
       ctx.strokeStyle = 'rgba(236,228,208,0.20)';
@@ -2468,7 +2459,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             })()}
           </div>
           {capturing && (
-            <img src={_shotLogo} style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, zIndex: 1, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
+            <img src={_shotLogo} data-shot-avatar="1" style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, zIndex: 1, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
           )}
           {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 10 }} />}
         </div>

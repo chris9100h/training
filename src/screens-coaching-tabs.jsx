@@ -48,7 +48,7 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
   );
 
   return (
-    <div style={{ flexShrink: 0, padding: (notes.length > 0 || hasSupportBanner) ? '0 22px 10px' : 0 }}>
+    <div style={{ flexShrink: 0, padding: (notes.length > 0 || hasSupportBanner) ? '10px 22px 10px' : 0 }}>
       {adminSupportUnread > 0 && renderSupportBanner(
         adminSupportUnread,
         () => go?.({ name: 'settings', openSupportInbox: true }),

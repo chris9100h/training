@@ -32,10 +32,11 @@ const healthNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : 
 const healthInt = v => (v === '' || v == null || isNaN(parseInt(v, 10))) ? null : parseInt(v, 10);
 
 // Calories from macros: P×4 + C×4 + F×9. With fiber given (net-carb mode),
-// carbs contribute (C − fiber)×4. Returns null when no macro is set.
+// carbs contribute max(0, C − fiber)×4 — clamped so it matches the displayed
+// net-carb value when fiber exceeds carbs. Returns null when no macro is set.
 function caloriesFromMacros(p, c, f, fiber) {
   if (p == null && c == null && f == null) return null;
-  return (p || 0) * 4 + ((c || 0) - (fiber || 0)) * 4 + (f || 0) * 9;
+  return (p || 0) * 4 + Math.max(0, (c || 0) - (fiber || 0)) * 4 + (f || 0) * 9;
 }
 
 function healthFmtDate(iso, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
@@ -180,7 +181,9 @@ function HealthMacroChart({ series, from, to }) {
   if (!pts.length) return <HealthChartEmpty />;
   const W = 320, padL = 38, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
   const H = padTop + plotH + padBottom, plotW = W - padL - padR;
-  const calOf = p => caloriesFromMacros(p.protein, p.carbs, p.fat) || 0;
+  // Use net carbs (fiber-reduced) so the bar height matches the logged calories
+  // on net-carb days; for total-carb days fiber is null → unchanged.
+  const calOf = p => caloriesFromMacros(p.protein, p.carbs, p.fat, p.fiber) || 0;
   const maxV = Math.max(...pts.map(p => Math.max(calOf(p), p.targetCal || 0)), 1);
   const dom = UI.chartDomain(0, maxV, { min: 0 });
   const totalDays = Math.max(1, healthDayDiff(from, to));
@@ -205,7 +208,7 @@ function HealthMacroChart({ series, from, to }) {
         const x = xOf(p.date) - bw / 2;
         const segs = [
           { cal: (p.protein || 0) * 4, color: MACRO_COLORS.protein },
-          { cal: (p.carbs || 0) * 4, color: MACRO_COLORS.carbs },
+          { cal: Math.max(0, (p.carbs || 0) - (p.fiber || 0)) * 4, color: MACRO_COLORS.carbs },
           { cal: (p.fat || 0) * 9, color: MACRO_COLORS.fat },
         ];
         let yCursor = padTop + plotH;
@@ -266,30 +269,34 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   }, [activeCoachingSchema]);
   const [coachForm, setCoachForm] = useStateH({});
   const setCoachVal = (k, v) => setCoachForm(f => ({ ...f, [k]: v }));
+  const [confirmEl, confirm] = useConfirm();
+  // Snapshot of the form as it was opened, to detect unsaved edits on dismiss.
+  const initialSnap = useRefH({ form: empty, coach: {}, net: false });
 
   useEffectH(() => {
     if (!open) return;
-    setNetCarbs(existing?.fiber != null ? true : !!store.settings?.netCarbs);
-    if (existing) {
-      setForm({
-        weight: existing.weight != null ? String(existing.weight) : '',
-        steps: existing.steps != null ? String(existing.steps) : '',
-        protein: existing.protein != null ? String(existing.protein) : '',
-        carbs: existing.carbs != null ? String(existing.carbs) : '',
-        fat: existing.fat != null ? String(existing.fat) : '',
-        fiber: existing.fiber != null ? String(existing.fiber) : '',
-        calories: existing.calories != null ? String(existing.calories) : '',
-        water: existing.waterMl != null ? String(existing.waterMl) : '',
-        note: existing.note || '',
-        offPlanNote: existing.offPlanNote || '',
-      });
-    } else setForm(empty);
+    const net = existing?.fiber != null ? true : !!store.settings?.netCarbs;
+    setNetCarbs(net);
+    const nextForm = existing ? {
+      weight: existing.weight != null ? String(existing.weight) : '',
+      steps: existing.steps != null ? String(existing.steps) : '',
+      protein: existing.protein != null ? String(existing.protein) : '',
+      carbs: existing.carbs != null ? String(existing.carbs) : '',
+      fat: existing.fat != null ? String(existing.fat) : '',
+      fiber: existing.fiber != null ? String(existing.fiber) : '',
+      calories: existing.calories != null ? String(existing.calories) : '',
+      water: existing.waterMl != null ? String(existing.waterMl) : '',
+      note: existing.note || '',
+      offPlanNote: existing.offPlanNote || '',
+    } : empty;
+    setForm(nextForm);
     const cf = {};
     coachFields.forEach(f => {
       const v = existing?.coachFields?.[f.key];
       cf[f.key] = f.type === 'stepper' ? (v != null ? v : null) : (v != null ? String(v) : '');
     });
     setCoachForm(cf);
+    initialSnap.current = { form: nextForm, coach: cf, net };
   }, [open, date, existing?.id]);
 
   const daysBack = healthDayDiff(date, LB.todayISO());
@@ -306,6 +313,16 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     ? (netAllFilled ? caloriesFromMacros(pVal, cVal, fVal, fibVal) : null)
     : caloriesFromMacros(pVal, cVal, fVal);
   const caloriesManual = netCarbs ? !netAllFilled : manualCal;
+
+  // Confirm before a backdrop tap throws away unsaved edits to this day.
+  const isDirty = () =>
+    JSON.stringify(form) !== JSON.stringify(initialSnap.current.form) ||
+    JSON.stringify(coachForm) !== JSON.stringify(initialSnap.current.coach) ||
+    netCarbs !== initialSnap.current.net;
+  const requestClose = async () => {
+    if (isDirty() && !await confirm('Your changes to this day won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    onClose();
+  };
 
   const save = () => {
     if (!canSave) return;
@@ -336,6 +353,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       adherence, targetsSnap,
       offPlanNote: form.offPlanNote.trim() || null,
       coachFields: Object.keys(savedCoachFields).length ? savedCoachFields : null,
+      updatedAt: new Date().toISOString(),
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
     setStore(s => ({
@@ -367,7 +385,8 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   );
 
   return (
-    <Sheet open={open} onClose={onClose} title={existing ? 'Edit Day' : 'Log Day'}>
+    <Sheet open={open} onClose={requestClose} title={existing ? 'Edit Day' : 'Log Day'}>
+      {confirmEl}
       <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14 }}>
         {healthFmtDate(date, { weekday: 'long', day: 'numeric', month: 'long' })}
       </div>
@@ -560,7 +579,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
   );
   const section = (suffix, label, cals) => (
     <div style={{ marginBottom: 18 }}>
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{label}{cals != null ? ` · ${cals} KCAL` : ''}</div>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{label}{cals != null ? ` · ${cals} kcal` : ''}</div>
       <div style={{ display: 'flex', gap: 8 }}>
         {num(`protein${suffix}`, 'Protein g')}
         {num(`carbs${suffix}`, 'Carbs g')}
@@ -868,7 +887,7 @@ function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
           }}>
             <i className="fa-solid fa-calendar-day" style={{ fontSize: 14 }} />
           </button>
-          <input type="date" value={selectedDate}
+          <input type="date" value={selectedDate} max={LB.todayISO()}
             onChange={e => e.target.value && onSelect(e.target.value)}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
           />
@@ -976,12 +995,12 @@ function HealthScreen({ store, setStore, go, userId }) {
     try {
       if (modeChanged) {
         if (mode) await LB.openStatusPeriod(userId, mode, startedAt);
-        else if (shouldDelete) await LB.supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null);
+        else if (shouldDelete) { const r = await LB.supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null); if (r.error) throw r.error; }
         else      await LB.closeStatusPeriod(userId, closedAt);
       } else {
         await LB.updateStatusPeriodStart(userId, startedAt);
       }
-    } catch (_) {}
+    } catch (e) { console.error('status period write failed', e); }
     if (coachingId && modeChanged) {
       try {
         const body = mode === 'sick'     ? 'Status: Sick — taking a break from training.'
@@ -1079,7 +1098,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   const windowDays = tfDays(tf);
   const weightSeries = useMemoH(() => seriesFor(windowDays, l => ({ value: l.weight })), [dailyLogs, tf]);
   const stepsSeries = useMemoH(() => seriesFor(windowDays, l => ({ value: l.steps })), [dailyLogs, tf]);
-  const macroSeries = useMemoH(() => seriesFor(windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null })), [dailyLogs, tf]);
+  const macroSeries = useMemoH(() => seriesFor(windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null })), [dailyLogs, tf]);
   const adhSeries = useMemoH(() => seriesFor(windowDays, l => ({ value: l.adherence })), [dailyLogs, tf]);
 
   // Cardio chart series — minutes summed per day from store.cardioLogs.
@@ -1403,7 +1422,7 @@ function HealthClientLogs({ clientStore }) {
 
   const weightSeries = useMemoH(() => seriesFor(windowDays, l => ({ value: l.weight })), [logs, tf]);
   const stepsSeries  = useMemoH(() => seriesFor(windowDays, l => ({ value: l.steps })), [logs, tf]);
-  const macroSeries  = useMemoH(() => seriesFor(windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null })), [logs, tf]);
+  const macroSeries  = useMemoH(() => seriesFor(windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null })), [logs, tf]);
   const adhSeries    = useMemoH(() => seriesFor(windowDays, l => ({ value: l.adherence })), [logs, tf]);
   const cardioSeries = useMemoH(() => {
     const { start, end } = healthWindow(windowDays);

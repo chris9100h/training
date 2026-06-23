@@ -324,6 +324,21 @@ function App() {
     });
   }, [phase, userId]);
 
+  // Remove duplicate CARDIO exercises (cross-tab race condition: two tabs both seed
+  // before either syncs to DB, resulting in two rows with different ids).
+  useEffectA(() => {
+    if (phase !== 'ready' || !userId || !store) return;
+    const cardioExes = (store.exercises || []).filter(e => e.movement_type === 'cardio');
+    if (cardioExes.length <= 1) return;
+    const usedIds = new Set(
+      (store.sessions || []).flatMap(s => (s.entries || []).map(e => e.exId))
+    );
+    const keep = cardioExes.find(e => usedIds.has(e.id)) || cardioExes[0];
+    const toDelete = cardioExes.filter(e => e.id !== keep.id).map(e => e.id);
+    LB.supabase.from('zane_exercises').delete().in('id', toDelete).then(() => {});
+    setStore(s => s ? { ...s, exercises: s.exercises.filter(e => !toDelete.includes(e.id)) } : s);
+  }, [phase, userId]); // runs once on ready; store is captured from that render
+
   useEffectA(() => {
     const color = store?.settings?.accentColor;
     if (color) {
@@ -352,8 +367,11 @@ function App() {
         if (!fresh) return;
         setStore(s => {
           const serverDailyIds  = new Set(fresh.dailyLogs.map(l => l.id));
+          const serverDailyDates = new Set(fresh.dailyLogs.map(l => l.date));
           const serverCardioIds = new Set(fresh.cardioLogs.map(l => l.id));
-          const localOnlyDaily  = (s.dailyLogs  || []).filter(l => !serverDailyIds.has(l.id));
+          // Daily logs are one-per-date: also drop a local row whose date the
+          // server already has (a divergent id from a pre-RPC multi-device write).
+          const localOnlyDaily  = (s.dailyLogs  || []).filter(l => !serverDailyIds.has(l.id) && !serverDailyDates.has(l.date));
           const localOnlyCardio = (s.cardioLogs || []).filter(l => !serverCardioIds.has(l.id));
           return { ...s, dailyLogs: [...localOnlyDaily, ...fresh.dailyLogs], cardioLogs: [...localOnlyCardio, ...fresh.cardioLogs] };
         });
@@ -392,12 +410,30 @@ function App() {
     };
   }, []);
 
+  // Dismiss already-shown notifications whenever the app is in the foreground.
+  // TTL on the push only governs *undelivered* messages; notifications that
+  // were shown while you were away keep piling up in the OS notification center
+  // otherwise. Returning to the app (visibilitychange) is the moment to clear
+  // them — it covers the "just logged a set" case and stale coaching pushes.
+  useEffectA(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const clearDelivered = () => {
+      if (document.visibilityState !== 'visible') return;
+      navigator.serviceWorker.ready
+        .then(reg => reg.getNotifications())
+        .then(ns => ns.forEach(n => n.close()))
+        .catch(() => {});
+    };
+    clearDelivered();
+    document.addEventListener('visibilitychange', clearDelivered);
+    return () => document.removeEventListener('visibilitychange', clearDelivered);
+  }, []);
+
   useEffectA(() => {
     if (!('serviceWorker' in navigator)) return;
     navigator.serviceWorker.ready.then(reg => {
       swReg.current = reg;
       reg.update().catch(() => {});
-
       const trackWorker = (worker) => {
         if (!worker) return;
         worker.addEventListener('statechange', () => {
@@ -525,8 +561,12 @@ function App() {
             const baseSkipIds = base ? new Set((base.skips || []).map(s => s.id)) : null;
             const localOnlySkips = (cur.skips || []).filter(x => !serverSkipIds.has(x.id) && !baseSkipIds?.has(x.id));
             const serverDailyIds = new Set((fresh.dailyLogs || []).map(l => l.id));
+            const serverDailyDates = new Set((fresh.dailyLogs || []).map(l => l.date));
             const baseDailyIds = base ? new Set((base.dailyLogs || []).map(l => l.id)) : null;
-            const localOnlyDailyLogs = (cur.dailyLogs || []).filter(x => !serverDailyIds.has(x.id) && !baseDailyIds?.has(x.id));
+            // Daily logs are one-per-date: also drop a local row whose date the
+            // server already has (a divergent id from a pre-RPC multi-device
+            // write) so it doesn't show as a duplicate for that day.
+            const localOnlyDailyLogs = (cur.dailyLogs || []).filter(x => !serverDailyIds.has(x.id) && !baseDailyIds?.has(x.id) && !serverDailyDates.has(x.date));
             const serverCardioIds = new Set((fresh.cardioLogs || []).map(l => l.id));
             const baseCardioIds = base ? new Set((base.cardioLogs || []).map(l => l.id)) : null;
             const localOnlyCardioLogs = (cur.cardioLogs || []).filter(x => !serverCardioIds.has(x.id) && !baseCardioIds?.has(x.id));

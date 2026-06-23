@@ -1081,8 +1081,8 @@ function getCycleStartForNum(sch, cycleNum) {
 const TRAIN_BG_OVERRIDES = {
   'mikeapicelli777@gmail.com': 'icons/IMG_6389.png',
   'mb2489@protonmail.com':     'icons/phoenix.png',
-  'test@test.com':             'icons/phoenix.png',
   'aboagyeboadi@yahoo.com':    'icons/prince_abu.png',
+  'joshseymour23@yahoo.com':   'icons/marine.png',
 };
 
 function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRetrySync }) {
@@ -1547,26 +1547,32 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     return statusPeriodModeFor(sessionDate);
   }, [isViewingToday, isFutureSlot, store.statusMode, statusPeriodModeFor, sessionDate]);
 
-  const handleClearStatus = async () => {
-    const current = store.statusMode ?? null;
-    if (!current) return;
-    // Deactivating today = last sick/vacation day was yesterday
-    const d = new Date(LB.todayISO() + 'T12:00:00'); d.setDate(d.getDate() - 1);
-    const closedAt = d.toISOString();
-    const openPeriod = (store.statusPeriods || []).find(p => !p.endedAt);
-    // If the period started today, closedAt (yesterday) < startedAt → delete instead of creating an invalid record
-    const shouldDelete = !!openPeriod && closedAt < openPeriod.startedAt;
-    setStore(s => ({
-      ...s, statusMode: null, statusModeSince: null,
-      statusPeriods: shouldDelete
-        ? (s.statusPeriods || []).filter(p => !!p.endedAt)
-        : (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: closedAt } : p),
-    }));
-    try {
-      if (shouldDelete) await LB.supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null);
-      else await LB.closeStatusPeriod(userId, closedAt);
-    } catch (_) {}
-  };
+  const handleClearStatus = () => LB.clearStatusMode(userId, store, setStore);
+
+  // After training while Sick mode is on, offer to end it — catches the common
+  // "forgot to toggle it off" case. Covers both strength and cardio sessions,
+  // sick only (training on vacation is normal). Asks at most once per day,
+  // whichever way the user answers.
+  const sickPromptShown = useRef(false);
+  useEffect(() => {
+    if (store?.statusMode !== 'sick' || sickPromptShown.current) return;
+    const today = LB.todayISO();
+    let dismissed = false;
+    try { dismissed = localStorage.getItem('logbook-sick-recover-prompt') === today; } catch (_) {}
+    if (dismissed) return;
+    const trainedToday = (store.sessions || []).some(s => s.ended && s.ended.slice(0, 10) === today)
+      || (store.cardioLogs || []).some(l => l.date === today);
+    if (!trainedToday) return;
+    sickPromptShown.current = true;
+    (async () => {
+      const yes = await confirm(
+        'You logged a session while Sick mode is on. Feeling better and ready to end it?',
+        { title: 'End sick mode?', ok: 'End sick mode', cancel: 'Stay in sick mode' },
+      );
+      try { localStorage.setItem('logbook-sick-recover-prompt', today); } catch (_) {}
+      if (yes) await LB.clearStatusMode(userId, store, setStore);
+    })();
+  }, [store?.statusMode, store?.sessions, store?.cardioLogs]);
 
   const selectedDayCardioLogs = useMemo(() => {
     const dateKey = sessionDate.toISOString().slice(0, 10);
@@ -1838,12 +1844,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     try {
       if (modeChanged) {
         if (mode) await LB.openStatusPeriod(userId, mode, startedAt);
-        else if (shouldDelete) await LB.supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null);
+        else if (shouldDelete) { const r = await LB.supabase.from('zane_status_periods').delete().eq('user_id', userId).is('ended_at', null); if (r.error) throw r.error; }
         else      await LB.closeStatusPeriod(userId, closedAt);
       } else {
         await LB.updateStatusPeriodStart(userId, startedAt);
       }
-    } catch (_) {}
+    } catch (e) { console.error('status period write failed', e); }
     if (coachingId && modeChanged) {
       try {
         const body = mode === 'sick'     ? 'Status: Sick — taking a break from training.'
@@ -1940,15 +1946,17 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const hasPlans = store.schedules?.length > 0;
     return (
       <Screen style={{ position: 'relative' }}>
-        {isCustomBg && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
-            <img src={trainBg} style={{ width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' }} />
-          </div>
-        )}
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+          <img src={trainBg} style={isCustomBg
+            ? { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' }
+            : { width: '85%', maxWidth: 320, opacity: 0.04, filter: 'grayscale(1) brightness(3)', objectFit: 'contain' }} />
+        </div>
         <TopBar
           title={<span>HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span></span>}
           sub={new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
-          right={<button onClick={() => go({ name: 'settings' })} style={{ background: 'transparent', border: `1px solid ${UI.hairStrong}`, padding: 4, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', fontSize: 20, color: UI.inkSoft, width: 36, height: 36, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>}
+          right={<button onClick={() => go({ name: 'settings' })} style={{ background: 'transparent', border: `1px solid ${UI.hairStrong}`, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', color: UI.inkSoft, width: 36, height: 36, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>}
         />
         <div style={{ padding: 22 }}>
           {hasPlans ? (

@@ -191,7 +191,7 @@ function CoachingUnreadBanner({ store, userId, onOpen }) {
         display: 'flex', alignItems: 'center', gap: 12,
         background: `rgba(var(--accent-rgb), 0.08)`,
         border: `0.5px solid rgba(var(--accent-rgb), 0.35)`,
-        borderRadius: 10, padding: '10px 14px', cursor: 'pointer',
+        borderRadius: 6, padding: '10px 14px', cursor: 'pointer',
       }}
     >
       <div style={{ width: 28, height: 28, borderRadius: 6, background: `rgba(var(--accent-rgb), 0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
