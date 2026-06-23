@@ -513,31 +513,6 @@ function KnurlCanvas({ style }) {
   return <canvas data-knurl="1" style={{ display: 'block', width: '100%', height: 3, ...style }} />;
 }
 
-// Faint e1RM progression line drawn behind an exercise block in the session
-// detail / screenshot. Decorative: stretched to the block, no axes. `pts` is a
-// date-sorted [{ date, e1rm }] series (from the loaded session window). `color`
-// is a resolved accent value (not a CSS var) so html2canvas renders it.
-function ExerciseE1rmTrend({ pts, color }) {
-  if (!pts || pts.length < 2) return null;
-  const W = 300, H = 60;
-  const vals = pts.map(p => p.e1rm);
-  const min = Math.min(...vals), max = Math.max(...vals);
-  const range = (max - min) || 1;
-  const n = pts.length;
-  const coords = pts.map((p, i) => [
-    (i / (n - 1)) * W,
-    H - (0.14 + ((p.e1rm - min) / range) * 0.72) * H, // 14%..86% band, top = higher
-  ]);
-  const line = coords.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
-  const area = `${line} L${W} ${H} L0 ${H} Z`;
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 0, pointerEvents: 'none' }}>
-      <path d={area} fill={color} fillOpacity="0.06" />
-      <path d={line} fill="none" stroke={color} strokeOpacity="0.28" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '' }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateL(initialName);
@@ -2141,28 +2116,6 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     prevEntryMap[e.exId] = prev?.entries.find(en => en.exId === e.exId) ?? null;
   });
 
-  // e1RM progression per exercise from the loaded session window (sets are only
-  // loaded for ~70 days, so this is a recent trend — drawn faintly behind each
-  // exercise). Best non-warm/non-skipped working-set e1RM per session, by date.
-  const e1rmSeriesByEx = {};
-  s.entries.forEach(e => {
-    if (e1rmSeriesByEx[e.exId]) return;
-    e1rmSeriesByEx[e.exId] = store.sessions
-      .filter(x => x.ended && (x.entries || []).some(en => en.exId === e.exId))
-      .map(x => {
-        const en = x.entries.find(en2 => en2.exId === e.exId);
-        const best = (en?.sets || []).reduce((m, st) => {
-          if (st.warmup || st.skipped) return m;
-          const r = (st.repsL != null || st.repsR != null) ? Math.min(st.repsL ?? 0, st.repsR ?? 0) : st.reps;
-          return (st.kg && r) ? Math.max(m, LB.e1rm(st.kg, r)) : m;
-        }, 0);
-        return best > 0 ? { date: x.ended, e1rm: best } : null;
-      })
-      .filter(Boolean)
-      .sort((a, b) => a.date.localeCompare(b.date));
-  });
-  const accentHex = (() => { try { return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#d99a2b'; } catch (_) { return '#d99a2b'; } })();
-
   const prevSameDay = store.sessions
     .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
@@ -2482,10 +2435,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 return (
                 <div key={i}
                   onClick={() => canHistory && go({ name: 'exerciseHistory', exId: e.exId, dayId: s.dayId, exName, back: { name: 'session', sessionId: s.id } })}
-                  style={{ position: 'relative', cursor: canHistory ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}
+                  style={{ cursor: canHistory ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}
                 >
-                  <ExerciseE1rmTrend pts={e1rmSeriesByEx[e.exId]} color={accentHex} />
-                  <div style={{ position: 'relative', zIndex: 1 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
                     <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>
                       {exName}{canHistory && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
@@ -2523,7 +2474,6 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                     ); })()}
                   </div>
                   {e.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{e.note}</div>}
-                  </div>
                 </div>
                 );
               };
