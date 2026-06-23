@@ -483,7 +483,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           setRepOutlierConfirm({ setIdx, loggedReps, refReps, high: false });
           return;
         }
-        if (loggedReps > refReps * 3) {
+        if (loggedReps > refReps * 3 || loggedReps > refReps + 10) {
           kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
           setKbField(null); setKbRaw(''); setKbFresh(false);
           setRepOutlierConfirm({ setIdx, loggedReps, refReps, high: true });
