@@ -445,7 +445,13 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   color: on ? '#0a0805' : UI.inkFaint,
                   transform: on ? 'scale(1.2)' : 'scale(1)',
-                  transition: 'color 0.2s, transform 0.25s cubic-bezier(0.34,1.4,0.64,1)',
+                  // Delay the darkening so the glyph only turns near-black once
+                  // the gold plate has slid underneath it (plate is 0.35s) —
+                  // otherwise a dark icon sits on the dark bar mid-slide and
+                  // looks like it vanishes. Lightening on deselect is immediate.
+                  transition: on
+                    ? 'color 0.12s ease 0.25s, transform 0.25s cubic-bezier(0.34,1.4,0.64,1)'
+                    : 'color 0.15s, transform 0.25s cubic-bezier(0.34,1.4,0.64,1)',
                 }}>
                   {React.cloneElement(TAB_ICONS[t.id], { width: ICON_SZ, height: ICON_SZ })}
                   {badge?.live && (
