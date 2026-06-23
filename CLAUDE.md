@@ -106,6 +106,7 @@
   2. **Alte Einträge nie entfernen** — sie sind die Historie, die Rückkehrer nachholen.
   3. SW-Cache-Version in `sw.js` wie üblich bumpen (deployt das Update).
   4. **Texte gut schreiben — das ist der Punkt der Funktion:** Das neue Feature klar und nutzerorientiert erklären — *was* ist neu, *welchen Nutzen* es bringt, *wie* man es benutzt. Knackige Stichpunkte (`items`), kein Tech-Jargon, keine internen Begriffe (Tabellen, Funktionsnamen). Der `title` benennt das Feature, die Punkte vermitteln den Mehrwert. Lieber 2–4 starke Punkte als eine lange Liste.
+  5. **Ton: technisch korrekt, aber light-hearted und etwas witzig.** Die Karte darf Spaß machen — lockere Sprache, ein Augenzwinkern, gern mal ein passendes Emoji oder ein kleiner Vergleich. Wichtig: Die Fakten müssen trotzdem **stimmen** (nichts versprechen, was das Feature nicht tut; keine impliziten Falschaussagen). Witzig ja, aber nie auf Kosten der Korrektheit oder Klarheit.
 - Wird ein Release ohne Ankündigungs-Wunsch gemacht, bleibt das Array unverändert (kein neuer Eintrag → keine Karte).
 - **`whatsnew.js` ist plain JS** (kein JSX): wird wie `store.js` als normales `<script>` in `index.html` geladen (nicht über den Precompile-Loader) und ist in `ASSETS` in `sw.js` für Offline gelistet — beides bereits eingerichtet.
 
