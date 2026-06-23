@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.401',
+    title: 'Smoother taps',
+    items: [
+      'Building an exercise is way less fiddly: muscle groups and equipment are now tap-anywhere chips instead of a dropdown — no more chasing a button that hides a few pixels above your finger (looking at you, iOS 👀).',
+      'Logging on two devices? Your phone and tablet finally play nice — health entries for the same day sync without stepping on each other.',
+      'Plus a handful of Health-tab tidy-ups: cleaner net-carb math, sick-mode tracking that actually sticks, and no more accidentally landing on a future day you can\'t save.',
+    ],
+  },
+  {
     id: 'v2.400',
     title: 'Fresh paint & a tidy-up',
     items: [
