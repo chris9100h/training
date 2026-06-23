@@ -507,11 +507,10 @@ function SvgKnurl({ style }) {
 
 // Canvas placeholder for between-exercise knurl dividers in screenshot mode.
 // takeScreenshot draws into these imperatively right before html2canvas runs,
-// so timing is guaranteed regardless of when React flushes the re-render.
-// `inset` shortens the line on the right (px) so the last divider clears the
-// Zane avatar that sits in the bottom-right corner of the capture.
-function KnurlCanvas({ style, inset = 0 }) {
-  return <canvas data-knurl="1" data-knurl-inset={inset} style={{ display: 'block', width: '100%', height: 3, ...style }} />;
+// so timing is guaranteed regardless of when React flushes the re-render. Lines
+// that overlap the avatar (bottom-right) are shortened there too, measured live.
+function KnurlCanvas({ style }) {
+  return <canvas data-knurl="1" style={{ display: 'block', width: '100%', height: 3, ...style }} />;
 }
 
 function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '' }) {
@@ -2172,12 +2171,24 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     // Draw knurl dividers imperatively — canvas elements placed by KnurlCanvas
     // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
+    // Shorten any knurl divider that overlaps the avatar (bottom-right) so the
+    // line stops just before it. Measured live, so it's correct for any avatar /
+    // background aspect ratio — not just the last divider.
+    const avatarEl = captureRef.current.querySelector('img[data-shot-avatar]');
+    const avatarRect = (avatarEl && avatarEl.offsetHeight) ? avatarEl.getBoundingClientRect() : null;
+    const KNURL_GAP = 14;
     captureRef.current.querySelectorAll('canvas[data-knurl]').forEach(c => {
-      const inset = parseInt(c.dataset.knurlInset) || 0;
       const pw = c.parentElement ? c.parentElement.offsetWidth : 320;
-      const w = pw - inset;
+      let w = pw;
+      if (avatarRect) {
+        const r = c.getBoundingClientRect();
+        // Vertical overlap with the avatar band → trim to just left of it.
+        if (r.bottom > avatarRect.top && r.top < avatarRect.bottom) {
+          w = Math.min(w, Math.round(pw - (r.right - avatarRect.left) - KNURL_GAP));
+        }
+      }
       if (w <= 0) return;
-      if (inset) c.style.width = w + 'px';
+      if (w < pw) c.style.width = w + 'px';
       c.width = w; c.height = 3;
       const ctx = c.getContext('2d');
       ctx.strokeStyle = 'rgba(236,228,208,0.20)';
@@ -2467,13 +2478,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       </div>
                     </div>
                   ) : renderEntry(g.entry, g.idx)}
-                  {gi < groups.length - 1 && (capturing ? <KnurlCanvas style={{ marginTop: 14 }} inset={gi === groups.length - 2 ? 104 : 0} /> : <Hairline style={{ marginTop: 14 }} />)}
+                  {gi < groups.length - 1 && (capturing ? <KnurlCanvas style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
                 </div>
               ));
             })()}
           </div>
           {capturing && (
-            <img src={_shotLogo} style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, zIndex: 1, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
+            <img src={_shotLogo} data-shot-avatar="1" style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, zIndex: 1, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
           )}
           {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 10 }} />}
         </div>
