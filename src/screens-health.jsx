@@ -353,6 +353,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       adherence, targetsSnap,
       offPlanNote: form.offPlanNote.trim() || null,
       coachFields: Object.keys(savedCoachFields).length ? savedCoachFields : null,
+      updatedAt: new Date().toISOString(),
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
     setStore(s => ({

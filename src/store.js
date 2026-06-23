@@ -465,7 +465,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_cardio_plans').select('id, name, activity_type, archived, mode, days, manual_targets, goal, goal_due_date, start_fitness, generated_weeks, plan_start_date, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Daily health logs (weight / steps / macros / water) — one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     // Sick/vacation history periods — used for missed-workout stats and training adherence.
     // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
     _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
@@ -608,6 +608,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       offPlanNote: l.off_plan_note ?? null,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
+      updatedAt: l.updated_at ?? null,
       createdAt: l.created_at,
     })),
     statusPeriods: (statusPeriodsRes?.data || []).map(p => ({
@@ -947,8 +948,12 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(l);
     });
     const removed = (prev.dailyLogs || []).filter(l => !(next.dailyLogs || []).find(x => x.id === l.id));
-    if (upsert.length) ops.push(_supabase.from('zane_daily_logs').upsert(upsert.map(l => ({
-      id: l.id, user_id: userId, date: l.date,
+    // Batch RPC resolves conflicts on (user_id, date) keeping the existing id,
+    // and guards against stale (older updated_at) writes — so two devices
+    // editing the same day no longer collide on UNIQUE(user_id, date) and a
+    // stale offline edit can't clobber a newer one. See migration 0096.
+    if (upsert.length) ops.push(_supabase.rpc('sync_daily_logs_batch', { p_logs: upsert.map(l => ({
+      id: l.id, date: l.date,
       weight: l.weight ?? null, steps: l.steps ?? null,
       calories: l.calories ?? null, protein: l.protein ?? null,
       carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
@@ -956,7 +961,8 @@ async function syncStore(prev, next, userId) {
       off_plan_note: l.offPlanNote ?? null,
       adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
       daily_coach_fields: l.coachFields ?? null,
-    }))));
+      updated_at: l.updatedAt ?? new Date().toISOString(),
+    })) }));
     if (removed.length) ops.push(_supabase.from('zane_daily_logs').delete().in('id', removed.map(l => l.id)));
   }
 
@@ -2568,7 +2574,7 @@ async function clearStatusMode(userId, store, setStore) {
 
 async function refreshHealthLogs(userId) {
   const [dailyRes, cardioRes] = await Promise.all([
-    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
   ]);
   if (dailyRes.error || cardioRes.error) return null;
@@ -2582,6 +2588,7 @@ async function refreshHealthLogs(userId) {
       offPlanNote: l.off_plan_note ?? null,
       adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null,
       coachFields: l.daily_coach_fields ?? null,
+      updatedAt: l.updated_at ?? null,
       createdAt: l.created_at,
     })),
     cardioLogs: (cardioRes.data || []).map(l => ({

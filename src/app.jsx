@@ -352,8 +352,11 @@ function App() {
         if (!fresh) return;
         setStore(s => {
           const serverDailyIds  = new Set(fresh.dailyLogs.map(l => l.id));
+          const serverDailyDates = new Set(fresh.dailyLogs.map(l => l.date));
           const serverCardioIds = new Set(fresh.cardioLogs.map(l => l.id));
-          const localOnlyDaily  = (s.dailyLogs  || []).filter(l => !serverDailyIds.has(l.id));
+          // Daily logs are one-per-date: also drop a local row whose date the
+          // server already has (a divergent id from a pre-RPC multi-device write).
+          const localOnlyDaily  = (s.dailyLogs  || []).filter(l => !serverDailyIds.has(l.id) && !serverDailyDates.has(l.date));
           const localOnlyCardio = (s.cardioLogs || []).filter(l => !serverCardioIds.has(l.id));
           return { ...s, dailyLogs: [...localOnlyDaily, ...fresh.dailyLogs], cardioLogs: [...localOnlyCardio, ...fresh.cardioLogs] };
         });
@@ -543,8 +546,12 @@ function App() {
             const baseSkipIds = base ? new Set((base.skips || []).map(s => s.id)) : null;
             const localOnlySkips = (cur.skips || []).filter(x => !serverSkipIds.has(x.id) && !baseSkipIds?.has(x.id));
             const serverDailyIds = new Set((fresh.dailyLogs || []).map(l => l.id));
+            const serverDailyDates = new Set((fresh.dailyLogs || []).map(l => l.date));
             const baseDailyIds = base ? new Set((base.dailyLogs || []).map(l => l.id)) : null;
-            const localOnlyDailyLogs = (cur.dailyLogs || []).filter(x => !serverDailyIds.has(x.id) && !baseDailyIds?.has(x.id));
+            // Daily logs are one-per-date: also drop a local row whose date the
+            // server already has (a divergent id from a pre-RPC multi-device
+            // write) so it doesn't show as a duplicate for that day.
+            const localOnlyDailyLogs = (cur.dailyLogs || []).filter(x => !serverDailyIds.has(x.id) && !baseDailyIds?.has(x.id) && !serverDailyDates.has(x.date));
             const serverCardioIds = new Set((fresh.cardioLogs || []).map(l => l.id));
             const baseCardioIds = base ? new Set((base.cardioLogs || []).map(l => l.id)) : null;
             const localOnlyCardioLogs = (cur.cardioLogs || []).filter(x => !serverCardioIds.has(x.id) && !baseCardioIds?.has(x.id));

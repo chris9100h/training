@@ -120,6 +120,7 @@ CREATE TABLE public.zane_daily_logs (
   targets_snap       jsonb,
   off_plan_note      text,
   daily_coach_fields jsonb,
+  updated_at         timestamp with time zone NOT NULL DEFAULT now(),
   created_at         timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT zane_daily_logs_user_id_date_key UNIQUE (user_id, date)
 );
@@ -908,6 +909,56 @@ AS $function$
     warmup     = EXCLUDED.warmup,
     updated_at = EXCLUDED.updated_at
   WHERE zane_sets.updated_at < EXCLUDED.updated_at;
+$function$;
+
+-- Batch upsert for daily logs. Resolves conflicts on (user_id, date) — keeping
+-- the existing row's id — so two devices logging the same day don't collide on
+-- the UNIQUE(user_id, date) constraint, and only overwrites when the incoming
+-- updated_at is newer (no stale clobber). Migration 0096.
+CREATE OR REPLACE FUNCTION public.sync_daily_logs_batch(p_logs jsonb)
+ RETURNS void
+ LANGUAGE sql
+ SET search_path TO 'public'
+AS $function$
+  INSERT INTO zane_daily_logs (
+    id, user_id, date, weight, steps, calories, protein, carbs, fat, fiber,
+    water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at
+  )
+  SELECT
+    l->>'id',
+    auth.uid(),
+    l->>'date',
+    (l->>'weight')::numeric,
+    (l->>'steps')::int,
+    (l->>'calories')::int,
+    (l->>'protein')::int,
+    (l->>'carbs')::int,
+    (l->>'fat')::int,
+    (l->>'fiber')::int,
+    (l->>'water_ml')::int,
+    l->>'note',
+    l->>'off_plan_note',
+    (l->>'adherence')::numeric,
+    CASE WHEN l->'targets_snap' IS NULL OR l->'targets_snap' = 'null'::jsonb THEN NULL ELSE l->'targets_snap' END,
+    CASE WHEN l->'daily_coach_fields' IS NULL OR l->'daily_coach_fields' = 'null'::jsonb THEN NULL ELSE l->'daily_coach_fields' END,
+    COALESCE((l->>'updated_at')::timestamptz, now())
+  FROM jsonb_array_elements(p_logs) AS l
+  ON CONFLICT (user_id, date) DO UPDATE SET
+    weight             = EXCLUDED.weight,
+    steps              = EXCLUDED.steps,
+    calories           = EXCLUDED.calories,
+    protein            = EXCLUDED.protein,
+    carbs              = EXCLUDED.carbs,
+    fat                = EXCLUDED.fat,
+    fiber              = EXCLUDED.fiber,
+    water_ml           = EXCLUDED.water_ml,
+    note               = EXCLUDED.note,
+    off_plan_note      = EXCLUDED.off_plan_note,
+    adherence          = EXCLUDED.adherence,
+    targets_snap       = EXCLUDED.targets_snap,
+    daily_coach_fields = EXCLUDED.daily_coach_fields,
+    updated_at         = EXCLUDED.updated_at
+  WHERE zane_daily_logs.updated_at < EXCLUDED.updated_at;
 $function$;
 
 -- Build the store-shaped (camelCase) entries array for a session from the
