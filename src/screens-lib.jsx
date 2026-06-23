@@ -2175,7 +2175,17 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     // line stops just before it. Measured live, so it's correct for any avatar /
     // background aspect ratio — not just the last divider.
     const avatarEl = captureRef.current.querySelector('img[data-shot-avatar]');
-    const avatarRect = (avatarEl && avatarEl.offsetHeight) ? avatarEl.getBoundingClientRect() : null;
+    // The avatar is a freshly-mounted <img>; on first capture it may not have
+    // decoded within the 2 RAFs above, so its box would measure 0 and no line
+    // would be trimmed. Wait for it to load before measuring.
+    if (avatarEl && !avatarEl.complete) {
+      await new Promise(res => {
+        avatarEl.addEventListener('load', res, { once: true });
+        avatarEl.addEventListener('error', res, { once: true });
+      });
+      await new Promise(r => requestAnimationFrame(r));
+    }
+    const avatarRect = (avatarEl && avatarEl.getBoundingClientRect().height) ? avatarEl.getBoundingClientRect() : null;
     const KNURL_GAP = 14;
     captureRef.current.querySelectorAll('canvas[data-knurl]').forEach(c => {
       const pw = c.parentElement ? c.parentElement.offsetWidth : 320;
