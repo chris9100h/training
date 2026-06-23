@@ -324,6 +324,21 @@ function App() {
     });
   }, [phase, userId]);
 
+  // Remove duplicate CARDIO exercises (cross-tab race condition: two tabs both seed
+  // before either syncs to DB, resulting in two rows with different ids).
+  useEffectA(() => {
+    if (phase !== 'ready' || !userId || !store) return;
+    const cardioExes = (store.exercises || []).filter(e => e.movement_type === 'cardio');
+    if (cardioExes.length <= 1) return;
+    const usedIds = new Set(
+      (store.sessions || []).flatMap(s => (s.entries || []).map(e => e.exId))
+    );
+    const keep = cardioExes.find(e => usedIds.has(e.id)) || cardioExes[0];
+    const toDelete = cardioExes.filter(e => e.id !== keep.id).map(e => e.id);
+    LB.supabase.from('zane_exercises').delete().in('id', toDelete).then(() => {});
+    setStore(s => s ? { ...s, exercises: s.exercises.filter(e => !toDelete.includes(e.id)) } : s);
+  }, [phase, userId]); // runs once on ready; store is captured from that render
+
   useEffectA(() => {
     const color = store?.settings?.accentColor;
     if (color) {
