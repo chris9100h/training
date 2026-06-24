@@ -499,7 +499,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       let weightBad = false, weightHigh = false;
       if (refKg != null && refKg > 0 && loggedKg != null && loggedKg > 0) {
         const tooLow  = loggedKg < refKg - increment * 5;
-        const tooHigh = loggedKg > refKg + increment * 8;
+        const tooHigh = loggedKg > refKg * 1.5;
         if (tooLow || tooHigh) { weightBad = true; weightHigh = tooHigh; }
       }
 
