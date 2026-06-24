@@ -842,30 +842,31 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isBonus && advanceCycle && { isBonus: false }) };
     });
     const shouldAdvance = session.isBonus ? advanceCycle : true;
-    // For freestyle sessions scheduleId is null so isWeekdayMode is always false —
-    // check the active plan too so weekday-mode users don't get a stale cycleIndex bump.
-    const activeSch = LB.todaysDay(store)?.schedule;
-    const activeIsWeekday = LB.isWeekdayPlan(activeSch);
-    // On a flex plan cycleIndex IS the live position, so it only advances when
-    // the finished session is the current next-up day. A freestyle workout, a
-    // session from another plan, or a catch-up of an earlier (skipped) rotation
-    // day must leave the next-up pointer where it is.
-    // Exception: if the user explicitly chose "continue from picked day", we honour
-    // that intent and let the cycleIndex jump even on a flex plan.
-    const flexBlocks = LB.isFlexPlan(activeSch) && !cycleFromPickedDay &&
-      (session.isFreestyle || session.scheduleId !== activeSch?.id || session.dayId !== LB.todaysDay(store)?.day?.id);
-    // If user chose "continue from picked day", jump cycle to that day's index + 1.
-    const pickedSch = store.schedules?.find(s => s.id === session.scheduleId);
-    // Look up the day in the *current version's* days, not the original base array —
-    // after a prior rotation the original order no longer matches baseDays.
-    const pickedBaseDays = (() => {
-      if (!cycleFromPickedDay || !pickedSch) return null;
-      if (!LB.isFlexPlan(activeSch) && pickedSch.versions?.length)
-        return LB.getPlanDaysForDate(pickedSch, LB.todayISO());
-      return pickedSch.days;
-    })();
-    const pickedDayIdx = cycleFromPickedDay ? (pickedBaseDays?.findIndex(d => d.id === session.dayId) ?? -1) : -1;
     setStore(s => {
+      // Compute from fresh state `s` to avoid stale-closure reads off the outer `store`.
+      // For freestyle sessions scheduleId is null so isWeekdayMode is always false —
+      // check the active plan too so weekday-mode users don't get a stale cycleIndex bump.
+      const activeSch = LB.todaysDay(s)?.schedule;
+      const activeIsWeekday = LB.isWeekdayPlan(activeSch);
+      // On a flex plan cycleIndex IS the live position, so it only advances when
+      // the finished session is the current next-up day. A freestyle workout, a
+      // session from another plan, or a catch-up of an earlier (skipped) rotation
+      // day must leave the next-up pointer where it is.
+      // Exception: if the user explicitly chose "continue from picked day", we honour
+      // that intent and let the cycleIndex jump even on a flex plan.
+      const flexBlocks = LB.isFlexPlan(activeSch) && !cycleFromPickedDay &&
+        (session.isFreestyle || session.scheduleId !== activeSch?.id || session.dayId !== LB.todaysDay(s)?.day?.id);
+      // If user chose "continue from picked day", jump cycle to that day's index + 1.
+      const pickedSch = s.schedules?.find(sch2 => sch2.id === session.scheduleId);
+      // Look up the day in the *current version's* days, not the original base array —
+      // after a prior rotation the original order no longer matches baseDays.
+      const pickedBaseDays = (() => {
+        if (!cycleFromPickedDay || !pickedSch) return null;
+        if (!LB.isFlexPlan(activeSch) && pickedSch.versions?.length)
+          return LB.getPlanDaysForDate(pickedSch, LB.todayISO());
+        return pickedSch.days;
+      })();
+      const pickedDayIdx = cycleFromPickedDay ? (pickedBaseDays?.findIndex(d => d.id === session.dayId) ?? -1) : -1;
       // For date-driven plans: insert a schedule version starting today with days rotated
       // so pickedDayIdx is position 0 → today = picked day, tomorrow = day after, no gaps.
       // Flex plans use cycleIndex directly, so skip version logic there.

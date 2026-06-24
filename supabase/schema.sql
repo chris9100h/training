@@ -174,7 +174,11 @@ CREATE TABLE public.zane_user_settings (
   weight_fill_down boolean NOT NULL DEFAULT true,
   manual_calories boolean NOT NULL DEFAULT false,
   onboarding_completed boolean DEFAULT false,
-  net_carbs boolean NOT NULL DEFAULT false
+  net_carbs boolean NOT NULL DEFAULT false,
+  default_checkin_schema jsonb,
+  status_mode text,
+  status_mode_since timestamp with time zone,
+  active_cardio_plan_id text
 );
 
 CREATE TABLE public.zane_pushover_active (
