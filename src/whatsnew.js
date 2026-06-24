@@ -19,9 +19,9 @@ window.WHATS_NEW = [
     id: 'v2.404',
     title: 'Push done right + visual polish',
     items: [
-      'Push notifications are now properly verified before they go live — you enter the 6-digit code from the notification, and only then does the toggle actually flip on. A countdown bar shows how much time you have left (turns orange when it gets spicy 🔥).',
-      'No code entered in time? The slider quietly goes back to off and cancels the subscription — no more half-enabled phantom state.',
-      'Swept through a bunch of visual inconsistencies: border radii, accent colours and weight unit labels are now consistent across the whole app. The kind of thing you notice when it\'s wrong, not when it\'s right. 🧹',
+      'Push notifications are now properly verified before going live — enter the 6-digit code from the notification and the toggle flips on. A countdown bar shows the remaining 2 minutes; it turns orange under 30 seconds.',
+      'No code entered in time? The slider goes back to off and the subscription is cancelled — no more half-enabled state sitting in the background.',
+      'Cleaned up a bunch of visual inconsistencies across the app: border radii, accent colours, and weight unit labels are now consistent throughout.',
     ],
   },
   {
