@@ -446,15 +446,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const rawRef = kbRawRef.current;
     _log(`completeSet(${setIdx}) kb=${kb?.field ?? 'none'} raw='${rawRef}'`);
 
-    // ── Rep outlier check ────────────────────────────────────────────────────
-    // Warn when logged reps are implausibly low vs the pre-filled value
-    // (smart progression target if active, else last session's reps).
+    // ── Outlier checks (reps + weight) ──────────────────────────────────────
+    // Reps: implausibly low/high vs pre-filled reference.
+    // Weight: increment-based (calibrated per equipment config).
+    // When both are off we show a combined message.
     if (!bypassOutlierCheck && !entry.sets[setIdx]?.warmup) {
       const wIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
       const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
       const prevSet = wIdx >= 0 ? prevWorkingSets[wIdx] : undefined;
-      // Mirror buildSeedSets exactly: suggestion (weight bump) → base reps;
-      // smart progression without bump → prev+1; otherwise → prev.
+      // Mirror buildSeedSets exactly
       const suggestion = LB.progressionSuggestion(store, entry.exId, session.dayId, entry.plannedReps, entry.plannedRepsPerSet, last);
       const lastReps = prevSet ? LB.effReps(prevSet) : null;
       const refReps = suggestion
@@ -462,33 +462,64 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         : lastReps != null
           ? (store.settings?.smartProgression ? lastReps + 1 : lastReps)
           : null;
-      if (refReps != null && refReps >= 4) {
-        let loggedReps;
-        if (isUnilateral) {
-          const lVal = (kb?.field === 'repsL' && kb?.setIdx === setIdx)
-            ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.repsL || 0)
-            : (session.entries[exIdx]?.sets[setIdx]?.repsL || 0);
-          const rVal = (kb?.field === 'repsR' && kb?.setIdx === setIdx)
-            ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.repsR || 0)
-            : (session.entries[exIdx]?.sets[setIdx]?.repsR || 0);
-          loggedReps = (lVal > 0 && rVal > 0) ? Math.min(lVal, rVal) : (lVal || rVal);
+
+      // Compute logged values (respect pending KB input)
+      let loggedReps;
+      if (isUnilateral) {
+        const lVal = (kb?.field === 'repsL' && kb?.setIdx === setIdx)
+          ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.repsL || 0)
+          : (session.entries[exIdx]?.sets[setIdx]?.repsL || 0);
+        const rVal = (kb?.field === 'repsR' && kb?.setIdx === setIdx)
+          ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.repsR || 0)
+          : (session.entries[exIdx]?.sets[setIdx]?.repsR || 0);
+        loggedReps = (lVal > 0 && rVal > 0) ? Math.min(lVal, rVal) : (lVal || rVal);
+      } else {
+        loggedReps = (kb?.field === 'reps' && kb?.setIdx === setIdx)
+          ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.reps || 0)
+          : (session.entries[exIdx]?.sets[setIdx]?.reps || 0);
+      }
+
+      let loggedKg = null;
+      let refKg = null;
+      let increment = 2.5;
+      if (!isNoWeightReps) {
+        refKg = suggestion ? (suggestion.kg ?? null) : (prevSet ? prevSet.kg : null);
+        if (refKg != null && refKg > 0) {
+          const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
+          increment = catCfg.increment ?? 2.5;
+          loggedKg = session.entries[exIdx]?.sets[setIdx]?.kg ?? null;
+          if (kb?.field === 'kg' && kb?.setIdx === setIdx) {
+            const num = parseFloat((rawRef || '').replace(',', '.'));
+            if (!isNaN(num) && num > 0) loggedKg = num;
+          }
+        }
+      }
+
+      // Determine violations
+      let weightBad = false, weightHigh = false;
+      if (refKg != null && refKg > 0 && loggedKg != null && loggedKg > 0) {
+        const tooLow  = loggedKg < refKg - increment * 5;
+        const tooHigh = loggedKg > refKg + increment * 8;
+        if (tooLow || tooHigh) { weightBad = true; weightHigh = tooHigh; }
+      }
+
+      let repsBad = false, repsHigh = false;
+      if (refReps != null && refReps >= 4 && loggedReps != null && loggedReps > 0) {
+        if (loggedReps < refReps / 3) { repsBad = true; repsHigh = false; }
+        else if (loggedReps > refReps * 3 || loggedReps > refReps + 10) { repsBad = true; repsHigh = true; }
+      }
+
+      if (weightBad || repsBad) {
+        kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+        setKbField(null); setKbRaw(''); setKbFresh(false);
+        if (weightBad && repsBad) {
+          setOutlierConfirm({ setIdx, kind: 'both', loggedKg, loggedReps, refKg, refReps });
+        } else if (weightBad) {
+          setOutlierConfirm({ setIdx, kind: 'kg', logged: loggedKg, ref: refKg, high: weightHigh });
         } else {
-          loggedReps = (kb?.field === 'reps' && kb?.setIdx === setIdx)
-            ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.reps || 0)
-            : (session.entries[exIdx]?.sets[setIdx]?.reps || 0);
+          setOutlierConfirm({ setIdx, kind: 'reps', logged: loggedReps, ref: refReps, high: repsHigh });
         }
-        if (loggedReps > 0 && loggedReps < refReps / 3) {
-          kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-          setKbField(null); setKbRaw(''); setKbFresh(false);
-          setRepOutlierConfirm({ setIdx, loggedReps, refReps, high: false });
-          return;
-        }
-        if (loggedReps > refReps * 3 || loggedReps > refReps + 10) {
-          kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-          setKbField(null); setKbRaw(''); setKbFresh(false);
-          setRepOutlierConfirm({ setIdx, loggedReps, refReps, high: true });
-          return;
-        }
+        return;
       }
     }
     // ────────────────────────────────────────────────────────────────────────
@@ -1043,7 +1074,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [addSupersetData, setAddSupersetData] = useStateT(null); // { newIdx } | null
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
-  const [repOutlierConfirm, setRepOutlierConfirm] = useStateT(null);
+  const [outlierConfirm, setOutlierConfirm] = useStateT(null);
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
@@ -1849,28 +1880,52 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         document.body
       )}
 
-      {/* Rep outlier confirmation */}
-      {repOutlierConfirm && ReactDOM.createPortal(
+      {/* Outlier confirmation (reps / kg / both) */}
+      {outlierConfirm && ReactDOM.createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 500, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }}>
           <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, padding: '20px 20px 44px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <i className="fa-solid fa-triangle-exclamation" style={{ color: UI.gold, fontSize: 14 }} />
-              <span style={{ fontWeight: 700, fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>{repOutlierConfirm.high ? `${repOutlierConfirm.loggedReps} reps?` : `Only ${repOutlierConfirm.loggedReps} ${repOutlierConfirm.loggedReps === 1 ? 'rep' : 'reps'}?`}</span>
+              <span style={{ fontWeight: 700, fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>{(() => {
+                const oc = outlierConfirm;
+                if (oc.kind === 'both') return "That doesn't look right?";
+                const isKg = oc.kind === 'kg';
+                const val = oc.logged;
+                const unit = isKg ? ` ${UI.unit()}` : (val === 1 ? ' rep' : ' reps');
+                return oc.high ? `${val}${unit}?` : `Only ${val}${unit}?`;
+              })()}</span>
             </div>
             <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 22 }}>
-              {entry.name} — {repOutlierConfirm.loggedReps} logged, {repOutlierConfirm.refReps} expected
+              {(() => {
+                const oc = outlierConfirm;
+                if (oc.kind === 'both') {
+                  const u = UI.unit();
+                  return `Expected ${oc.refKg}${u} × ${oc.refReps}, you logged ${oc.loggedKg}${u} × ${oc.loggedReps}`;
+                }
+                const isKg = oc.kind === 'kg';
+                const u = isKg ? UI.unit() : '';
+                return `${entry.name} — ${oc.logged}${u} logged, ${oc.ref}${u} expected`;
+              })()}
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
               <Btn kind="ghost" style={{ flex: 1 }} onClick={() => {
-                const s = repOutlierConfirm.setIdx;
-                setRepOutlierConfirm(null);
-                activateKb(s, isUnilateral ? 'repsL' : 'reps');
+                const s = outlierConfirm.setIdx;
+                const kind = outlierConfirm.kind;
+                setOutlierConfirm(null);
+                activateKb(s, kind === 'both' ? 'kg' : kind === 'kg' ? 'kg' : (isUnilateral ? 'repsL' : 'reps'));
               }}>No, fix it</Btn>
               <Btn style={{ flex: 1 }} onClick={() => {
-                const s = repOutlierConfirm.setIdx;
-                setRepOutlierConfirm(null);
+                const s = outlierConfirm.setIdx;
+                setOutlierConfirm(null);
                 completeSet(s, true);
-              }}>Yes, {repOutlierConfirm.loggedReps} {repOutlierConfirm.loggedReps === 1 ? 'rep' : 'reps'}</Btn>
+              }}>{(() => {
+                const oc = outlierConfirm;
+                if (oc.kind === 'both') return 'Yes, log it anyway';
+                const isKg = oc.kind === 'kg';
+                const val = oc.logged;
+                const unit = isKg ? UI.unit() : (val === 1 ? ' rep' : ' reps');
+                return `Yes, ${val}${isKg ? ` ${unit}` : unit}`;
+              })()}</Btn>
             </div>
           </div>
         </div>,
