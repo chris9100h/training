@@ -668,7 +668,19 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
 
   const deleteExercise = async () => {
     if (!await confirm('Previous sessions will be preserved.', { title: `Delete "${ex.name}"?`, ok: 'Delete', danger: true })) return;
-    setStore(s => ({ ...s, exercises: s.exercises.filter(e => e.id !== exId) }));
+    setStore(s => ({
+      ...s,
+      exercises: s.exercises.filter(e => e.id !== exId),
+      schedules: s.schedules.map(sch => ({
+        ...sch,
+        days: Object.fromEntries(
+          Object.entries(sch.days || {}).map(([k, day]) => [
+            k,
+            { ...day, items: (day.items || []).filter(item => item.exId !== exId) },
+          ])
+        ),
+      })),
+    }));
     go({ name: 'lib' });
   };
 
@@ -2863,7 +2875,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
             <button key={i} onClick={() => { setExIdx(i); setFollowLive(i === liveIdx); }} style={{
               flexShrink: 0, padding: '6px 12px', borderRadius: 4,
               border: `${isCurrent ? '1.5px' : '1px'} solid ${isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.hair}`,
-              background: isCurrent ? UI.goldFaint : allDone ? 'rgba(201,169,97,0.06)' : 'transparent',
+              background: isCurrent ? UI.goldFaint : allDone ? 'rgba(var(--accent-rgb),0.06)' : 'transparent',
               color: isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.inkSoft,
               fontFamily: UI.fontUi, fontSize: 12, fontWeight: isCurrent ? 600 : 400,
               letterSpacing: '0.06em', cursor: 'pointer',

@@ -278,7 +278,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
                 onClick={() => handleEnd(c)}
                 style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, cursor: ending === c.id ? 'wait' : 'pointer' }}
               >
-                <div style={{ width: 36, height: 36, borderRadius: 18, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <div style={{ width: 36, height: 36, borderRadius: '50%', background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <span style={{ fontFamily: UI.fontUi, fontSize: 15, color: UI.inkSoft, fontWeight: 700 }}>{(c.clientName || c.clientEmail || '?')[0].toUpperCase()}</span>
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -370,7 +370,7 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
       {inProgress && (
         <div style={{ position: 'absolute', inset: 0, background: `rgba(var(--accent-rgb),0.04)`, pointerEvents: 'none' }} />
       )}
-      <div style={{ width: 44, height: 44, borderRadius: 22, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' }}>
+      <div style={{ width: 44, height: 44, borderRadius: '50%', background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' }}>
         <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.inkSoft, fontWeight: 700 }}>{(client.clientName || client.clientEmail || '?')[0].toUpperCase()}</span>
         {inProgress && (
           <div style={{ position: 'absolute', top: 0, right: 0, width: 12, height: 12, borderRadius: 6, background: 'var(--accent)', border: '2px solid var(--bg)', animation: 'pulseDot 1.5s ease-in-out infinite' }} />
@@ -417,7 +417,7 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
         </button>
       )}
       {!isPending && unreadCount > 0 && (
-        <div style={{ minWidth: 20, height: 20, borderRadius: 10, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <div style={{ minWidth: 20, height: 20, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <span style={{ fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, color: '#0a0805' }}>{unreadCount > 9 ? '9+' : unreadCount}</span>
         </div>
       )}

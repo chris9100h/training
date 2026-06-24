@@ -1799,8 +1799,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 8,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 80, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 35px rgba(201,169,97,1), 0 0 80px rgba(201,169,97,0.6)' }}>★</span>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 30, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 18px rgba(201,169,97,1), 0 0 45px rgba(201,169,97,0.8), 0 0 90px rgba(201,169,97,0.4)' }}>NEW BEST</span>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 80, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 35px rgba(var(--accent-rgb),1), 0 0 80px rgba(var(--accent-rgb),0.6)' }}>★</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 30, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 18px rgba(var(--accent-rgb),1), 0 0 45px rgba(var(--accent-rgb),0.8), 0 0 90px rgba(var(--accent-rgb),0.4)' }}>NEW BEST</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, fontWeight: 700, letterSpacing: '0.28em' }}>PERSONAL RECORD</span>
           </div>
         </div>,
@@ -1826,8 +1826,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 6,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8), 0 0 80px rgba(201,169,97,0.4)' }}>IMPROVEMENT</span>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--accent-rgb),0.9), 0 0 70px rgba(var(--accent-rgb),0.5)' }}>↑</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8), 0 0 80px rgba(var(--accent-rgb),0.4)' }}>IMPROVEMENT</span>
           </div>
         </div>,
         document.body
@@ -1867,13 +1867,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           gap: 8,
         }}>
           <div style={{ animation: 'improvedBorderPulse 0.8s ease-in-out infinite', position: 'absolute', inset: 0 }} />
-          <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8)' }}>PROGRESSION UNLOCKED</span>
+          <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--accent-rgb),0.9), 0 0 70px rgba(var(--accent-rgb),0.5)' }}>↑</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8)' }}>PROGRESSION UNLOCKED</span>
           <span style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, marginTop: 4 }}>You've earned the next load.</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
             <span className="num" style={{ fontSize: 22, color: UI.inkSoft }}>{progressionUnlocked.currentKg}{UI.unit()}</span>
             <span style={{ color: UI.gold, fontSize: 20, lineHeight: 1 }}>→</span>
-            <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(201,169,97,0.8)' }}>{progressionUnlocked.nextKg}{UI.unit()}</span>
+            <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(var(--accent-rgb),0.8)' }}>{progressionUnlocked.nextKg}{UI.unit()}</span>
           </div>
           <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, letterSpacing: '0.12em' }}>{progressionUnlocked.exName}</span>
         </div>,
@@ -2043,7 +2043,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 flexShrink: 0, maxWidth: 110,
                 padding: '5px 11px 4px', borderRadius: 4,
                 border: `1px solid ${active ? UI.gold : done ? UI.goldSoft : UI.hairStrong}`,
-                background: active ? UI.goldFaint : done ? 'rgba(201,169,97,0.05)' : 'transparent',
+                background: active ? UI.goldFaint : done ? 'rgba(var(--accent-rgb),0.05)' : 'transparent',
                 cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
                 transition: 'all 0.15s',
@@ -3073,7 +3073,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
 function setInputStyle(done, current) {
   return {
-    background: done ? 'transparent' : current ? 'rgba(201,169,97,0.06)' : UI.bgInset,
+    background: done ? 'transparent' : current ? 'rgba(var(--accent-rgb),0.06)' : UI.bgInset,
     border: `1px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.hair}`,
     borderRadius: 3, outline: 'none',
     color: done ? UI.inkSoft : UI.ink,

@@ -995,8 +995,8 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
             </div>
           </div>
           {preview?.warnings?.map((msg, i) => (
-            <div key={i} style={{ padding: '8px 12px', background: 'rgba(240,168,48,0.08)', border: '0.5px solid rgba(240,168,48,0.3)', borderRadius: 6 }}>
-              <span style={{ fontSize: 11, color: '#f0a830', fontFamily: UI.fontUi, lineHeight: 1.5 }}>⚠ {msg}</span>
+            <div key={i} style={{ padding: '8px 12px', background: 'rgba(var(--accent-rgb),0.08)', border: '0.5px solid rgba(var(--accent-rgb),0.3)', borderRadius: 6 }}>
+              <span style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontUi, lineHeight: 1.5 }}>⚠ {msg}</span>
             </div>
           ))}
           {picks.map(({ w, i }) => {

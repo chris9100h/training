@@ -139,7 +139,7 @@ function CoachingPendingBanner({ store, setStore, userId }) {
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
     }}>
       <div style={{
-        background: UI.bg, border: `1px solid ${UI.hairStrong}`, borderRadius: 16,
+        background: UI.bg, border: `1px solid ${UI.hairStrong}`, borderRadius: 8,
         padding: 28, maxWidth: 380, width: '100%',
       }}>
         <div className="micro-gold" style={{ marginBottom: 10, letterSpacing: '0.15em' }}>COACHING REQUEST</div>
@@ -154,14 +154,14 @@ function CoachingPendingBanner({ store, setStore, userId }) {
           <button
             disabled={loading}
             onClick={() => respond(true)}
-            style={{ width: '100%', padding: '14px 0', borderRadius: 10, border: 'none', cursor: loading ? 'default' : 'pointer', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.08em', opacity: loading ? 0.6 : 1 }}
+            style={{ width: '100%', padding: '14px 0', borderRadius: 8, border: 'none', cursor: loading ? 'default' : 'pointer', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.08em', opacity: loading ? 0.6 : 1 }}
           >
             ACCEPT
           </button>
           <button
             disabled={loading}
             onClick={() => respond(false)}
-            style={{ width: '100%', padding: '14px 0', borderRadius: 10, border: `1px solid ${UI.hairStrong}`, cursor: loading ? 'default' : 'pointer', background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, opacity: loading ? 0.6 : 1 }}
+            style={{ width: '100%', padding: '14px 0', borderRadius: 8, border: `1px solid ${UI.hairStrong}`, cursor: loading ? 'default' : 'pointer', background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, opacity: loading ? 0.6 : 1 }}
           >
             DECLINE
           </button>
@@ -394,14 +394,14 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
           const unread = unreadByThread[t.id] || 0;
           return (
             <div key={t.id} onClick={() => setSelected(t)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}>
-              <div style={{ width: 40, height: 40, borderRadius: 10, background: `rgba(var(--accent-rgb),0.08)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: `rgba(var(--accent-rgb),0.08)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <i className="fa-solid fa-comment" style={{ fontSize: 14, color: 'var(--accent)' }} />
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{t.name}</div>
               </div>
               {unread > 0 && (
-                <div style={{ background: 'var(--accent)', color: '#0a0805', borderRadius: 10, fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, padding: '2px 7px', minWidth: 18, textAlign: 'center', flexShrink: 0 }}>
+                <div style={{ background: 'var(--accent)', color: '#0a0805', borderRadius: 6, fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, padding: '2px 7px', minWidth: 18, textAlign: 'center', flexShrink: 0 }}>
                   {unread}
                 </div>
               )}
@@ -527,9 +527,9 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
       {/* As client */}
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, marginTop: 4 }}>MY COACH</div>
       {asClient ? (
-        <div style={{ background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 14, overflow: 'hidden' }}>
+        <div style={{ background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 14, overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px' }}>
-            <div style={{ width: 36, height: 36, borderRadius: 18, background: `rgba(var(--accent-rgb),0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <div style={{ width: 36, height: 36, borderRadius: '50%', background: `rgba(var(--accent-rgb),0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <i className="fa-solid fa-user" style={{ fontSize: 14, color: 'var(--accent)' }} />
             </div>
             <div style={{ flex: 1 }}>
@@ -549,7 +549,7 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
               <i className="fa-solid fa-comment" style={{ fontSize: 12, color: 'var(--accent)' }} />
               <span style={{ flex: 1, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Messages</span>
               {(store.coaching?.unreadNotes?.length > 0) && (
-                <div style={{ background: 'var(--accent)', color: '#0a0805', borderRadius: 10, fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, padding: '1px 7px', minWidth: 18, textAlign: 'center' }}>
+                <div style={{ background: 'var(--accent)', color: '#0a0805', borderRadius: 6, fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, padding: '1px 7px', minWidth: 18, textAlign: 'center' }}>
                   {store.coaching.unreadNotes.length}
                 </div>
               )}
@@ -558,7 +558,7 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
           )}
         </div>
       ) : (
-        <div style={{ padding: '12px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, marginBottom: 14, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
+        <div style={{ padding: '12px 14px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 14, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
           No coach assigned.
         </div>
       )}
@@ -569,10 +569,10 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
       {asCoach.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
           {asCoach.map(c => (
-            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 10, border: `0.5px solid ${UI.hair}`, cursor: c.status === 'active' ? 'pointer' : 'default' }}
+            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, cursor: c.status === 'active' ? 'pointer' : 'default' }}
               onClick={() => c.status === 'active' && go({ name: 'coaching-client', coachingId: c.id, clientId: c.clientId, clientName: c.clientName })}
             >
-              <div style={{ width: 32, height: 32, borderRadius: 16, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: 32, height: 32, borderRadius: '50%', background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, fontWeight: 700 }}>{(c.clientName || '?')[0].toUpperCase()}</span>
               </div>
               <div style={{ flex: 1 }}>
@@ -642,9 +642,9 @@ function ClientCard({ client, go }) {
   return (
     <div
       onClick={() => go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName })}
-      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 12, border: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}
+      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}
     >
-      <div style={{ width: 44, height: 44, borderRadius: 22, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <div style={{ width: 44, height: 44, borderRadius: '50%', background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.inkSoft, fontWeight: 700 }}>{(client.clientName || '?')[0].toUpperCase()}</span>
       </div>
       <div style={{ flex: 1 }}>

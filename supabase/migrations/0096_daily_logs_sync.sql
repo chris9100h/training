@@ -17,6 +17,7 @@ CREATE OR REPLACE FUNCTION sync_daily_logs_batch(p_logs jsonb)
 RETURNS void
 LANGUAGE sql
 SECURITY INVOKER
+SET search_path TO 'public'
 AS $$
   INSERT INTO zane_daily_logs (
     id, user_id, date, weight, steps, calories, protein, carbs, fat, fiber,
