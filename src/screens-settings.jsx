@@ -405,6 +405,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [pushSheet, setPushSheet] = useStateSet(false);
   const [webPushSub, setWebPushSub] = useStateSet(null);
   const [webPushLoading, setWebPushLoading] = useStateSet(false);
+  const [webPushPending, setWebPushPending] = useStateSet(false);
   const [webPushVerified, setWebPushVerified] = useStateSet(() => localStorage.getItem('logbook-push-verified') === 'true');
   const [iosDisclaimerSeen, setIosDisclaimerSeen] = useStateSet(() => localStorage.getItem('logbook-push-ios-hint-seen') === 'true');
   const [webPushStep, setWebPushStep] = useStateSet('idle'); // 'idle'|'code-sent'
@@ -488,9 +489,9 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
     LB.getWebPushSubscription().then(sub => {
       setWebPushSub(sub);
       // Auto-restore verified state: if the browser's PushManager has an active
-      // subscription, push is working — don't require re-verification just because
-      // localStorage was cleared (cache clear, PWA reinstall, etc.).
-      if (sub && localStorage.getItem('logbook-push-verified') !== 'true') {
+      // subscription and push is already confirmed in DB, restore local verified flag
+      // without requiring re-verification (cache clear, PWA reinstall, etc.).
+      if (sub && store.settings?.pushEnabled && localStorage.getItem('logbook-push-verified') !== 'true') {
         setWebPushVerified(true);
         localStorage.setItem('logbook-push-verified', 'true');
       }
@@ -648,17 +649,41 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   };
 
   const pushStatusTimer = useRefSet(null);
-  useEffectSet(() => () => clearTimeout(pushStatusTimer.current), []);
+  const pendingTimeoutRef = useRefSet(null);
+  useEffectSet(() => () => { clearTimeout(pushStatusTimer.current); clearTimeout(pendingTimeoutRef.current); }, []);
+
+  const cancelPendingPush = async () => {
+    clearTimeout(pendingTimeoutRef.current);
+    await LB.unsubscribeWebPush(userId).catch(() => {});
+    setWebPushSub(null);
+    setPushEnabled(false); localStorage.setItem('logbook-push-enabled', 'false');
+    setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
+    setWebPushPending(false);
+    setWebPushStep('idle'); setWebPushCode(''); setCodeInput('');
+  };
+
+  // Cancel pending verification when the push sheet is closed without verifying
+  useEffectSet(() => {
+    if (!pushSheet && webPushPending) cancelPendingPush();
+  }, [pushSheet]);
+
   const togglePush = async () => {
     if (webPushLoading) return;
+    if (webPushPending) { await cancelPendingPush(); return; }
     setWebPushLoading(true);
     try {
       if (!pushEnabled) {
         const sub = await LB.subscribeWebPush(userId);
         setWebPushSub(sub);
-        setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true');
-        setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } }));
         setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
+        setWebPushPending(true);
+        // 2-minute window to enter the verification code; cancels subscription on timeout
+        pendingTimeoutRef.current = setTimeout(async () => {
+          await cancelPendingPush();
+          clearTimeout(pushStatusTimer.current);
+          setPushStatus('Verification timed out — push not enabled');
+          pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
+        }, 2 * 60 * 1000);
         sendWebPushCode();
       } else {
         await LB.unsubscribeWebPush(userId);
@@ -691,7 +716,11 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
       pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
       return;
     }
+    clearTimeout(pendingTimeoutRef.current);
+    setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true');
+    setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } }));
     setWebPushVerified(true); localStorage.setItem('logbook-push-verified', 'true');
+    setWebPushPending(false);
     setWebPushStep('idle'); setWebPushCode(''); setCodeInput('');
     clearTimeout(pushStatusTimer.current);
     setPushStatus('✓ Verified'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 3000);
@@ -2181,7 +2210,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
           <Row label="This device" first>
             {webPushLoading
               ? <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkFaint }}>…</span>
-              : <Toggle on={pushEnabled} onToggle={togglePush} />}
+              : <Toggle on={pushEnabled || webPushPending} onToggle={togglePush} />}
           </Row>
           {pushEnabled && store.settings?.usePushover && store.settings?.pushoverUserKey && (
             <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>Active via Pushover — see Advanced</div>
