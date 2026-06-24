@@ -1161,7 +1161,18 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
 
 // ─── Tab: Sessions ────────────────────────────────────────────────────────────
 
+const CARDIO_ACTIVITY_MAP = {
+  running:    { label: 'Running',    icon: 'fa-person-running' },
+  walking:    { label: 'Walking',    icon: 'fa-person-walking' },
+  cycling:    { label: 'Cycling',    icon: 'fa-person-biking' },
+  swimming:   { label: 'Swimming',   icon: 'fa-person-swimming' },
+  rowing:     { label: 'Rowing',     icon: 'fa-water' },
+  elliptical: { label: 'Elliptical', icon: 'fa-circle-dot' },
+  hiking:     { label: 'Hiking',     icon: 'fa-mountain-sun' },
+};
+
 function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initialSelected, onClearSelected }) {
+  const [subTab, setSubTab] = useStateC('workouts');
   const [selected, setSelected] = useStateC(initialSelected || null);
   const unit = clientStore.settings?.unit || 'kg';
   const [noteOpen, setNoteOpen] = useStateC(false);
@@ -1298,46 +1309,90 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
     );
   }
 
-  // ── Session list ───────────────────────────────────────────────────
+  // ── Session list / Cardio list ─────────────────────────────────────
+  const cardioLogs = (clientStore.cardioLogs || []).slice().sort((a, b) => b.date.localeCompare(a.date));
   return (
     <div style={{ overflowY: 'auto', flex: 1 }}>
-      {dayNames.length > 1 && (
-        <div style={{ flexShrink: 0, padding: '8px 12px 0', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
-          {dayNames.map(name => {
-            const active = dayFilter === name;
+      <SubTabBar
+        tabs={[
+          { id: 'workouts', label: 'Workouts', icon: 'fa-dumbbell' },
+          { id: 'cardio',   label: 'Cardio',   icon: 'fa-person-running' },
+        ]}
+        active={subTab}
+        onChange={t => { setSubTab(t); setDayFilter(null); }}
+        style={{ padding: '10px 12px 2px' }}
+      />
+      {subTab === 'workouts' ? (
+        <>
+          {dayNames.length > 1 && (
+            <div style={{ flexShrink: 0, padding: '8px 12px 0', display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
+              {dayNames.map(name => {
+                const active = dayFilter === name;
+                return (
+                  <button key={name} onClick={() => setDayFilter(active ? null : name)} style={{
+                    flexShrink: 0, padding: '5px 12px', borderRadius: 4, cursor: 'pointer',
+                    border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
+                    background: active ? UI.goldFaint : 'transparent',
+                    color: active ? UI.gold : UI.inkFaint,
+                    fontFamily: UI.fontUi, fontSize: 10, fontWeight: active ? 600 : 400,
+                    letterSpacing: '0.1em', textTransform: 'uppercase',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>{name}</button>
+                );
+              })}
+            </div>
+          )}
+          <div style={{ padding: '4px 12px 32px' }}>
+            {filteredSessions.length === 0 ? (
+              <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '32px 14px', textAlign: 'center' }}>
+                {dayFilter ? `No "${dayFilter}" sessions yet.` : 'No sessions yet.'}
+              </div>
+            ) : filteredSessions.map(s => {
+              const vol = LB.totalVolume(s, clientStore.exercises);
+              return (
+                <div key={s.id} onClick={() => setSelected(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
+                    <div style={{ fontSize: 11, color: UI.inkFaint }}>{fmtDate(s.date)} · {LB.doneSetCount(s)} sets</div>
+                  </div>
+                  <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(vol).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{unit}</span></span>
+                  <ChevronRight />
+                </div>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <div style={{ padding: '4px 12px 32px' }}>
+          {cardioLogs.length === 0 ? (
+            <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '32px 14px', textAlign: 'center' }}>No cardio logs yet.</div>
+          ) : cardioLogs.map(log => {
+            const act = CARDIO_ACTIVITY_MAP[log.type] || { label: log.type ? log.type.charAt(0).toUpperCase() + log.type.slice(1) : 'Cardio', icon: 'fa-person-running' };
             return (
-              <button key={name} onClick={() => setDayFilter(active ? null : name)} style={{
-                flexShrink: 0, padding: '5px 12px', borderRadius: 4, cursor: 'pointer',
-                border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
-                background: active ? UI.goldFaint : 'transparent',
-                color: active ? UI.gold : UI.inkFaint,
-                fontFamily: UI.fontUi, fontSize: 10, fontWeight: active ? 600 : 400,
-                letterSpacing: '0.1em', textTransform: 'uppercase',
-                WebkitTapHighlightColor: 'transparent',
-              }}>{name}</button>
+              <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(var(--accent-rgb),0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <i className={`fa-solid ${act.icon}`} style={{ fontSize: 13, color: UI.gold }} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{act.label}</div>
+                  <div style={{ fontSize: 11, color: UI.inkFaint }}>
+                    {fmtDate(log.date)}
+                    {log.durationMinutes ? ` · ${log.durationMinutes}m` : ''}
+                    {log.distanceM ? ` · ${log.distanceM >= 1000 ? (log.distanceM / 1000).toFixed(1) + ' km' : Math.round(log.distanceM) + ' m'}` : ''}
+                  </div>
+                  {log.note && <div style={{ fontSize: 11, color: UI.inkSoft, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.note}</div>}
+                </div>
+                {(log.effort != null || log.paceFeeling != null) && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, alignItems: 'flex-end' }}>
+                    {log.effort != null && <span className="micro" style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 6px', color: UI.inkSoft }}>E {log.effort}/10</span>}
+                    {log.paceFeeling != null && <span className="micro" style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 6px', color: UI.inkSoft }}>PF {log.paceFeeling}/6</span>}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
       )}
-      <div style={{ padding: '4px 12px 32px' }}>
-        {filteredSessions.length === 0 ? (
-          <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '32px 14px', textAlign: 'center' }}>
-            {dayFilter ? `No "${dayFilter}" sessions yet.` : 'No sessions yet.'}
-          </div>
-        ) : filteredSessions.map(s => {
-          const vol = LB.totalVolume(s, clientStore.exercises);
-          return (
-            <div key={s.id} onClick={() => setSelected(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
-                <div style={{ fontSize: 11, color: UI.inkFaint }}>{fmtDate(s.date)} · {LB.doneSetCount(s)} sets</div>
-              </div>
-              <span className="num" style={{ fontSize: 12, color: UI.gold }}>{Math.round(vol).toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{unit}</span></span>
-              <ChevronRight />
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }

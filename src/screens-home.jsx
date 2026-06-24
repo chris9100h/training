@@ -509,7 +509,7 @@ function RecentBannerDay({ banner, store, setStore, go, sch, userId, onOpenSkipS
   const dateLabel = daysAgo === 1 ? 'YESTERDAY' : `${daysAgo}D AGO`;
   if (skip) {
     return (
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 12 }}>
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="micro" style={{ marginBottom: 3 }}>{dayName} · {dateLabel}</div>
           <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `1px solid ${UI.hairStrong}`, borderRadius: 3, padding: '2px 8px', display: 'inline-block' }}>
@@ -524,7 +524,7 @@ function RecentBannerDay({ banner, store, setStore, go, sch, userId, onOpenSkipS
     );
   }
   return (
-    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.05)', border: `0.5px solid rgba(var(--danger-rgb),0.2)`, borderRadius: 12 }}>
+    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.05)', border: `0.5px solid rgba(var(--danger-rgb),0.2)`, borderRadius: 8 }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>{dayName} · {dateLabel}</div>
         <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Not logged</div>
@@ -612,8 +612,8 @@ function CardioPROverlay({ pr, onDone }) {
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
     }}>
       <div style={{ position: 'absolute', inset: 0, animation: 'improvedBorderPulse 0.7s ease-in-out infinite' }} />
-      <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,1), 0 0 70px rgba(201,169,97,0.6)' }}>{isBest ? '★' : '↑'}</span>
-      <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8)' }}>{isBest ? 'NEW BEST' : 'IMPROVEMENT'}</span>
+      <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--accent-rgb),1), 0 0 70px rgba(var(--accent-rgb),0.6)' }}>{isBest ? '★' : '↑'}</span>
+      <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8)' }}>{isBest ? 'NEW BEST' : 'IMPROVEMENT'}</span>
       {pr.type && <span style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, fontWeight: 700, letterSpacing: '0.28em', textTransform: 'uppercase' }}>{pr.type}</span>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 20, minWidth: 220 }}>
         {pr.items.map(it => {
@@ -2263,7 +2263,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               return (
                 <div key={i} style={{
                   flex: seg.count, height: 16, borderRadius: 4,
-                  background: isActive ? UI.goldFaint : 'rgba(201,169,97,0.06)',
+                  background: isActive ? UI.goldFaint : 'rgba(var(--accent-rgb),0.06)',
                   border: `0.5px solid ${isActive ? UI.goldSoft : UI.hair}`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>

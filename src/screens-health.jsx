@@ -1076,7 +1076,7 @@ function HealthScreen({ store, setStore, go, userId }) {
       dailyLogs: s.dailyLogs.map(l => {
         if (!healDates.has(l.date)) return l;
         const adherence = LB.macroAdherence({ protein: l.protein, carbs: l.carbs, fat: l.fat }, restTarget);
-        return adherence != null ? { ...l, adherence, targetsSnap: restSnap } : l;
+        return adherence != null ? { ...l, adherence, targetsSnap: restSnap, updatedAt: new Date().toISOString() } : l;
       }),
     }));
   }, [store.sessions, store.dailyLogs, effectiveTargets]);

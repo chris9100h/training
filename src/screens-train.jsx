@@ -446,15 +446,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const rawRef = kbRawRef.current;
     _log(`completeSet(${setIdx}) kb=${kb?.field ?? 'none'} raw='${rawRef}'`);
 
-    // ── Rep outlier check ────────────────────────────────────────────────────
-    // Warn when logged reps are implausibly low vs the pre-filled value
-    // (smart progression target if active, else last session's reps).
+    // ── Outlier checks (reps + weight) ──────────────────────────────────────
+    // Reps: implausibly low/high vs pre-filled reference.
+    // Weight: increment-based (calibrated per equipment config).
+    // When both are off we show a combined message.
     if (!bypassOutlierCheck && !entry.sets[setIdx]?.warmup) {
       const wIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
       const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
       const prevSet = wIdx >= 0 ? prevWorkingSets[wIdx] : undefined;
-      // Mirror buildSeedSets exactly: suggestion (weight bump) → base reps;
-      // smart progression without bump → prev+1; otherwise → prev.
+      // Mirror buildSeedSets exactly
       const suggestion = LB.progressionSuggestion(store, entry.exId, session.dayId, entry.plannedReps, entry.plannedRepsPerSet, last);
       const lastReps = prevSet ? LB.effReps(prevSet) : null;
       const refReps = suggestion
@@ -462,33 +462,64 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         : lastReps != null
           ? (store.settings?.smartProgression ? lastReps + 1 : lastReps)
           : null;
-      if (refReps != null && refReps >= 4) {
-        let loggedReps;
-        if (isUnilateral) {
-          const lVal = (kb?.field === 'repsL' && kb?.setIdx === setIdx)
-            ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.repsL || 0)
-            : (session.entries[exIdx]?.sets[setIdx]?.repsL || 0);
-          const rVal = (kb?.field === 'repsR' && kb?.setIdx === setIdx)
-            ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.repsR || 0)
-            : (session.entries[exIdx]?.sets[setIdx]?.repsR || 0);
-          loggedReps = (lVal > 0 && rVal > 0) ? Math.min(lVal, rVal) : (lVal || rVal);
+
+      // Compute logged values (respect pending KB input)
+      let loggedReps;
+      if (isUnilateral) {
+        const lVal = (kb?.field === 'repsL' && kb?.setIdx === setIdx)
+          ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.repsL || 0)
+          : (session.entries[exIdx]?.sets[setIdx]?.repsL || 0);
+        const rVal = (kb?.field === 'repsR' && kb?.setIdx === setIdx)
+          ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.repsR || 0)
+          : (session.entries[exIdx]?.sets[setIdx]?.repsR || 0);
+        loggedReps = (lVal > 0 && rVal > 0) ? Math.min(lVal, rVal) : (lVal || rVal);
+      } else {
+        loggedReps = (kb?.field === 'reps' && kb?.setIdx === setIdx)
+          ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.reps || 0)
+          : (session.entries[exIdx]?.sets[setIdx]?.reps || 0);
+      }
+
+      let loggedKg = null;
+      let refKg = null;
+      let increment = 2.5;
+      if (!isNoWeightReps) {
+        refKg = suggestion ? (suggestion.kg ?? null) : (prevSet ? prevSet.kg : null);
+        if (refKg != null && refKg > 0) {
+          const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
+          increment = catCfg.increment ?? 2.5;
+          loggedKg = session.entries[exIdx]?.sets[setIdx]?.kg ?? null;
+          if (kb?.field === 'kg' && kb?.setIdx === setIdx) {
+            const num = parseFloat((rawRef || '').replace(',', '.'));
+            if (!isNaN(num) && num > 0) loggedKg = num;
+          }
+        }
+      }
+
+      // Determine violations
+      let weightBad = false, weightHigh = false;
+      if (refKg != null && refKg > 0 && loggedKg != null && loggedKg > 0) {
+        const tooLow  = loggedKg < refKg - increment * 5;
+        const tooHigh = loggedKg > refKg * 1.5;
+        if (tooLow || tooHigh) { weightBad = true; weightHigh = tooHigh; }
+      }
+
+      let repsBad = false, repsHigh = false;
+      if (refReps != null && refReps >= 4 && loggedReps != null && loggedReps > 0) {
+        if (loggedReps < refReps / 3) { repsBad = true; repsHigh = false; }
+        else if (loggedReps > refReps * 3 || loggedReps > refReps + 10) { repsBad = true; repsHigh = true; }
+      }
+
+      if (weightBad || repsBad) {
+        kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+        setKbField(null); setKbRaw(''); setKbFresh(false);
+        if (weightBad && repsBad) {
+          setOutlierConfirm({ setIdx, kind: 'both', loggedKg, loggedReps, refKg, refReps });
+        } else if (weightBad) {
+          setOutlierConfirm({ setIdx, kind: 'kg', logged: loggedKg, ref: refKg, high: weightHigh });
         } else {
-          loggedReps = (kb?.field === 'reps' && kb?.setIdx === setIdx)
-            ? Math.max(parseInt(rawRef, 10) || 0, session.entries[exIdx]?.sets[setIdx]?.reps || 0)
-            : (session.entries[exIdx]?.sets[setIdx]?.reps || 0);
+          setOutlierConfirm({ setIdx, kind: 'reps', logged: loggedReps, ref: refReps, high: repsHigh });
         }
-        if (loggedReps > 0 && loggedReps < refReps / 3) {
-          kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-          setKbField(null); setKbRaw(''); setKbFresh(false);
-          setRepOutlierConfirm({ setIdx, loggedReps, refReps, high: false });
-          return;
-        }
-        if (loggedReps > refReps * 3 || loggedReps > refReps + 10) {
-          kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
-          setKbField(null); setKbRaw(''); setKbFresh(false);
-          setRepOutlierConfirm({ setIdx, loggedReps, refReps, high: true });
-          return;
-        }
+        return;
       }
     }
     // ────────────────────────────────────────────────────────────────────────
@@ -811,30 +842,31 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isBonus && advanceCycle && { isBonus: false }) };
     });
     const shouldAdvance = session.isBonus ? advanceCycle : true;
-    // For freestyle sessions scheduleId is null so isWeekdayMode is always false —
-    // check the active plan too so weekday-mode users don't get a stale cycleIndex bump.
-    const activeSch = LB.todaysDay(store)?.schedule;
-    const activeIsWeekday = LB.isWeekdayPlan(activeSch);
-    // On a flex plan cycleIndex IS the live position, so it only advances when
-    // the finished session is the current next-up day. A freestyle workout, a
-    // session from another plan, or a catch-up of an earlier (skipped) rotation
-    // day must leave the next-up pointer where it is.
-    // Exception: if the user explicitly chose "continue from picked day", we honour
-    // that intent and let the cycleIndex jump even on a flex plan.
-    const flexBlocks = LB.isFlexPlan(activeSch) && !cycleFromPickedDay &&
-      (session.isFreestyle || session.scheduleId !== activeSch?.id || session.dayId !== LB.todaysDay(store)?.day?.id);
-    // If user chose "continue from picked day", jump cycle to that day's index + 1.
-    const pickedSch = store.schedules?.find(s => s.id === session.scheduleId);
-    // Look up the day in the *current version's* days, not the original base array —
-    // after a prior rotation the original order no longer matches baseDays.
-    const pickedBaseDays = (() => {
-      if (!cycleFromPickedDay || !pickedSch) return null;
-      if (!LB.isFlexPlan(activeSch) && pickedSch.versions?.length)
-        return LB.getPlanDaysForDate(pickedSch, LB.todayISO());
-      return pickedSch.days;
-    })();
-    const pickedDayIdx = cycleFromPickedDay ? (pickedBaseDays?.findIndex(d => d.id === session.dayId) ?? -1) : -1;
     setStore(s => {
+      // Compute from fresh state `s` to avoid stale-closure reads off the outer `store`.
+      // For freestyle sessions scheduleId is null so isWeekdayMode is always false —
+      // check the active plan too so weekday-mode users don't get a stale cycleIndex bump.
+      const activeSch = LB.todaysDay(s)?.schedule;
+      const activeIsWeekday = LB.isWeekdayPlan(activeSch);
+      // On a flex plan cycleIndex IS the live position, so it only advances when
+      // the finished session is the current next-up day. A freestyle workout, a
+      // session from another plan, or a catch-up of an earlier (skipped) rotation
+      // day must leave the next-up pointer where it is.
+      // Exception: if the user explicitly chose "continue from picked day", we honour
+      // that intent and let the cycleIndex jump even on a flex plan.
+      const flexBlocks = LB.isFlexPlan(activeSch) && !cycleFromPickedDay &&
+        (session.isFreestyle || session.scheduleId !== activeSch?.id || session.dayId !== LB.todaysDay(s)?.day?.id);
+      // If user chose "continue from picked day", jump cycle to that day's index + 1.
+      const pickedSch = s.schedules?.find(sch2 => sch2.id === session.scheduleId);
+      // Look up the day in the *current version's* days, not the original base array —
+      // after a prior rotation the original order no longer matches baseDays.
+      const pickedBaseDays = (() => {
+        if (!cycleFromPickedDay || !pickedSch) return null;
+        if (!LB.isFlexPlan(activeSch) && pickedSch.versions?.length)
+          return LB.getPlanDaysForDate(pickedSch, LB.todayISO());
+        return pickedSch.days;
+      })();
+      const pickedDayIdx = cycleFromPickedDay ? (pickedBaseDays?.findIndex(d => d.id === session.dayId) ?? -1) : -1;
       // For date-driven plans: insert a schedule version starting today with days rotated
       // so pickedDayIdx is position 0 → today = picked day, tomorrow = day after, no gaps.
       // Flex plans use cycleIndex directly, so skip version logic there.
@@ -1043,7 +1075,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [addSupersetData, setAddSupersetData] = useStateT(null); // { newIdx } | null
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
-  const [repOutlierConfirm, setRepOutlierConfirm] = useStateT(null);
+  const [outlierConfirm, setOutlierConfirm] = useStateT(null);
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
@@ -1768,8 +1800,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 8,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 80, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 35px rgba(201,169,97,1), 0 0 80px rgba(201,169,97,0.6)' }}>★</span>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 30, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 18px rgba(201,169,97,1), 0 0 45px rgba(201,169,97,0.8), 0 0 90px rgba(201,169,97,0.4)' }}>NEW BEST</span>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 80, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 35px rgba(var(--accent-rgb),1), 0 0 80px rgba(var(--accent-rgb),0.6)' }}>★</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 30, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 18px rgba(var(--accent-rgb),1), 0 0 45px rgba(var(--accent-rgb),0.8), 0 0 90px rgba(var(--accent-rgb),0.4)' }}>NEW BEST</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, fontWeight: 700, letterSpacing: '0.28em' }}>PERSONAL RECORD</span>
           </div>
         </div>,
@@ -1795,8 +1827,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 6,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8), 0 0 80px rgba(201,169,97,0.4)' }}>IMPROVEMENT</span>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--accent-rgb),0.9), 0 0 70px rgba(var(--accent-rgb),0.5)' }}>↑</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8), 0 0 80px rgba(var(--accent-rgb),0.4)' }}>IMPROVEMENT</span>
           </div>
         </div>,
         document.body
@@ -1836,41 +1868,65 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           gap: 8,
         }}>
           <div style={{ animation: 'improvedBorderPulse 0.8s ease-in-out infinite', position: 'absolute', inset: 0 }} />
-          <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(201,169,97,0.9), 0 0 70px rgba(201,169,97,0.5)' }}>↑</span>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 15px rgba(201,169,97,1), 0 0 40px rgba(201,169,97,0.8)' }}>PROGRESSION UNLOCKED</span>
+          <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--accent-rgb),0.9), 0 0 70px rgba(var(--accent-rgb),0.5)' }}>↑</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8)' }}>PROGRESSION UNLOCKED</span>
           <span style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, marginTop: 4 }}>You've earned the next load.</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
             <span className="num" style={{ fontSize: 22, color: UI.inkSoft }}>{progressionUnlocked.currentKg}{UI.unit()}</span>
             <span style={{ color: UI.gold, fontSize: 20, lineHeight: 1 }}>→</span>
-            <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(201,169,97,0.8)' }}>{progressionUnlocked.nextKg}{UI.unit()}</span>
+            <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(var(--accent-rgb),0.8)' }}>{progressionUnlocked.nextKg}{UI.unit()}</span>
           </div>
           <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, letterSpacing: '0.12em' }}>{progressionUnlocked.exName}</span>
         </div>,
         document.body
       )}
 
-      {/* Rep outlier confirmation */}
-      {repOutlierConfirm && ReactDOM.createPortal(
+      {/* Outlier confirmation (reps / kg / both) */}
+      {outlierConfirm && ReactDOM.createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 500, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }}>
           <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, padding: '20px 20px 44px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <i className="fa-solid fa-triangle-exclamation" style={{ color: UI.gold, fontSize: 14 }} />
-              <span style={{ fontWeight: 700, fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>{repOutlierConfirm.high ? `${repOutlierConfirm.loggedReps} reps?` : `Only ${repOutlierConfirm.loggedReps} ${repOutlierConfirm.loggedReps === 1 ? 'rep' : 'reps'}?`}</span>
+              <span style={{ fontWeight: 700, fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>{(() => {
+                const oc = outlierConfirm;
+                if (oc.kind === 'both') return "That doesn't look right?";
+                const isKg = oc.kind === 'kg';
+                const val = oc.logged;
+                const unit = isKg ? ` ${UI.unit()}` : (val === 1 ? ' rep' : ' reps');
+                return oc.high ? `${val}${unit}?` : `Only ${val}${unit}?`;
+              })()}</span>
             </div>
             <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 22 }}>
-              {entry.name} — {repOutlierConfirm.loggedReps} logged, {repOutlierConfirm.refReps} expected
+              {(() => {
+                const oc = outlierConfirm;
+                if (oc.kind === 'both') {
+                  const u = UI.unit();
+                  return `Expected ${oc.refKg}${u} × ${oc.refReps}, you logged ${oc.loggedKg}${u} × ${oc.loggedReps}`;
+                }
+                const isKg = oc.kind === 'kg';
+                const u = isKg ? UI.unit() : '';
+                return `${entry.name} — ${oc.logged}${u} logged, ${oc.ref}${u} expected`;
+              })()}
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
               <Btn kind="ghost" style={{ flex: 1 }} onClick={() => {
-                const s = repOutlierConfirm.setIdx;
-                setRepOutlierConfirm(null);
-                activateKb(s, isUnilateral ? 'repsL' : 'reps');
+                const s = outlierConfirm.setIdx;
+                const kind = outlierConfirm.kind;
+                setOutlierConfirm(null);
+                activateKb(s, kind === 'both' ? 'kg' : kind === 'kg' ? 'kg' : (isUnilateral ? 'repsL' : 'reps'));
               }}>No, fix it</Btn>
               <Btn style={{ flex: 1 }} onClick={() => {
-                const s = repOutlierConfirm.setIdx;
-                setRepOutlierConfirm(null);
+                const s = outlierConfirm.setIdx;
+                setOutlierConfirm(null);
                 completeSet(s, true);
-              }}>Yes, {repOutlierConfirm.loggedReps} {repOutlierConfirm.loggedReps === 1 ? 'rep' : 'reps'}</Btn>
+              }}>{(() => {
+                const oc = outlierConfirm;
+                if (oc.kind === 'both') return 'Yes, log it anyway';
+                const isKg = oc.kind === 'kg';
+                const val = oc.logged;
+                const unit = isKg ? UI.unit() : (val === 1 ? ' rep' : ' reps');
+                return `Yes, ${val}${isKg ? ` ${unit}` : unit}`;
+              })()}</Btn>
             </div>
           </div>
         </div>,
@@ -1988,7 +2044,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 flexShrink: 0, maxWidth: 110,
                 padding: '5px 11px 4px', borderRadius: 4,
                 border: `1px solid ${active ? UI.gold : done ? UI.goldSoft : UI.hairStrong}`,
-                background: active ? UI.goldFaint : done ? 'rgba(201,169,97,0.05)' : 'transparent',
+                background: active ? UI.goldFaint : done ? 'rgba(var(--accent-rgb),0.05)' : 'transparent',
                 cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
                 transition: 'all 0.15s',
@@ -3018,7 +3074,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
 function setInputStyle(done, current) {
   return {
-    background: done ? 'transparent' : current ? 'rgba(201,169,97,0.06)' : UI.bgInset,
+    background: done ? 'transparent' : current ? 'rgba(var(--accent-rgb),0.06)' : UI.bgInset,
     border: `1px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.hair}`,
     borderRadius: 3, outline: 'none',
     color: done ? UI.inkSoft : UI.ink,

@@ -2148,7 +2148,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
             <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
               {unseen.map((u, i) => (
                 <div key={u.user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
-                  <div style={{ width: 34, height: 34, borderRadius: 17, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, color: UI.inkSoft }}>{(u.name || u.email || '?')[0].toUpperCase()}</span>
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>

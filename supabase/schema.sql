@@ -174,7 +174,11 @@ CREATE TABLE public.zane_user_settings (
   weight_fill_down boolean NOT NULL DEFAULT true,
   manual_calories boolean NOT NULL DEFAULT false,
   onboarding_completed boolean DEFAULT false,
-  net_carbs boolean NOT NULL DEFAULT false
+  net_carbs boolean NOT NULL DEFAULT false,
+  default_checkin_schema jsonb,
+  status_mode text,
+  status_mode_since timestamp with time zone,
+  active_cardio_plan_id text
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -407,6 +411,7 @@ CREATE POLICY "coach can delete client sets" ON public.zane_sets FOR DELETE TO p
 
 -- cardio logs
 CREATE POLICY "Users manage own cardio logs" ON public.zane_cardio_logs FOR ALL TO authenticated USING ((auth.uid() = user_id)) WITH CHECK ((auth.uid() = user_id));
+CREATE POLICY "coaches read client cardio logs" ON public.zane_cardio_logs FOR SELECT TO authenticated USING (EXISTS ( SELECT 1 FROM zane_coaching zc WHERE zc.client_id = zane_cardio_logs.user_id AND zc.coach_id = auth.uid() AND zc.coach_id <> zc.client_id AND zc.status = 'active'));
 
 -- daily logs
 CREATE POLICY "Users manage own daily logs" ON public.zane_daily_logs FOR ALL TO authenticated USING ((auth.uid() = user_id)) WITH CHECK ((auth.uid() = user_id));

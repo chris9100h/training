@@ -1007,6 +1007,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
+    JSON.stringify(prev.settings?.defaultCheckinSchema) !== JSON.stringify(next.settings?.defaultCheckinSchema) ||
     prev.nextReminderAt                   !== next.nextReminderAt   ||
     prev.statusMode                       !== next.statusMode       ||
     prev.statusModeSince                  !== next.statusModeSince  ||
@@ -1051,6 +1052,7 @@ async function syncStore(prev, next, userId) {
       macro_targets: next.settings?.macroTargets ?? null,
       show_health_tab: next.settings?.showHealthTab ?? false,
       onboarding_completed: next.settings?.onboardingCompleted ?? false,
+      default_checkin_schema: next.settings?.defaultCheckinSchema ?? null,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
       status_mode: next.statusMode ?? null,
@@ -1135,6 +1137,7 @@ function computeNextReminderAt(state) {
       if (idx !== null) {
         training = (days[idx]?.items || []).length > 0;
       } else {
+        // Flex plans have no cycleStartDate — position is action-advanced only, calendar-based reminders not supported.
         if (!state.cycleStartDate) return null;
         const start = parseDate(state.cycleStartDate);
         const n = Math.round((d.getTime() - start.getTime()) / 86400000);

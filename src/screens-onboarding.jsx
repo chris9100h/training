@@ -459,7 +459,7 @@ function TourVisualTrainOverview() {
             borderBottom: i < sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
           }}>
             <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{s.label}</div>
-            <div className="num" style={{ fontSize: 12, color: s.active ? 'var(--accent)' : UI.ink }}>80 kg</div>
+            <div className="num" style={{ fontSize: 12, color: s.active ? 'var(--accent)' : UI.ink }}>{`80 ${UI.unit()}`}</div>
             <div className="num" style={{ fontSize: 12, color: s.active ? 'var(--accent)' : UI.inkSoft }}>8</div>
             <div style={{ width: 26, height: 26, borderRadius: 4, background: s.done ? 'var(--accent)' : s.active ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset, border: `1.5px solid ${(s.done || s.active) ? 'var(--accent)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: s.active ? `0 0 0 3px rgba(var(--accent-rgb),0.15)` : 'none' }}>
               {s.done && <i className="fa-solid fa-check" style={{ fontSize: 9, color: '#0a0805' }} />}
@@ -484,7 +484,7 @@ function TourVisualTrainWarmup() {
         <div style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 4, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.07em' }}>SKIP</div>
       </div>
       <div style={{ textAlign: 'center', padding: '0 16px 14px' }}>
-        <div className="num" style={{ fontSize: 36, color: UI.ink, fontWeight: 300 }}>40 kg</div>
+        <div className="num" style={{ fontSize: 36, color: UI.ink, fontWeight: 300 }}>{`40 ${UI.unit()}`}</div>
         <div className="num" style={{ fontSize: 15, color: UI.inkSoft, marginTop: 2 }}>× 10 reps</div>
       </div>
       <div style={{ padding: '0 16px 14px' }}>
@@ -629,7 +629,7 @@ function TourVisualTrainSets() {
         {sets.map((s, i) => (
           <div key={s.label} style={{ display: 'grid', gridTemplateColumns: '22px 1fr auto 28px 22px', alignItems: 'center', gap: 6, padding: '6px 10px', background: s.done ? `rgba(var(--accent-rgb),0.04)` : 'transparent', borderBottom: i < sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none' }}>
             <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{s.label}</div>
-            <div className="num" style={{ fontSize: 12, color: UI.ink }}>80 kg</div>
+            <div className="num" style={{ fontSize: 12, color: UI.ink }}>{`80 ${UI.unit()}`}</div>
             <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>8</div>
             <div style={{ width: 26, height: 26, borderRadius: 4, background: s.done ? 'var(--accent)' : UI.bgInset, border: `1px solid ${s.done ? 'var(--accent)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {s.done && <i className="fa-solid fa-check" style={{ fontSize: 9, color: '#0a0805' }} />}
@@ -657,7 +657,7 @@ function TourVisualTrainNotes() {
         {[1, 2].map((n, i) => (
           <div key={n} style={{ display: 'grid', gridTemplateColumns: '22px 1fr auto 28px 22px', alignItems: 'center', gap: 6, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.04)`, borderBottom: i === 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
             <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{n}</div>
-            <div className="num" style={{ fontSize: 12, color: UI.ink }}>80 kg</div>
+            <div className="num" style={{ fontSize: 12, color: UI.ink }}>{`80 ${UI.unit()}`}</div>
             <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>8</div>
             <div style={{ width: 26, height: 26, borderRadius: 4, background: 'var(--accent)', border: `1px solid var(--accent)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <i className="fa-solid fa-check" style={{ fontSize: 9, color: '#0a0805' }} />
@@ -1047,7 +1047,7 @@ function TourVisualCoachNotes() {
   );
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-      {bubble('Bench felt strong this week — added 2.5 kg.', false)}
+      {bubble(`Bench felt strong this week — added 2.5 ${UI.unit()}.`, false)}
       {bubble('Nice. Hold the same load next session, then we deload.', true)}
     </div>
   );
@@ -1105,7 +1105,7 @@ function TourVisualCoachTrends() {
   );
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-      {row('Body weight', '82.4 kg', [85, 84.4, 84, 83.3, 82.8, 82.4])}
+      {row('Body weight', `82.4 ${UI.unit()}`, [85, 84.4, 84, 83.3, 82.8, 82.4])}
       {row('Sleep', '8 / 10', [6, 7, 6, 8, 7, 8])}
     </div>
   );
