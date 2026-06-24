@@ -388,6 +388,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const isCardio = !!entry?.isCardio;
   const isUnilateral = !isCardio && (exercise?.movement_type ?? (exercise?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
   const isNoWeightReps = !isCardio && !!exercise?.no_weight_reps;
+  const isBodyweight = !isCardio && exercise?.equipment === 'bodyweight';
   const progressionTargetForSet = (workingSetIdx) => {
     if (!store.settings?.smartProgression) return null;
     const perSet = entry?.plannedRepsPerSet;
@@ -1727,7 +1728,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const workingSetsArr = entry.sets.filter(s => !s.warmup);
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
-  const anyMissingData = !isNoWeightReps && workingSetsArr.some(st => !st.done && !st.skipped && (st.kg == null || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
+  const anyMissingData = !isNoWeightReps && workingSetsArr.some(st => !st.done && !st.skipped && ((!isBodyweight && st.kg == null) || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
 
   const checkAllSets = async () => {
     if (allWorkingDone || anyMissingData) return;
@@ -2427,18 +2428,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           updateSet(i, { done: false });
                           return;
                         }
-                        if (!isNoWeightReps && s.kg == null) return;
+                        if (!isNoWeightReps && !isBodyweight && s.kg == null) return;
                         _log(`row${i} → completeSet`);
                         completeSet(i);
                       }}
-                      disabled={!s.done && !s.skipped && !isNoWeightReps && (s.kg == null || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)))}
+                      disabled={!s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)))}
                       style={{
-                        width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (!isNoWeightReps && (s.kg == null || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null))) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
+                        width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (!isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null))) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
                         background: s.done ? UI.gold : 'transparent',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontSize: s.skipped ? 12 : 14, fontWeight: 700,
                         color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
-                        opacity: !s.done && !s.skipped && !isNoWeightReps && (s.kg == null || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
+                        opacity: !s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
                         flexShrink: 0, justifySelf: 'center',
                         WebkitTapHighlightColor: 'transparent',
                       }}>{s.skipped ? '×' : '✓'}</button>
