@@ -355,7 +355,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
   const ended = sessions.filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   const [chartOpen, setChartOpen] = useStateC(null);
   const [planOpen, setPlanOpen] = useStateC(false);
-  const unit = clientStore.settings?.unit || 'kg';
+  const unit = clientStore.settings?.unit || UI.unit();
 
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   const trainingDayCount = activeSch ? (activeSch.days || []).filter(d => d.items?.length > 0).length : 0;
@@ -548,10 +548,10 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
             {weeks.map((w, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
                 <div style={{ width: 72, flexShrink: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{w.label}</div>
-                <div style={{ flex: 1, height: 4, background: UI.bgRaised, borderRadius: 2, overflow: 'hidden' }}>
+                <div style={{ flex: 1, height: 4, background: UI.bgRaised, borderRadius: 4, overflow: 'hidden' }}>
                   {w.planned > 0 && (
                     <div style={{
-                      height: '100%', borderRadius: 2,
+                      height: '100%', borderRadius: 4,
                       width: `${w.pct ?? 0}%`,
                       background: w.pct >= 80 ? '#7bc47b' : w.pct >= 50 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.7)',
                       transition: 'width 0.3s ease',
@@ -783,7 +783,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '9px 0' }}>
             <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0, width: 50 }}>{g.label}</span>
             <div style={{ flex: 1, display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-              <span style={{ border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '2px 7px', fontFamily: UI.fontNum, fontSize: 11, color: UI.ink }}>
+              <span style={{ border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px', fontFamily: UI.fontNum, fontSize: 11, color: UI.ink }}>
                 {g.avg.toLocaleString('en-US')}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{unit}</span>
               </span>
               <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{g.count} session{g.count !== 1 ? 's' : ''}</span>
@@ -999,7 +999,7 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
         <div key={sch.id} style={{ marginBottom: 10, background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${sch.id === active ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`, overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px' }}>
             {sch.id === active && (
-              <div style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--accent)', flexShrink: 0 }} />
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
             )}
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{sch.name}</div>
@@ -1037,7 +1037,7 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
 // ─── InlineExHistory ──────────────────────────────────────────────────────────
 // Standalone component so hooks are never called conditionally.
 
-function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, unit = 'kg' }) {
+function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, unit = UI.unit() }) {
   const ex = (exercises || []).find(e => e.id === exId);
   const isUni = !!ex?.unilateral;
   const [metric, setMetric] = useStateC('kg');
@@ -1137,7 +1137,7 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
                 <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0, width: 50 }}>{fmtD(sess.ended)}</span>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {sess.sets.map((st, si) => (
-                    <span key={si} style={{ border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '2px 7px', fontFamily: UI.fontNum, fontSize: 11, color: UI.ink }}>
+                    <span key={si} style={{ border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px', fontFamily: UI.fontNum, fontSize: 11, color: UI.ink }}>
                       {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{unit}</span>
                       <span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>
                       {isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
@@ -1174,7 +1174,7 @@ const CARDIO_ACTIVITY_MAP = {
 function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initialSelected, onClearSelected }) {
   const [subTab, setSubTab] = useStateC('workouts');
   const [selected, setSelected] = useStateC(initialSelected || null);
-  const unit = clientStore.settings?.unit || 'kg';
+  const unit = clientStore.settings?.unit || UI.unit();
   const [noteOpen, setNoteOpen] = useStateC(false);
   const [noteBody, setNoteBody] = useStateC('');
   const [noteSaving, setNoteSaving] = useStateC(false);

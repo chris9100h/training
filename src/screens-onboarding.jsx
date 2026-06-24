@@ -404,7 +404,7 @@ function TourVisualDrag() {
           borderRadius: 4, opacity: i === 1 ? 0.6 : 1,
         }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2.5, padding: '0 2px', cursor: 'grab' }}>
-            {[0,1,2].map(j => <div key={j} style={{ width: 14, height: 1.5, background: UI.inkGhost, borderRadius: 1 }} />)}
+            {[0,1,2].map(j => <div key={j} style={{ width: 14, height: 1.5, background: UI.inkGhost, borderRadius: 4 }} />)}
           </div>
           <span style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, fontWeight: 500 }}>{ex}</span>
           {i === 1 && <span style={{ marginLeft: 'auto', fontFamily: UI.fontUi, fontSize: 9, color: 'var(--accent)', letterSpacing: '0.08em' }}>DRAG</span>}
@@ -458,13 +458,13 @@ function TourVisualTrainOverview() {
             background: s.active ? `rgba(var(--accent-rgb),0.07)` : s.done ? `rgba(var(--accent-rgb),0.04)` : 'transparent',
             borderBottom: i < sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
           }}>
-            <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{s.label}</div>
+            <div style={{ width: 20, height: 20, borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{s.label}</div>
             <div className="num" style={{ fontSize: 12, color: s.active ? 'var(--accent)' : UI.ink }}>{`80 ${UI.unit()}`}</div>
             <div className="num" style={{ fontSize: 12, color: s.active ? 'var(--accent)' : UI.inkSoft }}>8</div>
             <div style={{ width: 26, height: 26, borderRadius: 4, background: s.done ? 'var(--accent)' : s.active ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset, border: `1.5px solid ${(s.done || s.active) ? 'var(--accent)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: s.active ? `0 0 0 3px rgba(var(--accent-rgb),0.15)` : 'none' }}>
               {s.done && <i className="fa-solid fa-check" style={{ fontSize: 9, color: '#0a0805' }} />}
             </div>
-            <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>−</div>
+            <div style={{ width: 20, height: 20, borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>−</div>
           </div>
         ))}
       </div>
@@ -476,11 +476,11 @@ function TourVisualTrainWarmup() {
   return (
     <div style={{ background: UI.bgRaised, borderRadius: 8, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden', paddingBottom: 14 }}>
       <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 10, paddingBottom: 8 }}>
-        <div style={{ width: 32, height: 3, borderRadius: 2, background: UI.inkGhost }} />
+        <div style={{ width: 32, height: 3, borderRadius: 4, background: UI.inkGhost }} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', padding: '0 16px 12px', gap: 8 }}>
         <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--accent)' }}>WARMUP</span>
-        <div style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--accent)', opacity: 0.7 }} />
+        <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', opacity: 0.7 }} />
         <div style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 4, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.07em' }}>SKIP</div>
       </div>
       <div style={{ textAlign: 'center', padding: '0 16px 14px' }}>
@@ -493,7 +493,7 @@ function TourVisualTrainWarmup() {
       <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
         {[0, 1, 2].map(i => (
           <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-            <div style={{ width: 24, height: 24, borderRadius: 12, background: i === 0 ? 'var(--accent)' : i === 1 ? `rgba(var(--accent-rgb),0.2)` : UI.bgInset, border: `1.5px solid ${i === 0 ? 'var(--accent)' : i === 1 ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 24, height: 24, borderRadius: '50%', background: i === 0 ? 'var(--accent)' : i === 1 ? `rgba(var(--accent-rgb),0.2)` : UI.bgInset, border: `1.5px solid ${i === 0 ? 'var(--accent)' : i === 1 ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {i === 0 && <i className="fa-solid fa-check" style={{ fontSize: 8, color: '#0a0805' }} />}
             </div>
             <span style={{ fontSize: 7, fontFamily: UI.fontUi, color: i === 0 ? 'var(--accent)' : UI.inkGhost, fontWeight: 700 }}>W{i + 1}</span>
@@ -521,13 +521,13 @@ function TourVisualTrainLogSet() {
           background: s.active ? `rgba(var(--accent-rgb),0.08)` : s.done ? `rgba(var(--accent-rgb),0.04)` : 'transparent',
           borderBottom: i < sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
         }}>
-          <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{s.label}</div>
+          <div style={{ width: 20, height: 20, borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{s.label}</div>
           <div className="num" style={{ fontSize: 13, color: s.active ? 'var(--accent)' : UI.ink }}>80.0</div>
           <div className="num" style={{ fontSize: 13, color: s.active ? 'var(--accent)' : UI.inkSoft }}>8</div>
           <div style={{ width: 28, height: 28, borderRadius: 4, background: s.done ? 'var(--accent)' : s.active ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset, border: `1.5px solid ${(s.done || s.active) ? 'var(--accent)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: s.active ? `0 0 0 3px rgba(var(--accent-rgb),0.15)` : 'none' }}>
             {s.done ? <i className="fa-solid fa-check" style={{ fontSize: 10, color: '#0a0805' }} /> : s.active ? <i className="fa-solid fa-check" style={{ fontSize: 10, color: 'var(--accent)' }} /> : null}
           </div>
-          <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>−</div>
+          <div style={{ width: 20, height: 20, borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>−</div>
         </div>
       ))}
       <div style={{ padding: '5px 10px 7px', display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -542,7 +542,7 @@ function TourVisualTrainKeyboard() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
       <div style={{ display: 'flex', gap: 5, marginBottom: 2 }}>
-        {[['KG', '80.0', true], ['REPS', '8', false]].map(([lbl, val, active]) => (
+        {[[UI.unit().toUpperCase(), '80.0', true], ['REPS', '8', false]].map(([lbl, val, active]) => (
           <div key={lbl} style={{
             flex: 1, textAlign: 'center', padding: '5px 4px',
             background: UI.bgCard, borderRadius: 4,
@@ -556,22 +556,22 @@ function TourVisualTrainKeyboard() {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr) 50px', gridTemplateRows: 'repeat(5, 32px)', gap: 3 }}>
         {['↓', null, '↑'].map((k, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 3, fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontNum }}>
+          <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontNum }}>
             {k === null ? <i className="fa-solid fa-dumbbell" style={{ fontSize: 11, color: UI.inkSoft }} /> : k}
           </div>
         ))}
         {/* CONFIRM — tall accent button spanning rows 1–4, column 4 */}
-        <div style={{ gridRow: '1 / 5', gridColumn: 4, background: 'var(--accent)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ gridRow: '1 / 5', gridColumn: 4, background: 'var(--accent)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <i className="fa-solid fa-check" style={{ fontSize: 15, color: '#0a0805' }} />
         </div>
         {/* Rows 2–4: 1 2 3 / 4 5 6 / 7 8 9 */}
         {['1','2','3','4','5','6','7','8','9'].map(n => (
-          <div key={n} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 3, fontFamily: UI.fontNum, fontSize: 14, color: UI.ink }}>{n}</div>
+          <div key={n} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, fontFamily: UI.fontNum, fontSize: 14, color: UI.ink }}>{n}</div>
         ))}
         {/* Row 5: blank / 0 / ⌫ / ⌄ */}
-        <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 3 }} />
+        <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4 }} />
         {['0','⌫','⌄'].map(k => (
-          <div key={k} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 3, fontFamily: UI.fontNum, fontSize: 13, color: k === '⌫' ? UI.inkSoft : UI.ink }}>{k}</div>
+          <div key={k} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, fontFamily: UI.fontNum, fontSize: 13, color: k === '⌫' ? UI.inkSoft : UI.ink }}>{k}</div>
         ))}
       </div>
     </div>
@@ -628,13 +628,13 @@ function TourVisualTrainSets() {
       <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
         {sets.map((s, i) => (
           <div key={s.label} style={{ display: 'grid', gridTemplateColumns: '22px 1fr auto 28px 22px', alignItems: 'center', gap: 6, padding: '6px 10px', background: s.done ? `rgba(var(--accent-rgb),0.04)` : 'transparent', borderBottom: i < sets.length - 1 ? `0.5px solid ${UI.hair}` : 'none' }}>
-            <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{s.label}</div>
+            <div style={{ width: 20, height: 20, borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{s.label}</div>
             <div className="num" style={{ fontSize: 12, color: UI.ink }}>{`80 ${UI.unit()}`}</div>
             <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>8</div>
             <div style={{ width: 26, height: 26, borderRadius: 4, background: s.done ? 'var(--accent)' : UI.bgInset, border: `1px solid ${s.done ? 'var(--accent)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {s.done && <i className="fa-solid fa-check" style={{ fontSize: 9, color: '#0a0805' }} />}
             </div>
-            <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>−</div>
+            <div style={{ width: 20, height: 20, borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>−</div>
           </div>
         ))}
       </div>
@@ -656,13 +656,13 @@ function TourVisualTrainNotes() {
       <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
         {[1, 2].map((n, i) => (
           <div key={n} style={{ display: 'grid', gridTemplateColumns: '22px 1fr auto 28px 22px', alignItems: 'center', gap: 6, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.04)`, borderBottom: i === 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
-            <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{n}</div>
+            <div style={{ width: 20, height: 20, borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{n}</div>
             <div className="num" style={{ fontSize: 12, color: UI.ink }}>{`80 ${UI.unit()}`}</div>
             <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>8</div>
             <div style={{ width: 26, height: 26, borderRadius: 4, background: 'var(--accent)', border: `1px solid var(--accent)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <i className="fa-solid fa-check" style={{ fontSize: 9, color: '#0a0805' }} />
             </div>
-            <div style={{ width: 20, height: 20, borderRadius: 3, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>−</div>
+            <div style={{ width: 20, height: 20, borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>−</div>
           </div>
         ))}
       </div>
@@ -873,7 +873,7 @@ function TourVisualHealthLog() {
       <div style={{ padding: '8px 10px', borderBottom: `0.5px solid ${UI.hairStrong}` }}>
         <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.12em', color: UI.inkFaint }}>TODAY'S LOG</span>
       </div>
-      {field('Body weight', '82.4', 'kg')}
+      {field('Body weight', '82.4', UI.unit())}
       {field('Steps', '9 200')}
       {field('Calories', '2 180', 'kcal')}
       {field('Protein', '185', 'g')}
@@ -908,7 +908,7 @@ function TourVisualHealthWeek() {
       {bar('Macro adherence', 92, 'var(--ok)')}
       {bar('Training', 75, 'var(--accent)')}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 4 }}>
-        {[['Avg weight', '82.1', 'kg'], ['Steps avg', '9.4k', ''], ['Cardio', '85', 'min']].map(([lbl, val, unit]) => (
+        {[['Avg weight', '82.1', UI.unit()], ['Steps avg', '9.4k', ''], ['Cardio', '85', 'min']].map(([lbl, val, unit]) => (
           <div key={lbl} style={{ textAlign: 'center', padding: '6px 4px', background: UI.bgInset, borderRadius: 4 }}>
             <div className="num" style={{ fontSize: 14, color: UI.ink, fontWeight: 300 }}>{val}<span style={{ fontSize: 8, color: UI.inkFaint, marginLeft: 2 }}>{unit}</span></div>
             <div style={{ fontSize: 7.5, fontFamily: UI.fontUi, color: UI.inkGhost, letterSpacing: '0.07em', marginTop: 2, textTransform: 'uppercase' }}>{lbl}</div>
@@ -986,7 +986,7 @@ function TourVisualCoachCheckin() {
       </div>
       <div style={{ display: 'flex', gap: 3 }}>
         {Array.from({ length: 10 }, (_, i) => (
-          <div key={i} style={{ flex: 1, height: 5, borderRadius: 2, background: i < val ? 'var(--accent)' : UI.bgInset }} />
+          <div key={i} style={{ flex: 1, height: 5, borderRadius: 4, background: i < val ? 'var(--accent)' : UI.bgInset }} />
         ))}
       </div>
     </div>
@@ -1068,9 +1068,9 @@ function TourVisualCoachInvite() {
 function TourVisualCoachClients() {
   const card = (name, status, color, live) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 13px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${live ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}` }}>
-      <div style={{ width: 34, height: 34, borderRadius: 17, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' }}>
+      <div style={{ width: 34, height: 34, borderRadius: '50%', background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' }}>
         <span style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.inkSoft, fontWeight: 700 }}>{name[0]}</span>
-        {live && <div style={{ position: 'absolute', top: -1, right: -1, width: 10, height: 10, borderRadius: 5, background: 'var(--accent)', border: '2px solid var(--bg)' }} />}
+        {live && <div style={{ position: 'absolute', top: -1, right: -1, width: 10, height: 10, borderRadius: '50%', background: 'var(--accent)', border: '2px solid var(--bg)' }} />}
       </div>
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{name}</div>
@@ -1151,9 +1151,9 @@ function TourVisualCoachSelf() {
 
 function TourVisualPwaIosSafari() {
   return (
-    <div style={{ background: '#1c1c1e', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3a3a3c' }}>
+    <div style={{ background: '#1c1c1e', borderRadius: 8, overflow: 'hidden', border: '0.5px solid #3a3a3c' }}>
       <div style={{ background: '#2c2c2e', padding: '8px 10px' }}>
-        <div style={{ background: '#3a3a3c', borderRadius: 10, padding: '5px 10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+        <div style={{ background: '#3a3a3c', borderRadius: 8, padding: '5px 10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
           <i className="fa-solid fa-lock" style={{ fontSize: 8, color: '#8e8e93' }} />
           <span style={{ fontSize: 11, color: '#ebebf5', fontFamily: UI.fontUi }}>zane-wo.com</span>
         </div>
@@ -1187,9 +1187,9 @@ function TourVisualPwaIosSafari() {
 
 function TourVisualPwaIosShare() {
   return (
-    <div style={{ background: '#1c1c1e', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3a3a3c' }}>
+    <div style={{ background: '#1c1c1e', borderRadius: 8, overflow: 'hidden', border: '0.5px solid #3a3a3c' }}>
       <div style={{ background: '#2c2c2e', padding: '8px 10px' }}>
-        <div style={{ background: '#3a3a3c', borderRadius: 10, padding: '5px 10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+        <div style={{ background: '#3a3a3c', borderRadius: 8, padding: '5px 10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
           <i className="fa-solid fa-lock" style={{ fontSize: 8, color: '#8e8e93' }} />
           <span style={{ fontSize: 11, color: '#ebebf5', fontFamily: UI.fontUi }}>zane-wo.com</span>
         </div>
@@ -1212,9 +1212,9 @@ function TourVisualPwaIosShare() {
 
 function TourVisualPwaIosAddToHome() {
   return (
-    <div style={{ background: '#1c1c1e', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3a3a3c' }}>
+    <div style={{ background: '#1c1c1e', borderRadius: 8, overflow: 'hidden', border: '0.5px solid #3a3a3c' }}>
       <div style={{ background: '#2c2c2e', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <span style={{ fontSize: 15, fontWeight: 900, color: '#0a0805', fontFamily: UI.fontDisplay }}>Z</span>
         </div>
         <div>
@@ -1252,7 +1252,7 @@ function TourVisualPwaIosAddToHome() {
 
 function TourVisualPwaIosAdd() {
   return (
-    <div style={{ background: '#1c1c1e', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3a3a3c' }}>
+    <div style={{ background: '#1c1c1e', borderRadius: 8, overflow: 'hidden', border: '0.5px solid #3a3a3c' }}>
       <div style={{ background: '#2c2c2e', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span style={{ fontSize: 12, color: '#0a84ff', fontFamily: UI.fontUi }}>Cancel</span>
         <span style={{ fontSize: 13, color: '#ebebf5', fontFamily: UI.fontUi, fontWeight: 600 }}>Add to Home Screen</span>
@@ -1261,7 +1261,7 @@ function TourVisualPwaIosAdd() {
         </div>
       </div>
       <div style={{ padding: '16px', background: '#2c2c2e', borderTop: '0.5px solid #3a3a3c', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-        <div style={{ width: 52, height: 52, borderRadius: 12, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.5)' }}>
+        <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.5)' }}>
           <span style={{ fontSize: 24, fontWeight: 900, color: '#0a0805', fontFamily: UI.fontDisplay }}>Z</span>
         </div>
         <div style={{ background: '#3a3a3c', borderRadius: 8, padding: '5px 0', width: '60%', textAlign: 'center' }}>
@@ -1279,9 +1279,9 @@ function TourVisualPwaIosAdd() {
 
 function TourVisualPwaAndroidChrome() {
   return (
-    <div style={{ background: '#202124', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3c4043' }}>
+    <div style={{ background: '#202124', borderRadius: 8, overflow: 'hidden', border: '0.5px solid #3c4043' }}>
       <div style={{ background: '#292a2d', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
-        <div style={{ flex: 1, background: '#3c4043', borderRadius: 20, padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 5 }}>
+        <div style={{ flex: 1, background: '#3c4043', borderRadius: 8, padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 5 }}>
           <i className="fa-solid fa-lock" style={{ fontSize: 8, color: '#9aa0a6' }} />
           <span style={{ fontSize: 11, color: '#e8eaed', fontFamily: UI.fontUi, flex: 1 }}>zane-wo.com</span>
           <span style={{ fontSize: 9, color: '#9aa0a6', fontFamily: UI.fontUi, background: '#1a3a5c', padding: '2px 6px', borderRadius: 4 }}>Chrome</span>
@@ -1311,9 +1311,9 @@ function TourVisualPwaAndroidChrome() {
 
 function TourVisualPwaAndroidMenu() {
   return (
-    <div style={{ background: '#202124', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3c4043' }}>
+    <div style={{ background: '#202124', borderRadius: 8, overflow: 'hidden', border: '0.5px solid #3c4043' }}>
       <div style={{ background: '#292a2d', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
-        <div style={{ flex: 1, background: '#3c4043', borderRadius: 20, padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 5 }}>
+        <div style={{ flex: 1, background: '#3c4043', borderRadius: 8, padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 5 }}>
           <i className="fa-solid fa-lock" style={{ fontSize: 8, color: '#9aa0a6' }} />
           <span style={{ fontSize: 11, color: '#e8eaed', fontFamily: UI.fontUi }}>zane-wo.com</span>
         </div>
@@ -1338,9 +1338,9 @@ function TourVisualPwaAndroidAddToHome() {
     { icon: 'fa-clock-rotate-left', label: 'History' },
   ];
   return (
-    <div style={{ background: '#202124', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3c4043' }}>
+    <div style={{ background: '#202124', borderRadius: 8, overflow: 'hidden', border: '0.5px solid #3c4043' }}>
       <div style={{ background: '#292a2d', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
-        <div style={{ flex: 1, background: '#3c4043', borderRadius: 20, padding: '5px 10px' }}>
+        <div style={{ flex: 1, background: '#3c4043', borderRadius: 8, padding: '5px 10px' }}>
           <span style={{ fontSize: 11, color: '#e8eaed', fontFamily: UI.fontUi }}>zane-wo.com</span>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '3px' }}>
@@ -1364,7 +1364,7 @@ function TourVisualPwaAndroidAddToHome() {
 
 function TourVisualPwaAndroidInstall() {
   return (
-    <div style={{ background: '#202124', borderRadius: 10, overflow: 'hidden', border: '0.5px solid #3c4043' }}>
+    <div style={{ background: '#202124', borderRadius: 8, overflow: 'hidden', border: '0.5px solid #3c4043' }}>
       <div style={{ padding: '10px 12px', background: UI.bgCard, opacity: 0.35 }}>
         <div style={{ height: 44, background: UI.bgInset, borderRadius: 4 }} />
       </div>
@@ -1433,7 +1433,7 @@ function OnboardingPrompt({ onStart, onSkip }) {
         padding: '32px 28px',
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         gap: 12, textAlign: 'center',
-        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(201,169,97,0.2)',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(var(--accent-rgb),0.2)',
         animation: 'fadeUp 0.3s ease',
       }}>
         <div style={{ width: 80, height: 80, marginBottom: 4, animation: 'logoPulse 2.4s ease-in-out infinite' }}>
@@ -1795,7 +1795,7 @@ function OnboardingTourInner({ tourKey, go, route, onDone }) {
         borderRadius: 6,
         padding: '16px 18px',
         display: 'flex', flexDirection: 'column', gap: 10,
-        boxShadow: '0 16px 48px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(201,169,97,0.15)',
+        boxShadow: '0 16px 48px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(var(--accent-rgb),0.15)',
         zIndex: 9998,
         animation: 'fadeUp 0.2s ease',
       }}>

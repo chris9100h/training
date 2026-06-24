@@ -35,7 +35,7 @@ function UserArchivedSection({ tickets, renderTicket }) {
 function Toggle({ on, onToggle }) {
   return (
     <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
-      <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: on ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
+      <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: on ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
     </div>
   );
 }
@@ -855,7 +855,8 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   };
 
   const handleSetSupportStatus = async (coachingId, newStatus) => {
-    await LB.supabase.rpc('set_support_status', { p_coaching_id: coachingId, p_status: newStatus });
+    const { error } = await LB.supabase.rpc('set_support_status', { p_coaching_id: coachingId, p_status: newStatus });
+    if (error) { console.error(error); return; }
     setSupportInbox(prev => prev.map(t => t.coaching_id === coachingId ? { ...t, support_status: newStatus } : t));
     setSupportTicket(t => t ? { ...t, status: newStatus } : t);
     setStore(s => ({ ...s, supportTickets: (s.supportTickets || []).map(t =>
@@ -1838,7 +1839,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
                     const isMe = n.author_id === userId;
                     return (
                       <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-                        <div style={{ maxWidth: '80%', padding: '9px 13px', borderRadius: isMe ? '12px 12px 3px 12px' : '12px 12px 12px 3px', background: isMe ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised, border: `0.5px solid ${isMe ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}` }}>
+                        <div style={{ maxWidth: '80%', padding: '9px 13px', borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', background: isMe ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised, border: `0.5px solid ${isMe ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}` }}>
                           <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55 }}>{n.body}</div>
                         </div>
                         <div className="micro" style={{ color: UI.inkGhost, marginTop: 4 }}>

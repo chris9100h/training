@@ -231,7 +231,7 @@ function MacroLegend() {
     <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 10 }}>
       {[['Protein', MACRO_COLORS.protein], ['Carbs', MACRO_COLORS.carbs], ['Fat', MACRO_COLORS.fat], ['Target', UI.ink]].map(([lbl, col]) => (
         <div key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 9, height: 9, borderRadius: 2, background: col, display: 'inline-block' }} />
+          <span style={{ width: 9, height: 9, borderRadius: 4, background: col, display: 'inline-block' }} />
           <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.04em' }}>{lbl}</span>
         </div>
       ))}
@@ -1639,7 +1639,7 @@ function ExportSheet({ open, onClose, store }) {
   const doExportCSV = () => {
     setExporting('csv');
     try {
-      const unit = store.settings?.unit || 'kg';
+      const unit = store.settings?.unit || UI.unit();
       const logs = logsInRange();
       const cardio = cardioByDay();
       const sessions = sessionsByDay();
@@ -1700,7 +1700,7 @@ function ExportSheet({ open, onClose, store }) {
       const logs = logsInRange();
       const cardio = cardioByDay();
       const sessions = sessionsByDay();
-      const unit = store.settings?.unit || 'kg';
+      const unit = store.settings?.unit || UI.unit();
       const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c9a961';
       const cardBg  = '#201e2c';
       const inkText = '#e5e2ef';

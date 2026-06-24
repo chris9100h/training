@@ -234,7 +234,7 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
                 border: `1px solid ${UI.goldSoft}`, borderRadius: 4, background: UI.goldFaint,
                 padding: '10px 14px', minHeight: 44,
               }}>
-                <span style={{ width: 6, height: 6, borderRadius: 2, background: UI.gold, flexShrink: 0 }} />
+                <span style={{ width: 6, height: 6, borderRadius: 4, background: UI.gold, flexShrink: 0 }} />
                 <span className="label" style={{ color: UI.gold, marginBottom: 0 }}>Active</span>
               </div>
             ) : (
@@ -1068,7 +1068,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
 }
 
 // ─── CardioPlanScreen ───────────────────────────────────────────────────────
-function CardioPlanScreen({ store, setStore, go }) {
+function CardioPlanScreen({ store, setStore, go, userId }) {
   const [createOpen,  setCreateOpen]  = useStateCard(false);
   const [editPlan,    setEditPlan]    = useStateCard(null);
   const [detailPlan,  setDetailPlan]  = useStateCard(null);

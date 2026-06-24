@@ -6,7 +6,7 @@ const { useState: useStateL, useMemo: useMemoL, useRef: useRefL, useEffect: useE
 const _lib = { tab: 'recent', q: '', filterTags: [], filterRestCats: [], filterUnilateral: null, filterPlan: null, filterEquipment: [], filtersOpen: false };
 
 // ─── LIBRARY ──────────────────────────────────────────────────────────
-function LibraryScreen({ store, setStore, go }) {
+function LibraryScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [tab, setTab] = useStateL(_lib.tab);
   const [q, setQ] = useStateL(_lib.q);
@@ -263,7 +263,7 @@ function LibraryScreen({ store, setStore, go }) {
               </div>
               {selecting ? (
                 <div style={{
-                  width: 20, height: 20, borderRadius: 3, flexShrink: 0,
+                  width: 20, height: 20, borderRadius: 4, flexShrink: 0,
                   border: `1px solid ${isSelected ? UI.danger : UI.hairStrong}`,
                   background: isSelected ? UI.danger : 'transparent',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -1461,8 +1461,8 @@ function StatsTab({ store, sessions, go }) {
         ) : setsPerMuscle.map(({ muscle, sets }) => (
           <div key={muscle} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <div style={{ width: 100, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.05em' }}>{muscle}</div>
-            <div style={{ flex: 1, height: 3, background: UI.hair, borderRadius: 2, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${(sets / maxSets) * 100}%`, background: UI.gold, borderRadius: 2 }} />
+            <div style={{ flex: 1, height: 3, background: UI.hair, borderRadius: 4, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${(sets / maxSets) * 100}%`, background: UI.gold, borderRadius: 4 }} />
             </div>
             <div className="num" style={{ width: 24, textAlign: 'right', fontSize: 13, color: UI.gold }}>{sets}</div>
           </div>
@@ -1476,7 +1476,7 @@ function StatsTab({ store, sessions, go }) {
           {weeklyVolume.map(({ label, vol }, i) => (
             <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' }}>
               <div style={{
-                width: '100%', borderRadius: 3,
+                width: '100%', borderRadius: 4,
                 height: `${Math.max(3, (vol / maxWeekVol) * 68)}px`,
                 background: i === 7 ? UI.gold : UI.hair,
               }} />
@@ -2028,7 +2028,7 @@ const isImprovement = LB.isImprovement;
 const isDecline = LB.isDecline;
 
 // ─── SESSION DETAIL ──────────────────────────────────────────────────
-function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, back }) {
+function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, back, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [editing, setEditing] = useStateL(false);
   const [capturing, setCapturing] = useStateL(false);
@@ -2433,7 +2433,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           opacity: (st.done || hasData) ? (isWarm ? 0.5 : 1) : 0.3,
                           background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent',
                           border: `1px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
-                          borderRadius: 3, padding: '3px 8px',
+                          borderRadius: 4, padding: '3px 8px',
                           fontFamily: UI.fontNum, fontSize: 12,
                           color: isWarm ? UI.inkFaint : highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,
                         }}>
@@ -2445,7 +2445,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       );
                     })}
                     {(() => { const n = e.sets.filter(st => st.skipped).length; return n > 0 && (
-                      <span style={{ border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.05em' }}>
+                      <span style={{ border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.05em' }}>
                         {n} SET{n > 1 ? 'S' : ''} SKIPPED
                       </span>
                     ); })()}
@@ -2813,7 +2813,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
 
   const entries = session.entries || [];
   // Label weights in the trainee's own unit (stored numbers aren't converted).
-  const unit = session.unit || 'kg';
+  const unit = session.unit || UI.unit();
   const liveIdx = LB.inferCurrentExIdx(entries);
   const entry = entries[exIdx];
   const goLive = () => { setFollowLive(true); setExIdx(liveIdx); };
@@ -3282,7 +3282,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
             <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
               {Array.from({ length: maxSets }, (_, si) => (
                 <div key={si} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <div style={{ width: 14, height: 2, borderRadius: 1, background: `rgba(var(--accent-rgb),${setAlphas[si] ?? 0.12})` }} />
+                  <div style={{ width: 14, height: 2, borderRadius: 4, background: `rgba(var(--accent-rgb),${setAlphas[si] ?? 0.12})` }} />
                   <span className="micro" style={{ color: UI.inkFaint }}>Set {si + 1}</span>
                 </div>
               ))}
@@ -3300,7 +3300,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {sess.sets.map((st, si) => (
                     <span key={si} style={{
-                      border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '2px 7px',
+                      border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px',
                       fontFamily: UI.fontNum, fontSize: 11, color: UI.ink,
                     }}>
                       {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span>
