@@ -28,7 +28,7 @@ function planDescriptor(s) {
 }
 
 // ─── PlanScreen ────────────────────────────────────────────────────
-function PlanScreen({ store, setStore, go }) {
+function PlanScreen({ store, setStore, go, userId }) {
   const [archivedOpen, setArchivedOpen] = useStateS(false);
   const importRef = React.useRef(null);
 
@@ -183,7 +183,7 @@ function PlanScreen({ store, setStore, go }) {
 // Reached from the home rest-day card. Day chips switch between days
 // (like the exercise chips in training); each day shows the weights/reps
 // that will be prefilled when training, with no controls that change it.
-function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
+function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId }) {
   const sch = store.schedules.find(s => s.id === (scheduleId || store.activeScheduleId));
   const isWeekday = sch ? LB.isWeekdayPlan(sch) : false;
   const isFlex = sch ? LB.isFlexPlan(sch) : false;
@@ -374,7 +374,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
           border: `1px solid ${UI.goldSoft}`, borderRadius: 4, background: UI.goldFaint,
           padding: '10px 14px', minHeight: 44,
         }}>
-          <span style={{ width: 6, height: 6, borderRadius: 2, background: UI.gold, flexShrink: 0 }} />
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, flexShrink: 0 }} />
           <span className="label" style={{ color: UI.gold, marginBottom: 0 }}>Active</span>
         </div>
       )}
@@ -629,7 +629,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
       {reactivateSheet && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.5)' }}
           onClick={() => setReactivateSheet(false)}>
-          <div style={{ background: UI.bg, borderRadius: '14px 14px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
+          <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
             onClick={e => e.stopPropagation()}>
             <div className="label" style={{ color: UI.inkFaint, marginBottom: 6 }}>REACTIVATE THIS VERSION</div>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 18, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
@@ -1093,7 +1093,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       {applyFromSheet && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
           onClick={() => setApplyFromSheet(false)}>
-          <div style={{ background: UI.bg, borderRadius: '14px 14px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
+          <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
             onClick={e => e.stopPropagation()}>
             <div className="label" style={{ color: UI.inkFaint, marginBottom: 18 }}>WHEN SHOULD THIS TAKE EFFECT?</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1811,7 +1811,7 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
 }
 
 // ─── Create new schedule ─────────────────────────────────────────────
-function ScheduleNewScreen({ store, setStore, go }) {
+function ScheduleNewScreen({ store, setStore, go, userId }) {
   const [name, setName] = useStateS('');
   const [mode, setMode] = useStateS('cycle');
 

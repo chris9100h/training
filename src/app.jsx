@@ -131,7 +131,7 @@ function UpdateBanner({ onUpdate }) {
         padding: '32px 28px',
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         gap: 10, textAlign: 'center',
-        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(201,169,97,0.2)',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(var(--accent-rgb),0.2)',
       }}>
         <div style={{
           width: 48, height: 48, borderRadius: 6,
@@ -182,7 +182,7 @@ function WhatsNewModal({ entries, onDismiss }) {
         padding: '28px 26px',
         display: 'flex', flexDirection: 'column', gap: 18,
         overflowY: 'auto',
-        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(201,169,97,0.2)',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(var(--accent-rgb),0.2)',
         animation: 'fadeUp 0.3s ease',
       }}>
         <div className="micro-gold">WHAT'S NEW</div>

@@ -380,7 +380,8 @@ function SetPasswordScreen({ onDone, isRecovery }) {
       if (updateErr) throw updateErr;
 
       if (name.trim() && currentUser?.id) {
-        await LB.supabase.from('zane_profiles').upsert({ id: currentUser.id, name: name.trim() });
+        const { error } = await LB.supabase.from('zane_profiles').upsert({ id: currentUser.id, name: name.trim() });
+        if (error) { console.error(error); }
       }
 
       if (email) {
@@ -512,7 +513,7 @@ function RecentBannerDay({ banner, store, setStore, go, sch, userId, onOpenSkipS
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="micro" style={{ marginBottom: 3 }}>{dayName} · {dateLabel}</div>
-          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `1px solid ${UI.hairStrong}`, borderRadius: 3, padding: '2px 8px', display: 'inline-block' }}>
+          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px', display: 'inline-block' }}>
             {skip.skipReason}
           </span>
         </div>
@@ -1031,7 +1032,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
             </button>
             <div style={{ display: 'flex', gap: 6 }}>
               {Array.from({ length: METRICS }).map((_, i) => (
-                <div key={i} style={{ width: i === step - 1 ? 18 : 6, height: 6, borderRadius: 3, transition: 'all 0.2s', background: i === step - 1 ? 'var(--accent)' : i < step - 1 ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong }} />
+                <div key={i} style={{ width: i === step - 1 ? 18 : 6, height: 6, borderRadius: 4, transition: 'all 0.2s', background: i === step - 1 ? 'var(--accent)' : i < step - 1 ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong }} />
               ))}
             </div>
             <button onClick={save} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' }}>Save</button>

@@ -1949,7 +1949,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               const isSaving  = syncStatus === 'pending' && !storageFull;
               const dotColor  = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
               const pulse     = 'pulseDot 1.6s ease-in-out infinite';
-              return <div onClick={isProblem ? onRetrySync : undefined} style={{ width: 6, height: 6, borderRadius: 3, background: dotColor, animation: pulse, cursor: isProblem ? 'pointer' : 'default', flexShrink: 0 }} />;
+              return <div onClick={isProblem ? onRetrySync : undefined} style={{ width: 6, height: 6, borderRadius: 4, background: dotColor, animation: pulse, cursor: isProblem ? 'pointer' : 'default', flexShrink: 0 }} />;
             })()}
             {warmupActive
               ? <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>WARMUP</span>
@@ -1969,7 +1969,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               }}>
                 {Math.floor(restRemaining/60)}:{(restRemaining%60).toString().padStart(2,'0')}
               </span>
-              <div style={{ width: 44, height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden' }}>
+              <div style={{ width: 44, height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
               </div>
             </button>
@@ -2366,7 +2366,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
                   }}>
                     <div style={{
-                      width: 24, height: 24, borderRadius: 3, flexShrink: 0,
+                      width: 24, height: 24, borderRadius: 4, flexShrink: 0,
                       background: isCurrent ? UI.goldFaint : 'transparent',
                       outline: `1px solid ${isCurrent ? UI.gold : s.done ? UI.goldDeep : isWarmupRow ? UI.hair : UI.hairStrong}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -2433,7 +2433,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       }}
                       disabled={!s.done && !s.skipped && !isNoWeightReps && (s.kg == null || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)))}
                       style={{
-                        width: 26, height: 26, borderRadius: 3, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (!isNoWeightReps && (s.kg == null || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null))) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
+                        width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (!isNoWeightReps && (s.kg == null || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null))) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
                         background: s.done ? UI.gold : 'transparent',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontSize: s.skipped ? 12 : 14, fontWeight: 700,
@@ -2852,7 +2852,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               </div>
             )}
             {/* progress bar */}
-            <div style={{ height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden', marginTop: 18, width: 200 }}>
+            <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 18, width: 200 }}>
               <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
             </div>
           </div>
@@ -2898,7 +2898,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   const isSaving  = syncStatus === 'pending' && !storageFull;
                   const dotColor  = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
                   const pulse     = 'pulseDot 1.6s ease-in-out infinite';
-                  return <div onClick={isProblem ? onRetrySync : undefined} style={{ width: 6, height: 6, borderRadius: 3, background: dotColor, animation: pulse, cursor: isProblem ? 'pointer' : 'default', flexShrink: 0 }} />;
+                  return <div onClick={isProblem ? onRetrySync : undefined} style={{ width: 6, height: 6, borderRadius: 4, background: dotColor, animation: pulse, cursor: isProblem ? 'pointer' : 'default', flexShrink: 0 }} />;
                 })()}
                 <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>WARMUP</span>
               </div>
@@ -2961,7 +2961,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {warmupOverlaySets.map((ws, wi) => (
                 <div key={wi} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
                   <div style={{
-                    height: 3, width: '100%', borderRadius: 2,
+                    height: 3, width: '100%', borderRadius: 4,
                     background: ws.done ? UI.gold : wi === warmupOverlayNum - 1 ? UI.goldSoft : UI.hair,
                     boxShadow: wi === warmupOverlayNum - 1 ? `0 0 6px rgba(var(--accent-rgb),0.5)` : 'none',
                     transition: 'background 0.3s',
@@ -3014,7 +3014,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </div>
 
           {/* Progress bar */}
-          <div style={{ height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden', marginTop: 22, width: 180 }}>
+          <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 22, width: 180 }}>
             <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
           </div>
 
@@ -3076,7 +3076,7 @@ function setInputStyle(done, current) {
   return {
     background: done ? 'transparent' : current ? 'rgba(var(--accent-rgb),0.06)' : UI.bgInset,
     border: `1px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.hair}`,
-    borderRadius: 3, outline: 'none',
+    borderRadius: 4, outline: 'none',
     color: done ? UI.inkSoft : UI.ink,
     fontFamily: UI.fontNum, fontSize: 15, fontWeight: 500,
     fontVariantNumeric: 'tabular-nums',

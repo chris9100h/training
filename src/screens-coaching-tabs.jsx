@@ -449,7 +449,7 @@ function MarkerRow({ label, value, onChange, readOnly }) {
             key={n}
             onClick={() => !readOnly && onChange(n)}
             style={{
-              flex: 1, padding: '6px 0', borderRadius: 5, border: 'none', cursor: readOnly ? 'default' : 'pointer',
+              flex: 1, padding: '6px 0', borderRadius: 4, border: 'none', cursor: readOnly ? 'default' : 'pointer',
               background: value === n ? 'var(--accent)' : value != null && n <= value ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
               color: value === n ? '#0a0805' : n <= 3 ? 'var(--accent)' : n <= 6 ? UI.inkSoft : UI.inkFaint,
               fontSize: 10, fontFamily: UI.fontUi, fontWeight: value === n ? 700 : 400,
@@ -998,7 +998,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
         <div style={{ display: 'flex', gap: 6 }}>
           {nums.map(n => (
             <button key={n} onClick={() => onChange(value === n ? null : n)}
-              style={{ flex: 1, padding: '8px 0', borderRadius: 5, border: 'none', cursor: 'pointer',
+              style={{ flex: 1, padding: '8px 0', borderRadius: 4, border: 'none', cursor: 'pointer',
                 background: value === n ? 'var(--accent)' : value != null && n <= value ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
                 color: btnColor(n),
                 fontSize: 10, fontFamily: UI.fontUi, fontWeight: value === n ? 700 : 400, transition: 'background 0.1s' }}>
