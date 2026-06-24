@@ -650,10 +650,14 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
 
   const pushStatusTimer = useRefSet(null);
   const pendingTimeoutRef = useRefSet(null);
-  useEffectSet(() => () => { clearTimeout(pushStatusTimer.current); clearTimeout(pendingTimeoutRef.current); }, []);
+  const countdownIntervalRef = useRefSet(null);
+  const [pendingCountdown, setPendingCountdown] = useStateSet(120);
+  useEffectSet(() => () => { clearTimeout(pushStatusTimer.current); clearTimeout(pendingTimeoutRef.current); clearInterval(countdownIntervalRef.current); }, []);
 
   const cancelPendingPush = async () => {
     clearTimeout(pendingTimeoutRef.current);
+    clearInterval(countdownIntervalRef.current);
+    setPendingCountdown(120);
     await LB.unsubscribeWebPush(userId).catch(() => {});
     setWebPushSub(null);
     setPushEnabled(false); localStorage.setItem('logbook-push-enabled', 'false');
@@ -677,6 +681,9 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
         setWebPushSub(sub);
         setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
         setWebPushPending(true);
+        setPendingCountdown(120);
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = setInterval(() => setPendingCountdown(n => Math.max(0, n - 1)), 1000);
         // 2-minute window to enter the verification code; cancels subscription on timeout
         pendingTimeoutRef.current = setTimeout(async () => {
           await cancelPendingPush();
@@ -717,6 +724,8 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
       return;
     }
     clearTimeout(pendingTimeoutRef.current);
+    clearInterval(countdownIntervalRef.current);
+    setPendingCountdown(120);
     setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true');
     setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } }));
     setWebPushVerified(true); localStorage.setItem('logbook-push-verified', 'true');
@@ -2215,20 +2224,34 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
           {pushEnabled && store.settings?.usePushover && store.settings?.pushoverUserKey && (
             <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>Active via Pushover — see Advanced</div>
           )}
-          {pushEnabled && !store.settings?.usePushover && webPushSub && (() => {
+          {(pushEnabled || webPushPending) && !store.settings?.usePushover && webPushSub && (() => {
             const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 20, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box', letterSpacing: '0.3em', textAlign: 'center' };
-            if (webPushStep === 'code-sent') return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div className="micro" style={{ color: UI.inkSoft, paddingLeft: 2 }}>Enter the 6-digit code from the notification</div>
-                <input type="text" inputMode="numeric" maxLength={6} value={codeInput}
-                  onChange={e => setCodeInput(e.target.value.replace(/\D/g, ''))}
-                  placeholder="000000" style={iStyle} autoFocus />
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <Btn kind="ghost" onClick={sendWebPushCode}>Resend</Btn>
-                  <Btn onClick={verifyWebPushCode} disabled={codeInput.length !== 6} style={{ flex: 1 }}>Verify</Btn>
+            if (webPushStep === 'code-sent') {
+              const pct = pendingCountdown / 120;
+              const urgent = pendingCountdown <= 30;
+              const barColor = urgent ? '#e07b3a' : 'var(--accent)';
+              const mins = Math.floor(pendingCountdown / 60);
+              const secs = pendingCountdown % 60;
+              const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="micro" style={{ color: UI.inkSoft }}>Enter the 6-digit code from the notification</div>
+                    <div className="num" style={{ fontSize: 11, color: urgent ? '#e07b3a' : UI.inkFaint, minWidth: 28, textAlign: 'right' }}>{timeStr}</div>
+                  </div>
+                  <div style={{ height: 2, background: UI.hairStrong, borderRadius: 999, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${pct * 100}%`, background: barColor, borderRadius: 999, transition: 'width 1s linear, background 0.5s' }} />
+                  </div>
+                  <input type="text" inputMode="numeric" maxLength={6} value={codeInput}
+                    onChange={e => setCodeInput(e.target.value.replace(/\D/g, ''))}
+                    placeholder="000000" style={iStyle} autoFocus />
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Btn kind="ghost" onClick={sendWebPushCode}>Resend</Btn>
+                    <Btn onClick={verifyWebPushCode} disabled={codeInput.length !== 6} style={{ flex: 1 }}>Verify</Btn>
+                  </div>
                 </div>
-              </div>
-            );
+              );
+            }
             if (webPushVerified) return (
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: 'rgba(var(--accent-rgb), 0.08)', border: '0.5px solid rgba(var(--accent-rgb), 0.25)', borderRadius: 6, padding: '8px 14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
