@@ -1123,11 +1123,14 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
         {(() => {
           const dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
           const visibleSessions = activeSessions.filter(s => !s.is_finished || !dismissed.includes(s.session_id));
+          const sortedSessions = [...visibleSessions].sort((a, b) =>
+            new Date(b.ended ?? b.started_at) - new Date(a.ended ?? a.started_at)
+          );
           return (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {visibleSessions.length === 0
+              {sortedSessions.length === 0
                 ? <div className="micro" style={{ color: UI.inkFaint, padding: '4px 0' }}>Nobody training right now.</div>
-                : visibleSessions.map((s, i) => {
+                : sortedSessions.map((s, i) => {
                   const isFinished = s.is_finished;
                   if (isFinished) {
                     const finishedMin = s.ended ? Math.round((nowS - new Date(s.ended).getTime()) / 60000) : null;
