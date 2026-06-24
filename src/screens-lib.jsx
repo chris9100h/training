@@ -2906,6 +2906,19 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
             <div className="micro" style={{ marginTop: 4, color: UI.inkSoft }}>
               {entry.plannedSets} SETS · {entry.plannedReps} REPS PLANNED
             </div>
+            {(entry.category || entry.equipment || entry.movementType) && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
+                {entry.category && (
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.category}</span>
+                )}
+                {entry.equipment && (
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.equipment}</span>
+                )}
+                {entry.movementType && (
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.movementType}</span>
+                )}
+              </div>
+            )}
           </div>
 
           <Frame style={{ padding: '0 16px' }}>
