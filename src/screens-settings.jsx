@@ -714,7 +714,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const sendWebPushCode = () => {
     const code = String(Math.floor(100000 + Math.random() * 900000));
     setWebPushCode(code); setCodeInput(''); setWebPushStep('code-sent');
-    LB.fnFetch(LB.WEB_PUSH_URL, { title: 'Zane · verification', message: `Your code: ${code}` }).catch(() => {});
+    LB.fnFetch(LB.WEB_PUSH_URL, { title: 'Zane · verification', message: `Your code: ${code}`, verify: true }).catch(() => {});
   };
   const verifyWebPushCode = () => {
     if (codeInput.trim() !== webPushCode) {
