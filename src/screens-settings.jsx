@@ -1230,11 +1230,6 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             Pin a Health tab to the nav bar to log daily weight, steps & macros and see your trends. These daily logs also prefill your weekly coach check-in.
           </div>
-          <div style={{ marginTop: 16 }}>
-            <Row label="Manual calorie entry">
-              <Toggle on={!!store.settings?.manualCalories} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, manualCalories: !s.settings?.manualCalories } }))} />
-            </Row>
-          </div>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             By default calories are calculated from macros (P×4 + C×4 + F×9). Enable this to enter calories directly — useful for net-carb tracking.
           </div>

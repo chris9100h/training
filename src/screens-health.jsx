@@ -243,7 +243,6 @@ function MacroLegend() {
 
 function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus }) {
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
-  const manualCal = !!store.settings?.manualCalories;
   const todayISO = LB.todayISO();
   const dayStatusPeriod = useMemoH(() => {
     const ts = new Date(date + 'T12:00:00').getTime();
@@ -312,7 +311,6 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   const autoCals = netCarbs
     ? (netAllFilled ? caloriesFromMacros(pVal, cVal, fVal, fibVal) : null)
     : caloriesFromMacros(pVal, cVal, fVal);
-  const caloriesManual = netCarbs ? !netAllFilled : manualCal;
 
   // Confirm before a backdrop tap throws away unsaved edits to this day.
   const isDirty = () =>
@@ -328,7 +326,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     if (!canSave) return;
     const protein = healthInt(form.protein), carbs = healthInt(form.carbs), fat = healthInt(form.fat);
     const fiber = netCarbs ? healthInt(form.fiber) : null;
-    const calories = caloriesManual ? healthInt(form.calories) : autoCals;
+    const calories = form.calories !== '' ? healthInt(form.calories) : autoCals;
     // Today = treat as training if planned (assume the user will train).
     // Past days = only training if a session was actually done.
     const isTraining = date === LB.todayISO()
@@ -478,13 +476,8 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         </div>
       )}
       <div style={{ marginBottom: 16 }}>
-        <div style={labelStyle}>Calories (kcal){caloriesManual ? '' : (netCarbs ? ' · net carbs' : ' · from macros')}</div>
-        {caloriesManual
-          ? <input type="number" inputMode="decimal" placeholder="—" value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
-          : <div style={{ ...inputStyle, color: autoCals != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
-              {autoCals != null ? autoCals : '—'}
-            </div>
-        }
+        <div style={labelStyle}>Calories (kcal){autoCals != null && form.calories === '' ? (netCarbs ? ' · net carbs' : ' · from macros') : ''}</div>
+        <input type="number" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
       </div>
 
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>HYDRATION</div>
