@@ -67,7 +67,7 @@ function glucoseFromInput(raw, unit) {
 const glucoseUnitLabel = unit => unit === 'mgdl' ? 'mg/dL' : 'mmol/L';
 const GLUCOSE_CTX_LABELS = { fasted: 'Fasted', fed: 'Fed', other: 'Other' };
 // fasting normal range in mmol/L
-const GLUCOSE_REF_LOW = 3.9, GLUCOSE_REF_HIGH = 5.6;
+const GLUCOSE_REF_LOW = 3.9, GLUCOSE_REF_HIGH = 5.6, GLUCOSE_REF_FED = 7.8;
 
 // Scatter chart: one point per reading, coloured by context, with a reference
 // band for the fasting normal range (3.9–5.6 mmol/L).
@@ -80,9 +80,10 @@ function GlucoseScatterChart({ readings, from, to, unit }) {
 
   const refLow  = unit === 'mgdl' ? Math.round(GLUCOSE_REF_LOW  * GLUCOSE_FACTOR) : GLUCOSE_REF_LOW;
   const refHigh = unit === 'mgdl' ? Math.round(GLUCOSE_REF_HIGH * GLUCOSE_FACTOR) : GLUCOSE_REF_HIGH;
+  const refFed  = unit === 'mgdl' ? Math.round(GLUCOSE_REF_FED  * GLUCOSE_FACTOR) : GLUCOSE_REF_FED;
   const dispVals = pts.map(p => glucoseDisplay(p.valueMmol, unit));
   const rawMin = Math.min(...dispVals, refLow);
-  const rawMax = Math.max(...dispVals, refHigh);
+  const rawMax = Math.max(...dispVals, refFed);
   const dom = UI.chartDomain(rawMin, rawMax);
   const totalDays = Math.max(1, healthDayDiff(from, to));
   const xOf = d => padL + (healthDayDiff(from, d) / totalDays) * plotW;
@@ -90,12 +91,16 @@ function GlucoseScatterChart({ readings, from, to, unit }) {
   const dec = dom.range >= (unit === 'mgdl' ? 40 : 2) ? 0 : 1;
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const CTX_COLORS = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft };
+  const fedY = yOf(refFed).toFixed(1);
 
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
-      {/* fasting reference band */}
+      {/* fasted reference band */}
       <rect x={padL} y={yOf(refHigh).toFixed(1)} width={plotW} height={(yOf(refLow) - yOf(refHigh)).toFixed(1)}
         fill="rgba(var(--accent-rgb),0.07)" />
+      {/* fed upper reference line */}
+      <line x1={padL} y1={fedY} x2={W - padR} y2={fedY} stroke="#4a9fe0" strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
+      <text x={W - padR + 2} y={(parseFloat(fedY) + 3).toFixed(1)} fontSize="7" fontFamily={UI.fontUi} fill="#4a9fe0" opacity="0.8">fed</text>
       {gridVals.map((v, i) => (
         <g key={i}>
           {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
