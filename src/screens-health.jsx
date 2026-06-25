@@ -1911,7 +1911,7 @@ function ExportSheet({ open, onClose, store }) {
 
   const sessionsByDay = () => {
     const m = {};
-    (store.sessions || []).filter(s => s.ended && s.date >= from && s.date <= to).forEach(s => {
+    (store.sessions || []).filter(s => s.ended && (s.date || '').slice(0, 10) >= from && (s.date || '').slice(0, 10) <= to).forEach(s => {
       const d = typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10);
       if (!m[d]) m[d] = [];
       m[d].push(s);
