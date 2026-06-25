@@ -1034,15 +1034,17 @@ function HealthScreen({ store, setStore, go, userId }) {
 
   // Cache targets in localStorage so the adherence bar and macro target row
   // are at their final height on the very first render (no jump when settings load).
+  // Key is scoped per user so switching accounts never bleeds a stale cache.
+  const targetsCacheKey = 'logbook-health-targets-' + userId;
   const [cachedTargets, setCachedTargets] = useStateH(() => {
-    try { return JSON.parse(localStorage.getItem('logbook-health-targets') || 'null'); } catch { return null; }
+    try { return JSON.parse(localStorage.getItem(targetsCacheKey) || 'null'); } catch { return null; }
   });
   // targets is null until coachingMacros loads (async). Use cached value from the
   // previous visit so adherence bar + target rows are visible on the first render.
   const effectiveTargets = targets ?? cachedTargets;
   useEffectH(() => {
     if (targets === null && cachedTargets !== null) return; // don't overwrite a good cache with a transient null
-    try { localStorage.setItem('logbook-health-targets', JSON.stringify(targets)); } catch {}
+    try { localStorage.setItem(targetsCacheKey, JSON.stringify(targets)); } catch {}
     if (targets !== cachedTargets) setCachedTargets(targets);
   }, [targets]);
 
