@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.406',
+    title: 'Blood Glucose Tracking',
+    items: [
+      'Log blood glucose readings any time of day — straight from the daily log sheet. Add as many readings as you want, pick the context (fasted, fed, or other), and attach a note if something was off.',
+      'A scatter chart on the Health tab shows your readings over time, with reference bands for the normal fasting range (3.9–5.6 mmol/L) and the postprandial limit (< 7.8 mmol/L). Dots are colour-coded by context so patterns jump out.',
+      'Prefer mg/dL? Flip the unit in Health settings — values are always stored in mmol/L and converted on the fly, so you can switch back anytime without losing anything.',
+      'Coaches see their clients\' glucose data on the Daily tab too.',
+    ],
+  },
+  {
     id: 'v2.405',
     title: 'Training settings & a rest timer fix',
     items: [
