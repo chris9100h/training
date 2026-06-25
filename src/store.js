@@ -652,6 +652,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         reminderEnabled: sett.reminder_enabled ?? false,
         reminderTime: sett.reminder_time ?? '07:00',
         showWarmupInSummary: sett.show_warmup_in_summary ?? true,
+        showRegression: sett.show_regression ?? true,
         showCoachingTab: sett.show_coaching_tab ?? false,
         beYourOwnCoach: sett.be_your_own_coach ?? false,
         sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
@@ -1001,6 +1002,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.reminderEnabled      !== next.settings?.reminderEnabled      ||
     prev.settings?.reminderTime         !== next.settings?.reminderTime         ||
     prev.settings?.showWarmupInSummary  !== next.settings?.showWarmupInSummary  ||
+    prev.settings?.showRegression       !== next.settings?.showRegression       ||
     prev.settings?.showCoachingTab      !== next.settings?.showCoachingTab      ||
     prev.settings?.beYourOwnCoach         !== next.settings?.beYourOwnCoach         ||
     prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
@@ -1046,6 +1048,7 @@ async function syncStore(prev, next, userId) {
       reminder_enabled: next.settings?.reminderEnabled ?? false,
       reminder_time: next.settings?.reminderTime ?? '07:00',
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
+      show_regression: next.settings?.showRegression ?? true,
       show_coaching_tab: next.settings?.showCoachingTab ?? false,
       be_your_own_coach: next.settings?.beYourOwnCoach ?? false,
       session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,

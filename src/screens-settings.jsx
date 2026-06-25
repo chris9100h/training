@@ -360,6 +360,9 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [howToSheet, setHowToSheet] = useStateSet(false);
 
   // Training sub-sheets
+  const [sessionBehaviourSheet, setSessionBehaviourSheet] = useStateSet(false);
+  const [weightsProgressionSheet, setWeightsProgressionSheet] = useStateSet(false);
+  const [notificationsGroupSheet, setNotificationsGroupSheet] = useStateSet(false);
   const [restSheet, setRestSheet] = useStateSet(false);
   const [timeoutSheet, setTimeoutSheet] = useStateSet(false);
   const [paceguardSheet, setPaceguardSheet] = useStateSet(false);
@@ -1435,6 +1438,18 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
       {/* ══ Training Sheet ══ */}
       <SettingsSheet open={trainingSheet} onClose={() => setTrainingSheet(false)} title="Training">
         <div>
+          <NavRow label="Session" first onTap={() => setSessionBehaviourSheet(true)} />
+          <NavRow label="Weights & Progression" onTap={() => setWeightsProgressionSheet(true)} />
+          <NavRow label="Notifications" onTap={() => setNotificationsGroupSheet(true)} />
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setTrainingSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Training › Session ══ */}
+      <SettingsSheet open={sessionBehaviourSheet} onClose={() => setSessionBehaviourSheet(false)} title="Session">
+        <div>
           <Row label="Rest timers" first>
             <button style={accentBtn} onClick={() => setRestSheet(true)}>Change</button>
           </Row>
@@ -1449,14 +1464,26 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
               : <Toggle on={false} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, tempoEnabled: true } }))} />
             }
           </Row>
-          <Row label="Smart progression">
+          <Row label="Warmup sets in summary">
+            <Toggle on={showWarmupInSummary} onToggle={() => { const n = !showWarmupInSummary; setShowWarmupInSummary(n); setStore(s => ({ ...s, settings: { ...s.settings, showWarmupInSummary: n } })); }} />
+          </Row>
+          <Row label="Regression indicator">
+            <Toggle on={store.settings?.showRegression !== false} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, showRegression: s.settings?.showRegression === false } }))} />
+          </Row>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setSessionBehaviourSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Training › Weights & Progression ══ */}
+      <SettingsSheet open={weightsProgressionSheet} onClose={() => setWeightsProgressionSheet(false)} title="Weights & Progression">
+        <div>
+          <Row label="Smart progression" first>
             {store.settings?.smartProgression
               ? <button style={accentBtn} onClick={() => setProgressionSheet(true)}>Change</button>
               : <Toggle on={false} onToggle={() => { setStore(s => ({ ...s, settings: { ...s.settings, smartProgression: true } })); setProgDisclaimer(true); }} />
             }
-          </Row>
-          <Row label="Fill weight down">
-            <Toggle on={store.settings?.weightFillDown !== false} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, weightFillDown: s.settings?.weightFillDown === false } }))} />
           </Row>
           <Row label="Equipment setup">
             <button style={accentBtn} onClick={() => setProgConfigOpen(true)}>Change</button>
@@ -1464,10 +1491,19 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
           <Row label="Plate inventory">
             <button style={accentBtn} onClick={() => setPlateInventoryOpen(true)}>Change</button>
           </Row>
-          <Row label="Warmup sets in summary">
-            <Toggle on={showWarmupInSummary} onToggle={() => { const n = !showWarmupInSummary; setShowWarmupInSummary(n); setStore(s => ({ ...s, settings: { ...s.settings, showWarmupInSummary: n } })); }} />
+          <Row label="Fill weight down">
+            <Toggle on={store.settings?.weightFillDown !== false} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, weightFillDown: s.settings?.weightFillDown === false } }))} />
           </Row>
-          <Row label="Remind on training days">
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setWeightsProgressionSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Training › Notifications ══ */}
+      <SettingsSheet open={notificationsGroupSheet} onClose={() => setNotificationsGroupSheet(false)} title="Notifications">
+        <div>
+          <Row label="Remind on training days" first>
             {reminderEnabled
               ? <button style={accentBtn} onClick={() => setReminderSheet(true)}>{store.settings?.reminderTime || 'Change'}</button>
               : <Toggle on={false} onToggle={toggleReminder} />
@@ -1479,7 +1515,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
             </div>
           )}
           <div style={{ marginTop: 24 }}>
-            <Btn style={{ width: '100%' }} onClick={() => setTrainingSheet(false)}>Done</Btn>
+            <Btn style={{ width: '100%' }} onClick={() => setNotificationsGroupSheet(false)}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>

@@ -608,7 +608,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, prevWorkingSetFor(k)));
-        if (!anyImprovementBefore && isDecline(completed, prevSet)) {
+        if (!anyImprovementBefore && isDecline(completed, prevSet) && store.settings?.showRegression !== false) {
           setRegressionSet(true);
           setTimeout(() => setRegressionSet(false), 2500);
         }

@@ -165,6 +165,7 @@ CREATE TABLE public.zane_user_settings (
   reminder_time text NOT NULL DEFAULT '07:00'::text,
   next_reminder_at timestamp with time zone,
   show_warmup_in_summary boolean NOT NULL DEFAULT true,
+  show_regression boolean NOT NULL DEFAULT true,
   show_coaching_tab boolean DEFAULT false,
   be_your_own_coach boolean NOT NULL DEFAULT false,
   session_timeout_minutes integer DEFAULT 90,
