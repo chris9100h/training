@@ -1551,6 +1551,34 @@ function getCycleNumForDate(schedule, dateStr) {
   return totalPriorCycles + 1;
 }
 
+// Inverse of getCycleNumForDate: returns the start Date of the 1-indexed cycleNum
+// across all plan versions. Returns null for unversioned plans or cycleNum < 1.
+function getCycleStartForNum(schedule, cycleNum) {
+  if (!schedule?.versions?.length || cycleNum < 1) return null;
+  const sorted = [...schedule.versions].sort((a, b) => a.validFrom.localeCompare(b.validFrom));
+  let totalPriorCycles = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const v = sorted[i];
+    const nextV = sorted[i + 1];
+    const daysLen = (v.days || []).length;
+    if (!daysLen) continue;
+    if (nextV) {
+      const vStart = new Date(v.validFrom + 'T12:00:00');
+      const vEnd = new Date(nextV.validFrom + 'T12:00:00');
+      const daysInVersion = Math.round((vEnd - vStart) / 86400000);
+      const cyclesInVersion = Math.floor((daysInVersion - 1) / daysLen) + 1;
+      if (totalPriorCycles + cyclesInVersion >= cycleNum) {
+        return new Date(vStart.getTime() + (cycleNum - totalPriorCycles - 1) * daysLen * 86400000);
+      }
+      totalPriorCycles += cyclesInVersion;
+    } else {
+      const vStartDate = new Date(v.validFrom + 'T12:00:00');
+      return new Date(vStartDate.getTime() + (cycleNum - totalPriorCycles - 1) * daysLen * 86400000);
+    }
+  }
+  return null;
+}
+
 function getCyclePosForDate(schedule, dateStr) {
   const versions = schedule.versions;
   if (!versions?.length) return null;
@@ -2610,7 +2638,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
+  uid, todayISO, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,

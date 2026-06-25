@@ -1228,15 +1228,28 @@ function StatsTab({ store, sessions, go }) {
   const isFlex = sch ? LB.isFlexPlan(sch) : false;
   const isCycleMode = sch && !LB.isWeekdayPlan(sch) && !!store.cycleStartDate;
   const cycleLen = sch?.days?.length || 1;
+  // Use getCycleNumForDate (version-aware) when versions exist; fall back to
+  // simple arithmetic for unversioned plans. Both return 1-indexed; convert to
+  // 0-indexed for internal use (display adds 1 back via selectedCycleNum + 1).
+  const todayISO = today.toISOString().slice(0, 10);
+  const currentCycleNum = (() => {
+    if (!isCycleMode) return 0;
+    if (sch?.versions?.length) return LB.getCycleNumForDate(sch, todayISO) - 1;
+    return Math.floor(Math.round((today.getTime() - LB.parseDate(store.cycleStartDate).getTime()) / 86400000) / cycleLen);
+  })();
+  // Start of the current cycle window — use the version-aware helper when versions exist
   const cycleWindowStart = (() => {
     if (!isCycleMode) return null;
+    if (sch?.versions?.length) {
+      const d = LB.getCycleStartForNum(sch, currentCycleNum + 1);
+      return d || null;
+    }
     const start = LB.parseDate(store.cycleStartDate);
     const n = Math.round((today.getTime() - start.getTime()) / 86400000);
     const idxInCycle = ((n % cycleLen) + cycleLen) % cycleLen;
     const d = new Date(today); d.setDate(today.getDate() - idxInCycle);
     return d;
   })();
-  const currentCycleNum = isCycleMode ? Math.floor(Math.round((today.getTime() - LB.parseDate(store.cycleStartDate).getTime()) / 86400000) / cycleLen) : 0;
 
   const [cycleViewOffset, setCycleViewOffset] = useStateL(0);
   const selectedCycleStart = isCycleMode && cycleWindowStart ? (() => {

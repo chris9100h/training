@@ -1047,34 +1047,9 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
 }
 
 // Given a 1-indexed cycle number, returns the start Date of that cycle for a
-// versioned schedule. Uses the same arithmetic as getCycleNumForDate (inverted).
-function getCycleStartForNum(sch, cycleNum) {
-  if (!sch?.versions?.length || cycleNum < 1) return null;
-  const sorted = [...sch.versions].sort((a, b) => a.validFrom.localeCompare(b.validFrom));
-  let totalPriorCycles = 0;
-  for (let i = 0; i < sorted.length; i++) {
-    const v = sorted[i];
-    const nextV = sorted[i + 1];
-    const daysLen = (v.days || []).length;
-    if (!daysLen) continue;
-    if (nextV) {
-      const vStart = new Date(v.validFrom + 'T12:00:00');
-      const vEnd = new Date(nextV.validFrom + 'T12:00:00');
-      const daysInVersion = Math.round((vEnd - vStart) / 86400000);
-      const cyclesInVersion = Math.floor((daysInVersion - 1) / daysLen) + 1;
-      if (totalPriorCycles + cyclesInVersion >= cycleNum) {
-        const cycleOffset = cycleNum - totalPriorCycles - 1;
-        return new Date(vStart.getTime() + cycleOffset * daysLen * 86400000);
-      }
-      totalPriorCycles += cyclesInVersion;
-    } else {
-      const cycleOffset = cycleNum - totalPriorCycles - 1;
-      const vStartDate = new Date(v.validFrom + 'T12:00:00');
-      return new Date(vStartDate.getTime() + cycleOffset * daysLen * 86400000);
-    }
-  }
-  return null;
-}
+// Moved to store.js as LB.getCycleStartForNum — kept as thin wrapper for the
+// one caller below until we can update the call site.
+const getCycleStartForNum = LB.getCycleStartForNum;
 
 // ─── HOME ─────────────────────────────────────────────────────────────
 // Per-user override for the faint background figure on the main screen.
