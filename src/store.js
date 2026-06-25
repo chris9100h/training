@@ -1694,8 +1694,8 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
       ...s,
       currentExIdx: mem.currentExIdx ?? 0,
       cyclePos: mem.cyclePos ?? null,
-      // for the active session, local entries/restStart are authoritative
-      ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null } : {}),
+      // for the active session, local entries/restStart/restDuration are authoritative
+      ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null, restDuration: mem.restDuration ?? null } : {}),
       ...(keepCachedEntries ? { entries: mem.entries } : {}),
     };
   });
