@@ -618,7 +618,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         {addingGlucose ? (
           <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {(() => {
-              const glInputSt = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box', colorScheme: 'dark' };
+              const glInputSt = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
               return (
                 <div style={{ display: 'flex', gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -627,7 +627,14 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={labelStyle}>Time</div>
-                    <input type="time" value={glForm.time} onChange={e => setGl('time', e.target.value)} style={glInputSt} />
+                    <input type="text" inputMode="numeric" placeholder="HH:MM" maxLength={5}
+                      value={glForm.time}
+                      onChange={e => {
+                        let v = e.target.value.replace(/[^0-9:]/g, '');
+                        if (v.length === 2 && !v.includes(':') && glForm.time.length < 2) v += ':';
+                        setGl('time', v);
+                      }}
+                      style={glInputSt} />
                   </div>
                 </div>
               );
