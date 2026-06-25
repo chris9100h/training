@@ -100,7 +100,6 @@ function GlucoseScatterChart({ readings, from, to, unit }) {
         fill="rgba(var(--accent-rgb),0.07)" />
       {/* fed upper reference line */}
       <line x1={padL} y1={fedY} x2={W - padR} y2={fedY} stroke="#4a9fe0" strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
-      <text x={W - padR + 2} y={(parseFloat(fedY) + 3).toFixed(1)} fontSize="7" fontFamily={UI.fontUi} fill="#4a9fe0" opacity="0.8">fed</text>
       {gridVals.map((v, i) => (
         <g key={i}>
           {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
@@ -1138,8 +1137,8 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
         <>
           <GlucoseScatterChart readings={inWindow} from={start} to={end} unit={unit} />
           {/* Reference legend */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4, marginBottom: 2 }}>
-            <div style={{ height: 8, width: 28, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 2 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+            <div style={{ height: 8, width: 28, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 2, flexShrink: 0 }} />
             <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>
               Normal fasting {refLow.toFixed(dec)}–{refHigh.toFixed(dec)} {unitLabel}
             </span>
@@ -1150,6 +1149,14 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
                 <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>{GLUCOSE_CTX_LABELS[c]}</span>
               </span>
             ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4, marginBottom: 2 }}>
+            <div style={{ width: 28, flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+              <div style={{ width: '100%', borderTop: '1.5px dashed #4a9fe0', opacity: 0.5 }} />
+            </div>
+            <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>
+              Normal postprandial &lt;{(unit === 'mgdl' ? Math.round(GLUCOSE_REF_FED * GLUCOSE_FACTOR) : GLUCOSE_REF_FED).toFixed(dec)} {unitLabel} (2h after meal)
+            </span>
           </div>
           {noteItems.length > 0 && (
             <>
