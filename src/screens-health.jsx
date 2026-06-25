@@ -623,9 +623,9 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px' }}>
                 <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{g.time}</span>
                 <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: ctxColor, display: 'inline-block', flexShrink: 0 }} />
                     <span className="num" style={{ fontSize: 15, color: UI.ink }}>{disp}</span>
-                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: ctxColor, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{GLUCOSE_CTX_LABELS[g.context]}</span>
                   </div>
                   {g.note && <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{g.note}</div>}
                 </div>
@@ -1122,8 +1122,8 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
   const latestDisp = latest ? glucoseDisplay(latest.valueMmol, unit) : null;
 
   // Notes feed: readings with a note, newest first, max 20
-  const noteItems = useMemoH(() =>
-    [...inWindow].filter(l => l.note).sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 20),
+  const sortedReadings = useMemoH(() =>
+    [...inWindow].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 30),
     [inWindow]
   );
   const CTX_COLORS = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft };
@@ -1158,17 +1158,17 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
               Normal postprandial &lt;{(unit === 'mgdl' ? Math.round(GLUCOSE_REF_FED * GLUCOSE_FACTOR) : GLUCOSE_REF_FED).toFixed(dec)} {unitLabel} (2h after meal)
             </span>
           </div>
-          {noteItems.length > 0 && (
+          {sortedReadings.length > 0 && (
             <>
               <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {noteItems.map(n => (
+                {sortedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                    <div style={{ flexShrink: 0 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: CTX_COLORS[n.context] || UI.inkSoft, display: 'inline-block', flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
-                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: CTX_COLORS[n.context] || UI.inkFaint, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{GLUCOSE_CTX_LABELS[n.context]}</div>
+                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
                     </div>
-                    <div style={{ flex: 1, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{n.note}</div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{glucoseDisplay(n.valueMmol, unit)}</span>
                   </div>
                 ))}
