@@ -341,24 +341,36 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   const emptyGl = { value: '', time: '', context: 'fasted', note: '' };
   const [addingGlucose, setAddingGlucose] = useStateH(false);
   const [glForm, setGlForm] = useStateH(emptyGl);
+  const [editingGlucoseId, setEditingGlucoseId] = useStateH(null);
+  const [confirmDeleteGlId, setConfirmDeleteGlId] = useStateH(null);
   const setGl = (k, v) => setGlForm(f => ({ ...f, [k]: v }));
 
   useEffectH(() => {
-    if (!open) { setAddingGlucose(false); setGlForm(emptyGl); }
+    if (!open) { setAddingGlucose(false); setGlForm(emptyGl); setEditingGlucoseId(null); setConfirmDeleteGlId(null); }
   }, [open]);
 
   const saveGlucose = async () => {
     const mmol = glucoseFromInput(glForm.value, glUnit);
     if (mmol == null) return;
     const time = glForm.time || new Date().toTimeString().slice(0, 5);
-    const entry = { id: LB.uid(), date, time, valueMmol: mmol, context: glForm.context || 'fasted', note: glForm.note.trim() || null, createdAt: new Date().toISOString() };
-    setStore(s => ({ ...s, glucoseLogs: [entry, ...(s.glucoseLogs || [])] }));
-    setAddingGlucose(false); setGlForm(emptyGl);
-    const { error } = await LB.supabase.from('zane_glucose_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_mmol: entry.valueMmol, context: entry.context, note: entry.note });
-    if (error) setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== entry.id) }));
+    if (editingGlucoseId) {
+      const origEntry = (store.glucoseLogs || []).find(l => l.id === editingGlucoseId);
+      const updated = { ...origEntry, time, valueMmol: mmol, context: glForm.context || 'fasted', note: glForm.note.trim() || null };
+      setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).map(l => l.id === editingGlucoseId ? updated : l) }));
+      setEditingGlucoseId(null); setAddingGlucose(false); setGlForm(emptyGl);
+      const { error } = await LB.supabase.from('zane_glucose_logs').update({ time, value_mmol: mmol, context: updated.context, note: updated.note }).eq('id', editingGlucoseId).eq('user_id', userId);
+      if (error && origEntry) setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).map(l => l.id === editingGlucoseId ? origEntry : l) }));
+    } else {
+      const entry = { id: LB.uid(), date, time, valueMmol: mmol, context: glForm.context || 'fasted', note: glForm.note.trim() || null, createdAt: new Date().toISOString() };
+      setStore(s => ({ ...s, glucoseLogs: [entry, ...(s.glucoseLogs || [])] }));
+      setAddingGlucose(false); setGlForm(emptyGl);
+      const { error } = await LB.supabase.from('zane_glucose_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_mmol: entry.valueMmol, context: entry.context, note: entry.note });
+      if (error) setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== entry.id) }));
+    }
   };
 
   const deleteGlucose = async (id) => {
+    setConfirmDeleteGlId(null);
     setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== id) }));
     await LB.supabase.from('zane_glucose_logs').delete().eq('id', id).eq('user_id', userId);
   };
@@ -601,17 +613,29 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         {glucoseForDay.map(g => {
           const disp = glucoseDisplay(g.valueMmol, glUnit);
           const ctxColor = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft }[g.context] || UI.inkSoft;
+          const isConfirm = confirmDeleteGlId === g.id;
           return (
-            <div key={g.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px', background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `0.5px solid ${UI.hairStrong}` }}>
-              <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{g.time}</span>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span className="num" style={{ fontSize: 15, color: UI.ink }}>{disp}</span>
-                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: ctxColor, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{GLUCOSE_CTX_LABELS[g.context]}</span>
+            <div key={g.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px' }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{g.time}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="num" style={{ fontSize: 15, color: UI.ink }}>{disp}</span>
+                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: ctxColor, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{GLUCOSE_CTX_LABELS[g.context]}</span>
+                  </div>
+                  {g.note && <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{g.note}</div>}
                 </div>
-                {g.note && <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{g.note}</div>}
+                <button onClick={() => { setEditingGlucoseId(g.id); setAddingGlucose(true); setConfirmDeleteGlId(null); setGlForm({ value: String(glucoseDisplay(g.valueMmol, glUnit)), time: g.time, context: g.context, note: g.note || '' }); }} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 11, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>
+                  <i className="fa-solid fa-pencil" />
+                </button>
+                <button onClick={() => setConfirmDeleteGlId(isConfirm ? null : g.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
               </div>
-              <button onClick={() => deleteGlucose(g.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
+              {isConfirm && (
+                <div style={{ display: 'flex', gap: 0, borderTop: `0.5px solid ${UI.hairStrong}` }}>
+                  <button onClick={() => setConfirmDeleteGlId(null)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>Cancel</button>
+                  <button onClick={() => deleteGlucose(g.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: '#e05a5a' }}>Delete</button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -659,12 +683,12 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
               <input type="text" placeholder="…" value={glForm.note} onChange={e => setGl('note', e.target.value)} style={inputStyle} />
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <Btn kind="ghost" onClick={() => { setAddingGlucose(false); setGlForm(emptyGl); }} style={{ flex: 1 }}>Cancel</Btn>
-              <Btn onClick={saveGlucose} disabled={!glForm.value} style={{ flex: 2 }}>Add</Btn>
+              <Btn kind="ghost" onClick={() => { setAddingGlucose(false); setGlForm(emptyGl); setEditingGlucoseId(null); }} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={saveGlucose} disabled={!glForm.value} style={{ flex: 2 }}>{editingGlucoseId ? 'Update' : 'Add'}</Btn>
             </div>
           </div>
         ) : (
-          <button onClick={() => setAddingGlucose(true)} style={{
+          <button onClick={() => { setAddingGlucose(true); setEditingGlucoseId(null); }} style={{
             width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
             color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
