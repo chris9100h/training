@@ -617,22 +617,27 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         })}
         {addingGlucose ? (
           <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <div style={{ flex: '1 1 100px', minWidth: 0 }}>
-                <div style={labelStyle}>Value ({glucoseUnitLabel(glUnit)})</div>
-                <input type="number" inputMode="decimal" placeholder="—" value={glForm.value} onChange={e => setGl('value', e.target.value)} style={{ ...inputStyle, width: '100%', boxSizing: 'border-box', height: 38 }} autoFocus />
-              </div>
-              <div style={{ flex: '1 1 100px', minWidth: 0 }}>
-                <div style={labelStyle}>Time</div>
-                <input type="time" value={glForm.time} onChange={e => setGl('time', e.target.value)} style={{ ...inputStyle, width: '100%', boxSizing: 'border-box', height: 38 }} />
-              </div>
-            </div>
+            {(() => {
+              const glInputSt = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box', colorScheme: 'dark' };
+              return (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={labelStyle}>Value ({glucoseUnitLabel(glUnit)})</div>
+                    <input type="number" inputMode="decimal" placeholder="—" value={glForm.value} onChange={e => setGl('value', e.target.value)} style={{ ...glInputSt, fontFamily: UI.fontNum }} autoFocus />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={labelStyle}>Time</div>
+                    <input type="time" value={glForm.time} onChange={e => setGl('time', e.target.value)} style={glInputSt} />
+                  </div>
+                </div>
+              );
+            })()}
             <div>
               <div style={labelStyle}>Context</div>
               <div style={{ display: 'flex', gap: 6 }}>
                 {['fasted', 'fed', 'other'].map(c => (
                   <button key={c} onClick={() => setGl('context', c)} style={{
-                    padding: '5px 10px', cursor: 'pointer', borderRadius: 4,
+                    flex: 1, padding: '6px 4px', cursor: 'pointer', borderRadius: 4,
                     border: `0.5px solid ${glForm.context === c ? 'var(--accent)' : UI.hairStrong}`,
                     background: glForm.context === c ? 'var(--accent)' : 'transparent',
                     color: glForm.context === c ? '#0a0805' : UI.inkFaint,
