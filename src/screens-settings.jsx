@@ -2151,6 +2151,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
             { key: 'phoenix',    label: 'Phoenix',    sub: 'mb2489' },
             { key: 'marine',     label: 'Marine',     sub: 'marine.png' },
             { key: 'prince_abu', label: 'Prince Abu', sub: 'prince_abu.png' },
+            { key: 'chris',      label: 'Chris',      sub: 'admin only' },
           ].map(({ key, label, sub }) => {
             const active = adminBgPreview === key;
             return (

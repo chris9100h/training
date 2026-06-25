@@ -28,6 +28,8 @@ const ASSETS = [
   BASE + '/Background/phoenix.png',
   BASE + '/Background/marine.png',
   BASE + '/Background/prince_abu.png',
+  BASE + '/Background/Chris1.PNG',
+  BASE + '/Background/Chris2.PNG',
 ];
 
 // CDN libraries the app boots with. Precached best-effort so the app is fully
