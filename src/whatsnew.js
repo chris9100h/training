@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.405',
+    title: 'Training settings & a rest timer fix',
+    items: [
+      'Training settings are now organised into three sub-sections — Session, Weights & Progression, and Notifications. Easier to find things, less scrolling.',
+      'New toggle under Session: turn off the regression indicator if seeing "you did worse" mid-workout isn\'t your thing. It\'s off, it never happened. 🙈',
+      'Fixed: the rest timer used to jump to the wrong value when switching exercises mid-rest (after a cache reload). It now correctly holds whatever countdown it started with.',
+      'Minor: the app no longer does unnecessary background refreshes when you switch back to it during a session — slightly snappier return.',
+    ],
+  },
+  {
     id: 'v2.404',
     title: 'Push done right + visual polish',
     items: [
