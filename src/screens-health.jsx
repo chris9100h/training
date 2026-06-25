@@ -592,25 +592,6 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         <textarea rows={2} placeholder="e.g. Birthday cake, 2 slices" value={form.offPlanNote} onChange={e => set('offPlanNote', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
       </div>
 
-      {coachFields.length > 0 && (
-        <div style={{ marginBottom: 18, padding: '14px 14px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.05)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
-          <div className="micro-gold" style={{ marginBottom: 12 }}>YOUR COACH WANTS TO KNOW</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {layoutRows(coachFields).map((row, ri) => (
-              row.length === 1
-                ? <div key={row[0].key}><FieldWidget field={row[0]} value={coachForm[row[0].key]} onChange={v => setCoachVal(row[0].key, v)} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} /></div>
-                : <div key={ri} style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
-                    {row.map(f => (
-                      <div key={f.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                        <FieldWidget field={f} value={coachForm[f.key]} onChange={v => setCoachVal(f.key, v)} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} />
-                      </div>
-                    ))}
-                  </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* ── Glucose ── */}
       <div style={{ marginTop: 8, marginBottom: 18 }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
@@ -636,22 +617,23 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         })}
         {addingGlucose ? (
           <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 100px', minWidth: 0 }}>
                 <div style={labelStyle}>Value ({glucoseUnitLabel(glUnit)})</div>
-                <input type="number" inputMode="decimal" placeholder="—" value={glForm.value} onChange={e => setGl('value', e.target.value)} style={inputStyle} autoFocus />
+                <input type="number" inputMode="decimal" placeholder="—" value={glForm.value} onChange={e => setGl('value', e.target.value)} style={{ ...inputStyle, width: '100%', boxSizing: 'border-box', height: 38 }} autoFocus />
               </div>
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: '1 1 100px', minWidth: 0 }}>
                 <div style={labelStyle}>Time</div>
-                <input type="time" value={glForm.time} onChange={e => setGl('time', e.target.value)} style={inputStyle} />
+                <input type="time" value={glForm.time} onChange={e => setGl('time', e.target.value)} style={{ ...inputStyle, width: '100%', boxSizing: 'border-box', height: 38 }} />
               </div>
             </div>
             <div>
               <div style={labelStyle}>Context</div>
-              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+              <div style={{ display: 'flex', gap: 6 }}>
                 {['fasted', 'fed', 'other'].map(c => (
                   <button key={c} onClick={() => setGl('context', c)} style={{
-                    flex: 1, padding: '6px 4px', cursor: 'pointer', border: 'none',
+                    padding: '5px 10px', cursor: 'pointer', borderRadius: 4,
+                    border: `0.5px solid ${glForm.context === c ? 'var(--accent)' : UI.hairStrong}`,
                     background: glForm.context === c ? 'var(--accent)' : 'transparent',
                     color: glForm.context === c ? '#0a0805' : UI.inkFaint,
                     fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em',
@@ -676,6 +658,25 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
           }}>+ Add reading</button>
         )}
       </div>
+
+      {coachFields.length > 0 && (
+        <div style={{ marginBottom: 18, padding: '14px 14px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.05)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+          <div className="micro-gold" style={{ marginBottom: 12 }}>YOUR COACH WANTS TO KNOW</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {layoutRows(coachFields).map((row, ri) => (
+              row.length === 1
+                ? <div key={row[0].key}><FieldWidget field={row[0]} value={coachForm[row[0].key]} onChange={v => setCoachVal(row[0].key, v)} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} /></div>
+                : <div key={ri} style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                    {row.map(f => (
+                      <div key={f.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                        <FieldWidget field={f} value={coachForm[f.key]} onChange={v => setCoachVal(f.key, v)} distUnit="km" setDistUnit={() => {}} inputStyle={inputStyle} />
+                      </div>
+                    ))}
+                  </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8 }}>
         {existing && (
@@ -1612,10 +1613,12 @@ function HealthScreen({ store, setStore, go, userId }) {
 function HealthClientLogs({ clientStore }) {
   const logs = clientStore?.dailyLogs || [];
   const cardioLogs = clientStore?.cardioLogs || [];
+  const glucoseLogs = clientStore?.glucoseLogs || [];
+  const glucoseUnit = clientStore?.settings?.glucoseUnit ?? 'mmol';
   const [tf, setTf] = useStateH('1W');
 
   const COACH_ORDER_KEY = 'logbook-coach-health-card-order';
-  const DEFAULT_COACH_ORDER = ['week', 'today', 'weight', 'steps', 'macros', 'cardio', 'adherence', 'weekly'];
+  const DEFAULT_COACH_ORDER = ['week', 'today', 'weight', 'steps', 'macros', 'cardio', 'adherence', 'glucose', 'weekly'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(COACH_ORDER_KEY) || '[]'); } catch (_) {}
@@ -1736,7 +1739,7 @@ function HealthClientLogs({ clientStore }) {
     };
   }, [logs, clientStore?.sessions, clientStore?.cardioLogs, clientStore?.schedules, clientStore?.activeScheduleId, clientStore?.cycleStartDate, clientStore?.weekPlanStartDate, today, selectedDate, tf]);
 
-  if (!logs.length && !cardioLogs.length) {
+  if (!logs.length && !cardioLogs.length && !glucoseLogs.length) {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
         <i className="fa-solid fa-heart-pulse" style={{ fontSize: 28, color: UI.inkGhost }} />
@@ -1787,6 +1790,9 @@ function HealthClientLogs({ clientStore }) {
         <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
       </HealthChartCard>
     ),
+    glucose: glucoseLogs.length > 0
+      ? <GlucoseCard glucoseLogs={glucoseLogs} unit={glucoseUnit} tf={tf} setTf={setTf} dragHandle={handle} />
+      : null,
     weekly: weeks.length ? (
       <Card style={{ padding: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
