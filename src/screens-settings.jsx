@@ -1231,6 +1231,21 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
             Pin a Health tab to the nav bar to log daily weight, steps & macros and see your trends. These daily logs also prefill your weekly coach check-in.
           </div>
 
+          <div className="micro" style={{ color: UI.inkFaint, margin: '20px 0 8px' }}>GLUCOSE</div>
+          <Row label="Blood glucose unit" first last>
+            <div style={{ display: 'flex', gap: 0, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+              {['mmol', 'mgdl'].map(u => (
+                <button key={u} onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, glucoseUnit: u } }))}
+                  style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
+                    background: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'var(--accent)' : 'transparent',
+                    color: (store.settings?.glucoseUnit ?? 'mmol') === u ? '#fff' : UI.inkSoft,
+                    border: 'none', cursor: 'pointer', transition: 'background 0.15s' }}>
+                  {u === 'mmol' ? 'mmol/L' : 'mg/dL'}
+                </button>
+              ))}
+            </div>
+          </Row>
+
           {(store.statusPeriods || []).length > 0 && (
             <div style={{ marginTop: 16 }}>
               <NavRow label="Sick & Vacation periods" hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} />

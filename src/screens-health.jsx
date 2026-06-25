@@ -52,6 +52,66 @@ function adherenceColor(a) {
   return 'var(--danger)';
 }
 
+// ─── glucose helpers ─────────────────────────────────────────────────────────
+
+const GLUCOSE_FACTOR = 18.0182; // mmol/L → mg/dL
+function glucoseDisplay(mmol, unit) {
+  if (mmol == null) return null;
+  return unit === 'mgdl' ? Math.round(mmol * GLUCOSE_FACTOR) : Math.round(mmol * 10) / 10;
+}
+function glucoseFromInput(raw, unit) {
+  const n = parseFloat(String(raw).replace(',', '.'));
+  if (!isFinite(n) || n <= 0) return null;
+  return unit === 'mgdl' ? Math.round(n / GLUCOSE_FACTOR * 1000) / 1000 : n;
+}
+const glucoseUnitLabel = unit => unit === 'mgdl' ? 'mg/dL' : 'mmol/L';
+const GLUCOSE_CTX_LABELS = { fasted: 'Fasted', fed: 'Fed', other: 'Other' };
+// fasting normal range in mmol/L
+const GLUCOSE_REF_LOW = 3.9, GLUCOSE_REF_HIGH = 5.6;
+
+// Scatter chart: one point per reading, coloured by context, with a reference
+// band for the fasting normal range (3.9–5.6 mmol/L).
+function GlucoseScatterChart({ readings, from, to, unit }) {
+  const pts = (readings || []).filter(r => r.valueMmol != null && r.date >= from && r.date <= to)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+  if (!pts.length) return <HealthChartEmpty />;
+  const W = 320, padL = 42, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
+  const H = padTop + plotH + padBottom, plotW = W - padL - padR;
+
+  const refLow  = unit === 'mgdl' ? Math.round(GLUCOSE_REF_LOW  * GLUCOSE_FACTOR) : GLUCOSE_REF_LOW;
+  const refHigh = unit === 'mgdl' ? Math.round(GLUCOSE_REF_HIGH * GLUCOSE_FACTOR) : GLUCOSE_REF_HIGH;
+  const dispVals = pts.map(p => glucoseDisplay(p.valueMmol, unit));
+  const rawMin = Math.min(...dispVals, refLow);
+  const rawMax = Math.max(...dispVals, refHigh);
+  const dom = UI.chartDomain(rawMin, rawMax);
+  const totalDays = Math.max(1, healthDayDiff(from, to));
+  const xOf = d => padL + (healthDayDiff(from, d) / totalDays) * plotW;
+  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
+  const dec = dom.range >= (unit === 'mgdl' ? 40 : 2) ? 0 : 1;
+  const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+  const CTX_COLORS = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft };
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+      {/* fasting reference band */}
+      <rect x={padL} y={yOf(refHigh).toFixed(1)} width={plotW} height={(yOf(refLow) - yOf(refHigh)).toFixed(1)}
+        fill="rgba(var(--accent-rgb),0.07)" />
+      {gridVals.map((v, i) => (
+        <g key={i}>
+          {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
+          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Number(v.toFixed(dec))}</text>
+        </g>
+      ))}
+      <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+      {pts.map((p, i) => {
+        const disp = glucoseDisplay(p.valueMmol, unit);
+        return <circle key={i} cx={xOf(p.date).toFixed(1)} cy={yOf(disp).toFixed(1)} r={3}
+          fill={CTX_COLORS[p.context] || UI.inkSoft} opacity={0.85} />;
+      })}
+    </svg>
+  );
+}
+
 // ─── chart primitives ─────────────────────────────────────────────────────────
 
 function HealthChartEmpty({ label }) {
@@ -241,7 +301,7 @@ function MacroLegend() {
 
 // ─── Daily log sheet ──────────────────────────────────────────────────────────
 
-function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus }) {
+function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit }) {
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
   const todayISO = LB.todayISO();
   const dayStatusPeriod = useMemoH(() => {
@@ -271,6 +331,37 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   const [confirmEl, confirm] = useConfirm();
   // Snapshot of the form as it was opened, to detect unsaved edits on dismiss.
   const initialSnap = useRefH({ form: empty, coach: {}, net: false });
+
+  // ── Glucose readings for this day ──
+  const glUnit = glucoseUnit || 'mmol';
+  const glucoseForDay = useMemoH(
+    () => (glucoseLogs || []).filter(l => l.date === date).sort((a, b) => a.time.localeCompare(b.time)),
+    [glucoseLogs, date]
+  );
+  const emptyGl = { value: '', time: '', context: 'fasted', note: '' };
+  const [addingGlucose, setAddingGlucose] = useStateH(false);
+  const [glForm, setGlForm] = useStateH(emptyGl);
+  const setGl = (k, v) => setGlForm(f => ({ ...f, [k]: v }));
+
+  useEffectH(() => {
+    if (!open) { setAddingGlucose(false); setGlForm(emptyGl); }
+  }, [open]);
+
+  const saveGlucose = async () => {
+    const mmol = glucoseFromInput(glForm.value, glUnit);
+    if (mmol == null) return;
+    const time = glForm.time || new Date().toTimeString().slice(0, 5);
+    const entry = { id: LB.uid(), date, time, valueMmol: mmol, context: glForm.context || 'fasted', note: glForm.note.trim() || null, createdAt: new Date().toISOString() };
+    setStore(s => ({ ...s, glucoseLogs: [entry, ...(s.glucoseLogs || [])] }));
+    setAddingGlucose(false); setGlForm(emptyGl);
+    const { error } = await LB.supabase.from('zane_glucose_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_mmol: entry.valueMmol, context: entry.context, note: entry.note });
+    if (error) setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== entry.id) }));
+  };
+
+  const deleteGlucose = async (id) => {
+    setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== id) }));
+    await LB.supabase.from('zane_glucose_logs').delete().eq('id', id).eq('user_id', userId);
+  };
 
   useEffectH(() => {
     if (!open) return;
@@ -519,6 +610,72 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
           </div>
         </div>
       )}
+
+      {/* ── Glucose ── */}
+      <div style={{ marginTop: 8, marginBottom: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+          <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>GLUCOSE</span>
+          <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{glucoseUnitLabel(glUnit)}</span>
+        </div>
+        {glucoseForDay.map(g => {
+          const disp = glucoseDisplay(g.valueMmol, glUnit);
+          const ctxColor = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft }[g.context] || UI.inkSoft;
+          return (
+            <div key={g.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px', background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `0.5px solid ${UI.hairStrong}` }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{g.time}</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="num" style={{ fontSize: 15, color: UI.ink }}>{disp}</span>
+                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: ctxColor, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{GLUCOSE_CTX_LABELS[g.context]}</span>
+                </div>
+                {g.note && <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{g.note}</div>}
+              </div>
+              <button onClick={() => deleteGlucose(g.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
+            </div>
+          );
+        })}
+        {addingGlucose ? (
+          <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={labelStyle}>Value ({glucoseUnitLabel(glUnit)})</div>
+                <input type="number" inputMode="decimal" placeholder="—" value={glForm.value} onChange={e => setGl('value', e.target.value)} style={inputStyle} autoFocus />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={labelStyle}>Time</div>
+                <input type="time" value={glForm.time} onChange={e => setGl('time', e.target.value)} style={inputStyle} />
+              </div>
+            </div>
+            <div>
+              <div style={labelStyle}>Context</div>
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+                {['fasted', 'fed', 'other'].map(c => (
+                  <button key={c} onClick={() => setGl('context', c)} style={{
+                    flex: 1, padding: '6px 4px', cursor: 'pointer', border: 'none',
+                    background: glForm.context === c ? 'var(--accent)' : 'transparent',
+                    color: glForm.context === c ? '#0a0805' : UI.inkFaint,
+                    fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>{GLUCOSE_CTX_LABELS[c]}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={labelStyle}>Note (optional)</div>
+              <input type="text" placeholder="…" value={glForm.note} onChange={e => setGl('note', e.target.value)} style={inputStyle} />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => { setAddingGlucose(false); setGlForm(emptyGl); }} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={saveGlucose} disabled={!glForm.value} style={{ flex: 2 }}>Add</Btn>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setAddingGlucose(true)} style={{
+            width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
+            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }}>+ Add reading</button>
+        )}
+      </div>
 
       <div style={{ display: 'flex', gap: 8 }}>
         {existing && (
@@ -901,6 +1058,80 @@ function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
   );
 }
 
+// ─── Glucose card ─────────────────────────────────────────────────────────────
+
+function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
+  const today = LB.todayISO();
+  const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
+  const { start, end } = healthWindow(tfDays(tf));
+  const unitLabel = glucoseUnitLabel(unit);
+  const refLow  = unit === 'mgdl' ? Math.round(GLUCOSE_REF_LOW  * GLUCOSE_FACTOR) : GLUCOSE_REF_LOW;
+  const refHigh = unit === 'mgdl' ? Math.round(GLUCOSE_REF_HIGH * GLUCOSE_FACTOR) : GLUCOSE_REF_HIGH;
+  const dec = unit === 'mgdl' ? 0 : 1;
+
+  const inWindow = useMemoH(
+    () => (glucoseLogs || []).filter(l => l.date >= start && l.date <= end),
+    [glucoseLogs, tf, today]
+  );
+
+  // Latest reading as headline
+  const latest = inWindow.length
+    ? inWindow.reduce((a, b) => (a.date > b.date || (a.date === b.date && a.time > b.time)) ? a : b)
+    : null;
+  const latestDisp = latest ? glucoseDisplay(latest.valueMmol, unit) : null;
+
+  // Notes feed: readings with a note, newest first, max 20
+  const noteItems = useMemoH(() =>
+    [...inWindow].filter(l => l.note).sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 20),
+    [inWindow]
+  );
+  const CTX_COLORS = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft };
+
+  return (
+    <HealthChartCard title="Glucose" icon="fa-droplet" tf={tf} setTf={setTf}
+      headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle}>
+      {!inWindow.length ? (
+        <HealthChartEmpty label="No glucose readings in this range" />
+      ) : (
+        <>
+          <GlucoseScatterChart readings={inWindow} from={start} to={end} unit={unit} />
+          {/* Reference legend */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4, marginBottom: 2 }}>
+            <div style={{ height: 8, width: 28, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 2 }} />
+            <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>
+              Normal fasting {refLow.toFixed(dec)}–{refHigh.toFixed(dec)} {unitLabel}
+            </span>
+            <span style={{ flex: 1 }} />
+            {['fasted', 'fed', 'other'].map(c => (
+              <span key={c} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: CTX_COLORS[c], display: 'inline-block' }} />
+                <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>{GLUCOSE_CTX_LABELS[c]}</span>
+              </span>
+            ))}
+          </div>
+          {noteItems.length > 0 && (
+            <>
+              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {noteItems.map(n => (
+                  <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <div style={{ flexShrink: 0 }}>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: CTX_COLORS[n.context] || UI.inkFaint, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{GLUCOSE_CTX_LABELS[n.context]}</div>
+                    </div>
+                    <div style={{ flex: 1, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{n.note}</div>
+                    <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{glucoseDisplay(n.valueMmol, unit)}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </HealthChartCard>
+  );
+}
+
 // ─── HealthScreen ─────────────────────────────────────────────────────────────
 
 function HealthScreen({ store, setStore, go, userId }) {
@@ -1130,7 +1361,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   // Reorderable card order, persisted per device. Missing ids (e.g. after a new
   // card ships) are inserted at their default position, not appended at the end.
   const CARD_ORDER_KEY = 'logbook-health-card-order';
-  const DEFAULT_CARD_ORDER = ['week', 'today', 'macros', 'adherence', 'weight', 'cardio', 'steps'];
+  const DEFAULT_CARD_ORDER = ['week', 'today', 'macros', 'adherence', 'weight', 'cardio', 'steps', 'glucose'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]'); } catch (_) {}
@@ -1306,6 +1537,9 @@ function HealthScreen({ store, setStore, go, userId }) {
         <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
       </HealthChartCard>
     ) : null,
+    glucose: (store.glucoseLogs || []).length > 0
+      ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} tf={tf} setTf={setTf} dragHandle={handle} />
+      : null,
   };
 
   return (
@@ -1366,7 +1600,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       </div>
 
-      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} />
+      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} />
     </Screen>

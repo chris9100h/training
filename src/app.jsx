@@ -368,14 +368,20 @@ function App() {
       LB.refreshHealthLogs(uid).then(fresh => {
         if (!fresh) return;
         setStore(s => {
-          const serverDailyIds  = new Set(fresh.dailyLogs.map(l => l.id));
-          const serverDailyDates = new Set(fresh.dailyLogs.map(l => l.date));
-          const serverCardioIds = new Set(fresh.cardioLogs.map(l => l.id));
+          const serverDailyIds    = new Set(fresh.dailyLogs.map(l => l.id));
+          const serverDailyDates  = new Set(fresh.dailyLogs.map(l => l.date));
+          const serverCardioIds   = new Set(fresh.cardioLogs.map(l => l.id));
+          const serverGlucoseIds  = new Set((fresh.glucoseLogs || []).map(l => l.id));
           // Daily logs are one-per-date: also drop a local row whose date the
           // server already has (a divergent id from a pre-RPC multi-device write).
-          const localOnlyDaily  = (s.dailyLogs  || []).filter(l => !serverDailyIds.has(l.id) && !serverDailyDates.has(l.date));
-          const localOnlyCardio = (s.cardioLogs || []).filter(l => !serverCardioIds.has(l.id));
-          return { ...s, dailyLogs: [...localOnlyDaily, ...fresh.dailyLogs], cardioLogs: [...localOnlyCardio, ...fresh.cardioLogs] };
+          const localOnlyDaily   = (s.dailyLogs   || []).filter(l => !serverDailyIds.has(l.id) && !serverDailyDates.has(l.date));
+          const localOnlyCardio  = (s.cardioLogs  || []).filter(l => !serverCardioIds.has(l.id));
+          const localOnlyGlucose = (s.glucoseLogs || []).filter(l => !serverGlucoseIds.has(l.id));
+          return { ...s,
+            dailyLogs:   [...localOnlyDaily,   ...fresh.dailyLogs],
+            cardioLogs:  [...localOnlyCardio,  ...fresh.cardioLogs],
+            glucoseLogs: [...localOnlyGlucose, ...(fresh.glucoseLogs || [])],
+          };
         });
       }).catch(() => {});
     };

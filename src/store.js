@@ -470,12 +470,14 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
     // Support tickets — user's own ticket list, newest activity first
     isCoachLoad ? null : _supabase.rpc('get_user_support_chats'),
+    // Blood glucose readings — multiple per day, value always in mmol/L (migration 0101)
+    _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
-         supportTicketsRes] = await Promise.all(queries);
+         supportTicketsRes, glucoseLogsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -613,6 +615,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     statusPeriods: (statusPeriodsRes?.data || []).map(p => ({
       id: p.id, mode: p.mode, startedAt: p.started_at, endedAt: p.ended_at ?? null,
     })),
+    glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time,
+      valueMmol: parseFloat(l.value_mmol),
+      context: l.context ?? 'other', note: l.note ?? null, createdAt: l.created_at,
+    })),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
     // and via the local cache also offline). bestE1rmForExercise combines this
     // with the windowed sessions, so PR detection stays exact mid-session.
@@ -658,6 +665,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         macroTargets: sett.macro_targets ?? null,
         showHealthTab: sett.show_health_tab ?? false,
         onboardingCompleted: sett.onboarding_completed ?? false,
+        glucoseUnit: sett.glucose_unit ?? 'mmol',
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -1006,6 +1014,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
+    prev.settings?.glucoseUnit            !== next.settings?.glucoseUnit            ||
     JSON.stringify(prev.settings?.defaultCheckinSchema) !== JSON.stringify(next.settings?.defaultCheckinSchema) ||
     prev.nextReminderAt                   !== next.nextReminderAt   ||
     prev.statusMode                       !== next.statusMode       ||
@@ -1051,6 +1060,7 @@ async function syncStore(prev, next, userId) {
       macro_targets: next.settings?.macroTargets ?? null,
       show_health_tab: next.settings?.showHealthTab ?? false,
       onboarding_completed: next.settings?.onboardingCompleted ?? false,
+      glucose_unit: next.settings?.glucoseUnit ?? 'mmol',
       default_checkin_schema: next.settings?.defaultCheckinSchema ?? null,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
@@ -2603,9 +2613,10 @@ async function clearStatusMode(userId, store, setStore) {
 }
 
 async function refreshHealthLogs(userId) {
-  const [dailyRes, cardioRes] = await Promise.all([
+  const [dailyRes, cardioRes, glucoseRes] = await Promise.all([
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ]);
   if (dailyRes.error || cardioRes.error) return null;
   return {
@@ -2626,6 +2637,11 @@ async function refreshHealthLogs(userId) {
       durationMinutes: l.duration_minutes, distanceM: l.distance_m ?? null,
       paceFeeling: l.pace_feeling ?? null, effort: l.effort ?? null,
       note: l.note ?? null, sessionId: l.session_id ?? null, createdAt: l.created_at,
+    })),
+    glucoseLogs: (glucoseRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time,
+      valueMmol: parseFloat(l.value_mmol),
+      context: l.context ?? 'other', note: l.note ?? null, createdAt: l.created_at,
     })),
   };
 }
