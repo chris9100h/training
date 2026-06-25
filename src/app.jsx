@@ -295,9 +295,11 @@ function App() {
   const localDirty                = useRefA(false); // true if user changed store after cache load
   const userIdRef                 = useRefA(null);  // current userId for stale-closure contexts
   const phaseRef                  = useRefA('init'); // current phase for stale-closure contexts
+  const routeRef                  = useRefA({ name: 'home' }); // current route for stale-closure contexts
 
   useEffectA(() => { userIdRef.current = userId; }, [userId]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
+  useEffectA(() => { routeRef.current = route; }, [route]);
 
   useEffectA(() => {
     if (store?.user?.email && store?.user?.name) {
@@ -381,6 +383,7 @@ function App() {
     const onHide = () => localStorage.setItem(KEY, Date.now());
     const onShow = (e) => {
       if (!e.persisted) return;
+      if (routeRef.current?.name === 'train') return;
       const ts = localStorage.getItem(KEY);
       const elapsed = ts ? Date.now() - Number(ts) : 0;
       if (elapsed > THRESHOLD) { window.location.reload(); return; }
@@ -392,6 +395,7 @@ function App() {
       if (document.hidden) {
         localStorage.setItem(KEY, Date.now());
       } else {
+        if (routeRef.current?.name === 'train') return;
         const ts = localStorage.getItem(KEY);
         const elapsed = ts ? Date.now() - Number(ts) : 0;
         if (elapsed > THRESHOLD) { window.location.reload(); return; }
@@ -884,6 +888,7 @@ function App() {
   // version string. iOS Safari ignores reg.update() when the app is in the
   // foreground, so this is the only reliable detection path.
   const checkSwUpdate = useCallbackA(() => {
+    if (routeRef.current?.name === 'train') return;
     // Resolve sw.js relative to the SW scope (or page URL before registration
     // settles) — works on both github.io/training/ and the zane-wo.com root.
     const swUrl = new URL('sw.js', swReg.current?.scope || window.location.href);
