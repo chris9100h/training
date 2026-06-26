@@ -1270,14 +1270,16 @@ function e1rm(kg, reps) {
 // variant because it evaluates a set mid-completion, before `done` is set.
 // More weight at no worse than -2 reps, or same/more weight at more reps.
 function isImprovement(curr, prev) {
-  if (!prev || !curr || !curr.done || curr.skipped || curr.kg == null || prev.kg == null) return false;
+  // done=true wins: if both done+skipped are set, treat as done
+  if (!prev || !curr || !curr.done || curr.kg == null || prev.kg == null) return false;
   const rA = effReps(curr); const rB = effReps(prev);
   if (rA == null || rB == null) return false;
   return (curr.kg > prev.kg && rA >= rB - 2) || (curr.kg >= prev.kg && rA > rB);
 }
 function isDecline(curr, prev) {
-  if (!prev || !curr || curr.skipped) return false;
-  if (prev.skipped) return false; // prev was already skipped, no baseline to decline from
+  // done=true wins: only treat as skipped when truly skipped (not also done)
+  if (!prev || !curr || (curr.skipped && !curr.done)) return false;
+  if (prev.skipped && !prev.done) return false; // prev was already skipped, no baseline to decline from
   if (!curr.done || curr.kg == null || prev.kg == null) return false;
   const rA = effReps(curr); const rB = effReps(prev);
   if (rA == null || rB == null) return false;
