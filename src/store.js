@@ -550,7 +550,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const result = {
     user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || ''), approved: profileRes.data?.approved ?? false },
     exercises: exRes.data || [],
-    schedules: schRes.data || [],
+    schedules: (schRes.data || []).map(s => ({
+      ...s,
+      days: Array.isArray(s.days) ? s.days : [],
+      versions: Array.isArray(s.versions) ? s.versions : [],
+    })),
     // map snake_case DB columns → camelCase store fields
     sessions: (sessRes.data || []).map(s => {
       const entryRows = entriesBySession[s.id];
