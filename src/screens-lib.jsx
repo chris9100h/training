@@ -2994,27 +2994,32 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
 
           <Frame style={{ padding: '0 16px' }}>
             {(entry.sets || []).map((s, i) => {
-              const done = s.done || s.skipped;
+              const handled = s.done || s.skipped;
               const unilateral = s.repsL != null || s.repsR != null;
               return (
                 <React.Fragment key={i}>
                 <div style={{
                   display: 'grid', gridTemplateColumns: '20px 1fr 1fr 20px',
                   alignItems: 'center', gap: 10, padding: '13px 0',
-                  opacity: done ? 1 : 0.35,
+                  opacity: handled ? 1 : 0.35,
                   transition: 'opacity 0.3s',
                 }}>
-                  <span className="num" style={{ fontSize: 11, color: s.warmup ? UI.inkFaint : done ? UI.gold : UI.inkFaint }}>
+                  <span className="num" style={{ fontSize: 11, color: s.warmup ? UI.inkFaint : s.done ? UI.gold : handled ? UI.danger : UI.inkFaint }}>
                     {s.warmup ? 'W' : i + 1}
                   </span>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                    <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>
-                      {s.kg != null ? s.kg : '—'}
-                    </span>
-                    {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em' }}>{unit}</span>}
+                    {s.skipped
+                      ? <span className="num" style={{ fontSize: 14, color: UI.inkFaint }}>skipped</span>
+                      : <>
+                          <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>
+                            {s.kg != null ? s.kg : '—'}
+                          </span>
+                          {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em' }}>{unit}</span>}
+                        </>
+                    }
                   </div>
                   <div style={{ textAlign: 'center' }}>
-                    {unilateral ? (
+                    {!s.skipped && (unilateral ? (
                       <span className="num" style={{ fontSize: 14, color: UI.ink }}>
                         {s.repsL ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 11 }}> / </span>{s.repsR ?? '—'}
                       </span>
@@ -3025,13 +3030,15 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                         </span>
                         {s.reps != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em' }}>reps</span>}
                       </div>
-                    )}
+                    ))}
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    {done ? (
+                    {s.done ? (
                       <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8">
                         <path d="M2 6l2.5 2.5L10 3"/>
                       </svg>
+                    ) : s.skipped ? (
+                      <span style={{ fontSize: 13, color: UI.danger, lineHeight: 1 }}>×</span>
                     ) : (
                       <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />
                     )}
