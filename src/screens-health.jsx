@@ -1624,10 +1624,10 @@ function HealthScreen({ store, setStore, go, userId }) {
           cursor: 'pointer',
           WebkitTapHighlightColor: 'transparent',
         }}>
-          <i className={`fa-solid ${store.statusMode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach'}`} style={{ fontSize: 14, color: 'var(--accent)' }} />
+          <i className={`fa-solid ${store.statusMode === 'sick' ? 'fa-bed-pulse' : store.statusMode === 'deload' ? 'fa-battery-quarter' : 'fa-umbrella-beach'}`} style={{ fontSize: 14, color: 'var(--accent)' }} />
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
-              {store.statusMode === 'sick' ? 'Sick' : 'Vacation'}
+              {store.statusMode === 'sick' ? 'Sick' : store.statusMode === 'deload' ? 'Deload' : 'Vacation'}
               {store.statusModeSince ? ` · Since ${new Date(store.statusModeSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}
             </div>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Tap to manage or deactivate</div>
