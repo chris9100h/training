@@ -1697,8 +1697,18 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <Row label="Week view in cycle mode" first>
             <Toggle on={cycleWeekView} onToggle={() => { const n = !cycleWeekView; setCycleWeekView(n); localStorage.setItem('logbook-cycle-week-view', String(n)); setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: n } })); }} />
           </Row>
-          <Row label="OLED black background">
-            <Toggle on={darkMode === 'black'} onToggle={() => { const n = darkMode === 'black' ? 'dark' : 'black'; setDarkMode(n); localStorage.setItem('logbook-dark-mode', n); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: n } })); }} />
+          <Row label="Theme">
+            <div style={{ display: 'flex', gap: 4 }}>
+              {[['dark', 'Dark'], ['black', 'OLED'], ['light', 'Light']].map(([key, label]) => (
+                <button key={key} onClick={() => { setDarkMode(key); localStorage.setItem('logbook-dark-mode', key); window.applyDarkMode(key); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: key } })); }} style={{
+                  padding: '6px 11px', borderRadius: 4, cursor: 'pointer',
+                  background: darkMode === key ? UI.goldFaint : UI.bgInset,
+                  border: `1px solid ${darkMode === key ? UI.goldSoft : UI.hairStrong}`,
+                  color: darkMode === key ? UI.gold : UI.inkSoft,
+                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                }}>{label}</button>
+              ))}
+            </div>
           </Row>
           <Row label="Unit preference">
             <button style={accentBtn} onClick={() => setUnitPickerOpen(true)}>

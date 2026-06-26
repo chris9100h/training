@@ -48,6 +48,7 @@
 ## Theme & Styling
 
 - CSS Custom Properties in `:root` (kein CSS-Framework).
+- **Themes:** `window.DARK_MODES` + `window.applyDarkMode(key)` in `index.html` schalten die Theme-Variablen um. Drei Werte für `settings.darkMode`: `'dark'` (default), `'black'` (OLED) und `'light'` (creme). `applyDarkMode` setzt `--bg*`, `--ink*`, `--hair*` und `--knurl-rgb`; `light` dreht Ink dunkel und `--knurl-rgb` auf einen dunklen Wert, damit Knurl/Guilloche auf hellem Grund sichtbar bleiben. `app.jsx` ruft `applyDarkMode` bei jeder `settings.darkMode`-Änderung auf; Picker im Appearance-Sheet (Settings). Dekorative Texturen nutzen `rgba(var(--knurl-rgb), x)` statt hartcodierter heller Werte.
 - Akzentfarbe läuft über `--accent`, `--accent-light`, `--accent-deep`, `--accent-rgb`. Keine hardcodierten `rgba(r,g,b,x)`-Werte für die Akzentfarbe — immer `rgba(var(--accent-rgb), x)`.
 - Farb-Tokens im Code immer über `UI.xxx` referenzieren (z.B. `UI.gold`, `UI.ink`, `UI.hairStrong`).
 - **Border-Radius-Skala** — strikte Hierarchie, nie größere Werte verwenden:
