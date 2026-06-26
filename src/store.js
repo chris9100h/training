@@ -1358,6 +1358,10 @@ function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweight
   return Array.from({ length: it.sets }).map((_, i) => {
     const prev = workingSets[i];
     const targetReps = repsPerSet ? (repsPerSet[i] ?? repsPerSet[repsPerSet.length - 1]) : null;
+    // For bodyweight exercises bodyweightKg is today's logged weight and always wins over
+    // the stale prev.kg (which reflects a different day's bodyweight). For non-bodyweight
+    // exercises bodyweightKg is null and prev.kg is used as before.
+    const seedKg = bodyweightKg ?? prev?.kg ?? null;
     if (suggestion) {
       return isUni
         ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false }
@@ -1365,8 +1369,8 @@ function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweight
     }
     if (smartProgression && prev) {
       return isUni
-        ? { kg: prev.kg ?? bodyweightKg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
-        : { kg: prev.kg ?? bodyweightKg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
+        ? { kg: seedKg, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
+        : { kg: seedKg, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
     }
     if (!prev && targetReps != null) {
       return isUni
@@ -1374,8 +1378,8 @@ function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweight
         : { kg: bodyweightKg ?? null, reps: targetReps, done: false };
     }
     return isUni
-      ? { kg: prev?.kg ?? bodyweightKg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
-      : { kg: prev?.kg ?? bodyweightKg ?? null, reps: prev?.reps ?? null, done: false };
+      ? { kg: seedKg, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
+      : { kg: seedKg, reps: prev?.reps ?? null, done: false };
   });
 }
 
