@@ -944,28 +944,38 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   };
 
   const handleCreateTicket = async () => {
-    if (!supportDraft.trim() || supportSending) return;
+    if ((!supportDraft.trim() && !supportImageFile) || supportSending) return;
     setSupportSending(true);
     const body = supportDraft.trim();
+    const imgFile = supportImageFile;
+    setSupportDraft('');
+    setSupportImageFile(null);
+    setSupportImagePreview(null);
     try {
       const { data: coachingId, error: ticketErr } = await LB.supabase.rpc('open_support_chat', { p_category: supportCategoryDraft });
       if (ticketErr || !coachingId) return;
+      let attachments = null;
+      if (imgFile) {
+        const url = await uploadChatImage(imgFile);
+        attachments = [{ url, name: imgFile.name, type: imgFile.type }];
+      }
       const { data: note, error: noteErr } = await LB.supabase.from('zane_coaching_notes').insert({
-        id: LB.uid(), coaching_id: coachingId, author_id: userId, type: 'general', body,
-      }).select('id, author_id, body, created_at').single();
+        id: LB.uid(), coaching_id: coachingId, author_id: userId, type: 'general',
+        body: body || '', ...(attachments ? { attachments } : {}),
+      }).select('id, author_id, body, created_at, read_at, attachments').single();
       if (!noteErr && note) {
+        const preview = attachments ? (body || '📷 Image') : body;
         const newTicket = {
           coachingId, status: 'open', category: supportCategoryDraft,
           createdAt: new Date().toISOString(), lastMessageAt: note.created_at,
-          lastMessageBody: body, unreadCount: 0,
+          lastMessageBody: preview, unreadCount: 0,
         };
         setStore(s => ({ ...s, supportTickets: [newTicket, ...(s.supportTickets || [])] }));
-        setSupportDraft('');
         setSupportCategoryDraft('question');
         setSupportActiveTicketId(coachingId);
         setSupportActiveNotes([note]);
         setSupportView('thread');
-        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId, preview: body });
+        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId, preview });
       }
     } finally { setSupportSending(false); }
   };
@@ -2074,9 +2084,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 </div>
                 {/* sticky compose at bottom */}
                 <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
-                  <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
-                    placeholder="Describe your request…" rows={4} style={iStyle} />
-                  <Btn onClick={handleCreateTicket} disabled={!supportDraft.trim() || supportSending}>
+                  {supportImagePreview && (
+                    <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
+                      <img src={supportImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
+                      <button onClick={() => { setSupportImageFile(null); setSupportImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11 }}>×</button>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                    <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
+                      placeholder="Describe your request…" rows={4} style={{ ...iStyle, flex: 1 }} />
+                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImagePick} />
+                      <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
+                    </label>
+                  </div>
+                  <Btn onClick={handleCreateTicket} disabled={(!supportDraft.trim() && !supportImageFile) || supportSending}>
                     {supportSending ? 'Creating…' : 'Create ticket'}
                   </Btn>
                 </div>
