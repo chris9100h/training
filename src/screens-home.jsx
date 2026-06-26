@@ -1056,6 +1056,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const [confirmEl, confirm] = useConfirm();
   const trainBg = store.settings?.vipBackground || 'icons/zane-logo.png';
   const isCustomBg = trainBg !== 'icons/zane-logo.png';
+  const isLightMode = (store.settings?.darkMode ?? 'dark') === 'light';
+  const defaultLogoStyle = { width: '85%', maxWidth: 320, opacity: isLightMode ? 0.14 : 0.04, filter: isLightMode ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const today = LB.todaysDay(store);
   const sch = today?.schedule;
   const day = today?.day;
@@ -2091,7 +2093,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
           <img src={trainBg} style={isCustomBg
             ? { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' }
-            : { width: '85%', maxWidth: 320, opacity: 0.04, filter: 'grayscale(1) brightness(3)', objectFit: 'contain' }} />
+            : defaultLogoStyle} />
         </div>
         <TopBar
           title={<span>HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span></span>}
@@ -2161,7 +2163,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
         <img src={trainBg} style={isCustomBg
           ? { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' }
-          : { width: '85%', maxWidth: 320, opacity: 0.04, filter: 'grayscale(1) brightness(3)', objectFit: 'contain' }} />
+          : defaultLogoStyle} />
       </div>
 
       {/* Header */}
