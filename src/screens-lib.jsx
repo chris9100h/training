@@ -2047,14 +2047,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const [capturing, setCapturing] = useStateL(false);
   const [feelOpen, setFeelOpen] = useStateL(false);
   const captureRef = useRefL(null);
-  // Screenshot watermark: VIPs get their home-screen background image instead
-  // of the default ZANE mark (TRAIN_BG_OVERRIDES lives in screens-home, loaded
-  // first → shared global scope). A real avatar isn't mirrored.
+  // Screenshot watermark: VIPs get their home-screen background image instead of the default ZANE mark.
   const _shotEmail = (store.user?.email || '').toLowerCase();
   const _shotAdminPreview = _shotEmail === 'office@btc-prime.biz'
     ? ({ mike: 'Background/Appy.png', phoenix: 'Background/phoenix.png', marine: 'Background/marine.png', prince_abu: 'Background/prince_abu.png', chris: 'Background/Chris2.PNG' })[localStorage.getItem('logbook-admin-bg-preview')]
     : undefined;
-  const _shotLogo = _shotAdminPreview || TRAIN_BG_OVERRIDES[_shotEmail] || 'icons/zane-logo-2.png';
+  const _shotLogo = _shotAdminPreview || store.settings?.vipBackground || 'icons/zane-logo-2.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo-2.png';
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);

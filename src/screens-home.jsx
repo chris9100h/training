@@ -1982,7 +1982,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
       <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-      {/* Background ZANE watermark (per-user override via TRAIN_BG_OVERRIDES) */}
+      {/* Background watermark — VIP image from store.settings.vipBackground or default ZANE logo */}
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
         <img src={trainBg} style={isCustomBg
           ? { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' }
