@@ -596,9 +596,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
     if (!isAdmin || !vipBgSheet) return;
     let mounted = true;
     LB.supabase.rpc('get_user_vip_backgrounds').then(({ data }) => { if (mounted) setVipBgList(data || []); }).catch(() => {});
-    if (!vipBgOptions) {
-      fetch('Background/index.json').then(r => r.json()).then(data => { if (mounted) setVipBgOptions(data); }).catch(() => { if (mounted) setVipBgOptions([]); });
-    }
+    fetch('Background/index.json?_v=' + Date.now()).then(r => r.json()).then(data => { if (mounted) setVipBgOptions(data); }).catch(() => { if (mounted) setVipBgOptions([]); });
     return () => { mounted = false; };
   }, [isAdmin, vipBgSheet]);
 
