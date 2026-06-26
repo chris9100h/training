@@ -456,6 +456,12 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   );
   const [bgPreviewSheet, setBgPreviewSheet] = useStateSet(false);
   const [adminSheet, setAdminSheet] = useStateSet(false);
+  const [vipBgSheet, setVipBgSheet] = useStateSet(false);
+  const [vipBgList, setVipBgList] = useStateSet([]);
+  const [vipBgEmail, setVipBgEmail] = useStateSet('');
+  const [vipBgKey, setVipBgKey] = useStateSet('');
+  const [vipBgSaving, setVipBgSaving] = useStateSet(false);
+  const [vipBgMsg, setVipBgMsg] = useStateSet(null);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
 
   useEffectSet(() => {
@@ -583,6 +589,13 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
     LB.supabase.rpc('get_support_chats').then(({ data }) => { if (mounted) setSupportInbox(data || []); }).catch(() => {});
     return () => { mounted = false; };
   }, [isAdmin, accountSheet, adminSheet]);
+
+  useEffectSet(() => {
+    if (!isAdmin || !vipBgSheet) return;
+    let mounted = true;
+    LB.supabase.rpc('get_user_vip_backgrounds').then(({ data }) => { if (mounted) setVipBgList(data || []); }).catch(() => {});
+    return () => { mounted = false; };
+  }, [isAdmin, vipBgSheet]);
 
   useEffectSet(() => {
     if (!supportInboxSheet || !isAdmin) return;
@@ -893,6 +906,22 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
         LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportTicket.coachingId, preview: body });
       }
     } finally { setSupportAdminSending(false); }
+  };
+
+  const saveVipBg = async () => {
+    const email = vipBgEmail.trim().toLowerCase();
+    if (!email || vipBgSaving) return;
+    setVipBgSaving(true);
+    setVipBgMsg(null);
+    try {
+      const { data, error } = await LB.supabase.rpc('set_user_vip_background', { p_email: email, p_bg_key: vipBgKey });
+      if (error) { setVipBgMsg({ ok: false, text: error.message }); return; }
+      if (data === 'ERROR:not_found') { setVipBgMsg({ ok: false, text: `No account found for ${email}` }); return; }
+      setVipBgMsg({ ok: true, text: vipBgKey ? `Background set for ${email}` : `Background cleared for ${email}` });
+      setVipBgEmail('');
+      setVipBgKey('');
+      LB.supabase.rpc('get_user_vip_backgrounds').then(({ data: list }) => { setVipBgList(list || []); }).catch(() => {});
+    } finally { setVipBgSaving(false); }
   };
 
   const handleSetSupportStatus = async (coachingId, newStatus) => {
@@ -1802,6 +1831,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
                   Open registration for a batch — auto-approved until used up, then turns back on.
                 </div>
                 <NavRow label="Recent sign-ups" hint={unseenCount > 0 ? `${unseenCount} new` : `${recentSignups.length}`} onTap={() => setSignupsSheet(true)} />
+                <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
                 <NavRow label="Background preview" hint={{ standard: 'Standard', mike: 'Mike', phoenix: 'Phoenix', marine: 'Marine', prince_abu: 'Prince Abu' }[adminBgPreview] || 'Change'} onTap={() => setBgPreviewSheet(true)} />
               </Frame>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
@@ -1812,6 +1842,73 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
                   )}
                 </Btn>
               </div>
+            </div>
+          );
+        })()}
+      </SettingsSheet>
+
+      {/* ══ VIP backgrounds sheet (admin) ══ */}
+      <SettingsSheet open={vipBgSheet} onClose={() => setVipBgSheet(false)} title="VIP Backgrounds">
+        {(() => {
+          const VIP_OPTIONS = [
+            { key: 'Background/Appy.png',       label: 'Appy' },
+            { key: 'Background/phoenix.png',     label: 'Phoenix' },
+            { key: 'Background/marine.png',      label: 'Marine' },
+            { key: 'Background/prince_abu.png',  label: 'Prince Abu' },
+            { key: 'Background/Chris1.PNG',      label: 'Chris 1' },
+            { key: 'Background/Chris2.PNG',      label: 'Chris 2' },
+          ];
+          const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="micro" style={{ color: UI.inkFaint }}>EMAIL</div>
+                <input
+                  type="email"
+                  value={vipBgEmail}
+                  onChange={e => setVipBgEmail(e.target.value)}
+                  placeholder="user@example.com"
+                  style={iStyle}
+                />
+                <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>BACKGROUND</div>
+                <select
+                  value={vipBgKey}
+                  onChange={e => setVipBgKey(e.target.value)}
+                  style={{ ...iStyle, appearance: 'none', WebkitAppearance: 'none', cursor: 'pointer' }}
+                >
+                  <option value="">— None (clear) —</option>
+                  {VIP_OPTIONS.map(o => (
+                    <option key={o.key} value={o.key}>{o.label}</option>
+                  ))}
+                </select>
+                {vipBgMsg && (
+                  <div style={{ fontSize: 12, color: vipBgMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: vipBgMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
+                    {vipBgMsg.text}
+                  </div>
+                )}
+                <Btn onClick={saveVipBg} disabled={!vipBgEmail.trim() || vipBgSaving}>
+                  {vipBgSaving ? 'Saving…' : vipBgKey ? 'Assign background' : 'Clear background'}
+                </Btn>
+              </div>
+              {vipBgList.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>CURRENT ASSIGNMENTS</div>
+                  {vipBgList.map((row, i) => {
+                    const opt = VIP_OPTIONS.find(o => o.key === row.bg_key);
+                    return (
+                      <div key={row.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.email}</div>
+                          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 1 }}>{opt?.label || row.bg_key}</div>
+                        </div>
+                        <button onClick={() => { setVipBgEmail(row.email); setVipBgKey(''); setVipBgMsg(null); }} style={{ background: 'none', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
+                          Clear
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })()}

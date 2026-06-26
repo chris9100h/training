@@ -666,6 +666,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         showHealthTab: sett.show_health_tab ?? false,
         onboardingCompleted: sett.onboarding_completed ?? false,
         glucoseUnit: sett.glucose_unit ?? 'mmol',
+        vipBackground: sett.vip_background ?? null,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {

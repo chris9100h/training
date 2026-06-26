@@ -1052,22 +1052,13 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
 const getCycleStartForNum = LB.getCycleStartForNum;
 
 // ─── HOME ─────────────────────────────────────────────────────────────
-// Per-user override for the faint background figure on the main screen.
-// Keyed by lowercase email → image path (must also be listed in sw.js ASSETS).
-const TRAIN_BG_OVERRIDES = {
-  'mikeapicelli777@gmail.com': 'Background/Appy.png',
-  'mb2489@protonmail.com':     'Background/phoenix.png',
-  'aboagyeboadi@yahoo.com':    'Background/prince_abu.png',
-  'joshseymour23@yahoo.com':   'Background/marine.png',
-};
-
 function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRetrySync }) {
   const [confirmEl, confirm] = useConfirm();
   const _userEmail = (store.user?.email || '').toLowerCase();
   const _adminPreviewBg = _userEmail === 'office@btc-prime.biz'
     ? ({ mike: 'Background/Appy.png', phoenix: 'Background/phoenix.png', marine: 'Background/marine.png', prince_abu: 'Background/prince_abu.png', chris: 'Background/Chris1.PNG' })[localStorage.getItem('logbook-admin-bg-preview')]
     : undefined;
-  const trainBg = _adminPreviewBg || TRAIN_BG_OVERRIDES[_userEmail] || 'icons/zane-logo.png';
+  const trainBg = _adminPreviewBg || store.settings?.vipBackground || 'icons/zane-logo.png';
   const isCustomBg = trainBg !== 'icons/zane-logo.png';
   const today = LB.todaysDay(store);
   const sch = today?.schedule;
