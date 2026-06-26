@@ -1299,6 +1299,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const isFutureSlot = sessionDate > (() => { const d = new Date(); d.setHours(12,0,0,0); return d; })();
 
   const periodLabel = useMemo(() => {
+    if (store.statusMode === 'deload' && weekOffset === 0) return 'DELOAD';
     if (isFlex) return 'FLEXIBLE';
     if (weekdayMode) {
       if (store.weekPlanStartDate) {
@@ -1331,7 +1332,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     }
     const cycleNum = currentCycleNum + weekOffset + 1;
     return `CYCLE ${cycleNum}`;
-  }, [isFlex, weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch]);
+  }, [isFlex, weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch, store.statusMode]);
 
   const cardLabel = useMemo(() => {
     // During a deload, today's label reads DELOAD instead of TODAY/NEXT UP so
