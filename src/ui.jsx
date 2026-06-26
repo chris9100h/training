@@ -682,13 +682,13 @@ const ICON_CALENDAR = (
 // ─── useConfirm ─────────────────────────────────────────────────────
 function useConfirm() {
   const [state, setState] = React.useState(null);
-  const confirm = (message, { title = 'Confirm?', ok = 'OK', cancel = 'Cancel', danger = false } = {}) =>
-    new Promise(resolve => setState({ message, title, ok, cancel, danger, resolve }));
+  const confirm = (message, { title = 'Confirm?', ok = 'OK', cancel = 'Cancel', danger = false, preventBackdropClose = false } = {}) =>
+    new Promise(resolve => setState({ message, title, ok, cancel, danger, preventBackdropClose, resolve }));
   const close = (result) => { state?.resolve(result); setState(null); };
   // Portal into document.body so the confirm sheet always sits above any other
   // Sheet (both zIndex: 100) regardless of where confirmEl is placed in the tree.
   const el = state && ReactDOM.createPortal(
-    <Sheet open={true} onClose={() => close(false)}>
+    <Sheet open={true} onClose={state.preventBackdropClose ? null : () => close(false)}>
       <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, marginBottom: 10, textAlign: 'center' }}>{state.title}</div>
       <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 22, lineHeight: 1.5, textAlign: 'center' }}>{state.message}</div>
       <div style={{ display: 'flex', gap: 8 }}>

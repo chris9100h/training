@@ -1631,7 +1631,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (!shouldPrompt) return;
     deloadNudgeShown.current = true;
     (async () => {
-      const yes = await confirm(body, { title, ok: 'Start deload', cancel: 'Not now' });
+      const yes = await confirm(body, { title, ok: 'Start deload', cancel: 'Not now', preventBackdropClose: true });
       const stamp = new Date().toISOString();
       setStore(s => ({ ...s, deloadPromptDismissedAt: stamp }));
       if (yes) {
