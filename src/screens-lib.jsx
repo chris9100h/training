@@ -2729,7 +2729,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
           const maxLen    = Math.max(sets.length, lastSets.length);
           const fmtSet = s => {
             if (!s) return '—';
-            if (s.skipped) return 'skipped';
+            if (s.skipped && !s.done) return 'skipped';
             const repsStr = (s.repsL != null || s.repsR != null)
               ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
               : (s.reps ?? '—');
@@ -2765,7 +2765,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
                     borderBottom: si < maxLen - 1 ? `0.5px solid ${UI.hair}` : 'none',
                   }}>
                     <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
-                    <span className="num" style={{ fontSize: 14, color: curr && !curr.skipped ? UI.ink : UI.inkFaint }}>
+                    <span className="num" style={{ fontSize: 14, color: curr && (!curr.skipped || curr.done) ? UI.ink : UI.inkFaint }}>
                       {fmtSet(curr)}
                     </span>
                     <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right' }}>
