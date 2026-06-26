@@ -31,6 +31,7 @@ const ASSETS = [
   BASE + '/Background/Chris1.PNG',
   BASE + '/Background/Chris2.PNG',
   BASE + '/Background/akxyl.png',
+  BASE + '/Background/IMG_6817.png',
   BASE + '/Background/index.json',
 ];
 
