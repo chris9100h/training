@@ -2752,8 +2752,9 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
                 const prevDone = prev && !prev.skipped;
                 const improved = isImprovement(curr, prev);
                 const anyImprovementBefore = sets.slice(0, si).some((c, j) => isImprovement(c, lastSets[j]));
-                const declined = !anyImprovementBefore && (isDecline(curr, prev) || ((!curr || curr.skipped) && prevDone));
-                const icon   = !curr ? '−' : !prev ? '+' : curr.skipped && prevDone ? '↓' : curr && !curr.skipped && prev?.skipped ? '↑' : improved ? '↑' : declined ? '↓' : '—';
+                const currSkipped = curr?.skipped && !curr?.done;
+                const declined = !anyImprovementBefore && (isDecline(curr, prev) || ((!curr || currSkipped) && prevDone));
+                const icon   = !curr ? '−' : !prev ? '+' : currSkipped && prevDone ? '↓' : curr && !currSkipped && prev?.skipped && !prev?.done ? '↑' : improved ? '↑' : declined ? '↓' : '—';
                 const iconColor = (improved || (!prev && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
                                 : declined ? UI.danger
                                 : UI.inkFaint;
@@ -3059,9 +3060,10 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                     const prevDone = !s.skipped;
                     const improved = isImprovement(curr, s);
                     const anyImprovementBefore = currWorkingSets.slice(0, i).some((c, j) => isImprovement(c, lastSets[j]));
-                    const declined = !anyImprovementBefore && (isDecline(curr, s) || (curr?.skipped && prevDone));
+                    const currSkipped = curr?.skipped && !curr?.done;
+                    const declined = !anyImprovementBefore && (isDecline(curr, s) || (currSkipped && prevDone));
                     const showIcon = (curr?.done || curr?.skipped) && !!s;
-                    const icon     = curr?.skipped && prevDone ? '↓' : improved ? '↑' : declined ? '↓' : '—';
+                    const icon     = currSkipped && prevDone ? '↓' : improved ? '↑' : declined ? '↓' : '—';
                     const iconColor = improved ? 'var(--accent)' : declined ? UI.danger : UI.inkFaint;
                     return (
                       <React.Fragment key={i}>
