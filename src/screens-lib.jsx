@@ -460,11 +460,13 @@ function SvgKnurl({ style }) {
     const w = Math.round(ref.current.getBoundingClientRect().width);
     if (w > 0) ref.current.setAttribute('width', w);
   }, []);
+  // Read the CSS variable at render time so the color matches the active theme.
+  const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
   return (
     <svg ref={ref} width="100%" height="3" style={{ display: 'block', overflow: 'hidden', ...style }}>
       {Array.from({ length: 100 }, (_, i) => {
         const x = (i - 1) * 5.2;
-        return <line key={i} x1={x} y1="3" x2={x + 1.73} y2="0" stroke="rgba(236,228,208,0.20)" strokeWidth="1.5" />;
+        return <line key={i} x1={x} y1="3" x2={x + 1.73} y2="0" stroke={`rgba(${knurlRgb},0.20)`} strokeWidth="1.5" />;
       })}
     </svg>
   );
@@ -2223,7 +2225,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       if (w < pw) c.style.width = w + 'px';
       c.width = w; c.height = 3;
       const ctx = c.getContext('2d');
-      ctx.strokeStyle = 'rgba(236,228,208,0.20)';
+      const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
+      ctx.strokeStyle = `rgba(${knurlRgb},0.20)`;
       ctx.lineWidth = 1.5;
       for (let x = -2; x < w + 6; x += 5.2) {
         ctx.beginPath(); ctx.moveTo(x, 3); ctx.lineTo(x + 1.73, 0); ctx.stroke();

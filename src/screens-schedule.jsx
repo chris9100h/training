@@ -145,8 +145,7 @@ function PlanScreen({ store, setStore, go, userId }) {
                   <Pill key={d.id} gold={!!d.items.length}>{d.name}</Pill>
                 ))}
               </div>
-              {!LB.isWeekdayPlan(s) && (
-                <button onClick={toggleDeload} style={{
+              <button onClick={toggleDeload} style={{
                   width: '100%', marginTop: 12, padding: '10px 12px', borderRadius: 6, cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                   background: isDeload ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
@@ -159,7 +158,6 @@ function PlanScreen({ store, setStore, go, userId }) {
                     ? (deloadRemaining != null ? `Deload active · ${deloadRemaining}d left · End` : 'Deload active · End')
                     : 'Start deload week'}
                 </button>
-              )}
             </BracketFrame>
           ) : (
             <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px' }}>

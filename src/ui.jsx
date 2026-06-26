@@ -685,7 +685,9 @@ function useConfirm() {
   const confirm = (message, { title = 'Confirm?', ok = 'OK', cancel = 'Cancel', danger = false } = {}) =>
     new Promise(resolve => setState({ message, title, ok, cancel, danger, resolve }));
   const close = (result) => { state?.resolve(result); setState(null); };
-  const el = state && (
+  // Portal into document.body so the confirm sheet always sits above any other
+  // Sheet (both zIndex: 100) regardless of where confirmEl is placed in the tree.
+  const el = state && ReactDOM.createPortal(
     <Sheet open={true} onClose={() => close(false)}>
       <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, marginBottom: 10, textAlign: 'center' }}>{state.title}</div>
       <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 22, lineHeight: 1.5, textAlign: 'center' }}>{state.message}</div>
@@ -696,7 +698,8 @@ function useConfirm() {
           ...(state.danger ? { background: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.6)', boxShadow: '0 6px 20px rgba(var(--danger-rgb),0.25)' } : {}),
         }}>{state.ok}</Btn>
       </div>
-    </Sheet>
+    </Sheet>,
+    document.body
   );
   return [el, confirm];
 }

@@ -2340,7 +2340,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             {selectedDayStatusMode && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                 <span className="micro" style={{ color: UI.inkFaint }}>
-                  {selectedDayStatusMode === 'sick' ? 'Sick mode active' : 'Vacation mode active'}
+                  {selectedDayStatusMode === 'sick' ? 'Sick mode active' : selectedDayStatusMode === 'deload' ? 'Deload mode active' : 'Vacation mode active'}
                 </span>
                 {isViewingToday && (
                   <button onClick={handleClearStatus} style={{

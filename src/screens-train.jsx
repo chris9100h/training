@@ -451,7 +451,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Reps: implausibly low/high vs pre-filled reference.
     // Weight: increment-based (calibrated per equipment config).
     // When both are off we show a combined message.
-    if (!bypassOutlierCheck && !entry.sets[setIdx]?.warmup) {
+    // Skipped during deload — loads are intentionally reduced, comparisons
+    // against the pre-deload reference would always fire as "too low".
+    const _isDeloadSet = store.statusMode === 'deload' || session.isDeload;
+    if (!bypassOutlierCheck && !entry.sets[setIdx]?.warmup && !_isDeloadSet) {
       const wIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
       const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
       const prevSet = wIdx >= 0 ? prevWorkingSets[wIdx] : undefined;

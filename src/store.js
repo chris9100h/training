@@ -1427,9 +1427,13 @@ function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweight
     // exercises bodyweightKg is null and prev.kg is used as before.
     const seedKg = bodyweightKg ?? prev?.kg ?? null;
     if (suggestion) {
+      // During a deload, halve the ACTUAL last-session weight (prev.kg), not the
+      // progression-suggested next weight. Without this, a 100 kg lift with a
+      // +5 kg suggestion would seed 52.5 kg instead of the correct 50 kg.
+      const baseKg = deload && prev?.kg != null ? prev.kg : suggestion.kg;
       return isUni
-        ? { kg: dl(suggestion.kg), repsL: suggestion.reps, repsR: suggestion.reps, done: false }
-        : { kg: dl(suggestion.kg), reps: suggestion.reps, done: false };
+        ? { kg: dl(baseKg), repsL: suggestion.reps, repsR: suggestion.reps, done: false }
+        : { kg: dl(baseKg), reps: suggestion.reps, done: false };
     }
     if (smartProgression && prev) {
       return isUni
