@@ -1272,10 +1272,22 @@ function dayTypeChip(dashed) {
 function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSelect = true }) {
   const [selectedPlan, setSelectedPlan] = useStateS(null);
   const [selectedIds, setSelectedIds] = useStateS(new Set());
+  const [tab, setTab] = useStateS('plans');
 
   const plans = store.schedules.filter(s =>
     s.days.some(d => d.items.length > 0 && (s.id !== schedule?.id || d.id !== currentDayId))
   );
+
+  // Templates whose exercises still exist — mapped to a copyable plan day.
+  const templates = (store.workoutTemplates || []).filter(t => (t.exercises || []).some(it => LB.findExercise(store, it.exId)));
+  const importTemplate = (t) => {
+    const items = (t.exercises || [])
+      .filter(it => LB.findExercise(store, it.exId))
+      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) }));
+    const day = { id: LB.uid(), name: t.name, items };
+    if (multiSelect) onCopy([{ day, migrateId: undefined }]);
+    else onCopy(day, undefined);
+  };
 
   const lastTrainedDate = (s) => {
     const dates = store.sessions
@@ -1303,7 +1315,41 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
   if (!selectedPlan) {
     return (
       <Sheet open={true} onClose={onClose} title="Import exercises from">
-        {plans.length === 0 ? (
+        {templates.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            {[['plans', 'Plans'], ['templates', 'Templates']].map(([key, label]) => (
+              <button key={key} onClick={() => setTab(key)} style={{
+                flex: 1, padding: '8px 0', borderRadius: 6, cursor: 'pointer',
+                background: tab === key ? UI.goldFaint : UI.bgInset,
+                border: `1px solid ${tab === key ? UI.goldSoft : UI.hairStrong}`,
+                color: tab === key ? UI.gold : UI.inkSoft,
+                fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+              }}>{label}</button>
+            ))}
+          </div>
+        )}
+        {tab === 'templates' ? (
+          templates.length === 0 ? (
+            <div style={{ padding: '24px 0', textAlign: 'center', color: UI.inkFaint, fontSize: 13 }}>No templates yet.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+              {templates.map(t => (
+                <button key={t.id} onClick={() => importTemplate(t)} style={{
+                  background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+                  borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+                  textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
+                }}
+                onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
+                onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.hairStrong}>
+                  <div className="display" style={{ fontSize: 16 }}>{t.name}</div>
+                  <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 4, lineHeight: 1.5 }}>
+                    {(t.exercises || []).map(it => LB.findExercise(store, it.exId)?.name || '—').join(' · ')}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )
+        ) : plans.length === 0 ? (
           <div style={{ padding: '24px 0', textAlign: 'center', color: UI.inkFaint, fontSize: 13 }}>
             No plans with exercises yet.
           </div>

@@ -1119,6 +1119,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const [backlogPickerOpen, setBacklogPickerOpen] = useState(false);
   const [workoutSubOpen, setWorkoutSubOpen] = useState(false);
   const [bonusDayPickerOpen, setBonusDayPickerOpen] = useState(false);
+  const [freestyleSubOpen, setFreestyleSubOpen] = useState(false);
   const [checkinPickerOpen, setCheckinPickerOpen] = useState(false);
   const [pullDelta, setPullDelta] = useState(0);
   const [coachingSchema, setCoachingSchema] = useState(null);
@@ -1826,6 +1827,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   const startFreestyleSession = () => {
     setWorkoutSubOpen(false);
+    setFreestyleSubOpen(false);
     setQuickActionsOpen(false);
     const session = {
       id: LB.uid(), scheduleId: null, dayId: null, dayName: 'Freestyle',
@@ -1833,6 +1835,36 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       ended: null, entries: [], currentExIdx: 0, cyclePos: null, isFreestyle: true, isBonus: true,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    go({ name: 'train', sessionId: session.id });
+  };
+
+  const startFreestyleFromTemplate = async (template) => {
+    if (loggingRef.current) return;
+    loggingRef.current = true;
+    setWorkoutSubOpen(false);
+    setFreestyleSubOpen(false);
+    setQuickActionsOpen(false);
+    const items = (template.exercises || []).filter(it => LB.findExercise(store, it.exId));
+    const seedRefs = await LB.fetchSeedEntries(store, items, null, userId);
+    const entries = items.map(it => {
+      const ex = LB.findExercise(store, it.exId);
+      if (ex?.movement_type === 'cardio') {
+        return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
+      }
+      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null);
+      const isUni = ex?.unilateral || false;
+      const suggestion = LB.progressionSuggestion(store, it.exId, null, it.reps, it.repsPerSet, seedRefs[it.exId]);
+      const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+      const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
+      return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+    });
+    const session = {
+      id: LB.uid(), scheduleId: null, dayId: null, dayName: 'Freestyle',
+      date: new Date().toISOString(), startedAt: new Date().toISOString(),
+      ended: null, entries, currentExIdx: 0, cyclePos: null, isFreestyle: true, isBonus: true,
+    };
+    setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    loggingRef.current = false;
     go({ name: 'train', sessionId: session.id });
   };
 
@@ -2705,17 +2737,64 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
             </button>
           )}
-          <button onClick={startFreestyleSession} style={{
+          <button onClick={() => { setWorkoutSubOpen(false); setFreestyleSubOpen(true); }} style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 12,
             padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
             borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ flex: 1, textAlign: 'left' }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>Freestyle</div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Open session — add exercises on the fly</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Open session — empty or from a template</div>
             </div>
             <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
           </button>
+        </div>
+      </Sheet>
+
+      {/* Freestyle sub-picker: Empty | From template */}
+      <Sheet open={freestyleSubOpen} onClose={() => setFreestyleSubOpen(false)} title="Freestyle">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button onClick={startFreestyleSession} style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+            padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+            borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>Empty session</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Start blank — add exercises on the fly</div>
+            </div>
+            <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+          </button>
+          {(store.workoutTemplates || []).length > 0 && (
+            <>
+              <div className="label" style={{ marginTop: 8, marginBottom: 2, color: UI.inkFaint }}>From template</div>
+              {(store.workoutTemplates || []).map(t => (
+                <div key={t.id} style={{
+                  display: 'flex', alignItems: 'stretch', gap: 0,
+                  background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, overflow: 'hidden',
+                }}>
+                  <button onClick={() => startFreestyleFromTemplate(t)} style={{
+                    flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                    padding: '12px 14px', background: 'transparent', border: 'none',
+                    cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                  }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+                    <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>{(t.exercises || []).length} ex</span>
+                  </button>
+                  <button onClick={async () => {
+                    if (!await confirm(`Delete template "${t.name}"?`, { title: 'Delete template', ok: 'Delete', danger: true })) return;
+                    setStore(s => ({ ...s, workoutTemplates: (s.workoutTemplates || []).filter(x => x.id !== t.id) }));
+                  }} aria-label="Delete template" style={{
+                    flexShrink: 0, width: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'transparent', border: 'none', borderLeft: `0.5px solid ${UI.hair}`,
+                    color: 'rgba(var(--danger-rgb),0.7)', cursor: 'pointer',
+                  }}>
+                    <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       </Sheet>
 

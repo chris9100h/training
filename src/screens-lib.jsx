@@ -2065,6 +2065,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const [editing, setEditing] = useStateL(false);
   const [capturing, setCapturing] = useStateL(false);
   const [feelOpen, setFeelOpen] = useStateL(false);
+  const [tplFormOpen, setTplFormOpen] = useStateL(false);
+  const [tplName, setTplName] = useStateL('');
+  const [tplSaved, setTplSaved] = useStateL(false);
   const captureRef = useRefL(null);
   // Screenshot watermark: VIPs get their home-screen background image instead of the default ZANE mark.
   const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo-2.png';
@@ -2098,6 +2101,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
   const setFeel = (feel) => {
     setStore(st => ({ ...st, sessions: st.sessions.map(x => x.id === sessionId ? { ...x, feel } : x) }));
+  };
+
+  const saveAsTemplate = () => {
+    const name = tplName.trim();
+    if (!name) return;
+    const exercises = (s.entries || []).map(e => ({
+      exId: e.exId, name: e.name,
+      sets: e.plannedSets || (e.sets || []).filter(st => !st.warmup).length || 3,
+      reps: e.plannedReps ?? null,
+      repsPerSet: e.plannedRepsPerSet ?? null,
+      supersetGroup: e.supersetGroup ?? null,
+    }));
+    const tpl = { id: LB.uid(), name, exercises, createdAt: new Date().toISOString() };
+    setStore(st => ({ ...st, workoutTemplates: [tpl, ...(st.workoutTemplates || [])] }));
+    setTplFormOpen(false);
+    setTplSaved(true);
   };
 
   const deleteSession = async () => {
@@ -2327,6 +2346,29 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             </BracketFrame>
           );
         })()}
+
+        {/* Save as template — freestyle sessions only, right after finishing */}
+        {justFinished && !capturing && s.isFreestyle && (s.entries || []).length > 0 && (
+          tplSaved ? (
+            <div style={{ marginBottom: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 0', color: UI.gold, fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.08em' }}>
+              <i className="fa-solid fa-check" /> Saved as template
+            </div>
+          ) : tplFormOpen ? (
+            <div style={{ marginBottom: 4, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <Field label="Template name">
+                <TextInput value={tplName} onChange={setTplName} placeholder="e.g. Push A" autoFocus />
+              </Field>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <Btn kind="ghost" onClick={() => setTplFormOpen(false)} style={{ flex: 1 }}>Cancel</Btn>
+                <Btn onClick={saveAsTemplate} style={{ flex: 1 }}>Save template</Btn>
+              </div>
+            </div>
+          ) : (
+            <Btn kind="ghost" onClick={() => { setTplName(s.dayName && s.dayName !== 'Freestyle' ? s.dayName : ''); setTplFormOpen(true); }} style={{ width: '100%', marginBottom: 4 }}>
+              <i className="fa-solid fa-bookmark" style={{ marginRight: 8 }} /> Save as template
+            </Btn>
+          )
+        )}
 
         {/* Feel — prompt after finish, always editable */}
         {!capturing && (

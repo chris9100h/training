@@ -344,6 +344,13 @@ async function importFromBackup(backup, userId) {
       }))
     ));
   }
+  if (backup.workoutTemplates?.length) {
+    await unwrap(_supabase.from('zane_workout_templates').upsert(
+      backup.workoutTemplates.map(t => ({
+        id: t.id, user_id: userId, name: t.name, exercises: t.exercises || [],
+      }))
+    ));
+  }
 }
 
 // Builds a complete export object for backup. Fetches ALL session entries and
@@ -499,12 +506,14 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.rpc('get_user_support_chats'),
     // Blood glucose readings — multiple per day, value always in mmol/L (migration 0101)
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    // Reusable workout templates (migration 0107)
+    _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
-         supportTicketsRes, glucoseLogsRes] = await Promise.all(queries);
+         supportTicketsRes, glucoseLogsRes, templatesRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -650,6 +659,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       id: l.id, date: l.date, time: l.time,
       valueMmol: parseFloat(l.value_mmol),
       context: l.context ?? 'other', note: l.note ?? null, createdAt: l.created_at,
+    })),
+    workoutTemplates: (templatesRes?.data || []).map(t => ({
+      id: t.id, name: t.name,
+      exercises: Array.isArray(t.exercises) ? t.exercises : [],
+      createdAt: t.created_at,
     })),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
     // and via the local cache also offline). bestE1rmForExercise combines this
@@ -979,6 +993,18 @@ async function syncStore(prev, next, userId) {
       plan_start_date: p.planStartDate,
     }))));
     if (removed.length) ops.push(_supabase.from('zane_cardio_plans').delete().in('id', removed.map(p => p.id)));
+  }
+
+  if (prev.workoutTemplates !== next.workoutTemplates) {
+    const upsert = (next.workoutTemplates || []).filter(t => {
+      const p = (prev.workoutTemplates || []).find(x => x.id === t.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(t);
+    });
+    const removed = (prev.workoutTemplates || []).filter(t => !(next.workoutTemplates || []).find(x => x.id === t.id));
+    if (upsert.length) ops.push(_supabase.from('zane_workout_templates').upsert(upsert.map(t => ({
+      id: t.id, user_id: userId, name: t.name, exercises: t.exercises || [],
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_workout_templates').delete().in('id', removed.map(t => t.id)));
   }
 
   if (prev.dailyLogs !== next.dailyLogs) {
