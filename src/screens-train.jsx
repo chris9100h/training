@@ -2074,12 +2074,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
         {/* Exercise name */}
         <div style={{ flexShrink: 0 }}>
-          <div className="display" style={{
-            fontSize: entry.name.length > 28 ? 16 : entry.name.length > 22 ? 20 : entry.name.length > 16 ? 26 : 32,
-            color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>
-            {entry.name}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="display" style={{
+              flex: 1, minWidth: 0,
+              fontSize: entry.name.length > 28 ? 16 : entry.name.length > 22 ? 20 : entry.name.length > 16 ? 26 : 32,
+              color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {entry.name}
+            </div>
+            {exercise?.youtube_url && (
+              <a href={exercise.youtube_url} target="_blank" rel="noopener noreferrer"
+                aria-label="Watch form video"
+                style={{
+                  flexShrink: 0, width: 38, height: 38, borderRadius: 6,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  border: `0.5px solid ${UI.hairStrong}`, background: UI.bgRaised,
+                  color: '#FF0000', textDecoration: 'none',
+                }}>
+                <i className="fa-brands fa-youtube" style={{ fontSize: 18 }} />
+              </a>
+            )}
           </div>
           {(exercise?.category || exercise?.equipment || (exercise?.tags || []).length > 0) && (
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>

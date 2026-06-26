@@ -263,7 +263,7 @@ async function importFromBackup(backup, userId) {
   await Promise.all([
     backup.user?.name && unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name })),
     backup.exercises?.length && unwrap(_supabase.from('zane_exercises').upsert(
-      backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, user_id: userId }))
+      backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId }))
     )),
     backup.schedules?.length && unwrap(_supabase.from('zane_schedules').upsert(
       backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
@@ -452,7 +452,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const histCutoff = historyWindowCutoffISO();
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps').eq('user_id', userId),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, youtube_url').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
@@ -900,7 +900,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -1852,6 +1852,7 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite) {
     id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
     type: n.type, entityId: n.entity_id, entityName: n.entity_name,
     threadId: n.thread_id, body: n.body, createdAt: n.created_at,
+    attachments: n.attachments || null,
   });
   _realtimeChannel = _supabase
     .channel(`rt-${userId}`)
@@ -2024,21 +2025,33 @@ function diffSchedule(before, after, exercises) {
   return lines.length > 0 ? lines.join('\n') : null;
 }
 
-async function addCoachingNote(coachingId, type, entityId, entityName, body, authorId, threadId = null) {
+async function addCoachingNote(coachingId, type, entityId, entityName, body, authorId, threadId = null, attachments = null) {
   const id = 'cnote_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   const { error } = await _supabase.from('zane_coaching_notes').insert({
     id, coaching_id: coachingId, author_id: authorId,
     type, entity_id: entityId || null, entity_name: entityName || null, body,
     thread_id: threadId || null,
+    ...(attachments && attachments.length ? { attachments } : {}),
   });
   if (error) throw error;
   // Fire-and-forget push to the other party (fails silently if push not enabled).
   // Skip for self-coaching — there's no "other party" to notify. The author is
   // derived server-side from the JWT, so it can't be spoofed.
   if (!coachingId.startsWith('self_')) {
-    fnFetch(COACHING_NOTIFY_URL, { coachingId, threadId, preview: body });
+    const preview = body || (attachments && attachments.length ? '📷 Image' : '');
+    fnFetch(COACHING_NOTIFY_URL, { coachingId, threadId, preview });
   }
   return id;
+}
+
+// Upload an image to the chat-attachments bucket (own folder per RLS) and return
+// its public URL. Shared by support tickets and coaching notes.
+async function uploadChatImage(file, userId) {
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+  const { error } = await _supabase.storage.from('chat-attachments').upload(path, file, { contentType: file.type });
+  if (error) throw error;
+  return _supabase.storage.from('chat-attachments').getPublicUrl(path).data.publicUrl;
 }
 
 async function markCoachingNotesRead(noteIds) {
@@ -2062,6 +2075,7 @@ async function loadCoachingNotes(coachingId, threadId = null) {
     threadId: n.thread_id,
     type: n.type, entityId: n.entity_id, entityName: n.entity_name,
     body: n.body, createdAt: n.created_at, readAt: n.read_at,
+    attachments: n.attachments || null,
   }));
 }
 
@@ -2698,7 +2712,7 @@ window.LB = {
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
-  addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
+  addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,

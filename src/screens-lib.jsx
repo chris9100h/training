@@ -620,6 +620,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editNoWeightReps, setEditNoWeightReps] = useStateL(autoEdit ? !!ex.no_weight_reps : false);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
   const [editProgressionReps, setEditProgressionReps] = useStateL(autoEdit ? (ex.progression_reps ?? null) : null);
+  const [editYoutubeUrl, setEditYoutubeUrl] = useStateL(autoEdit ? (ex.youtube_url || '') : '');
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
   const [showSizeInfoEdit, setShowSizeInfoEdit] = useStateL(false);
@@ -641,7 +642,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     }
   };
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditNoWeightReps(!!ex.no_weight_reps); setEditEquipment(ex.equipment || null); setEditProgressionReps(ex.progression_reps ?? null); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditNoWeightReps(!!ex.no_weight_reps); setEditEquipment(ex.equipment || null); setEditProgressionReps(ex.progression_reps ?? null); setEditYoutubeUrl(ex.youtube_url || ''); setEditMode(true); };
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
@@ -649,7 +650,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     const repsChanged = newProgressionReps !== (ex.progression_reps ?? null);
     setStore(s => {
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: editNoWeightReps, equipment: editEquipment || null, progression_reps: newProgressionReps }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: editNoWeightReps, equipment: editEquipment || null, progression_reps: newProgressionReps, youtube_url: editYoutubeUrl.trim() || null }
         : e);
       const schedules = (repsChanged && newProgressionReps != null)
         ? s.schedules.map(sch => ({ ...sch, days: sch.days.map(day => ({ ...day, items: (day.items || []).map(it => it.exId === exId ? { ...it, reps: newProgressionReps } : it) })) }))
@@ -841,6 +842,9 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                 }
               </div>
             </div>
+            <Field label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 12 }} />Form video</span>}>
+              <TextInput value={editYoutubeUrl} onChange={setEditYoutubeUrl} placeholder="YouTube link (optional)" />
+            </Field>
             <div style={{ display: 'flex', gap: 10 }}>
               <Btn kind="ghost" onClick={cancelEdit} style={{ flex: 1 }}>
                 {autoEdit ? 'Skip' : 'Cancel'}
@@ -864,6 +868,21 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
       </div>
 
       {!editMode && <div style={{ padding: '18px 22px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+        {/* Form video link */}
+        {ex.youtube_url && (
+          <a href={ex.youtube_url} target="_blank" rel="noopener noreferrer"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              padding: '11px 12px', borderRadius: 6, textDecoration: 'none',
+              border: `0.5px solid ${UI.hairStrong}`, background: UI.bgRaised,
+              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12,
+              letterSpacing: '0.1em', textTransform: 'uppercase',
+            }}>
+            <i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 16 }} />
+            Watch form video
+          </a>
+        )}
 
         {/* Stats — SubDials */}
         <div style={{ display: 'flex', justifyContent: 'space-around', padding: '6px 0' }}>

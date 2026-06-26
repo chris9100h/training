@@ -202,7 +202,7 @@ function CoachingUnreadBanner({ store, userId, onOpen }) {
           {notes.length === 1 ? label : `${notes.length} ${labelPlural}`}
         </div>
         <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {notes[0].body}
+          {notes[0].body || ((notes[0].attachments || []).length ? '📷 Image' : '')}
         </div>
       </div>
       <ChevronRight />
@@ -218,7 +218,19 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   const [loading, setLoading] = useStateC(true);
   const [body, setBody] = useStateC('');
   const [sending, setSending] = useStateC(false);
+  const [imageFile, setImageFile] = useStateC(null);
+  const [imagePreview, setImagePreview] = useStateC(null);
   const bottomRef = useRefC(null);
+
+  const pickImage = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = ev => setImagePreview(ev.target.result);
+    reader.readAsDataURL(file);
+  };
 
   const reload = () => {
     setLoading(true);
@@ -248,11 +260,19 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   }, [notes]);
 
   const send = async () => {
-    if (!body.trim()) return;
+    if (!body.trim() && !imageFile) return;
     setSending(true);
+    const imgFile = imageFile;
     try {
-      await LB.addCoachingNote(coachingId, 'general', null, null, body.trim(), userId, thread.id);
+      let attachments = null;
+      if (imgFile) {
+        const url = await LB.uploadChatImage(imgFile, userId);
+        attachments = [{ url, name: imgFile.name, type: imgFile.type }];
+      }
+      await LB.addCoachingNote(coachingId, 'general', null, null, body.trim(), userId, thread.id, attachments);
       setBody('');
+      setImageFile(null);
+      setImagePreview(null);
       reload();
     } catch (e) { alert(e.message); } finally { setSending(false); }
   };
@@ -275,7 +295,12 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
           return (
             <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
               <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', padding: '9px 12px', border: isMe ? 'none' : `0.5px solid ${UI.hairStrong}` }}>
-                <div style={{ fontSize: 13, color: isMe ? '#0a0805' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{n.body}</div>
+                {(n.attachments || []).map((a, ai) => (
+                  <a key={ai} href={a.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginBottom: n.body ? 8 : 0 }}>
+                    <img src={a.url} alt={a.name || 'image'} style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 4, display: 'block' }} />
+                  </a>
+                ))}
+                {n.body && <div style={{ fontSize: 13, color: isMe ? '#0a0805' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{n.body}</div>}
               </div>
               <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, margin: '3px 4px 0' }}>
                 {isMe ? 'You' : otherName} · {fmtRelative(n.createdAt)}
@@ -286,7 +311,19 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
         <div ref={bottomRef} />
       </div>
       <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, background: 'transparent' }}>
+        {imagePreview && (
+          <div style={{ padding: '10px 16px 0', display: 'flex' }}>
+            <div style={{ position: 'relative', display: 'inline-block' }}>
+              <img src={imagePreview} alt="preview" style={{ maxHeight: 80, maxWidth: 120, borderRadius: 4, display: 'block', border: `0.5px solid ${UI.hairStrong}` }} />
+              <button onClick={() => { setImageFile(null); setImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', border: 'none', background: UI.danger, color: '#fff', cursor: 'pointer', fontSize: 12, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+            </div>
+          </div>
+        )}
         <div style={{ padding: '10px 16px', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <label style={{ width: 40, height: 40, borderRadius: 6, border: `0.5px solid ${UI.hair}`, background: UI.bgInset, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkSoft }}>
+            <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
+            <input type="file" accept="image/*" onChange={pickImage} style={{ display: 'none' }} />
+          </label>
           <input
             value={body}
             onChange={e => setBody(e.target.value)}
@@ -294,7 +331,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
             placeholder="Message…"
             style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }}
           />
-          <button onClick={send} disabled={sending || !body.trim()} style={{ width: 40, height: 40, borderRadius: 6, border: body.trim() && !sending ? 'none' : `0.5px solid ${UI.hair}`, background: body.trim() && !sending ? 'var(--accent)' : 'transparent', color: body.trim() && !sending ? '#0a0805' : UI.inkFaint, cursor: sending || !body.trim() ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
+          <button onClick={send} disabled={sending || (!body.trim() && !imageFile)} style={{ width: 40, height: 40, borderRadius: 6, border: (body.trim() || imageFile) && !sending ? 'none' : `0.5px solid ${UI.hair}`, background: (body.trim() || imageFile) && !sending ? 'var(--accent)' : 'transparent', color: (body.trim() || imageFile) && !sending ? '#0a0805' : UI.inkFaint, cursor: sending || (!body.trim() && !imageFile) ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
             {sending ? <span style={{ fontFamily: UI.fontUi, fontSize: 14 }}>…</span> : <i className="fa-solid fa-arrow-up" style={{ fontSize: 15 }} />}
           </button>
         </div>
