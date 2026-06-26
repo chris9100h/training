@@ -358,7 +358,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
   const unit = clientStore.settings?.unit || UI.unit();
 
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
-  const trainingDayCount = activeSch ? (activeSch.days || []).filter(d => d.items?.length > 0).length : 0;
+  const trainingDayCount = activeSch ? (Array.isArray(activeSch.days) ? activeSch.days : []).filter(d => d.items?.length > 0).length : 0;
   const todayDay = useMemoC(() => getTodayDay(clientStore), [clientStore]);
   const todayStr = localDateKey(new Date());
   const todaySession = useMemoC(() =>

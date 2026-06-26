@@ -14,9 +14,11 @@ function useIsPadS() {
 
 const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','BACK','REST'];
 
+const daysArr = s => Array.isArray(s?.days) ? s.days : [];
+
 // One-line plan summary shown in the plan list and viewer header.
 function planDescriptor(s) {
-  const trainingDays = s.days.filter(d => d.items.length).length;
+  const trainingDays = daysArr(s).filter(d => d.items.length).length;
   if (LB.isFlexPlan(s)) {
     const goal = s.sessions_per_week;
     return `Flexible · ${trainingDays} ${trainingDays === 1 ? 'workout' : 'workouts'}${goal ? ` · ${goal}×/week` : ''}`;
@@ -1310,7 +1312,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
             {plans.map(s => {
               const isSame = s.id === schedule?.id;
               const last = lastTrainedDate(s);
-              const dayCount = s.days.filter(d => d.items.length > 0 && (isSame ? d.id !== currentDayId : true)).length;
+              const dayCount = daysArr(s).filter(d => d.items.length > 0 && (isSame ? d.id !== currentDayId : true)).length;
               return (
                 <button key={s.id} onClick={() => { setSelectedPlan(s); setSelectedIds(new Set()); }} style={{
                   background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
@@ -1341,7 +1343,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 
   // Day list for selected plan
   const isSamePlan = selectedPlan.id === schedule?.id;
-  const days = selectedPlan.days.filter(d => d.items.length > 0 && (!isSamePlan || d.id !== currentDayId));
+  const days = daysArr(selectedPlan).filter(d => d.items.length > 0 && (!isSamePlan || d.id !== currentDayId));
 
   const confirmMulti = () => {
     const selections = days
