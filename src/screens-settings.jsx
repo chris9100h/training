@@ -457,6 +457,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [bgPreviewSheet, setBgPreviewSheet] = useStateSet(false);
   const [adminSheet, setAdminSheet] = useStateSet(false);
   const [vipBgSheet, setVipBgSheet] = useStateSet(false);
+  const [vipBgListSheet, setVipBgListSheet] = useStateSet(false);
   const [vipBgList, setVipBgList] = useStateSet([]);
   const [vipBgEmail, setVipBgEmail] = useStateSet('');
   const [vipBgKey, setVipBgKey] = useStateSet('');
@@ -1890,25 +1891,44 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
                   {vipBgSaving ? 'Saving…' : vipBgKey ? 'Assign background' : 'Clear background'}
                 </Btn>
               </div>
-              {vipBgList.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>CURRENT ASSIGNMENTS</div>
-                  {vipBgList.map((row, i) => {
-                    const opt = VIP_OPTIONS.find(o => o.key === row.bg_key);
-                    return (
-                      <div key={row.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.email}</div>
-                          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 1 }}>{opt?.label || row.bg_key}</div>
-                        </div>
-                        <button onClick={() => { setVipBgEmail(row.email); setVipBgKey(''); setVipBgMsg(null); }} style={{ background: 'none', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
-                          Clear
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+              <Frame style={{ padding: '0 14px' }}>
+                <NavRow label="Current assignments" hint={vipBgList.length > 0 ? `${vipBgList.length}` : 'None'} first onTap={() => setVipBgListSheet(true)} />
+              </Frame>
+            </div>
+          );
+        })()}
+      </SettingsSheet>
+
+      {/* ══ VIP backgrounds — current assignments sub-sheet ══ */}
+      <SettingsSheet open={vipBgListSheet} onClose={() => setVipBgListSheet(false)} title="Current Assignments">
+        {(() => {
+          const VIP_OPTIONS = [
+            { key: 'Background/Appy.png',       label: 'Appy' },
+            { key: 'Background/phoenix.png',     label: 'Phoenix' },
+            { key: 'Background/marine.png',      label: 'Marine' },
+            { key: 'Background/prince_abu.png',  label: 'Prince Abu' },
+            { key: 'Background/Chris1.PNG',      label: 'Chris 1' },
+            { key: 'Background/Chris2.PNG',      label: 'Chris 2' },
+          ];
+          if (vipBgList.length === 0) {
+            return <div className="micro" style={{ color: UI.inkGhost, padding: '4px 0 12px' }}>No backgrounds assigned yet.</div>;
+          }
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+              {vipBgList.map((row, i) => {
+                const opt = VIP_OPTIONS.find(o => o.key === row.bg_key);
+                return (
+                  <div key={row.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.email}</div>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 1 }}>{opt?.label || row.bg_key}</div>
+                    </div>
+                    <button onClick={() => { setVipBgEmail(row.email); setVipBgKey(''); setVipBgMsg(null); setVipBgListSheet(false); }} style={{ background: 'none', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
+                      Clear
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           );
         })()}
