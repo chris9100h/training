@@ -1555,30 +1555,87 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     }
   }, [store?.statusMode, store?.statusModeSince, store?.sessions]);
 
-  // Every ~8 weeks of uninterrupted training, nudge the user about a deload.
-  // Anchored on the last dismissal/action (deloadPromptDismissedAt), falling back
-  // to the cycle start / earliest session so new users aren't nagged early.
+  // After every 8 completed cycles (cycle plans), 8 complete weeks (weekday plans),
+  // or 8×sessions_per_week sessions (flex plans), congratulate the user and offer a
+  // deload. Fires only when a non-deload session is completed on the last training
+  // day of that block. Anchor resets on each dismissal so the next prompt is 8 more
+  // cycles/weeks/sessions away.
   const deloadNudgeShown = useRef(false);
   useEffect(() => {
     if (deloadNudgeShown.current) return;
-    if (store?.statusMode || store?.inProgress) return; // not during any status/active session
-    const EIGHT_WEEKS = 56 * 86400000;
-    const now = Date.now();
-    const firstSession = (store.sessions || []).filter(s => s.ended).map(s => Date.parse(s.date)).filter(Boolean).sort()[0];
-    const anchorStr = store.deloadPromptDismissedAt || store.cycleStartDate || null;
-    const anchor = anchorStr ? Date.parse(anchorStr) : (firstSession || null);
-    if (!anchor || now - anchor < EIGHT_WEEKS) return;
+    if (store?.statusMode || store?.inProgress) return;
+    if (!sch) return;
+
+    const todayStr = LB.todayISO();
+    const justFinished = (store?.sessions || []).some(
+      s => s.ended && s.date?.slice(0, 10) === todayStr && !s.isDeload,
+    );
+    if (!justFinished) return;
+
+    const todayD = new Date(todayStr + 'T12:00:00');
+    let shouldPrompt = false;
+    let title = '8 cycles done! 🎉';
+    let body = "You've completed 8 full training cycles — that's serious dedication. A deload week now means you come back stronger. Want to start one?";
+
+    if (LB.isFlexPlan(sch)) {
+      const anchorTS = store?.deloadPromptDismissedAt ? new Date(store.deloadPromptDismissedAt) : new Date(0);
+      const spw = sch.sessions_per_week || 3;
+      const goal = spw * 8;
+      const count = (store.sessions || []).filter(
+        s => s.ended && !s.isDeload && new Date(s.ended) >= anchorTS,
+      ).length;
+      if (count > 0 && count % goal === 0) {
+        shouldPrompt = true;
+        title = `${goal} sessions done! 🎉`;
+        body = `You've logged ${goal} training sessions — solid work. A deload week now means you come back stronger. Want to start one?`;
+      }
+    } else if (LB.isWeekdayPlan(sch)) {
+      const anchorStr = store?.deloadPromptDismissedAt || store?.weekPlanStartDate;
+      if (anchorStr) {
+        const anchorD = new Date(anchorStr.slice(0, 10) + 'T12:00:00');
+        const daysElapsed = Math.round((todayD - anchorD) / 86400000);
+        const weekFromAnchor = Math.floor(daysElapsed / 7);
+        if (weekFromAnchor >= 7 && weekFromAnchor % 8 === 7) {
+          const vDays = LB.getPlanDaysForDate(sch, todayStr);
+          const trainingWds = vDays.filter(d => d.weekday != null && (d.items || []).length > 0).map(d => d.weekday);
+          const lastWd = trainingWds.length ? Math.max(...trainingWds) : -1;
+          if (lastWd >= 0 && LB.isoWd(todayD) === lastWd) {
+            shouldPrompt = true;
+            title = '8 weeks done! 🎉';
+            body = "You've completed 8 solid weeks of training — impressive consistency. A deload week now means you'll come back even stronger. Want to start one?";
+          }
+        }
+      }
+    } else if (sch.versions?.length) {
+      const cycleNum = LB.getCycleNumForDate(sch, todayStr);
+      if (cycleNum > 0) {
+        const cyclePos = LB.getCyclePosForDate(sch, todayStr);
+        const days = LB.getPlanDaysForDate(sch, todayStr);
+        const lastTrainingIdx = days.reduce((last, d, i) => ((d.items || []).length > 0 ? i : last), -1);
+        if (cyclePos !== null && lastTrainingIdx >= 0 && cyclePos === lastTrainingIdx) {
+          const anchorStr = store?.deloadPromptDismissedAt;
+          let eligible;
+          if (anchorStr) {
+            const anchorCycleNum = LB.getCycleNumForDate(sch, anchorStr.slice(0, 10));
+            const diff = anchorCycleNum ? cycleNum - anchorCycleNum : 0;
+            eligible = diff > 0 && diff % 8 === 0;
+          } else {
+            eligible = cycleNum % 8 === 0;
+          }
+          if (eligible) shouldPrompt = true;
+        }
+      }
+    }
+
+    if (!shouldPrompt) return;
     deloadNudgeShown.current = true;
     (async () => {
-      const yes = await confirm(
-        "You've been training hard for about 8 weeks straight. A deload week can help you recover and come back stronger. Start one now?",
-        { title: 'Time for a deload?', ok: 'Start deload', cancel: 'Not now' },
-      );
+      const yes = await confirm(body, { title, ok: 'Start deload', cancel: 'Not now' });
       const stamp = new Date().toISOString();
       setStore(s => ({ ...s, deloadPromptDismissedAt: stamp }));
       if (yes) await LB.startDeload(userId, { ...store, deloadPromptDismissedAt: stamp }, setStore);
     })();
-  }, [store?.statusMode, store?.inProgress, store?.deloadPromptDismissedAt, store?.cycleStartDate, store?.sessions]);
+  }, [store?.statusMode, store?.inProgress, store?.deloadPromptDismissedAt, store?.sessions, sch]);
 
   const selectedDayCardioLogs = useMemo(() => {
     const dateKey = sessionDate.toISOString().slice(0, 10);

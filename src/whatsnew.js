@@ -16,6 +16,18 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.412',
+    title: 'Deload week, templates & more',
+    items: [
+      'Deload week is here — start one from the Plans tab (or wait for the app to suggest it). Weights are automatically pre-filled at 50% of your last session so you don\'t have to think. One cycle or week later, the deload ends by itself and training picks up where it left off.',
+      'The app congratulates you after every 8 completed cycles (or weeks, or sessions for flex plans) and asks if you\'d like a deload — right when you finish the last training day of that block. Say "not now" and it leaves you alone for 8 more cycles.',
+      'Workout templates: save a finished freestyle session as a template, then start future sessions from it — or import it straight into a plan day. Find them in the Library.',
+      'Exercise videos: paste a YouTube link onto any exercise and a play button appears in the exercise editor, the exercise detail, and during training. Useful for form reminders.',
+      'Coaches can now send images in chat — tap the attachment icon in any thread, pick a photo, done.',
+      'Several fixes: light theme contrast improvements, library knurl textures visible in screenshots, and a handful of smaller visual tweaks.',
+    ],
+  },
+  {
     id: 'v2.406',
     title: 'Blood Glucose Tracking',
     items: [
