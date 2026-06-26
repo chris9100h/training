@@ -451,11 +451,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
   const [unitPickerOpen, setUnitPickerOpen] = useStateSet(false);
-  const [adminBgPreview, setAdminBgPreview] = useStateSet(
-    () => localStorage.getItem('logbook-admin-bg-preview') || 'standard'
-  );
-  const [bgPreviewSheet, setBgPreviewSheet] = useStateSet(false);
-  const [adminSheet, setAdminSheet] = useStateSet(false);
+const [adminSheet, setAdminSheet] = useStateSet(false);
   const [vipBgSheet, setVipBgSheet] = useStateSet(false);
   const [vipBgListSheet, setVipBgListSheet] = useStateSet(false);
   const [vipBgList, setVipBgList] = useStateSet([]);
@@ -1835,7 +1831,6 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
                 </div>
                 <NavRow label="Recent sign-ups" hint={unseenCount > 0 ? `${unseenCount} new` : `${recentSignups.length}`} onTap={() => setSignupsSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
-                <NavRow label="Background preview" hint={{ standard: 'Standard', mike: 'Mike', phoenix: 'Phoenix', marine: 'Marine', prince_abu: 'Prince Abu' }[adminBgPreview] || 'Change'} onTap={() => setBgPreviewSheet(true)} />
               </Frame>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
                 <Btn onClick={() => setSupportInboxSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', fontSize: 15, padding: '14px 16px' }}>
@@ -2292,43 +2287,6 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
         })()}
       </FullSheet>
 
-      {/* ══ VIP background preview sheet (admin) ══ */}
-      <SettingsSheet open={bgPreviewSheet} onClose={() => setBgPreviewSheet(false)} title="Background">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {[
-            { key: 'standard',   label: 'Standard',   sub: 'Zane logo watermark' },
-            { key: 'mike',       label: 'Mike',       sub: 'mikeapicelli777' },
-            { key: 'phoenix',    label: 'Phoenix',    sub: 'mb2489' },
-            { key: 'marine',     label: 'Marine',     sub: 'marine.png' },
-            { key: 'prince_abu', label: 'Prince Abu', sub: 'prince_abu.png' },
-            { key: 'chris',      label: 'Chris',      sub: 'admin only' },
-          ].map(({ key, label, sub }) => {
-            const active = adminBgPreview === key;
-            return (
-              <button key={key} onClick={() => {
-                setAdminBgPreview(key);
-                if (key === 'standard') localStorage.removeItem('logbook-admin-bg-preview');
-                else localStorage.setItem('logbook-admin-bg-preview', key);
-              }} style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '12px 14px', borderRadius: 6,
-                border: active ? `1.5px solid var(--accent)` : `0.5px solid ${UI.hairStrong}`,
-                background: active ? `rgba(var(--accent-rgb), 0.1)` : UI.bgInset,
-                cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textAlign: 'left',
-              }}>
-                <div>
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: active ? 'var(--accent)' : UI.ink }}>{label}</div>
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{sub}</div>
-                </div>
-                {active && <svg width="14" height="11" viewBox="0 0 14 11" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 5.5L5 9.5L13 1.5" /></svg>}
-              </button>
-            );
-          })}
-          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 4 }}>
-            Previews on your own home screen only — device-local, nothing is synced or shown to users.
-          </div>
-        </div>
-      </SettingsSheet>
 
       {/* ══ Recent sign-ups sheet (admin) ══ */}
       <SettingsSheet open={signupsSheet} onClose={() => setSignupsSheet(false)} title="Recent sign-ups">
