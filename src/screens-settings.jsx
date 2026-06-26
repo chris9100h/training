@@ -422,6 +422,8 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [supportActiveLoading, setSupportActiveLoading] = useStateSet(false);
   const [supportDraft, setSupportDraft] = useStateSet('');
   const [supportSending, setSupportSending] = useStateSet(false);
+  const [supportImageFile, setSupportImageFile] = useStateSet(null);
+  const [supportImagePreview, setSupportImagePreview] = useStateSet(null);
   const [supportCategoryDraft, setSupportCategoryDraft] = useStateSet('question');
   const [supportCatFilter, setSupportCatFilter] = useStateSet('all');
   const [supportInboxSheet, setSupportInboxSheet] = useStateSet(false);
@@ -432,6 +434,8 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [supportTicketLoading, setSupportTicketLoading] = useStateSet(false);
   const [supportAdminDraft, setSupportAdminDraft] = useStateSet('');
   const [supportAdminSending, setSupportAdminSending] = useStateSet(false);
+  const [adminImageFile, setAdminImageFile] = useStateSet(null);
+  const [adminImagePreview, setAdminImagePreview] = useStateSet(null);
   const [archivedInbox, setArchivedInbox] = useStateSet([]);
   const [showArchived, setShowArchived] = useStateSet(false);
   const [archivedLoading, setArchivedLoading] = useStateSet(false);
@@ -520,12 +524,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   // Load notes + mark read when user opens a ticket thread
   useEffectSet(() => {
     if (!supportActiveTicketId) { setSupportActiveNotes([]); return; }
+    let mounted = true;
     setSupportActiveLoading(true);
     LB.supabase.from('zane_coaching_notes')
-      .select('id, author_id, body, created_at')
+      .select('id, author_id, body, created_at, read_at, attachments')
       .eq('coaching_id', supportActiveTicketId)
       .order('created_at', { ascending: true })
       .then(({ data }) => {
+        if (!mounted) return;
         setSupportActiveNotes(data || []);
         setSupportActiveLoading(false);
         LB.supabase.from('zane_coaching_notes')
@@ -533,7 +539,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           .eq('coaching_id', supportActiveTicketId)
           .neq('author_id', userId)
           .is('read_at', null)
-          .then(() => setStore(s => {
+          .then(() => { if (!mounted) return; setStore(s => {
             const ticket = (s.supportTickets || []).find(t => t.coachingId === supportActiveTicketId);
             const delta = ticket ? ticket.unreadCount : 0;
             return {
@@ -543,25 +549,60 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 t.coachingId === supportActiveTicketId ? { ...t, unreadCount: 0 } : t
               ),
             };
-          }));
+          }); });
       });
+    // Poll for read_at updates on our own sent messages (seen indicator)
+    const poll = setInterval(() => {
+      if (!mounted) return;
+      LB.supabase.from('zane_coaching_notes')
+        .select('id, read_at')
+        .eq('coaching_id', supportActiveTicketId)
+        .eq('author_id', userId)
+        .not('read_at', 'is', null)
+        .then(({ data }) => {
+          if (!mounted || !data) return;
+          setSupportActiveNotes(prev => prev.map(n => {
+            const u = data.find(d => d.id === n.id);
+            return u && !n.read_at ? { ...n, read_at: u.read_at } : n;
+          }));
+        });
+    }, 12000);
+    return () => { mounted = false; clearInterval(poll); };
   }, [supportActiveTicketId]);
 
   // Load admin ticket notes + mark user messages read
   useEffectSet(() => {
     if (!supportTicket) { setSupportTicketNotes([]); return; }
+    let mounted = true;
     setSupportTicketLoading(true);
     LB.supabase.from('zane_coaching_notes')
-      .select('id, author_id, body, created_at')
+      .select('id, author_id, body, created_at, read_at, attachments')
       .eq('coaching_id', supportTicket.coachingId)
       .order('created_at', { ascending: true })
-      .then(({ data }) => { setSupportTicketNotes(data || []); setSupportTicketLoading(false); });
+      .then(({ data }) => { if (!mounted) return; setSupportTicketNotes(data || []); setSupportTicketLoading(false); });
     LB.supabase.from('zane_coaching_notes')
       .update({ read_at: new Date().toISOString() })
       .eq('coaching_id', supportTicket.coachingId)
       .neq('author_id', userId)
       .is('read_at', null)
-      .then(() => setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)));
+      .then(() => { if (!mounted) return; setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)); });
+    // Poll for read_at updates on admin's sent messages (seen indicator)
+    const poll = setInterval(() => {
+      if (!mounted) return;
+      LB.supabase.from('zane_coaching_notes')
+        .select('id, read_at')
+        .eq('coaching_id', supportTicket.coachingId)
+        .eq('author_id', userId)
+        .not('read_at', 'is', null)
+        .then(({ data }) => {
+          if (!mounted || !data) return;
+          setSupportTicketNotes(prev => prev.map(n => {
+            const u = data.find(d => d.id === n.id);
+            return u && !n.read_at ? { ...n, read_at: u.read_at } : n;
+          }));
+        });
+    }, 12000);
+    return () => { mounted = false; clearInterval(poll); };
   }, [supportTicket]);
 
   // Admin-only: load all admin state on mount (signup config, sign-ups, support inbox).
@@ -843,23 +884,61 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   };
   const handleSignOut = async () => { await LB.signOut(); };
 
+  const uploadChatImage = async (file) => {
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const { error } = await LB.supabase.storage.from('chat-attachments').upload(path, file, { contentType: file.type });
+    if (error) throw error;
+    return LB.supabase.storage.from('chat-attachments').getPublicUrl(path).data.publicUrl;
+  };
+
+  const handleImagePick = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSupportImageFile(file);
+    const reader = new FileReader();
+    reader.onload = ev => setSupportImagePreview(ev.target.result);
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleAdminImagePick = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAdminImageFile(file);
+    const reader = new FileReader();
+    reader.onload = ev => setAdminImagePreview(ev.target.result);
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   const handleSupportSend = async () => {
-    if (!supportDraft.trim() || supportSending || !supportActiveTicketId) return;
+    if ((!supportDraft.trim() && !supportImageFile) || supportSending || !supportActiveTicketId) return;
     setSupportSending(true);
     const body = supportDraft.trim();
+    const imgFile = supportImageFile;
     setSupportDraft('');
+    setSupportImageFile(null);
+    setSupportImagePreview(null);
     try {
+      let attachments = null;
+      if (imgFile) {
+        const url = await uploadChatImage(imgFile);
+        attachments = [{ url, name: imgFile.name, type: imgFile.type }];
+      }
       const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
-        id: LB.uid(), coaching_id: supportActiveTicketId, author_id: userId, type: 'general', body,
-      }).select('id, author_id, body, created_at').single();
+        id: LB.uid(), coaching_id: supportActiveTicketId, author_id: userId, type: 'general',
+        body: body || '', ...(attachments ? { attachments } : {}),
+      }).select('id, author_id, body, created_at, read_at, attachments').single();
       if (!error && note) {
         setSupportActiveNotes(prev => [...prev, note]);
+        const preview = attachments ? (body || '📷 Image') : body;
         setStore(s => ({ ...s, supportTickets: (s.supportTickets || []).map(t =>
           t.coachingId === supportActiveTicketId
-            ? { ...t, lastMessageAt: note.created_at, lastMessageBody: body }
+            ? { ...t, lastMessageAt: note.created_at, lastMessageBody: preview }
             : t
         )}));
-        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportActiveTicketId, preview: body });
+        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportActiveTicketId, preview });
       }
     } finally { setSupportSending(false); }
   };
@@ -892,17 +971,27 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   };
 
   const handleAdminReply = async () => {
-    if (!supportAdminDraft.trim() || supportAdminSending || !supportTicket) return;
+    if ((!supportAdminDraft.trim() && !adminImageFile) || supportAdminSending || !supportTicket) return;
     setSupportAdminSending(true);
     const body = supportAdminDraft.trim();
+    const imgFile = adminImageFile;
     setSupportAdminDraft('');
+    setAdminImageFile(null);
+    setAdminImagePreview(null);
     try {
+      let attachments = null;
+      if (imgFile) {
+        const url = await uploadChatImage(imgFile);
+        attachments = [{ url, name: imgFile.name, type: imgFile.type }];
+      }
       const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
-        id: LB.uid(), coaching_id: supportTicket.coachingId, author_id: userId, type: 'general', body,
-      }).select('id, author_id, body, created_at').single();
+        id: LB.uid(), coaching_id: supportTicket.coachingId, author_id: userId, type: 'general',
+        body: body || '', ...(attachments ? { attachments } : {}),
+      }).select('id, author_id, body, created_at, read_at, attachments').single();
       if (!error && note) {
         setSupportTicketNotes(prev => [...prev, note]);
-        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportTicket.coachingId, preview: body });
+        const preview = attachments ? (body || '📷 Image') : body;
+        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportTicket.coachingId, preview });
       }
     } finally { setSupportAdminSending(false); }
   };
@@ -2021,27 +2110,48 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   {!supportActiveLoading && supportActiveNotes.length === 0 && (
                     <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '24px 0' }}>No messages yet.</div>
                   )}
-                  {supportActiveNotes.map(n => {
-                    const isMe = n.author_id === userId;
-                    return (
-                      <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-                        <div style={{ maxWidth: '80%', padding: '9px 13px', borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', background: isMe ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised, border: `0.5px solid ${isMe ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}` }}>
-                          <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55 }}>{n.body}</div>
+                  {(() => {
+                    const myNotes = supportActiveNotes.filter(n => n.author_id === userId);
+                    const lastReadId = [...myNotes].reverse().find(n => n.read_at)?.id;
+                    return supportActiveNotes.map(n => {
+                      const isMe = n.author_id === userId;
+                      const hasImg = Array.isArray(n.attachments) && n.attachments.length > 0;
+                      return (
+                        <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+                          <div style={{ maxWidth: '80%', padding: hasImg ? '6px' : '9px 13px', borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', background: isMe ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised, border: `0.5px solid ${isMe ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`, overflow: 'hidden' }}>
+                            {hasImg && n.attachments.map((a, i) => (
+                              <img key={i} src={a.url} alt="" style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0 }} />
+                            ))}
+                            {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
+                          </div>
+                          <div className="micro" style={{ color: UI.inkGhost, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span>{isMe ? 'You' : 'Support'} · {new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                            {isMe && n.id === lastReadId && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Seen</span>}
+                          </div>
                         </div>
-                        <div className="micro" style={{ color: UI.inkGhost, marginTop: 4 }}>
-                          {isMe ? 'You' : 'Support'} · {new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    });
+                  })()}
                 </div>
                 {/* Compose — sticks to bottom */}
                 {activeTicket?.status !== 'resolved' ? (
                   <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
-                    <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
-                      placeholder="Write a message…" rows={3} style={iStyle}
-                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSupportSend(); }} />
-                    <Btn onClick={handleSupportSend} disabled={!supportDraft.trim() || supportSending}>
+                    {supportImagePreview && (
+                      <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
+                        <img src={supportImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
+                        <button onClick={() => { setSupportImageFile(null); setSupportImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11 }}>×</button>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                      <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
+                        placeholder="Write a message…" rows={3} style={{ ...iStyle, flex: 1 }}
+                        onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSupportSend(); }} />
+                      <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                        <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImagePick} />
+                        <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
+                      </label>
+                    </div>
+                    <Btn onClick={handleSupportSend} disabled={(!supportDraft.trim() && !supportImageFile) || supportSending}>
                       {supportSending ? 'Sending…' : 'Send'}
                     </Btn>
                   </div>
@@ -2152,31 +2262,53 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   {!supportTicketLoading && supportTicketNotes.length === 0 && (
                     <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '24px 0' }}>No messages yet.</div>
                   )}
-                  {supportTicketNotes.map(n => {
-                    const isAdminMsg = n.author_id === userId;
-                    return (
-                      <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAdminMsg ? 'flex-end' : 'flex-start' }}>
-                        <div style={{
-                          maxWidth: '80%', padding: '9px 13px', borderRadius: isAdminMsg ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
-                          background: isAdminMsg ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised,
-                          border: `0.5px solid ${isAdminMsg ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`,
-                        }}>
-                          <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55 }}>{n.body}</div>
+                  {(() => {
+                    const myNotes = supportTicketNotes.filter(n => n.author_id === userId);
+                    const lastReadId = [...myNotes].reverse().find(n => n.read_at)?.id;
+                    return supportTicketNotes.map(n => {
+                      const isAdminMsg = n.author_id === userId;
+                      const hasImg = Array.isArray(n.attachments) && n.attachments.length > 0;
+                      return (
+                        <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAdminMsg ? 'flex-end' : 'flex-start' }}>
+                          <div style={{
+                            maxWidth: '80%', padding: hasImg ? '6px' : '9px 13px', borderRadius: isAdminMsg ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
+                            background: isAdminMsg ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised,
+                            border: `0.5px solid ${isAdminMsg ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`,
+                            overflow: 'hidden',
+                          }}>
+                            {hasImg && n.attachments.map((a, i) => (
+                              <img key={i} src={a.url} alt="" style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0 }} />
+                            ))}
+                            {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
+                          </div>
+                          <div className="micro" style={{ color: UI.inkGhost, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span>{isAdminMsg ? 'You' : supportTicket.clientName} · {new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                            {isAdminMsg && n.id === lastReadId && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Seen</span>}
+                          </div>
                         </div>
-                        <div className="micro" style={{ color: UI.inkGhost, marginTop: 4 }}>
-                          {isAdminMsg ? 'You' : supportTicket.clientName} · {new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    });
+                  })()}
                 </div>
                 {/* Compose — sticks to bottom */}
                 <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
-                  <textarea value={supportAdminDraft} onChange={e => setSupportAdminDraft(e.target.value)}
-                    placeholder="Reply…" rows={3} style={iStyle}
-                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
-                  />
-                  <Btn onClick={handleAdminReply} disabled={!supportAdminDraft.trim() || supportAdminSending}>
+                  {adminImagePreview && (
+                    <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
+                      <img src={adminImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
+                      <button onClick={() => { setAdminImageFile(null); setAdminImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11 }}>×</button>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                    <textarea value={supportAdminDraft} onChange={e => setSupportAdminDraft(e.target.value)}
+                      placeholder="Reply…" rows={3} style={{ ...iStyle, flex: 1 }}
+                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
+                    />
+                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: adminImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${adminImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: adminImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAdminImagePick} />
+                      <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
+                    </label>
+                  </div>
+                  <Btn onClick={handleAdminReply} disabled={(!supportAdminDraft.trim() && !adminImageFile) || supportAdminSending}>
                     {supportAdminSending ? 'Sending…' : 'Send reply'}
                   </Btn>
                   {currentStatus === 'resolved' && (
