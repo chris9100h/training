@@ -1058,6 +1058,9 @@ function App() {
   // (display-only; the stored numbers stay the same).
   window.__UNIT = store?.settings?.unit || 'kg';
 
+  // Deload overlay flag — buildSeedSets reads this to pre-fill loads at ~50%.
+  window.__DELOAD = store?.statusMode === 'deload';
+
   // Two layout variants: the iPad sidebar layout (only on tab routes) and the
   // full-bleed layout (everything else). Navigating between a tab route and a
   // non-tab route (e.g. plan → schedule-new) flips between them on iPad.

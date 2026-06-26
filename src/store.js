@@ -463,7 +463,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle')
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
@@ -616,6 +616,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         feel: s.feel ?? null,
         ...(s.is_bonus     ? { isBonus:     true } : {}),
         ...(s.is_freestyle ? { isFreestyle: true } : {}),
+        ...(s.is_deload    ? { isDeload:    true } : {}),
       };
     }),
     skips: (skipsRes.data || []).map(s => ({
@@ -678,6 +679,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     inProgress: sett.in_progress_session_id ?? null,
     statusMode: sett.status_mode ?? null,
     statusModeSince: sett.status_mode_since ?? null,
+    deloadPromptDismissedAt: sett.deload_prompt_dismissed_at ?? null,
     customDayTypes: sett.custom_day_types ?? [],
     settings: {
         unit: sett.unit ?? null,
@@ -894,13 +896,14 @@ function sessionToRow(s, userId) {
   // keeps its default '[]' on insert and is left untouched on update.
   // agg* are read-only server aggregates attached at load time — never synced.
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
   row.feel = feel ?? null;
   row.is_bonus = !!isBonus;
   row.is_freestyle = !!isFreestyle;
+  row.is_deload = !!isDeload;
   return row;
 }
 
@@ -1077,6 +1080,7 @@ async function syncStore(prev, next, userId) {
     prev.nextReminderAt                   !== next.nextReminderAt   ||
     prev.statusMode                       !== next.statusMode       ||
     prev.statusModeSince                  !== next.statusModeSince  ||
+    prev.deloadPromptDismissedAt          !== next.deloadPromptDismissedAt ||
     prev.activeCardioPlanId               !== next.activeCardioPlanId;
 
   if (settingsChanged) {
@@ -1124,6 +1128,7 @@ async function syncStore(prev, next, userId) {
       in_progress_session_id: next.inProgress ?? null,
       status_mode: next.statusMode ?? null,
       status_mode_since: next.statusModeSince ?? null,
+      deload_prompt_dismissed_at: next.deloadPromptDismissedAt ?? null,
     }));
   }
 
@@ -1288,7 +1293,7 @@ function isDecline(curr, prev) {
 function bestE1rmForExercise(state, exId, excludeSessionId = null, dayId = null) {
   let best = dayId ? 0 : ((state.exerciseBests || {})[exId] || 0);
   for (const s of state.sessions || []) {
-    if (!s.ended || (excludeSessionId && s.id === excludeSessionId)) continue;
+    if (!s.ended || s.isDeload || (excludeSessionId && s.id === excludeSessionId)) continue;
     if (dayId && s.dayId !== dayId) continue;
     for (const e of (s.entries || [])) {
       if (e.exId !== exId) continue;
@@ -1408,6 +1413,12 @@ function latestBodyweight(store) {
 function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweightKg = null) {
   const workingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
   const repsPerSet = it.repsPerSet;
+  // Deload overlay: halve the seeded LOAD (not bodyweight, not reps) so a
+  // deload week pre-fills at ~50%. Reads the global mirrored from
+  // store.statusMode in app.jsx (same pattern as window.__UNIT). Rounded to a
+  // 2.5 increment; the user can still adjust per set.
+  const deload = typeof window !== 'undefined' && window.__DELOAD === true && bodyweightKg == null;
+  const dl = (kg) => (deload && kg != null) ? Math.round((kg * 0.5) / 2.5) * 2.5 : kg;
   return Array.from({ length: it.sets }).map((_, i) => {
     const prev = workingSets[i];
     const targetReps = repsPerSet ? (repsPerSet[i] ?? repsPerSet[repsPerSet.length - 1]) : null;
@@ -1417,28 +1428,28 @@ function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweight
     const seedKg = bodyweightKg ?? prev?.kg ?? null;
     if (suggestion) {
       return isUni
-        ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false }
-        : { kg: suggestion.kg, reps: suggestion.reps, done: false };
+        ? { kg: dl(suggestion.kg), repsL: suggestion.reps, repsR: suggestion.reps, done: false }
+        : { kg: dl(suggestion.kg), reps: suggestion.reps, done: false };
     }
     if (smartProgression && prev) {
       return isUni
-        ? { kg: seedKg, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
-        : { kg: seedKg, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
+        ? { kg: dl(seedKg), repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
+        : { kg: dl(seedKg), reps: prev.reps != null ? prev.reps + 1 : null, done: false };
     }
     if (!prev && targetReps != null) {
       return isUni
-        ? { kg: bodyweightKg ?? null, repsL: targetReps, repsR: targetReps, done: false }
-        : { kg: bodyweightKg ?? null, reps: targetReps, done: false };
+        ? { kg: dl(bodyweightKg ?? null), repsL: targetReps, repsR: targetReps, done: false }
+        : { kg: dl(bodyweightKg ?? null), reps: targetReps, done: false };
     }
     return isUni
-      ? { kg: seedKg, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
-      : { kg: seedKg, reps: prev?.reps ?? null, done: false };
+      ? { kg: dl(seedKg), repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
+      : { kg: dl(seedKg), reps: prev?.reps ?? null, done: false };
   });
 }
 
 function lastSessionForExercise(state, exId, dayId = null) {
   const sessions = state.sessions
-    .filter(s => s.ended && (dayId == null || s.dayId === dayId))
+    .filter(s => s.ended && !s.isDeload && (dayId == null || s.dayId === dayId))
     .slice()
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   for (const s of sessions) {
@@ -1449,9 +1460,11 @@ function lastSessionForExercise(state, exId, dayId = null) {
 }
 
 // Up to `limit` most-recent ended sessions that logged this exercise, newest first.
+// Deload sessions are excluded so a deliberately light week never seeds the next
+// session's weights or skews progression/regression.
 function recentSessionsForExercise(state, exId, dayId = null, limit = 3) {
   const sessions = state.sessions
-    .filter(s => s.ended && (dayId == null || s.dayId === dayId))
+    .filter(s => s.ended && !s.isDeload && (dayId == null || s.dayId === dayId))
     .slice()
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   const out = [];
@@ -2688,6 +2701,88 @@ async function clearStatusMode(userId, store, setStore) {
   } catch (e) { console.error('clearStatusMode: status period write failed', e); }
 }
 
+// ─── DELOAD ─────────────────────────────────────────────────────────────────
+
+// Planned deload length for the active plan: one cycle (date-based), one week
+// (weekday), or — for flex — null (the deload ends by session count, not days).
+function deloadPlanDays(store) {
+  const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
+  if (!sch) return 7;
+  if (isFlexPlan(sch)) return null;
+  if (isWeekdayPlan(sch)) return 7;
+  return (sch.days || []).length || 7;
+}
+
+// Flex deload target: the weekly session goal, or the count of training days.
+function deloadFlexGoal(sch) {
+  return sch?.sessions_per_week || (sch?.days || []).filter(d => (d.items || []).length).length || 3;
+}
+
+// True once the active deload has run its course (one cycle / week elapsed, or —
+// for flex — the weekly session goal of deload sessions has been logged). Shared
+// by the Plan-tab button (remaining display) and the app.jsx auto-end check.
+function deloadElapsed(store, now = new Date()) {
+  if (store.statusMode !== 'deload' || !store.statusModeSince) return false;
+  const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
+  const since = new Date(store.statusModeSince);
+  if (sch && isFlexPlan(sch)) {
+    const done = (store.sessions || []).filter(s => s.ended && s.isDeload && new Date(s.ended) >= since).length;
+    return done >= deloadFlexGoal(sch);
+  }
+  const days = deloadPlanDays(store) || 7;
+  const elapsed = Math.floor((now - since) / 86400000);
+  return elapsed >= days;
+}
+
+// Days remaining in the current deload (null for flex — counts sessions, not days).
+function deloadDaysRemaining(store, now = new Date()) {
+  if (store.statusMode !== 'deload' || !store.statusModeSince) return null;
+  const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
+  if (sch && isFlexPlan(sch)) return null;
+  const days = deloadPlanDays(store) || 7;
+  const elapsed = Math.floor((now - new Date(store.statusModeSince)) / 86400000);
+  return Math.max(0, days - elapsed);
+}
+
+// Start a deload: switch status mode to 'deload' and open a status period.
+// Mirrors the optimistic setStore + write pattern of the home status toggle.
+async function startDeload(userId, store, setStore) {
+  const startedAt = new Date().toISOString();
+  const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+  setStore(s => ({
+    ...s, statusMode: 'deload', statusModeSince: startedAt,
+    statusPeriods: [{ id: '_pending', mode: 'deload', startedAt, endedAt: null },
+      ...(s.statusPeriods || []).map(p => p.endedAt ? p : { ...p, endedAt: startedAt })],
+  }));
+  try { await openStatusPeriod(userId, 'deload', startedAt); }
+  catch (e) { console.error('startDeload: status period write failed', e); }
+  if (coachingId) {
+    try {
+      const threadId = await getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
+      await addCoachingNote(coachingId, 'general', null, null, 'Status: Deload week — training light to recover.', userId, threadId);
+    } catch (_) {}
+  }
+}
+
+// End a deload: close the status period at `now` so today onward is normal again.
+async function endDeload(userId, store, setStore) {
+  if (store.statusMode !== 'deload') return;
+  const endedAt = new Date().toISOString();
+  const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+  setStore(s => ({
+    ...s, statusMode: null, statusModeSince: null,
+    statusPeriods: (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: endedAt } : p),
+  }));
+  try { await closeStatusPeriod(userId, endedAt); }
+  catch (e) { console.error('endDeload: status period write failed', e); }
+  if (coachingId) {
+    try {
+      const threadId = await getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
+      await addCoachingNote(coachingId, 'general', null, null, 'Status: Deload finished — back to normal training.', userId, threadId);
+    } catch (_) {}
+  }
+}
+
 async function refreshHealthLogs(userId) {
   const [dailyRes, cardioRes, glucoseRes] = await Promise.all([
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
@@ -2737,6 +2832,7 @@ window.LB = {
   cancelPushover,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
+  startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   loadCoachingMacros, addCoachingMacros,

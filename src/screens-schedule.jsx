@@ -32,7 +32,25 @@ function planDescriptor(s) {
 // ─── PlanScreen ────────────────────────────────────────────────────
 function PlanScreen({ store, setStore, go, userId }) {
   const [archivedOpen, setArchivedOpen] = useStateS(false);
+  const [confirmEl, confirm] = useConfirm();
   const importRef = React.useRef(null);
+
+  const isDeload = store.statusMode === 'deload';
+  const deloadRemaining = isDeload ? LB.deloadDaysRemaining(store) : null;
+  const toggleDeload = async (e) => {
+    e.stopPropagation();
+    if (isDeload) {
+      if (!await confirm('End the deload week and return to normal training?', { title: 'End deload', ok: 'End deload' })) return;
+      await LB.endDeload(userId, store, setStore);
+    } else {
+      if (store.statusMode) {
+        if (!await confirm(`This will end your ${store.statusMode} status. Start a deload week instead?`, { title: 'Start deload', ok: 'Start deload' })) return;
+      } else if (!await confirm('Train your normal plan at ~50% load for one cycle. Weights pre-fill light and this week is excluded from progression. Start now?', { title: 'Start deload week', ok: 'Start deload' })) {
+        return;
+      }
+      await LB.startDeload(userId, store, setStore);
+    }
+  };
 
   const importPlan = (e) => {
     const file = e.target.files[0];
@@ -127,6 +145,21 @@ function PlanScreen({ store, setStore, go, userId }) {
                   <Pill key={d.id} gold={!!d.items.length}>{d.name}</Pill>
                 ))}
               </div>
+              {!LB.isWeekdayPlan(s) && (
+                <button onClick={toggleDeload} style={{
+                  width: '100%', marginTop: 12, padding: '10px 12px', borderRadius: 6, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  background: isDeload ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                  border: `1px ${isDeload ? 'solid' : 'dashed'} ${isDeload ? UI.goldSoft : UI.hairStrong}`,
+                  color: isDeload ? UI.gold : UI.inkSoft,
+                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
+                }}>
+                  <i className={`fa-solid ${isDeload ? 'fa-arrow-rotate-left' : 'fa-battery-quarter'}`} style={{ fontSize: 12 }} />
+                  {isDeload
+                    ? (deloadRemaining != null ? `Deload active · ${deloadRemaining}d left · End` : 'Deload active · End')
+                    : 'Start deload week'}
+                </button>
+              )}
             </BracketFrame>
           ) : (
             <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px' }}>
@@ -177,6 +210,7 @@ function PlanScreen({ store, setStore, go, userId }) {
           );
         })()}
       </div>
+      {confirmEl}
     </Screen>
   );
 }

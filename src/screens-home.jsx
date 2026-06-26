@@ -1334,16 +1334,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   }, [isFlex, weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch]);
 
   const cardLabel = useMemo(() => {
+    // During a deload, today's label reads DELOAD instead of TODAY/NEXT UP so
+    // the strip clearly signals the light week. Reverts automatically on end.
+    const todayWord = (isViewingToday && store.statusMode === 'deload') ? 'DELOAD' : 'TODAY';
     if (isFlex) {
-      return `${isViewingToday ? 'NEXT UP · ' : ''}DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
+      return `${isViewingToday ? (store.statusMode === 'deload' ? 'DELOAD · ' : 'NEXT UP · ') : ''}DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
     }
     if (isViewingToday) {
-      if (weekdayMode) return `TODAY · ${WEEKDAYS_FULL[selectedWd].toUpperCase()}`;
+      if (weekdayMode) return `${todayWord} · ${WEEKDAYS_FULL[selectedWd].toUpperCase()}`;
       if (cycleWeekView) {
         const sel = week.find(d => d.weekday === selectedWd);
-        return `TODAY · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
+        return `${todayWord} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
       }
-      return `TODAY · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
+      return `${todayWord} · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
     }
     const dateStr = sessionDate.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
     if (weekdayMode) return dateStr;
@@ -1352,7 +1355,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       return `${dateStr} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
     }
     return `${dateStr} · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
-  }, [isFlex, isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week]);
+  }, [isFlex, isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week, store.statusMode]);
 
   const avgDayDuration = useMemo(() => {
     if (!activeDay?.id) return null;
@@ -1537,6 +1540,44 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       if (yes) await LB.clearStatusMode(userId, store, setStore);
     })();
   }, [store?.statusMode, store?.sessions, store?.cardioLogs]);
+
+  // Auto-end a deload once it has run its course (one cycle / week elapsed, or
+  // the flex session goal of deload sessions logged). Runs on mount and when the
+  // relevant inputs change; endDeload no-ops if already off.
+  const deloadEndChecked = useRef(false);
+  useEffect(() => {
+    if (store?.statusMode !== 'deload') { deloadEndChecked.current = false; return; }
+    if (deloadEndChecked.current) return;
+    if (LB.deloadElapsed(store)) {
+      deloadEndChecked.current = true;
+      LB.endDeload(userId, store, setStore);
+    }
+  }, [store?.statusMode, store?.statusModeSince, store?.sessions]);
+
+  // Every ~8 weeks of uninterrupted training, nudge the user about a deload.
+  // Anchored on the last dismissal/action (deloadPromptDismissedAt), falling back
+  // to the cycle start / earliest session so new users aren't nagged early.
+  const deloadNudgeShown = useRef(false);
+  useEffect(() => {
+    if (deloadNudgeShown.current) return;
+    if (store?.statusMode || store?.inProgress) return; // not during any status/active session
+    const EIGHT_WEEKS = 56 * 86400000;
+    const now = Date.now();
+    const firstSession = (store.sessions || []).filter(s => s.ended).map(s => Date.parse(s.date)).filter(Boolean).sort()[0];
+    const anchorStr = store.deloadPromptDismissedAt || store.cycleStartDate || null;
+    const anchor = anchorStr ? Date.parse(anchorStr) : (firstSession || null);
+    if (!anchor || now - anchor < EIGHT_WEEKS) return;
+    deloadNudgeShown.current = true;
+    (async () => {
+      const yes = await confirm(
+        "You've been training hard for about 8 weeks straight. A deload week can help you recover and come back stronger. Start one now?",
+        { title: 'Time for a deload?', ok: 'Start deload', cancel: 'Not now' },
+      );
+      const stamp = new Date().toISOString();
+      setStore(s => ({ ...s, deloadPromptDismissedAt: stamp }));
+      if (yes) await LB.startDeload(userId, { ...store, deloadPromptDismissedAt: stamp }, setStore);
+    })();
+  }, [store?.statusMode, store?.inProgress, store?.deloadPromptDismissedAt, store?.cycleStartDate, store?.sessions]);
 
   const selectedDayCardioLogs = useMemo(() => {
     const dateKey = sessionDate.toISOString().slice(0, 10);

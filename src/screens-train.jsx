@@ -567,7 +567,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const prevSet = prevWorkingSetFor(setIdx);
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
 
+    // During a deload the loads are deliberately light — suppress all
+    // progression/PR/improvement/regression overlays so a planned easy week
+    // never reads as a jump or a decline.
+    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+
     const progressionResult = (() => {
+      if (isDeloadSession) return null;
       if (!store.settings?.smartProgression) return null;
       if (!updatedSets.filter(s => !s.warmup).every(s => s.done || s.skipped)) return null;
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
@@ -592,7 +598,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // beats the all-time e1RM record for this exercise — independent of smart
     // progression, max once per exercise. A first-ever set (no record yet) and
     // bodyweight sets (no kg) never count as a new best.
-    if (!entry.sets[setIdx]?.warmup && !progressionResult) {
+    if (!entry.sets[setIdx]?.warmup && !progressionResult && !isDeloadSession) {
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
       const cE1rm = (completed?.kg != null && cReps != null && cReps > 0) ? LB.e1rm(completed.kg, cReps) : 0;
@@ -840,7 +846,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           }),
         };
       });
-      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isBonus && advanceCycle && { isBonus: false }) };
+      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(store.statusMode === 'deload' ? { isDeload: true } : {}), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isBonus && advanceCycle && { isBonus: false }) };
     });
     const shouldAdvance = session.isBonus ? advanceCycle : true;
     setStore(s => {
@@ -2024,7 +2030,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* Day name + exercise position — sync status floats centered between them
           (the global top-center overlay would cover the timers above). */}
       <div style={{ flexShrink: 0, padding: '6px 22px 10px', position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <span className="micro-gold">{session.dayName}</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <span className="micro-gold">{session.dayName}</span>
+          {(store.statusMode === 'deload' || session.isDeload) && (
+            <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 6px' }}>DELOAD · 50%</span>
+          )}
+        </span>
         <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
           {String(exIdx + 1).padStart(2, '0')} <span style={{ color: UI.hair }}>/</span> {String(session.entries.length).padStart(2, '0')}
         </span>
