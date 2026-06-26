@@ -1068,6 +1068,19 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           body: JSON.stringify({ coachingId, preview: 'Your support ticket has been removed by support.' }),
         }).catch(() => {});
       }
+      // Delete storage attachments for all notes in this ticket
+      const { data: notesWithAttachments } = await LB.supabase
+        .from('zane_coaching_notes')
+        .select('attachments')
+        .eq('coaching_id', coachingId)
+        .not('attachments', 'is', null);
+      const storagePrefix = `${LB.SUPABASE_URL}/storage/v1/object/public/chat-attachments/`;
+      const paths = (notesWithAttachments || []).flatMap(n =>
+        (n.attachments || []).map(a => a.url?.startsWith(storagePrefix) ? a.url.slice(storagePrefix.length) : null).filter(Boolean)
+      );
+      if (paths.length > 0) {
+        await LB.supabase.storage.from('chat-attachments').remove(paths).catch(() => {});
+      }
       await LB.supabase.rpc('delete_support_ticket', { p_coaching_id: coachingId });
       setSupportInbox(prev => prev.filter(t => t.coaching_id !== coachingId));
       setSupportTicket(null);
