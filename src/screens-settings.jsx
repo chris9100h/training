@@ -644,6 +644,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     LB.supabase.rpc('get_support_chats').then(({ data }) => { setSupportInbox(data || []); setSupportInboxLoading(false); }).catch(() => setSupportInboxLoading(false));
   }, [supportInboxSheet]);
 
+  useEffectSet(() => {
+    supportBottomRef.current?.scrollIntoView({ behavior: 'auto' });
+  }, [supportActiveNotes]);
+
+  useEffectSet(() => {
+    adminBottomRef.current?.scrollIntoView({ behavior: 'auto' });
+  }, [supportTicketNotes]);
+
   const markSignupSeen = (uid) => {
     setSeenSignups(prev => {
       const next = new Set(prev); next.add(uid);
@@ -707,6 +715,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const pushStatusTimer = useRefSet(null);
   const pendingTimeoutRef = useRefSet(null);
   const countdownIntervalRef = useRefSet(null);
+  const supportBottomRef = useRefSet(null);
+  const adminBottomRef = useRefSet(null);
   const [pendingCountdown, setPendingCountdown] = useStateSet(120);
   useEffectSet(() => () => { clearTimeout(pushStatusTimer.current); clearTimeout(pendingTimeoutRef.current); clearInterval(countdownIntervalRef.current); }, []);
 
@@ -2154,6 +2164,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       );
                     });
                   })()}
+                  <div ref={supportBottomRef} />
                 </div>
                 {/* Compose — sticks to bottom */}
                 {activeTicket?.status !== 'resolved' ? (
@@ -2311,6 +2322,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       );
                     });
                   })()}
+                  <div ref={adminBottomRef} />
                 </div>
                 {/* Compose — sticks to bottom */}
                 <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
