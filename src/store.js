@@ -263,7 +263,7 @@ async function importFromBackup(backup, userId) {
   await Promise.all([
     backup.user?.name && unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name })),
     backup.exercises?.length && unwrap(_supabase.from('zane_exercises').upsert(
-      backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, user_id: userId }))
+      backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId }))
     )),
     backup.schedules?.length && unwrap(_supabase.from('zane_schedules').upsert(
       backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
@@ -300,7 +300,6 @@ async function importFromBackup(backup, userId) {
       progression_range_top: sett.progressionRangeTop ?? null,
       equipment_config: sett.equipmentConfig ?? null,
       weight_fill_down: sett.weightFillDown ?? true,
-      manual_calories: sett.manualCalories ?? false,
       net_carbs: sett.netCarbs ?? false,
       show_warmup_in_summary: sett.showWarmupInSummary ?? false,
       show_coaching_tab: sett.showCoachingTab ?? false,
@@ -345,30 +344,64 @@ async function importFromBackup(backup, userId) {
       }))
     ));
   }
+  if (backup.workoutTemplates?.length) {
+    await unwrap(_supabase.from('zane_workout_templates').upsert(
+      backup.workoutTemplates.map(t => ({
+        id: t.id, user_id: userId, name: t.name, exercises: t.exercises || [],
+      }))
+    ));
+  }
 }
 
-// Builds a complete export object for backup. Unlike JSON.stringify(store), this
-// fetches ALL session entries from the DB (no boot-window restriction) so older
-// sessions are fully preserved. Strips server-derived and relational fields that
-// have no meaning in a backup (exerciseBests, coaching, nextReminderAt).
+// Builds a complete export object for backup. Fetches ALL session entries and
+// all coaching data fresh from DB (no boot-window restriction). Strips only
+// ephemeral/server-derived fields that have no meaning outside the live session.
 async function exportBackup(store, userId) {
-  const { data: allEntryRows } = await _supabase
-    .from('zane_session_entries')
-    .select('*, sets:zane_sets(*)')
-    .eq('user_id', userId)
-    .order('entry_idx');
+  // Collect all coaching relationship IDs (regular + self + support tickets)
+  const regularCoachingIds = [
+    ...(store.coaching?.asCoach || []).map(r => r.id),
+    ...(store.coaching?.asClient ? [store.coaching.asClient.id] : []),
+    ...(store.coaching?.asSelf ? [store.coaching.asSelf.id] : []),
+  ];
+  const supportCoachingIds = (store.supportTickets || []).map(t => t.coachingId).filter(Boolean);
+  const allCoachingIds = [...new Set([...regularCoachingIds, ...supportCoachingIds])];
+
+  const fetches = [
+    _supabase.from('zane_session_entries').select('*, sets:zane_sets(*)').eq('user_id', userId).order('entry_idx'),
+  ];
+  if (allCoachingIds.length) {
+    fetches.push(
+      _supabase.from('zane_coaching_notes').select('*').in('coaching_id', allCoachingIds).order('created_at'),
+      _supabase.from('zane_coaching_threads').select('*').in('coaching_id', allCoachingIds).order('created_at'),
+      _supabase.from('zane_coaching_macros').select('*').in('coaching_id', allCoachingIds).order('set_at'),
+      _supabase.from('zane_checkins').select('*').in('coaching_id', allCoachingIds).order('week_start'),
+    );
+  }
+
+  const [entriesRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
+
   const bySession = {};
-  for (const e of (allEntryRows || [])) {
+  for (const e of (entriesRes.data || [])) {
     if (!bySession[e.session_id]) bySession[e.session_id] = [];
     bySession[e.session_id].push(e);
   }
-  const { exerciseBests, coaching, nextReminderAt, ...rest } = store;
+
+  const { exerciseBests, nextReminderAt, supportUnread, adminSupportUnread, ...rest } = store;
   return {
+    _version: 2,
+    _exportedAt: new Date().toISOString(),
     ...rest,
     sessions: store.sessions.map(s => ({
       ...s,
       entries: bySession[s.id] ? mapEntryRows(bySession[s.id]) : s.entries,
     })),
+    coaching: allCoachingIds.length ? {
+      relationships: store.coaching,
+      notes: notesRes?.data || [],
+      threads: threadsRes?.data || [],
+      macros: macrosRes?.data || [],
+      checkins: checkinsRes?.data || [],
+    } : store.coaching,
   };
 }
 
@@ -426,11 +459,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const histCutoff = historyWindowCutoffISO();
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps').eq('user_id', userId),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, youtube_url').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle')
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
@@ -471,12 +504,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
     // Support tickets — user's own ticket list, newest activity first
     isCoachLoad ? null : _supabase.rpc('get_user_support_chats'),
+    // Blood glucose readings — multiple per day, value always in mmol/L (migration 0101)
+    _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    // Reusable workout templates (migration 0107)
+    _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
-         supportTicketsRes] = await Promise.all(queries);
+         supportTicketsRes, glucoseLogsRes, templatesRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -549,7 +586,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const result = {
     user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || ''), approved: profileRes.data?.approved ?? false },
     exercises: exRes.data || [],
-    schedules: schRes.data || [],
+    schedules: (schRes.data || []).map(s => ({
+      ...s,
+      days: Array.isArray(s.days) ? s.days : [],
+      versions: Array.isArray(s.versions) ? s.versions : [],
+    })),
     // map snake_case DB columns → camelCase store fields
     sessions: (sessRes.data || []).map(s => {
       const entryRows = entriesBySession[s.id];
@@ -575,6 +616,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         feel: s.feel ?? null,
         ...(s.is_bonus     ? { isBonus:     true } : {}),
         ...(s.is_freestyle ? { isFreestyle: true } : {}),
+        ...(s.is_deload    ? { isDeload:    true } : {}),
       };
     }),
     skips: (skipsRes.data || []).map(s => ({
@@ -614,6 +656,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     statusPeriods: (statusPeriodsRes?.data || []).map(p => ({
       id: p.id, mode: p.mode, startedAt: p.started_at, endedAt: p.ended_at ?? null,
     })),
+    glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time,
+      valueMmol: parseFloat(l.value_mmol),
+      context: l.context ?? 'other', note: l.note ?? null, createdAt: l.created_at,
+    })),
+    workoutTemplates: (templatesRes?.data || []).map(t => ({
+      id: t.id, name: t.name,
+      exercises: Array.isArray(t.exercises) ? t.exercises : [],
+      createdAt: t.created_at,
+    })),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
     // and via the local cache also offline). bestE1rmForExercise combines this
     // with the windowed sessions, so PR detection stays exact mid-session.
@@ -627,6 +679,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     inProgress: sett.in_progress_session_id ?? null,
     statusMode: sett.status_mode ?? null,
     statusModeSince: sett.status_mode_since ?? null,
+    deloadPromptDismissedAt: sett.deload_prompt_dismissed_at ?? null,
     customDayTypes: sett.custom_day_types ?? [],
     settings: {
         unit: sett.unit ?? null,
@@ -645,13 +698,13 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         tempoConcentric: sett.tempo_concentric ?? 1,
         smartProgression: sett.smart_progression ?? false,
         weightFillDown: sett.weight_fill_down ?? true,
-        manualCalories: sett.manual_calories ?? false,
         netCarbs: sett.net_carbs ?? false,
         progressionRangeTop: sett.progression_range_top ?? 4,
         equipmentConfig: sett.equipment_config ?? {},
         reminderEnabled: sett.reminder_enabled ?? false,
         reminderTime: sett.reminder_time ?? '07:00',
         showWarmupInSummary: sett.show_warmup_in_summary ?? true,
+        showRegression: sett.show_regression ?? true,
         showCoachingTab: sett.show_coaching_tab ?? false,
         beYourOwnCoach: sett.be_your_own_coach ?? false,
         sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
@@ -659,6 +712,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         macroTargets: sett.macro_targets ?? null,
         showHealthTab: sett.show_health_tab ?? false,
         onboardingCompleted: sett.onboarding_completed ?? false,
+        glucoseUnit: sett.glucose_unit ?? 'mmol',
+        vipBackground: sett.vip_background ?? null,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -841,13 +896,14 @@ function sessionToRow(s, userId) {
   // keeps its default '[]' on insert and is left untouched on update.
   // agg* are read-only server aggregates attached at load time — never synced.
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
   row.feel = feel ?? null;
   row.is_bonus = !!isBonus;
   row.is_freestyle = !!isFreestyle;
+  row.is_deload = !!isDeload;
   return row;
 }
 
@@ -861,7 +917,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -942,6 +998,18 @@ async function syncStore(prev, next, userId) {
     if (removed.length) ops.push(_supabase.from('zane_cardio_plans').delete().in('id', removed.map(p => p.id)));
   }
 
+  if (prev.workoutTemplates !== next.workoutTemplates) {
+    const upsert = (next.workoutTemplates || []).filter(t => {
+      const p = (prev.workoutTemplates || []).find(x => x.id === t.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(t);
+    });
+    const removed = (prev.workoutTemplates || []).filter(t => !(next.workoutTemplates || []).find(x => x.id === t.id));
+    if (upsert.length) ops.push(_supabase.from('zane_workout_templates').upsert(upsert.map(t => ({
+      id: t.id, user_id: userId, name: t.name, exercises: t.exercises || [],
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_workout_templates').delete().in('id', removed.map(t => t.id)));
+  }
+
   if (prev.dailyLogs !== next.dailyLogs) {
     const upsert = (next.dailyLogs || []).filter(l => {
       const p = (prev.dailyLogs || []).find(x => x.id === l.id);
@@ -993,7 +1061,6 @@ async function syncStore(prev, next, userId) {
     prev.settings?.tempoConcentric    !== next.settings?.tempoConcentric    ||
     prev.settings?.smartProgression   !== next.settings?.smartProgression   ||
     prev.settings?.weightFillDown     !== next.settings?.weightFillDown     ||
-    prev.settings?.manualCalories     !== next.settings?.manualCalories     ||
     prev.settings?.netCarbs           !== next.settings?.netCarbs           ||
     prev.settings?.progressionRangeTop !== next.settings?.progressionRangeTop ||
     JSON.stringify(prev.settings?.equipmentConfig) !== JSON.stringify(next.settings?.equipmentConfig) ||
@@ -1001,16 +1068,19 @@ async function syncStore(prev, next, userId) {
     prev.settings?.reminderEnabled      !== next.settings?.reminderEnabled      ||
     prev.settings?.reminderTime         !== next.settings?.reminderTime         ||
     prev.settings?.showWarmupInSummary  !== next.settings?.showWarmupInSummary  ||
+    prev.settings?.showRegression       !== next.settings?.showRegression       ||
     prev.settings?.showCoachingTab      !== next.settings?.showCoachingTab      ||
     prev.settings?.beYourOwnCoach         !== next.settings?.beYourOwnCoach         ||
     prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
     prev.settings?.showHealthTab          !== next.settings?.showHealthTab          ||
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
+    prev.settings?.glucoseUnit            !== next.settings?.glucoseUnit            ||
     JSON.stringify(prev.settings?.defaultCheckinSchema) !== JSON.stringify(next.settings?.defaultCheckinSchema) ||
     prev.nextReminderAt                   !== next.nextReminderAt   ||
     prev.statusMode                       !== next.statusMode       ||
     prev.statusModeSince                  !== next.statusModeSince  ||
+    prev.deloadPromptDismissedAt          !== next.deloadPromptDismissedAt ||
     prev.activeCardioPlanId               !== next.activeCardioPlanId;
 
   if (settingsChanged) {
@@ -1038,7 +1108,6 @@ async function syncStore(prev, next, userId) {
       tempo_concentric: next.settings?.tempoConcentric ?? 1,
       smart_progression: next.settings?.smartProgression ?? false,
       weight_fill_down: next.settings?.weightFillDown ?? true,
-      manual_calories: next.settings?.manualCalories ?? false,
       net_carbs: next.settings?.netCarbs ?? false,
       progression_range_top: next.settings?.progressionRangeTop ?? 4,
       equipment_config: next.settings?.equipmentConfig ?? {},
@@ -1046,17 +1115,20 @@ async function syncStore(prev, next, userId) {
       reminder_enabled: next.settings?.reminderEnabled ?? false,
       reminder_time: next.settings?.reminderTime ?? '07:00',
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
+      show_regression: next.settings?.showRegression ?? true,
       show_coaching_tab: next.settings?.showCoachingTab ?? false,
       be_your_own_coach: next.settings?.beYourOwnCoach ?? false,
       session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,
       macro_targets: next.settings?.macroTargets ?? null,
       show_health_tab: next.settings?.showHealthTab ?? false,
       onboarding_completed: next.settings?.onboardingCompleted ?? false,
+      glucose_unit: next.settings?.glucoseUnit ?? 'mmol',
       default_checkin_schema: next.settings?.defaultCheckinSchema ?? null,
       next_reminder_at: computeNextReminderAt(next),
       in_progress_session_id: next.inProgress ?? null,
       status_mode: next.statusMode ?? null,
       status_mode_since: next.statusModeSince ?? null,
+      deload_prompt_dismissed_at: next.deloadPromptDismissedAt ?? null,
     }));
   }
 
@@ -1221,7 +1293,7 @@ function isDecline(curr, prev) {
 function bestE1rmForExercise(state, exId, excludeSessionId = null, dayId = null) {
   let best = dayId ? 0 : ((state.exerciseBests || {})[exId] || 0);
   for (const s of state.sessions || []) {
-    if (!s.ended || (excludeSessionId && s.id === excludeSessionId)) continue;
+    if (!s.ended || s.isDeload || (excludeSessionId && s.id === excludeSessionId)) continue;
     if (dayId && s.dayId !== dayId) continue;
     for (const e of (s.entries || [])) {
       if (e.exId !== exId) continue;
@@ -1341,33 +1413,47 @@ function latestBodyweight(store) {
 function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweightKg = null) {
   const workingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
   const repsPerSet = it.repsPerSet;
+  // Deload overlay: halve the seeded LOAD (not bodyweight, not reps) so a
+  // deload week pre-fills at ~50%. Reads the global mirrored from
+  // store.statusMode in app.jsx (same pattern as window.__UNIT). Rounded to a
+  // 2.5 increment; the user can still adjust per set.
+  const deload = typeof window !== 'undefined' && window.__DELOAD === true && bodyweightKg == null;
+  const dl = (kg) => (deload && kg != null) ? Math.round((kg * 0.5) / 2.5) * 2.5 : kg;
   return Array.from({ length: it.sets }).map((_, i) => {
     const prev = workingSets[i];
     const targetReps = repsPerSet ? (repsPerSet[i] ?? repsPerSet[repsPerSet.length - 1]) : null;
+    // For bodyweight exercises bodyweightKg is today's logged weight and always wins over
+    // the stale prev.kg (which reflects a different day's bodyweight). For non-bodyweight
+    // exercises bodyweightKg is null and prev.kg is used as before.
+    const seedKg = bodyweightKg ?? prev?.kg ?? null;
     if (suggestion) {
+      // During a deload, halve the ACTUAL last-session weight (prev.kg), not the
+      // progression-suggested next weight. Without this, a 100 kg lift with a
+      // +5 kg suggestion would seed 52.5 kg instead of the correct 50 kg.
+      const baseKg = deload && prev?.kg != null ? prev.kg : suggestion.kg;
       return isUni
-        ? { kg: suggestion.kg, repsL: suggestion.reps, repsR: suggestion.reps, done: false }
-        : { kg: suggestion.kg, reps: suggestion.reps, done: false };
+        ? { kg: dl(baseKg), repsL: suggestion.reps, repsR: suggestion.reps, done: false }
+        : { kg: dl(baseKg), reps: suggestion.reps, done: false };
     }
     if (smartProgression && prev) {
       return isUni
-        ? { kg: prev.kg ?? bodyweightKg ?? null, repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
-        : { kg: prev.kg ?? bodyweightKg ?? null, reps: prev.reps != null ? prev.reps + 1 : null, done: false };
+        ? { kg: dl(seedKg), repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
+        : { kg: dl(seedKg), reps: prev.reps != null ? prev.reps + 1 : null, done: false };
     }
     if (!prev && targetReps != null) {
       return isUni
-        ? { kg: bodyweightKg ?? null, repsL: targetReps, repsR: targetReps, done: false }
-        : { kg: bodyweightKg ?? null, reps: targetReps, done: false };
+        ? { kg: dl(bodyweightKg ?? null), repsL: targetReps, repsR: targetReps, done: false }
+        : { kg: dl(bodyweightKg ?? null), reps: targetReps, done: false };
     }
     return isUni
-      ? { kg: prev?.kg ?? bodyweightKg ?? null, repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
-      : { kg: prev?.kg ?? bodyweightKg ?? null, reps: prev?.reps ?? null, done: false };
+      ? { kg: dl(seedKg), repsL: prev?.repsL ?? null, repsR: prev?.repsR ?? null, done: false }
+      : { kg: dl(seedKg), reps: prev?.reps ?? null, done: false };
   });
 }
 
 function lastSessionForExercise(state, exId, dayId = null) {
   const sessions = state.sessions
-    .filter(s => s.ended && (dayId == null || s.dayId === dayId))
+    .filter(s => s.ended && !s.isDeload && (dayId == null || s.dayId === dayId))
     .slice()
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   for (const s of sessions) {
@@ -1378,9 +1464,11 @@ function lastSessionForExercise(state, exId, dayId = null) {
 }
 
 // Up to `limit` most-recent ended sessions that logged this exercise, newest first.
+// Deload sessions are excluded so a deliberately light week never seeds the next
+// session's weights or skews progression/regression.
 function recentSessionsForExercise(state, exId, dayId = null, limit = 3) {
   const sessions = state.sessions
-    .filter(s => s.ended && (dayId == null || s.dayId === dayId))
+    .filter(s => s.ended && !s.isDeload && (dayId == null || s.dayId === dayId))
     .slice()
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   const out = [];
@@ -1552,6 +1640,34 @@ function getCycleNumForDate(schedule, dateStr) {
   return totalPriorCycles + 1;
 }
 
+// Inverse of getCycleNumForDate: returns the start Date of the 1-indexed cycleNum
+// across all plan versions. Returns null for unversioned plans or cycleNum < 1.
+function getCycleStartForNum(schedule, cycleNum) {
+  if (!schedule?.versions?.length || cycleNum < 1) return null;
+  const sorted = [...schedule.versions].sort((a, b) => a.validFrom.localeCompare(b.validFrom));
+  let totalPriorCycles = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const v = sorted[i];
+    const nextV = sorted[i + 1];
+    const daysLen = (v.days || []).length;
+    if (!daysLen) continue;
+    if (nextV) {
+      const vStart = new Date(v.validFrom + 'T12:00:00');
+      const vEnd = new Date(nextV.validFrom + 'T12:00:00');
+      const daysInVersion = Math.round((vEnd - vStart) / 86400000);
+      const cyclesInVersion = Math.floor((daysInVersion - 1) / daysLen) + 1;
+      if (totalPriorCycles + cyclesInVersion >= cycleNum) {
+        return new Date(vStart.getTime() + (cycleNum - totalPriorCycles - 1) * daysLen * 86400000);
+      }
+      totalPriorCycles += cyclesInVersion;
+    } else {
+      const vStartDate = new Date(v.validFrom + 'T12:00:00');
+      return new Date(vStartDate.getTime() + (cycleNum - totalPriorCycles - 1) * daysLen * 86400000);
+    }
+  }
+  return null;
+}
+
 function getCyclePosForDate(schedule, dateStr) {
   const versions = schedule.versions;
   if (!versions?.length) return null;
@@ -1694,8 +1810,8 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
       ...s,
       currentExIdx: mem.currentExIdx ?? 0,
       cyclePos: mem.cyclePos ?? null,
-      // for the active session, local entries/restStart are authoritative
-      ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null } : {}),
+      // for the active session, local entries/restStart/restDuration are authoritative
+      ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null, restDuration: mem.restDuration ?? null } : {}),
       ...(keepCachedEntries ? { entries: mem.entries } : {}),
     };
   });
@@ -1779,6 +1895,7 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite) {
     id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
     type: n.type, entityId: n.entity_id, entityName: n.entity_name,
     threadId: n.thread_id, body: n.body, createdAt: n.created_at,
+    attachments: n.attachments || null,
   });
   _realtimeChannel = _supabase
     .channel(`rt-${userId}`)
@@ -1951,21 +2068,33 @@ function diffSchedule(before, after, exercises) {
   return lines.length > 0 ? lines.join('\n') : null;
 }
 
-async function addCoachingNote(coachingId, type, entityId, entityName, body, authorId, threadId = null) {
+async function addCoachingNote(coachingId, type, entityId, entityName, body, authorId, threadId = null, attachments = null) {
   const id = 'cnote_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   const { error } = await _supabase.from('zane_coaching_notes').insert({
     id, coaching_id: coachingId, author_id: authorId,
     type, entity_id: entityId || null, entity_name: entityName || null, body,
     thread_id: threadId || null,
+    ...(attachments && attachments.length ? { attachments } : {}),
   });
   if (error) throw error;
   // Fire-and-forget push to the other party (fails silently if push not enabled).
   // Skip for self-coaching — there's no "other party" to notify. The author is
   // derived server-side from the JWT, so it can't be spoofed.
   if (!coachingId.startsWith('self_')) {
-    fnFetch(COACHING_NOTIFY_URL, { coachingId, threadId, preview: body });
+    const preview = body || (attachments && attachments.length ? '📷 Image' : '');
+    fnFetch(COACHING_NOTIFY_URL, { coachingId, threadId, preview });
   }
   return id;
+}
+
+// Upload an image to the chat-attachments bucket (own folder per RLS) and return
+// its public URL. Shared by support tickets and coaching notes.
+async function uploadChatImage(file, userId) {
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+  const { error } = await _supabase.storage.from('chat-attachments').upload(path, file, { contentType: file.type });
+  if (error) throw error;
+  return _supabase.storage.from('chat-attachments').getPublicUrl(path).data.publicUrl;
 }
 
 async function markCoachingNotesRead(noteIds) {
@@ -1989,6 +2118,7 @@ async function loadCoachingNotes(coachingId, threadId = null) {
     threadId: n.thread_id,
     type: n.type, entityId: n.entity_id, entityName: n.entity_name,
     body: n.body, createdAt: n.created_at, readAt: n.read_at,
+    attachments: n.attachments || null,
   }));
 }
 
@@ -2575,10 +2705,98 @@ async function clearStatusMode(userId, store, setStore) {
   } catch (e) { console.error('clearStatusMode: status period write failed', e); }
 }
 
+// ─── DELOAD ─────────────────────────────────────────────────────────────────
+
+// Planned deload length for the active plan: one cycle (date-based), one week
+// (weekday), or — for flex — null (the deload ends by session count, not days).
+function deloadPlanDays(store) {
+  const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
+  if (!sch) return 7;
+  if (isFlexPlan(sch)) return null;
+  if (isWeekdayPlan(sch)) return 7;
+  return (sch.days || []).length || 7;
+}
+
+// Flex deload target: the weekly session goal, or the count of training days.
+function deloadFlexGoal(sch) {
+  return sch?.sessions_per_week || (sch?.days || []).filter(d => (d.items || []).length).length || 3;
+}
+
+// True once the active deload has run its course (one cycle / week elapsed, or —
+// for flex — the weekly session goal of deload sessions has been logged). Shared
+// by the Plan-tab button (remaining display) and the app.jsx auto-end check.
+function deloadElapsed(store, now = new Date()) {
+  if (store.statusMode !== 'deload' || !store.statusModeSince) return false;
+  const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
+  const since = new Date(store.statusModeSince);
+  if (sch && isFlexPlan(sch)) {
+    const done = (store.sessions || []).filter(s => s.ended && s.isDeload && new Date(s.ended) >= since).length;
+    return done >= deloadFlexGoal(sch);
+  }
+  const days = deloadPlanDays(store) || 7;
+  const elapsed = Math.floor((now - since) / 86400000);
+  return elapsed >= days;
+}
+
+// Days remaining in the current deload (null for flex — counts sessions, not days).
+function deloadDaysRemaining(store, now = new Date()) {
+  if (store.statusMode !== 'deload' || !store.statusModeSince) return null;
+  const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
+  if (sch && isFlexPlan(sch)) return null;
+  const days = deloadPlanDays(store) || 7;
+  // Clamp to 0 so a future statusModeSince (nudge-aligned to next cycle start)
+  // shows the full duration rather than a negative elapsed.
+  const elapsed = Math.max(0, Math.floor((now - new Date(store.statusModeSince)) / 86400000));
+  return Math.max(0, days - elapsed);
+}
+
+// Start a deload: switch status mode to 'deload' and open a status period.
+// Mirrors the optimistic setStore + write pattern of the home status toggle.
+// sinceISO: optional ISO string to use as statusModeSince instead of now — used
+// by the nudge to align the deload window to the start of the next cycle so it
+// covers exactly one full cycle of training (not a partial one starting mid-cycle).
+async function startDeload(userId, store, setStore, sinceISO = null) {
+  const startedAt = sinceISO || new Date().toISOString();
+  const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+  setStore(s => ({
+    ...s, statusMode: 'deload', statusModeSince: startedAt,
+    statusPeriods: [{ id: '_pending', mode: 'deload', startedAt, endedAt: null },
+      ...(s.statusPeriods || []).map(p => p.endedAt ? p : { ...p, endedAt: startedAt })],
+  }));
+  try { await openStatusPeriod(userId, 'deload', startedAt); }
+  catch (e) { console.error('startDeload: status period write failed', e); }
+  if (coachingId) {
+    try {
+      const threadId = await getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
+      await addCoachingNote(coachingId, 'general', null, null, 'Status: Deload week — training light to recover.', userId, threadId);
+    } catch (_) {}
+  }
+}
+
+// End a deload: close the status period at `now` so today onward is normal again.
+async function endDeload(userId, store, setStore) {
+  if (store.statusMode !== 'deload') return;
+  const endedAt = new Date().toISOString();
+  const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+  setStore(s => ({
+    ...s, statusMode: null, statusModeSince: null,
+    statusPeriods: (s.statusPeriods || []).map(p => !p.endedAt ? { ...p, endedAt: endedAt } : p),
+  }));
+  try { await closeStatusPeriod(userId, endedAt); }
+  catch (e) { console.error('endDeload: status period write failed', e); }
+  if (coachingId) {
+    try {
+      const threadId = await getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
+      await addCoachingNote(coachingId, 'general', null, null, 'Status: Deload finished — back to normal training.', userId, threadId);
+    } catch (_) {}
+  }
+}
+
 async function refreshHealthLogs(userId) {
-  const [dailyRes, cardioRes] = await Promise.all([
+  const [dailyRes, cardioRes, glucoseRes] = await Promise.all([
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ]);
   if (dailyRes.error || cardioRes.error) return null;
   return {
@@ -2600,6 +2818,11 @@ async function refreshHealthLogs(userId) {
       paceFeeling: l.pace_feeling ?? null, effort: l.effort ?? null,
       note: l.note ?? null, sessionId: l.session_id ?? null, createdAt: l.created_at,
     })),
+    glucoseLogs: (glucoseRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time,
+      valueMmol: parseFloat(l.value_mmol),
+      context: l.context ?? 'other', note: l.note ?? null, createdAt: l.created_at,
+    })),
   };
 }
 
@@ -2611,15 +2834,16 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getActiveVersionIdx, dedupeVersionsByDate,
+  uid, todayISO, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
+  startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
-  addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread,
+  addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,

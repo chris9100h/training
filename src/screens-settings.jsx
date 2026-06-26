@@ -35,7 +35,7 @@ function UserArchivedSection({ tickets, renderTicket }) {
 function Toggle({ on, onToggle }) {
   return (
     <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
-      <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: 9, background: on ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
+      <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: on ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
     </div>
   );
 }
@@ -360,6 +360,9 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [howToSheet, setHowToSheet] = useStateSet(false);
 
   // Training sub-sheets
+  const [sessionBehaviourSheet, setSessionBehaviourSheet] = useStateSet(false);
+  const [weightsProgressionSheet, setWeightsProgressionSheet] = useStateSet(false);
+  const [notificationsGroupSheet, setNotificationsGroupSheet] = useStateSet(false);
   const [restSheet, setRestSheet] = useStateSet(false);
   const [timeoutSheet, setTimeoutSheet] = useStateSet(false);
   const [paceguardSheet, setPaceguardSheet] = useStateSet(false);
@@ -405,6 +408,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [pushSheet, setPushSheet] = useStateSet(false);
   const [webPushSub, setWebPushSub] = useStateSet(null);
   const [webPushLoading, setWebPushLoading] = useStateSet(false);
+  const [webPushPending, setWebPushPending] = useStateSet(false);
   const [webPushVerified, setWebPushVerified] = useStateSet(() => localStorage.getItem('logbook-push-verified') === 'true');
   const [iosDisclaimerSeen, setIosDisclaimerSeen] = useStateSet(() => localStorage.getItem('logbook-push-ios-hint-seen') === 'true');
   const [webPushStep, setWebPushStep] = useStateSet('idle'); // 'idle'|'code-sent'
@@ -418,6 +422,8 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [supportActiveLoading, setSupportActiveLoading] = useStateSet(false);
   const [supportDraft, setSupportDraft] = useStateSet('');
   const [supportSending, setSupportSending] = useStateSet(false);
+  const [supportImageFile, setSupportImageFile] = useStateSet(null);
+  const [supportImagePreview, setSupportImagePreview] = useStateSet(null);
   const [supportCategoryDraft, setSupportCategoryDraft] = useStateSet('question');
   const [supportCatFilter, setSupportCatFilter] = useStateSet('all');
   const [supportInboxSheet, setSupportInboxSheet] = useStateSet(false);
@@ -428,6 +434,8 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [supportTicketLoading, setSupportTicketLoading] = useStateSet(false);
   const [supportAdminDraft, setSupportAdminDraft] = useStateSet('');
   const [supportAdminSending, setSupportAdminSending] = useStateSet(false);
+  const [adminImageFile, setAdminImageFile] = useStateSet(null);
+  const [adminImagePreview, setAdminImagePreview] = useStateSet(null);
   const [archivedInbox, setArchivedInbox] = useStateSet([]);
   const [showArchived, setShowArchived] = useStateSet(false);
   const [archivedLoading, setArchivedLoading] = useStateSet(false);
@@ -447,11 +455,15 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
   const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
   const [unitPickerOpen, setUnitPickerOpen] = useStateSet(false);
-  const [adminBgPreview, setAdminBgPreview] = useStateSet(
-    () => localStorage.getItem('logbook-admin-bg-preview') || 'standard'
-  );
-  const [bgPreviewSheet, setBgPreviewSheet] = useStateSet(false);
-  const [adminSheet, setAdminSheet] = useStateSet(false);
+const [adminSheet, setAdminSheet] = useStateSet(false);
+  const [vipBgSheet, setVipBgSheet] = useStateSet(false);
+  const [vipBgListSheet, setVipBgListSheet] = useStateSet(false);
+  const [vipBgList, setVipBgList] = useStateSet([]);
+  const [vipBgOptions, setVipBgOptions] = useStateSet(null);
+  const [vipBgEmail, setVipBgEmail] = useStateSet('');
+  const [vipBgKey, setVipBgKey] = useStateSet('');
+  const [vipBgSaving, setVipBgSaving] = useStateSet(false);
+  const [vipBgMsg, setVipBgMsg] = useStateSet(null);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
 
   useEffectSet(() => {
@@ -488,9 +500,9 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
     LB.getWebPushSubscription().then(sub => {
       setWebPushSub(sub);
       // Auto-restore verified state: if the browser's PushManager has an active
-      // subscription, push is working — don't require re-verification just because
-      // localStorage was cleared (cache clear, PWA reinstall, etc.).
-      if (sub && localStorage.getItem('logbook-push-verified') !== 'true') {
+      // subscription and push is already confirmed in DB, restore local verified flag
+      // without requiring re-verification (cache clear, PWA reinstall, etc.).
+      if (sub && store.settings?.pushEnabled && localStorage.getItem('logbook-push-verified') !== 'true') {
         setWebPushVerified(true);
         localStorage.setItem('logbook-push-verified', 'true');
       }
@@ -512,12 +524,14 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   // Load notes + mark read when user opens a ticket thread
   useEffectSet(() => {
     if (!supportActiveTicketId) { setSupportActiveNotes([]); return; }
+    let mounted = true;
     setSupportActiveLoading(true);
     LB.supabase.from('zane_coaching_notes')
-      .select('id, author_id, body, created_at')
+      .select('id, author_id, body, created_at, read_at, attachments')
       .eq('coaching_id', supportActiveTicketId)
       .order('created_at', { ascending: true })
       .then(({ data }) => {
+        if (!mounted) return;
         setSupportActiveNotes(data || []);
         setSupportActiveLoading(false);
         LB.supabase.from('zane_coaching_notes')
@@ -525,7 +539,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
           .eq('coaching_id', supportActiveTicketId)
           .neq('author_id', userId)
           .is('read_at', null)
-          .then(() => setStore(s => {
+          .then(() => { if (!mounted) return; setStore(s => {
             const ticket = (s.supportTickets || []).find(t => t.coachingId === supportActiveTicketId);
             const delta = ticket ? ticket.unreadCount : 0;
             return {
@@ -535,25 +549,60 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
                 t.coachingId === supportActiveTicketId ? { ...t, unreadCount: 0 } : t
               ),
             };
-          }));
+          }); });
       });
+    // Poll for read_at updates on our own sent messages (seen indicator)
+    const poll = setInterval(() => {
+      if (!mounted) return;
+      LB.supabase.from('zane_coaching_notes')
+        .select('id, read_at')
+        .eq('coaching_id', supportActiveTicketId)
+        .eq('author_id', userId)
+        .not('read_at', 'is', null)
+        .then(({ data }) => {
+          if (!mounted || !data) return;
+          setSupportActiveNotes(prev => prev.map(n => {
+            const u = data.find(d => d.id === n.id);
+            return u && !n.read_at ? { ...n, read_at: u.read_at } : n;
+          }));
+        });
+    }, 12000);
+    return () => { mounted = false; clearInterval(poll); };
   }, [supportActiveTicketId]);
 
   // Load admin ticket notes + mark user messages read
   useEffectSet(() => {
     if (!supportTicket) { setSupportTicketNotes([]); return; }
+    let mounted = true;
     setSupportTicketLoading(true);
     LB.supabase.from('zane_coaching_notes')
-      .select('id, author_id, body, created_at')
+      .select('id, author_id, body, created_at, read_at, attachments')
       .eq('coaching_id', supportTicket.coachingId)
       .order('created_at', { ascending: true })
-      .then(({ data }) => { setSupportTicketNotes(data || []); setSupportTicketLoading(false); });
+      .then(({ data }) => { if (!mounted) return; setSupportTicketNotes(data || []); setSupportTicketLoading(false); });
     LB.supabase.from('zane_coaching_notes')
       .update({ read_at: new Date().toISOString() })
       .eq('coaching_id', supportTicket.coachingId)
       .neq('author_id', userId)
       .is('read_at', null)
-      .then(() => setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)));
+      .then(() => { if (!mounted) return; setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)); });
+    // Poll for read_at updates on admin's sent messages (seen indicator)
+    const poll = setInterval(() => {
+      if (!mounted) return;
+      LB.supabase.from('zane_coaching_notes')
+        .select('id, read_at')
+        .eq('coaching_id', supportTicket.coachingId)
+        .eq('author_id', userId)
+        .not('read_at', 'is', null)
+        .then(({ data }) => {
+          if (!mounted || !data) return;
+          setSupportTicketNotes(prev => prev.map(n => {
+            const u = data.find(d => d.id === n.id);
+            return u && !n.read_at ? { ...n, read_at: u.read_at } : n;
+          }));
+        });
+    }, 12000);
+    return () => { mounted = false; clearInterval(poll); };
   }, [supportTicket]);
 
   // Admin-only: load all admin state on mount (signup config, sign-ups, support inbox).
@@ -581,11 +630,27 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   }, [isAdmin, accountSheet, adminSheet]);
 
   useEffectSet(() => {
+    if (!isAdmin || !vipBgSheet) return;
+    let mounted = true;
+    LB.supabase.rpc('get_user_vip_backgrounds').then(({ data }) => { if (mounted) setVipBgList(data || []); }).catch(() => {});
+    fetch('Background/index.json?_v=' + Date.now()).then(r => r.json()).then(data => { if (mounted) setVipBgOptions(data); }).catch(() => { if (mounted) setVipBgOptions([]); });
+    return () => { mounted = false; };
+  }, [isAdmin, vipBgSheet]);
+
+  useEffectSet(() => {
     if (!supportInboxSheet || !isAdmin) return;
     setSupportInboxLoading(true);
     setStore(s => s ? { ...s, adminSupportUnread: 0 } : s);
     LB.supabase.rpc('get_support_chats').then(({ data }) => { setSupportInbox(data || []); setSupportInboxLoading(false); }).catch(() => setSupportInboxLoading(false));
   }, [supportInboxSheet]);
+
+  useEffectSet(() => {
+    supportBottomRef.current?.scrollIntoView({ behavior: 'auto' });
+  }, [supportActiveNotes]);
+
+  useEffectSet(() => {
+    adminBottomRef.current?.scrollIntoView({ behavior: 'auto' });
+  }, [supportTicketNotes]);
 
   const markSignupSeen = (uid) => {
     setSeenSignups(prev => {
@@ -648,17 +713,50 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   };
 
   const pushStatusTimer = useRefSet(null);
-  useEffectSet(() => () => clearTimeout(pushStatusTimer.current), []);
+  const pendingTimeoutRef = useRefSet(null);
+  const countdownIntervalRef = useRefSet(null);
+  const supportBottomRef = useRefSet(null);
+  const adminBottomRef = useRefSet(null);
+  const [pendingCountdown, setPendingCountdown] = useStateSet(120);
+  useEffectSet(() => () => { clearTimeout(pushStatusTimer.current); clearTimeout(pendingTimeoutRef.current); clearInterval(countdownIntervalRef.current); }, []);
+
+  const cancelPendingPush = async () => {
+    clearTimeout(pendingTimeoutRef.current);
+    clearInterval(countdownIntervalRef.current);
+    setPendingCountdown(120);
+    await LB.unsubscribeWebPush(userId).catch(() => {});
+    setWebPushSub(null);
+    setPushEnabled(false); localStorage.setItem('logbook-push-enabled', 'false');
+    setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
+    setWebPushPending(false);
+    setWebPushStep('idle'); setWebPushCode(''); setCodeInput('');
+  };
+
+  // Cancel pending verification when the push sheet is closed without verifying
+  useEffectSet(() => {
+    if (!pushSheet && webPushPending) cancelPendingPush();
+  }, [pushSheet]);
+
   const togglePush = async () => {
     if (webPushLoading) return;
+    if (webPushPending) { await cancelPendingPush(); return; }
     setWebPushLoading(true);
     try {
       if (!pushEnabled) {
         const sub = await LB.subscribeWebPush(userId);
         setWebPushSub(sub);
-        setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true');
-        setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } }));
         setWebPushVerified(false); localStorage.removeItem('logbook-push-verified');
+        setWebPushPending(true);
+        setPendingCountdown(120);
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = setInterval(() => setPendingCountdown(n => Math.max(0, n - 1)), 1000);
+        // 2-minute window to enter the verification code; cancels subscription on timeout
+        pendingTimeoutRef.current = setTimeout(async () => {
+          await cancelPendingPush();
+          clearTimeout(pushStatusTimer.current);
+          setPushStatus('Verification timed out — push not enabled');
+          pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
+        }, 2 * 60 * 1000);
         sendWebPushCode();
       } else {
         await LB.unsubscribeWebPush(userId);
@@ -682,7 +780,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const sendWebPushCode = () => {
     const code = String(Math.floor(100000 + Math.random() * 900000));
     setWebPushCode(code); setCodeInput(''); setWebPushStep('code-sent');
-    LB.fnFetch(LB.WEB_PUSH_URL, { title: 'Zane · verification', message: `Your code: ${code}` }).catch(() => {});
+    LB.fnFetch(LB.WEB_PUSH_URL, { title: 'Zane · verification', message: `Your code: ${code}`, verify: true }).catch(() => {});
   };
   const verifyWebPushCode = () => {
     if (codeInput.trim() !== webPushCode) {
@@ -691,7 +789,13 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
       pushStatusTimer.current = setTimeout(() => setPushStatus(null), 5000);
       return;
     }
+    clearTimeout(pendingTimeoutRef.current);
+    clearInterval(countdownIntervalRef.current);
+    setPendingCountdown(120);
+    setPushEnabled(true); localStorage.setItem('logbook-push-enabled', 'true');
+    setStore(s => ({ ...s, settings: { ...s.settings, pushEnabled: true } }));
     setWebPushVerified(true); localStorage.setItem('logbook-push-verified', 'true');
+    setWebPushPending(false);
     setWebPushStep('idle'); setWebPushCode(''); setCodeInput('');
     clearTimeout(pushStatusTimer.current);
     setPushStatus('✓ Verified'); pushStatusTimer.current = setTimeout(() => setPushStatus(null), 3000);
@@ -790,72 +894,147 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   };
   const handleSignOut = async () => { await LB.signOut(); };
 
+  const uploadChatImage = async (file) => {
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const { error } = await LB.supabase.storage.from('chat-attachments').upload(path, file, { contentType: file.type });
+    if (error) throw error;
+    return LB.supabase.storage.from('chat-attachments').getPublicUrl(path).data.publicUrl;
+  };
+
+  const handleImagePick = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSupportImageFile(file);
+    const reader = new FileReader();
+    reader.onload = ev => setSupportImagePreview(ev.target.result);
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleAdminImagePick = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAdminImageFile(file);
+    const reader = new FileReader();
+    reader.onload = ev => setAdminImagePreview(ev.target.result);
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   const handleSupportSend = async () => {
-    if (!supportDraft.trim() || supportSending || !supportActiveTicketId) return;
+    if ((!supportDraft.trim() && !supportImageFile) || supportSending || !supportActiveTicketId) return;
     setSupportSending(true);
     const body = supportDraft.trim();
+    const imgFile = supportImageFile;
     setSupportDraft('');
+    setSupportImageFile(null);
+    setSupportImagePreview(null);
     try {
+      let attachments = null;
+      if (imgFile) {
+        const url = await uploadChatImage(imgFile);
+        attachments = [{ url, name: imgFile.name, type: imgFile.type }];
+      }
       const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
-        id: LB.uid(), coaching_id: supportActiveTicketId, author_id: userId, type: 'general', body,
-      }).select('id, author_id, body, created_at').single();
+        id: LB.uid(), coaching_id: supportActiveTicketId, author_id: userId, type: 'general',
+        body: body || '', ...(attachments ? { attachments } : {}),
+      }).select('id, author_id, body, created_at, read_at, attachments').single();
       if (!error && note) {
         setSupportActiveNotes(prev => [...prev, note]);
+        const preview = attachments ? (body || '📷 Image') : body;
         setStore(s => ({ ...s, supportTickets: (s.supportTickets || []).map(t =>
           t.coachingId === supportActiveTicketId
-            ? { ...t, lastMessageAt: note.created_at, lastMessageBody: body }
+            ? { ...t, lastMessageAt: note.created_at, lastMessageBody: preview }
             : t
         )}));
-        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportActiveTicketId, preview: body });
+        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportActiveTicketId, preview });
       }
     } finally { setSupportSending(false); }
   };
 
   const handleCreateTicket = async () => {
-    if (!supportDraft.trim() || supportSending) return;
+    if ((!supportDraft.trim() && !supportImageFile) || supportSending) return;
     setSupportSending(true);
     const body = supportDraft.trim();
+    const imgFile = supportImageFile;
+    setSupportDraft('');
+    setSupportImageFile(null);
+    setSupportImagePreview(null);
     try {
       const { data: coachingId, error: ticketErr } = await LB.supabase.rpc('open_support_chat', { p_category: supportCategoryDraft });
       if (ticketErr || !coachingId) return;
+      let attachments = null;
+      if (imgFile) {
+        const url = await uploadChatImage(imgFile);
+        attachments = [{ url, name: imgFile.name, type: imgFile.type }];
+      }
       const { data: note, error: noteErr } = await LB.supabase.from('zane_coaching_notes').insert({
-        id: LB.uid(), coaching_id: coachingId, author_id: userId, type: 'general', body,
-      }).select('id, author_id, body, created_at').single();
+        id: LB.uid(), coaching_id: coachingId, author_id: userId, type: 'general',
+        body: body || '', ...(attachments ? { attachments } : {}),
+      }).select('id, author_id, body, created_at, read_at, attachments').single();
       if (!noteErr && note) {
+        const preview = attachments ? (body || '📷 Image') : body;
         const newTicket = {
           coachingId, status: 'open', category: supportCategoryDraft,
           createdAt: new Date().toISOString(), lastMessageAt: note.created_at,
-          lastMessageBody: body, unreadCount: 0,
+          lastMessageBody: preview, unreadCount: 0,
         };
         setStore(s => ({ ...s, supportTickets: [newTicket, ...(s.supportTickets || [])] }));
-        setSupportDraft('');
         setSupportCategoryDraft('question');
         setSupportActiveTicketId(coachingId);
         setSupportActiveNotes([note]);
         setSupportView('thread');
-        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId, preview: body });
+        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId, preview });
       }
     } finally { setSupportSending(false); }
   };
 
   const handleAdminReply = async () => {
-    if (!supportAdminDraft.trim() || supportAdminSending || !supportTicket) return;
+    if ((!supportAdminDraft.trim() && !adminImageFile) || supportAdminSending || !supportTicket) return;
     setSupportAdminSending(true);
     const body = supportAdminDraft.trim();
+    const imgFile = adminImageFile;
     setSupportAdminDraft('');
+    setAdminImageFile(null);
+    setAdminImagePreview(null);
     try {
+      let attachments = null;
+      if (imgFile) {
+        const url = await uploadChatImage(imgFile);
+        attachments = [{ url, name: imgFile.name, type: imgFile.type }];
+      }
       const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
-        id: LB.uid(), coaching_id: supportTicket.coachingId, author_id: userId, type: 'general', body,
-      }).select('id, author_id, body, created_at').single();
+        id: LB.uid(), coaching_id: supportTicket.coachingId, author_id: userId, type: 'general',
+        body: body || '', ...(attachments ? { attachments } : {}),
+      }).select('id, author_id, body, created_at, read_at, attachments').single();
       if (!error && note) {
         setSupportTicketNotes(prev => [...prev, note]);
-        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportTicket.coachingId, preview: body });
+        const preview = attachments ? (body || '📷 Image') : body;
+        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportTicket.coachingId, preview });
       }
     } finally { setSupportAdminSending(false); }
   };
 
+  const saveVipBg = async () => {
+    const email = vipBgEmail.trim().toLowerCase();
+    if (!email || vipBgSaving) return;
+    setVipBgSaving(true);
+    setVipBgMsg(null);
+    try {
+      const { data, error } = await LB.supabase.rpc('set_user_vip_background', { p_email: email, p_bg_key: vipBgKey });
+      if (error) { setVipBgMsg({ ok: false, text: error.message }); return; }
+      if (data === 'ERROR:not_found') { setVipBgMsg({ ok: false, text: `No account found for ${email}` }); return; }
+      setVipBgMsg({ ok: true, text: vipBgKey ? `Background set for ${email}` : `Background cleared for ${email}` });
+      setVipBgEmail('');
+      setVipBgKey('');
+      LB.supabase.rpc('get_user_vip_backgrounds').then(({ data: list }) => { setVipBgList(list || []); }).catch(() => {});
+    } finally { setVipBgSaving(false); }
+  };
+
   const handleSetSupportStatus = async (coachingId, newStatus) => {
-    await LB.supabase.rpc('set_support_status', { p_coaching_id: coachingId, p_status: newStatus });
+    const { error } = await LB.supabase.rpc('set_support_status', { p_coaching_id: coachingId, p_status: newStatus });
+    if (error) { console.error(error); return; }
     setSupportInbox(prev => prev.map(t => t.coaching_id === coachingId ? { ...t, support_status: newStatus } : t));
     setSupportTicket(t => t ? { ...t, status: newStatus } : t);
     setStore(s => ({ ...s, supportTickets: (s.supportTickets || []).map(t =>
@@ -888,6 +1067,19 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
           headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ coachingId, preview: 'Your support ticket has been removed by support.' }),
         }).catch(() => {});
+      }
+      // Delete storage attachments for all notes in this ticket
+      const { data: notesWithAttachments } = await LB.supabase
+        .from('zane_coaching_notes')
+        .select('attachments')
+        .eq('coaching_id', coachingId)
+        .not('attachments', 'is', null);
+      const storagePrefix = `${LB.SUPABASE_URL}/storage/v1/object/public/chat-attachments/`;
+      const paths = (notesWithAttachments || []).flatMap(n =>
+        (n.attachments || []).map(a => a.url?.startsWith(storagePrefix) ? a.url.slice(storagePrefix.length) : null).filter(Boolean)
+      );
+      if (paths.length > 0) {
+        await LB.supabase.storage.from('chat-attachments').remove(paths).catch(() => {});
       }
       await LB.supabase.rpc('delete_support_ticket', { p_coaching_id: coachingId });
       setSupportInbox(prev => prev.filter(t => t.coaching_id !== coachingId));
@@ -1084,11 +1276,14 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
         {(() => {
           const dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
           const visibleSessions = activeSessions.filter(s => !s.is_finished || !dismissed.includes(s.session_id));
+          const sortedSessions = [...visibleSessions].sort((a, b) =>
+            new Date(b.ended ?? b.started_at) - new Date(a.ended ?? a.started_at)
+          );
           return (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {visibleSessions.length === 0
+              {sortedSessions.length === 0
                 ? <div className="micro" style={{ color: UI.inkFaint, padding: '4px 0' }}>Nobody training right now.</div>
-                : visibleSessions.map((s, i) => {
+                : sortedSessions.map((s, i) => {
                   const isFinished = s.is_finished;
                   if (isFinished) {
                     const finishedMin = s.ended ? Math.round((nowS - new Date(s.ended).getTime()) / 60000) : null;
@@ -1185,14 +1380,22 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             Pin a Health tab to the nav bar to log daily weight, steps & macros and see your trends. These daily logs also prefill your weekly coach check-in.
           </div>
-          <div style={{ marginTop: 16 }}>
-            <Row label="Manual calorie entry">
-              <Toggle on={!!store.settings?.manualCalories} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, manualCalories: !s.settings?.manualCalories } }))} />
-            </Row>
-          </div>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-            By default calories are calculated from macros (P×4 + C×4 + F×9). Enable this to enter calories directly — useful for net-carb tracking.
-          </div>
+
+          <div className="micro" style={{ color: UI.inkFaint, margin: '20px 0 8px' }}>GLUCOSE</div>
+          <Row label="Blood glucose unit" first last>
+            <div style={{ display: 'flex', gap: 0, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+              {['mmol', 'mgdl'].map(u => (
+                <button key={u} onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, glucoseUnit: u } }))}
+                  style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
+                    background: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'var(--accent)' : 'transparent',
+                    color: (store.settings?.glucoseUnit ?? 'mmol') === u ? '#fff' : UI.inkSoft,
+                    border: 'none', cursor: 'pointer', transition: 'background 0.15s' }}>
+                  {u === 'mmol' ? 'mmol/L' : 'mg/dL'}
+                </button>
+              ))}
+            </div>
+          </Row>
+
           {(store.statusPeriods || []).length > 0 && (
             <div style={{ marginTop: 16 }}>
               <NavRow label="Sick & Vacation periods" hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} />
@@ -1393,6 +1596,18 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
       {/* ══ Training Sheet ══ */}
       <SettingsSheet open={trainingSheet} onClose={() => setTrainingSheet(false)} title="Training">
         <div>
+          <NavRow label="Session" first onTap={() => setSessionBehaviourSheet(true)} />
+          <NavRow label="Weights & Progression" onTap={() => setWeightsProgressionSheet(true)} />
+          <NavRow label="Notifications" onTap={() => setNotificationsGroupSheet(true)} />
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setTrainingSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Training › Session ══ */}
+      <SettingsSheet open={sessionBehaviourSheet} onClose={() => setSessionBehaviourSheet(false)} title="Session">
+        <div>
           <Row label="Rest timers" first>
             <button style={accentBtn} onClick={() => setRestSheet(true)}>Change</button>
           </Row>
@@ -1407,14 +1622,26 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
               : <Toggle on={false} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, tempoEnabled: true } }))} />
             }
           </Row>
-          <Row label="Smart progression">
+          <Row label="Warmup sets in summary">
+            <Toggle on={showWarmupInSummary} onToggle={() => { const n = !showWarmupInSummary; setShowWarmupInSummary(n); setStore(s => ({ ...s, settings: { ...s.settings, showWarmupInSummary: n } })); }} />
+          </Row>
+          <Row label="Regression indicator">
+            <Toggle on={store.settings?.showRegression !== false} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, showRegression: s.settings?.showRegression === false } }))} />
+          </Row>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setSessionBehaviourSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Training › Weights & Progression ══ */}
+      <SettingsSheet open={weightsProgressionSheet} onClose={() => setWeightsProgressionSheet(false)} title="Weights & Progression">
+        <div>
+          <Row label="Smart progression" first>
             {store.settings?.smartProgression
               ? <button style={accentBtn} onClick={() => setProgressionSheet(true)}>Change</button>
               : <Toggle on={false} onToggle={() => { setStore(s => ({ ...s, settings: { ...s.settings, smartProgression: true } })); setProgDisclaimer(true); }} />
             }
-          </Row>
-          <Row label="Fill weight down">
-            <Toggle on={store.settings?.weightFillDown !== false} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, weightFillDown: s.settings?.weightFillDown === false } }))} />
           </Row>
           <Row label="Equipment setup">
             <button style={accentBtn} onClick={() => setProgConfigOpen(true)}>Change</button>
@@ -1422,10 +1649,19 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
           <Row label="Plate inventory">
             <button style={accentBtn} onClick={() => setPlateInventoryOpen(true)}>Change</button>
           </Row>
-          <Row label="Warmup sets in summary">
-            <Toggle on={showWarmupInSummary} onToggle={() => { const n = !showWarmupInSummary; setShowWarmupInSummary(n); setStore(s => ({ ...s, settings: { ...s.settings, showWarmupInSummary: n } })); }} />
+          <Row label="Fill weight down">
+            <Toggle on={store.settings?.weightFillDown !== false} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, weightFillDown: s.settings?.weightFillDown === false } }))} />
           </Row>
-          <Row label="Remind on training days">
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setWeightsProgressionSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Training › Notifications ══ */}
+      <SettingsSheet open={notificationsGroupSheet} onClose={() => setNotificationsGroupSheet(false)} title="Notifications">
+        <div>
+          <Row label="Remind on training days" first>
             {reminderEnabled
               ? <button style={accentBtn} onClick={() => setReminderSheet(true)}>{store.settings?.reminderTime || 'Change'}</button>
               : <Toggle on={false} onToggle={toggleReminder} />
@@ -1437,7 +1673,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
             </div>
           )}
           <div style={{ marginTop: 24 }}>
-            <Btn style={{ width: '100%' }} onClick={() => setTrainingSheet(false)}>Done</Btn>
+            <Btn style={{ width: '100%' }} onClick={() => setNotificationsGroupSheet(false)}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>
@@ -1461,8 +1697,18 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
           <Row label="Week view in cycle mode" first>
             <Toggle on={cycleWeekView} onToggle={() => { const n = !cycleWeekView; setCycleWeekView(n); localStorage.setItem('logbook-cycle-week-view', String(n)); setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: n } })); }} />
           </Row>
-          <Row label="OLED black background">
-            <Toggle on={darkMode === 'black'} onToggle={() => { const n = darkMode === 'black' ? 'dark' : 'black'; setDarkMode(n); localStorage.setItem('logbook-dark-mode', n); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: n } })); }} />
+          <Row label="Theme">
+            <div style={{ display: 'flex', gap: 4 }}>
+              {[['dark', 'Dark'], ['black', 'OLED'], ['light', 'Light']].map(([key, label]) => (
+                <button key={key} onClick={() => { setDarkMode(key); localStorage.setItem('logbook-dark-mode', key); window.applyDarkMode(key); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: key } })); }} style={{
+                  padding: '6px 11px', borderRadius: 4, cursor: 'pointer',
+                  background: darkMode === key ? UI.goldFaint : UI.bgInset,
+                  border: `1px solid ${darkMode === key ? UI.goldSoft : UI.hairStrong}`,
+                  color: darkMode === key ? UI.gold : UI.inkSoft,
+                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                }}>{label}</button>
+              ))}
+            </div>
           </Row>
           <Row label="Unit preference">
             <button style={accentBtn} onClick={() => setUnitPickerOpen(true)}>
@@ -1716,7 +1962,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
                   Open registration for a batch — auto-approved until used up, then turns back on.
                 </div>
                 <NavRow label="Recent sign-ups" hint={unseenCount > 0 ? `${unseenCount} new` : `${recentSignups.length}`} onTap={() => setSignupsSheet(true)} />
-                <NavRow label="Background preview" hint={{ standard: 'Standard', mike: 'Mike', phoenix: 'Phoenix', marine: 'Marine', prince_abu: 'Prince Abu' }[adminBgPreview] || 'Change'} onTap={() => setBgPreviewSheet(true)} />
+                <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
               </Frame>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
                 <Btn onClick={() => setSupportInboxSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', fontSize: 15, padding: '14px 16px' }}>
@@ -1726,6 +1972,79 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
                   )}
                 </Btn>
               </div>
+            </div>
+          );
+        })()}
+      </SettingsSheet>
+
+      {/* ══ VIP backgrounds sheet (admin) ══ */}
+      <SettingsSheet open={vipBgSheet} onClose={() => setVipBgSheet(false)} title="VIP Backgrounds">
+        {(() => {
+          const opts = vipBgOptions;
+          const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="micro" style={{ color: UI.inkFaint }}>EMAIL</div>
+                <input
+                  type="email"
+                  value={vipBgEmail}
+                  onChange={e => setVipBgEmail(e.target.value)}
+                  placeholder="user@example.com"
+                  style={iStyle}
+                />
+                <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>BACKGROUND</div>
+                <select
+                  value={vipBgKey}
+                  onChange={e => setVipBgKey(e.target.value)}
+                  style={{ ...iStyle, appearance: 'none', WebkitAppearance: 'none', cursor: 'pointer' }}
+                  disabled={!opts}
+                >
+                  <option value="">{opts ? '— None (clear) —' : 'Loading…'}</option>
+                  {(opts || []).map(o => (
+                    <option key={o.key} value={o.key}>{o.label}</option>
+                  ))}
+                </select>
+                {vipBgMsg && (
+                  <div style={{ fontSize: 12, color: vipBgMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: vipBgMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
+                    {vipBgMsg.text}
+                  </div>
+                )}
+                <Btn onClick={saveVipBg} disabled={!vipBgEmail.trim() || vipBgSaving}>
+                  {vipBgSaving ? 'Saving…' : vipBgKey ? 'Assign background' : 'Clear background'}
+                </Btn>
+              </div>
+              <Frame style={{ padding: '0 14px' }}>
+                <NavRow label="Current assignments" hint={vipBgList.length > 0 ? `${vipBgList.length}` : 'None'} first onTap={() => setVipBgListSheet(true)} />
+              </Frame>
+            </div>
+          );
+        })()}
+      </SettingsSheet>
+
+      {/* ══ VIP backgrounds — current assignments sub-sheet ══ */}
+      <SettingsSheet open={vipBgListSheet} onClose={() => setVipBgListSheet(false)} title="Current Assignments">
+        {(() => {
+          const opts = vipBgOptions || [];
+          if (vipBgList.length === 0) {
+            return <div className="micro" style={{ color: UI.inkGhost, padding: '4px 0 12px' }}>No backgrounds assigned yet.</div>;
+          }
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+              {vipBgList.map((row, i) => {
+                const opt = opts.find(o => o.key === row.bg_key);
+                return (
+                  <div key={row.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.email}</div>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 1 }}>{opt?.label || row.bg_key}</div>
+                    </div>
+                    <button onClick={() => { setVipBgEmail(row.email); setVipBgKey(''); setVipBgMsg(null); setVipBgListSheet(false); }} style={{ background: 'none', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
+                      Clear
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           );
         })()}
@@ -1798,9 +2117,21 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
                 </div>
                 {/* sticky compose at bottom */}
                 <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
-                  <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
-                    placeholder="Describe your request…" rows={4} style={iStyle} />
-                  <Btn onClick={handleCreateTicket} disabled={!supportDraft.trim() || supportSending}>
+                  {supportImagePreview && (
+                    <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
+                      <img src={supportImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
+                      <button onClick={() => { setSupportImageFile(null); setSupportImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11 }}>×</button>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                    <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
+                      placeholder="Describe your request…" rows={4} style={{ ...iStyle, flex: 1 }} />
+                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImagePick} />
+                      <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
+                    </label>
+                  </div>
+                  <Btn onClick={handleCreateTicket} disabled={(!supportDraft.trim() && !supportImageFile) || supportSending}>
                     {supportSending ? 'Creating…' : 'Create ticket'}
                   </Btn>
                 </div>
@@ -1834,27 +2165,49 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
                   {!supportActiveLoading && supportActiveNotes.length === 0 && (
                     <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '24px 0' }}>No messages yet.</div>
                   )}
-                  {supportActiveNotes.map(n => {
-                    const isMe = n.author_id === userId;
-                    return (
-                      <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-                        <div style={{ maxWidth: '80%', padding: '9px 13px', borderRadius: isMe ? '12px 12px 3px 12px' : '12px 12px 12px 3px', background: isMe ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised, border: `0.5px solid ${isMe ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}` }}>
-                          <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55 }}>{n.body}</div>
+                  {(() => {
+                    const myNotes = supportActiveNotes.filter(n => n.author_id === userId);
+                    const lastReadId = [...myNotes].reverse().find(n => n.read_at)?.id;
+                    return supportActiveNotes.map(n => {
+                      const isMe = n.author_id === userId;
+                      const hasImg = Array.isArray(n.attachments) && n.attachments.length > 0;
+                      return (
+                        <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+                          <div style={{ maxWidth: '80%', padding: hasImg ? '6px' : '9px 13px', borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', background: isMe ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised, border: `0.5px solid ${isMe ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`, overflow: 'hidden' }}>
+                            {hasImg && n.attachments.map((a, i) => (
+                              <img key={i} src={a.url} alt="" style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0 }} />
+                            ))}
+                            {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
+                          </div>
+                          <div className="micro" style={{ color: UI.inkGhost, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span>{isMe ? 'You' : 'Support'} · {new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                            {isMe && n.id === lastReadId && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Seen</span>}
+                          </div>
                         </div>
-                        <div className="micro" style={{ color: UI.inkGhost, marginTop: 4 }}>
-                          {isMe ? 'You' : 'Support'} · {new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    });
+                  })()}
+                  <div ref={supportBottomRef} />
                 </div>
                 {/* Compose — sticks to bottom */}
                 {activeTicket?.status !== 'resolved' ? (
                   <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
-                    <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
-                      placeholder="Write a message…" rows={3} style={iStyle}
-                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSupportSend(); }} />
-                    <Btn onClick={handleSupportSend} disabled={!supportDraft.trim() || supportSending}>
+                    {supportImagePreview && (
+                      <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
+                        <img src={supportImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
+                        <button onClick={() => { setSupportImageFile(null); setSupportImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11 }}>×</button>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                      <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
+                        placeholder="Write a message…" rows={3} style={{ ...iStyle, flex: 1 }}
+                        onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSupportSend(); }} />
+                      <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                        <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImagePick} />
+                        <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
+                      </label>
+                    </div>
+                    <Btn onClick={handleSupportSend} disabled={(!supportDraft.trim() && !supportImageFile) || supportSending}>
                       {supportSending ? 'Sending…' : 'Send'}
                     </Btn>
                   </div>
@@ -1965,31 +2318,54 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
                   {!supportTicketLoading && supportTicketNotes.length === 0 && (
                     <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '24px 0' }}>No messages yet.</div>
                   )}
-                  {supportTicketNotes.map(n => {
-                    const isAdminMsg = n.author_id === userId;
-                    return (
-                      <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAdminMsg ? 'flex-end' : 'flex-start' }}>
-                        <div style={{
-                          maxWidth: '80%', padding: '9px 13px', borderRadius: isAdminMsg ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
-                          background: isAdminMsg ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised,
-                          border: `0.5px solid ${isAdminMsg ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`,
-                        }}>
-                          <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55 }}>{n.body}</div>
+                  {(() => {
+                    const myNotes = supportTicketNotes.filter(n => n.author_id === userId);
+                    const lastReadId = [...myNotes].reverse().find(n => n.read_at)?.id;
+                    return supportTicketNotes.map(n => {
+                      const isAdminMsg = n.author_id === userId;
+                      const hasImg = Array.isArray(n.attachments) && n.attachments.length > 0;
+                      return (
+                        <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAdminMsg ? 'flex-end' : 'flex-start' }}>
+                          <div style={{
+                            maxWidth: '80%', padding: hasImg ? '6px' : '9px 13px', borderRadius: isAdminMsg ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
+                            background: isAdminMsg ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised,
+                            border: `0.5px solid ${isAdminMsg ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`,
+                            overflow: 'hidden',
+                          }}>
+                            {hasImg && n.attachments.map((a, i) => (
+                              <img key={i} src={a.url} alt="" style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0 }} />
+                            ))}
+                            {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
+                          </div>
+                          <div className="micro" style={{ color: UI.inkGhost, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span>{isAdminMsg ? 'You' : supportTicket.clientName} · {new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                            {isAdminMsg && n.id === lastReadId && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Seen</span>}
+                          </div>
                         </div>
-                        <div className="micro" style={{ color: UI.inkGhost, marginTop: 4 }}>
-                          {isAdminMsg ? 'You' : supportTicket.clientName} · {new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    });
+                  })()}
+                  <div ref={adminBottomRef} />
                 </div>
                 {/* Compose — sticks to bottom */}
                 <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
-                  <textarea value={supportAdminDraft} onChange={e => setSupportAdminDraft(e.target.value)}
-                    placeholder="Reply…" rows={3} style={iStyle}
-                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
-                  />
-                  <Btn onClick={handleAdminReply} disabled={!supportAdminDraft.trim() || supportAdminSending}>
+                  {adminImagePreview && (
+                    <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
+                      <img src={adminImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
+                      <button onClick={() => { setAdminImageFile(null); setAdminImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11 }}>×</button>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                    <textarea value={supportAdminDraft} onChange={e => setSupportAdminDraft(e.target.value)}
+                      placeholder="Reply…" rows={3} style={{ ...iStyle, flex: 1 }}
+                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
+                    />
+                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: adminImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${adminImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: adminImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAdminImagePick} />
+                      <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
+                    </label>
+                  </div>
+                  <Btn onClick={handleAdminReply} disabled={(!supportAdminDraft.trim() && !adminImageFile) || supportAdminSending}>
                     {supportAdminSending ? 'Sending…' : 'Send reply'}
                   </Btn>
                   {currentStatus === 'resolved' && (
@@ -2100,42 +2476,6 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
         })()}
       </FullSheet>
 
-      {/* ══ VIP background preview sheet (admin) ══ */}
-      <SettingsSheet open={bgPreviewSheet} onClose={() => setBgPreviewSheet(false)} title="Background">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {[
-            { key: 'standard',   label: 'Standard',   sub: 'Zane logo watermark' },
-            { key: 'mike',       label: 'Mike',       sub: 'mikeapicelli777' },
-            { key: 'phoenix',    label: 'Phoenix',    sub: 'mb2489' },
-            { key: 'marine',     label: 'Marine',     sub: 'marine.png' },
-            { key: 'prince_abu', label: 'Prince Abu', sub: 'prince_abu.png' },
-          ].map(({ key, label, sub }) => {
-            const active = adminBgPreview === key;
-            return (
-              <button key={key} onClick={() => {
-                setAdminBgPreview(key);
-                if (key === 'standard') localStorage.removeItem('logbook-admin-bg-preview');
-                else localStorage.setItem('logbook-admin-bg-preview', key);
-              }} style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '12px 14px', borderRadius: 6,
-                border: active ? `1.5px solid var(--accent)` : `0.5px solid ${UI.hairStrong}`,
-                background: active ? `rgba(var(--accent-rgb), 0.1)` : UI.bgInset,
-                cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textAlign: 'left',
-              }}>
-                <div>
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: active ? 'var(--accent)' : UI.ink }}>{label}</div>
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{sub}</div>
-                </div>
-                {active && <svg width="14" height="11" viewBox="0 0 14 11" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 5.5L5 9.5L13 1.5" /></svg>}
-              </button>
-            );
-          })}
-          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 4 }}>
-            Previews on your own home screen only — device-local, nothing is synced or shown to users.
-          </div>
-        </div>
-      </SettingsSheet>
 
       {/* ══ Recent sign-ups sheet (admin) ══ */}
       <SettingsSheet open={signupsSheet} onClose={() => setSignupsSheet(false)} title="Recent sign-ups">
@@ -2180,25 +2520,39 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
           <Row label="This device" first>
             {webPushLoading
               ? <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkFaint }}>…</span>
-              : <Toggle on={pushEnabled} onToggle={togglePush} />}
+              : <Toggle on={pushEnabled || webPushPending} onToggle={togglePush} />}
           </Row>
           {pushEnabled && store.settings?.usePushover && store.settings?.pushoverUserKey && (
             <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>Active via Pushover — see Advanced</div>
           )}
-          {pushEnabled && !store.settings?.usePushover && webPushSub && (() => {
+          {(pushEnabled || webPushPending) && !store.settings?.usePushover && webPushSub && (() => {
             const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 20, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box', letterSpacing: '0.3em', textAlign: 'center' };
-            if (webPushStep === 'code-sent') return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div className="micro" style={{ color: UI.inkSoft, paddingLeft: 2 }}>Enter the 6-digit code from the notification</div>
-                <input type="text" inputMode="numeric" maxLength={6} value={codeInput}
-                  onChange={e => setCodeInput(e.target.value.replace(/\D/g, ''))}
-                  placeholder="000000" style={iStyle} autoFocus />
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <Btn kind="ghost" onClick={sendWebPushCode}>Resend</Btn>
-                  <Btn onClick={verifyWebPushCode} disabled={codeInput.length !== 6} style={{ flex: 1 }}>Verify</Btn>
+            if (webPushStep === 'code-sent') {
+              const pct = pendingCountdown / 120;
+              const urgent = pendingCountdown <= 30;
+              const barColor = urgent ? '#e07b3a' : 'var(--accent)';
+              const mins = Math.floor(pendingCountdown / 60);
+              const secs = pendingCountdown % 60;
+              const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="micro" style={{ color: UI.inkSoft }}>Enter the 6-digit code from the notification</div>
+                    <div className="num" style={{ fontSize: 11, color: urgent ? '#e07b3a' : UI.inkFaint, minWidth: 28, textAlign: 'right' }}>{timeStr}</div>
+                  </div>
+                  <div style={{ height: 2, background: UI.hairStrong, borderRadius: 999, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${pct * 100}%`, background: barColor, borderRadius: 999, transition: 'width 1s linear, background 0.5s' }} />
+                  </div>
+                  <input type="text" inputMode="numeric" maxLength={6} value={codeInput}
+                    onChange={e => setCodeInput(e.target.value.replace(/\D/g, ''))}
+                    placeholder="000000" style={iStyle} autoFocus />
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Btn kind="ghost" onClick={sendWebPushCode}>Resend</Btn>
+                    <Btn onClick={verifyWebPushCode} disabled={codeInput.length !== 6} style={{ flex: 1 }}>Verify</Btn>
+                  </div>
                 </div>
-              </div>
-            );
+              );
+            }
             if (webPushVerified) return (
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: 'rgba(var(--accent-rgb), 0.08)', border: '0.5px solid rgba(var(--accent-rgb), 0.25)', borderRadius: 6, padding: '8px 14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

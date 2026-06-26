@@ -380,7 +380,8 @@ function SetPasswordScreen({ onDone, isRecovery }) {
       if (updateErr) throw updateErr;
 
       if (name.trim() && currentUser?.id) {
-        await LB.supabase.from('zane_profiles').upsert({ id: currentUser.id, name: name.trim() });
+        const { error } = await LB.supabase.from('zane_profiles').upsert({ id: currentUser.id, name: name.trim() });
+        if (error) { console.error(error); }
       }
 
       if (email) {
@@ -512,7 +513,7 @@ function RecentBannerDay({ banner, store, setStore, go, sch, userId, onOpenSkipS
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="micro" style={{ marginBottom: 3 }}>{dayName} · {dateLabel}</div>
-          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `1px solid ${UI.hairStrong}`, borderRadius: 3, padding: '2px 8px', display: 'inline-block' }}>
+          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px', display: 'inline-block' }}>
             {skip.skipReason}
           </span>
         </div>
@@ -1031,7 +1032,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
             </button>
             <div style={{ display: 'flex', gap: 6 }}>
               {Array.from({ length: METRICS }).map((_, i) => (
-                <div key={i} style={{ width: i === step - 1 ? 18 : 6, height: 6, borderRadius: 3, transition: 'all 0.2s', background: i === step - 1 ? 'var(--accent)' : i < step - 1 ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong }} />
+                <div key={i} style={{ width: i === step - 1 ? 18 : 6, height: 6, borderRadius: 4, transition: 'all 0.2s', background: i === step - 1 ? 'var(--accent)' : i < step - 1 ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong }} />
               ))}
             </div>
             <button onClick={save} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' }}>Save</button>
@@ -1046,53 +1047,17 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
 }
 
 // Given a 1-indexed cycle number, returns the start Date of that cycle for a
-// versioned schedule. Uses the same arithmetic as getCycleNumForDate (inverted).
-function getCycleStartForNum(sch, cycleNum) {
-  if (!sch?.versions?.length || cycleNum < 1) return null;
-  const sorted = [...sch.versions].sort((a, b) => a.validFrom.localeCompare(b.validFrom));
-  let totalPriorCycles = 0;
-  for (let i = 0; i < sorted.length; i++) {
-    const v = sorted[i];
-    const nextV = sorted[i + 1];
-    const daysLen = (v.days || []).length;
-    if (!daysLen) continue;
-    if (nextV) {
-      const vStart = new Date(v.validFrom + 'T12:00:00');
-      const vEnd = new Date(nextV.validFrom + 'T12:00:00');
-      const daysInVersion = Math.round((vEnd - vStart) / 86400000);
-      const cyclesInVersion = Math.floor((daysInVersion - 1) / daysLen) + 1;
-      if (totalPriorCycles + cyclesInVersion >= cycleNum) {
-        const cycleOffset = cycleNum - totalPriorCycles - 1;
-        return new Date(vStart.getTime() + cycleOffset * daysLen * 86400000);
-      }
-      totalPriorCycles += cyclesInVersion;
-    } else {
-      const cycleOffset = cycleNum - totalPriorCycles - 1;
-      const vStartDate = new Date(v.validFrom + 'T12:00:00');
-      return new Date(vStartDate.getTime() + cycleOffset * daysLen * 86400000);
-    }
-  }
-  return null;
-}
+// Moved to store.js as LB.getCycleStartForNum — kept as thin wrapper for the
+// one caller below until we can update the call site.
+const getCycleStartForNum = LB.getCycleStartForNum;
 
 // ─── HOME ─────────────────────────────────────────────────────────────
-// Per-user override for the faint background figure on the main screen.
-// Keyed by lowercase email → image path (must also be listed in sw.js ASSETS).
-const TRAIN_BG_OVERRIDES = {
-  'mikeapicelli777@gmail.com': 'icons/IMG_6389.png',
-  'mb2489@protonmail.com':     'icons/phoenix.png',
-  'aboagyeboadi@yahoo.com':    'icons/prince_abu.png',
-  'joshseymour23@yahoo.com':   'icons/marine.png',
-};
-
 function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRetrySync }) {
   const [confirmEl, confirm] = useConfirm();
-  const _userEmail = (store.user?.email || '').toLowerCase();
-  const _adminPreviewBg = _userEmail === 'office@btc-prime.biz'
-    ? ({ mike: 'icons/IMG_6389.png', phoenix: 'icons/phoenix.png', marine: 'icons/marine.png', prince_abu: 'icons/prince_abu.png' })[localStorage.getItem('logbook-admin-bg-preview')]
-    : undefined;
-  const trainBg = _adminPreviewBg || TRAIN_BG_OVERRIDES[_userEmail] || 'icons/zane-logo.png';
+  const trainBg = store.settings?.vipBackground || 'icons/zane-logo.png';
   const isCustomBg = trainBg !== 'icons/zane-logo.png';
+  const isLightMode = (store.settings?.darkMode ?? 'dark') === 'light';
+  const defaultLogoStyle = { width: '85%', maxWidth: 320, opacity: isLightMode ? 0.14 : 0.04, filter: isLightMode ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const today = LB.todaysDay(store);
   const sch = today?.schedule;
   const day = today?.day;
@@ -1156,6 +1121,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const [backlogPickerOpen, setBacklogPickerOpen] = useState(false);
   const [workoutSubOpen, setWorkoutSubOpen] = useState(false);
   const [bonusDayPickerOpen, setBonusDayPickerOpen] = useState(false);
+  const [freestyleSubOpen, setFreestyleSubOpen] = useState(false);
   const [checkinPickerOpen, setCheckinPickerOpen] = useState(false);
   const [pullDelta, setPullDelta] = useState(0);
   const [coachingSchema, setCoachingSchema] = useState(null);
@@ -1335,6 +1301,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const isFutureSlot = sessionDate > (() => { const d = new Date(); d.setHours(12,0,0,0); return d; })();
 
   const periodLabel = useMemo(() => {
+    if (store.statusMode === 'deload' && weekOffset === 0) return 'DELOAD';
     if (isFlex) return 'FLEXIBLE';
     if (weekdayMode) {
       if (store.weekPlanStartDate) {
@@ -1367,19 +1334,22 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     }
     const cycleNum = currentCycleNum + weekOffset + 1;
     return `CYCLE ${cycleNum}`;
-  }, [isFlex, weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch]);
+  }, [isFlex, weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch, store.statusMode]);
 
   const cardLabel = useMemo(() => {
+    // During a deload, today's label reads DELOAD instead of TODAY/NEXT UP so
+    // the strip clearly signals the light week. Reverts automatically on end.
+    const todayWord = (isViewingToday && store.statusMode === 'deload') ? 'DELOAD' : 'TODAY';
     if (isFlex) {
-      return `${isViewingToday ? 'NEXT UP · ' : ''}DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
+      return `${isViewingToday ? (store.statusMode === 'deload' ? 'DELOAD · ' : 'NEXT UP · ') : ''}DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
     }
     if (isViewingToday) {
-      if (weekdayMode) return `TODAY · ${WEEKDAYS_FULL[selectedWd].toUpperCase()}`;
+      if (weekdayMode) return `${todayWord} · ${WEEKDAYS_FULL[selectedWd].toUpperCase()}`;
       if (cycleWeekView) {
         const sel = week.find(d => d.weekday === selectedWd);
-        return `TODAY · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
+        return `${todayWord} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
       }
-      return `TODAY · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
+      return `${todayWord} · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
     }
     const dateStr = sessionDate.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
     if (weekdayMode) return dateStr;
@@ -1388,7 +1358,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       return `${dateStr} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
     }
     return `${dateStr} · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
-  }, [isFlex, isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week]);
+  }, [isFlex, isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week, store.statusMode]);
 
   const avgDayDuration = useMemo(() => {
     if (!activeDay?.id) return null;
@@ -1573,6 +1543,149 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       if (yes) await LB.clearStatusMode(userId, store, setStore);
     })();
   }, [store?.statusMode, store?.sessions, store?.cardioLogs]);
+
+  // Auto-end a deload once it has run its course (one cycle / week elapsed, or
+  // the flex session goal of deload sessions logged). Runs on mount and when the
+  // relevant inputs change; endDeload no-ops if already off.
+  const deloadEndChecked = useRef(false);
+  useEffect(() => {
+    if (store?.statusMode !== 'deload') { deloadEndChecked.current = false; return; }
+    if (deloadEndChecked.current) return;
+    if (LB.deloadElapsed(store)) {
+      deloadEndChecked.current = true;
+      LB.endDeload(userId, store, setStore);
+    }
+  }, [store?.statusMode, store?.statusModeSince, store?.sessions]);
+
+  // After every 8 completed cycles (cycle plans), 8 complete weeks (weekday plans),
+  // or 8×sessions_per_week sessions (flex plans), congratulate the user and offer a
+  // deload. Fires only when a non-deload session is completed on the last training
+  // day of that block. Anchor resets on each dismissal so the next prompt is 8 more
+  // cycles/weeks/sessions away.
+  const deloadNudgeShown = useRef(false);
+  useEffect(() => {
+    if (deloadNudgeShown.current) return;
+    if (store?.statusMode || store?.inProgress) return;
+    if (!sch) return;
+
+    const todayStr = LB.todayISO();
+    const justFinished = (store?.sessions || []).some(
+      s => s.ended && s.date?.slice(0, 10) === todayStr && !s.isDeload,
+    );
+    if (!justFinished) return;
+
+    const todayD = new Date(todayStr + 'T12:00:00');
+    let shouldPrompt = false;
+    let deloadCycleInfo = null; // { cyclePos, cycleLen } for next-cycle-start alignment
+    let title = '8 cycles done! 🎉';
+    let body = "You've completed 8 full training cycles — that's serious dedication. A deload week now means you come back stronger. Want to start one?";
+
+    if (LB.isFlexPlan(sch)) {
+      const anchorTS = store?.deloadPromptDismissedAt ? new Date(store.deloadPromptDismissedAt) : new Date(0);
+      const spw = sch.sessions_per_week || 3;
+      const goal = spw * 8;
+      const count = (store.sessions || []).filter(
+        s => s.ended && !s.isDeload && new Date(s.ended) >= anchorTS,
+      ).length;
+      if (count > 0 && count % goal === 0) {
+        shouldPrompt = true;
+        title = `${goal} sessions done! 🎉`;
+        body = `You've logged ${goal} training sessions — solid work. A deload week now means you come back stronger. Want to start one?`;
+      }
+    } else if (LB.isWeekdayPlan(sch)) {
+      const firstSession = (store?.sessions || []).filter(s => s.ended && s.date).map(s => s.date.slice(0, 10)).sort()[0] || null;
+      const anchorStr = store?.deloadPromptDismissedAt || store?.weekPlanStartDate || firstSession;
+      if (anchorStr) {
+        const anchorD = new Date(anchorStr.slice(0, 10) + 'T12:00:00');
+        const daysElapsed = Math.round((todayD - anchorD) / 86400000);
+        const weekFromAnchor = Math.floor(daysElapsed / 7);
+        if (weekFromAnchor >= 7 && weekFromAnchor % 8 === 7) {
+          const vDays = LB.getPlanDaysForDate(sch, todayStr);
+          const trainingWds = vDays.filter(d => d.weekday != null && (d.items || []).length > 0).map(d => d.weekday);
+          const lastWd = trainingWds.length ? Math.max(...trainingWds) : -1;
+          if (lastWd >= 0 && LB.isoWd(todayD) === lastWd) {
+            shouldPrompt = true;
+            title = '8 weeks done! 🎉';
+            body = "You've completed 8 solid weeks of training — impressive consistency. A deload week now means you'll come back even stronger. Want to start one?";
+          }
+        }
+      }
+    } else if (sch.versions?.length) {
+      const cycleNum = LB.getCycleNumForDate(sch, todayStr);
+      if (cycleNum > 0) {
+        const cyclePos = LB.getCyclePosForDate(sch, todayStr);
+        const days = LB.getPlanDaysForDate(sch, todayStr);
+        const lastTrainingIdx = days.reduce((last, d, i) => ((d.items || []).length > 0 ? i : last), -1);
+        if (cyclePos !== null && lastTrainingIdx >= 0 && cyclePos === lastTrainingIdx) {
+          const anchorStr = store?.deloadPromptDismissedAt;
+          let eligible;
+          if (anchorStr) {
+            const anchorCycleNum = LB.getCycleNumForDate(sch, anchorStr.slice(0, 10));
+            const diff = anchorCycleNum ? cycleNum - anchorCycleNum : 0;
+            eligible = diff > 0 && diff % 8 === 0;
+          } else {
+            eligible = cycleNum % 8 === 0;
+          }
+          if (eligible) {
+            shouldPrompt = true;
+            deloadCycleInfo = { cyclePos, cycleLen: days.length };
+          }
+        }
+      }
+    } else {
+      // Unversioned cycle plan: fall back to store.cycleStartDate for position.
+      const cycleLen = (sch.days || []).length;
+      const cycleStartStr = store?.cycleStartDate;
+      if (cycleLen && cycleStartStr) {
+        const cycleStartD = new Date(cycleStartStr + 'T12:00:00');
+        const daysFromStart = Math.round((todayD - cycleStartD) / 86400000);
+        if (daysFromStart >= 0) {
+          const cycleNum = Math.floor(daysFromStart / cycleLen) + 1;
+          const cyclePos = daysFromStart % cycleLen;
+          const lastTrainingIdx = (sch.days || []).reduce((last, d, i) => ((d.items || []).length > 0 ? i : last), -1);
+          if (lastTrainingIdx >= 0 && cyclePos === lastTrainingIdx) {
+            const anchorStr = store?.deloadPromptDismissedAt;
+            let eligible;
+            if (anchorStr) {
+              const anchorD2 = new Date(anchorStr.slice(0, 10) + 'T12:00:00');
+              const anchorDaysFromStart = Math.round((anchorD2 - cycleStartD) / 86400000);
+              const anchorCycleNum = anchorDaysFromStart >= 0 ? Math.floor(anchorDaysFromStart / cycleLen) + 1 : 0;
+              const diff = cycleNum - anchorCycleNum;
+              eligible = diff > 0 && diff % 8 === 0;
+            } else {
+              eligible = cycleNum % 8 === 0;
+            }
+            if (eligible) {
+              shouldPrompt = true;
+              deloadCycleInfo = { cyclePos, cycleLen };
+            }
+          }
+        }
+      }
+    }
+
+    if (!shouldPrompt) return;
+    deloadNudgeShown.current = true;
+    (async () => {
+      const yes = await confirm(body, { title, ok: 'Start deload', cancel: 'Not now', preventBackdropClose: true });
+      const stamp = new Date().toISOString();
+      setStore(s => ({ ...s, deloadPromptDismissedAt: stamp }));
+      if (yes) {
+        // Align deload window to next cycle start so rest days at end of cycle don't
+        // shorten the deload. Works for both versioned and unversioned cycle plans.
+        let sinceISO = null;
+        if (!LB.isFlexPlan(sch) && !LB.isWeekdayPlan(sch) && deloadCycleInfo) {
+          const { cyclePos, cycleLen } = deloadCycleInfo;
+          if (cyclePos !== null && cycleLen > 0) {
+            const nextCycleStart = new Date(todayStr + 'T00:00:00');
+            nextCycleStart.setDate(nextCycleStart.getDate() + (cycleLen - cyclePos));
+            sinceISO = nextCycleStart.toISOString();
+          }
+        }
+        await LB.startDeload(userId, { ...store, deloadPromptDismissedAt: stamp }, setStore, sinceISO);
+      }
+    })();
+  }, [store?.statusMode, store?.inProgress, store?.deloadPromptDismissedAt, store?.sessions, sch]);
 
   const selectedDayCardioLogs = useMemo(() => {
     const dateKey = sessionDate.toISOString().slice(0, 10);
@@ -1863,6 +1976,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   const startFreestyleSession = () => {
     setWorkoutSubOpen(false);
+    setFreestyleSubOpen(false);
     setQuickActionsOpen(false);
     const session = {
       id: LB.uid(), scheduleId: null, dayId: null, dayName: 'Freestyle',
@@ -1870,6 +1984,36 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       ended: null, entries: [], currentExIdx: 0, cyclePos: null, isFreestyle: true, isBonus: true,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    go({ name: 'train', sessionId: session.id });
+  };
+
+  const startFreestyleFromTemplate = async (template) => {
+    if (loggingRef.current) return;
+    loggingRef.current = true;
+    setWorkoutSubOpen(false);
+    setFreestyleSubOpen(false);
+    setQuickActionsOpen(false);
+    const items = (template.exercises || []).filter(it => LB.findExercise(store, it.exId));
+    const seedRefs = await LB.fetchSeedEntries(store, items, null, userId);
+    const entries = items.map(it => {
+      const ex = LB.findExercise(store, it.exId);
+      if (ex?.movement_type === 'cardio') {
+        return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
+      }
+      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null);
+      const isUni = ex?.unilateral || false;
+      const suggestion = LB.progressionSuggestion(store, it.exId, null, it.reps, it.repsPerSet, seedRefs[it.exId]);
+      const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+      const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
+      return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+    });
+    const session = {
+      id: LB.uid(), scheduleId: null, dayId: null, dayName: 'Freestyle',
+      date: new Date().toISOString(), startedAt: new Date().toISOString(),
+      ended: null, entries, currentExIdx: 0, cyclePos: null, isFreestyle: true, isBonus: true,
+    };
+    setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    loggingRef.current = false;
     go({ name: 'train', sessionId: session.id });
   };
 
@@ -1949,7 +2093,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
           <img src={trainBg} style={isCustomBg
             ? { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' }
-            : { width: '85%', maxWidth: 320, opacity: 0.04, filter: 'grayscale(1) brightness(3)', objectFit: 'contain' }} />
+            : defaultLogoStyle} />
         </div>
         <TopBar
           title={<span>HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span></span>}
@@ -2015,11 +2159,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
       <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-      {/* Background ZANE watermark (per-user override via TRAIN_BG_OVERRIDES) */}
+      {/* Background watermark — VIP image from store.settings.vipBackground or default ZANE logo */}
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
         <img src={trainBg} style={isCustomBg
           ? { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' }
-          : { width: '85%', maxWidth: 320, opacity: 0.04, filter: 'grayscale(1) brightness(3)', objectFit: 'contain' }} />
+          : defaultLogoStyle} />
       </div>
 
       {/* Header */}
@@ -2304,7 +2448,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             {selectedDayStatusMode && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                 <span className="micro" style={{ color: UI.inkFaint }}>
-                  {selectedDayStatusMode === 'sick' ? 'Sick mode active' : 'Vacation mode active'}
+                  {selectedDayStatusMode === 'sick' ? 'Sick mode active' : selectedDayStatusMode === 'deload' ? 'Deload mode active' : 'Vacation mode active'}
                 </span>
                 {isViewingToday && (
                   <button onClick={handleClearStatus} style={{
@@ -2742,17 +2886,64 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
             </button>
           )}
-          <button onClick={startFreestyleSession} style={{
+          <button onClick={() => { setWorkoutSubOpen(false); setFreestyleSubOpen(true); }} style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 12,
             padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
             borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ flex: 1, textAlign: 'left' }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>Freestyle</div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Open session — add exercises on the fly</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Open session — empty or from a template</div>
             </div>
             <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
           </button>
+        </div>
+      </Sheet>
+
+      {/* Freestyle sub-picker: Empty | From template */}
+      <Sheet open={freestyleSubOpen} onClose={() => setFreestyleSubOpen(false)} title="Freestyle">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button onClick={startFreestyleSession} style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+            padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+            borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>Empty session</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Start blank — add exercises on the fly</div>
+            </div>
+            <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+          </button>
+          {(store.workoutTemplates || []).length > 0 && (
+            <>
+              <div className="label" style={{ marginTop: 8, marginBottom: 2, color: UI.inkFaint }}>From template</div>
+              {(store.workoutTemplates || []).map(t => (
+                <div key={t.id} style={{
+                  display: 'flex', alignItems: 'stretch', gap: 0,
+                  background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, overflow: 'hidden',
+                }}>
+                  <button onClick={() => startFreestyleFromTemplate(t)} style={{
+                    flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                    padding: '12px 14px', background: 'transparent', border: 'none',
+                    cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                  }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+                    <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>{(t.exercises || []).length} ex</span>
+                  </button>
+                  <button onClick={async () => {
+                    if (!await confirm(`Delete template "${t.name}"?`, { title: 'Delete template', ok: 'Delete', danger: true })) return;
+                    setStore(s => ({ ...s, workoutTemplates: (s.workoutTemplates || []).filter(x => x.id !== t.id) }));
+                  }} aria-label="Delete template" style={{
+                    flexShrink: 0, width: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'transparent', border: 'none', borderLeft: `0.5px solid ${UI.hair}`,
+                    color: 'rgba(var(--danger-rgb),0.7)', cursor: 'pointer',
+                  }}>
+                    <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       </Sheet>
 

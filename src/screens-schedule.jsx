@@ -14,9 +14,11 @@ function useIsPadS() {
 
 const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','BACK','REST'];
 
+const daysArr = s => Array.isArray(s?.days) ? s.days : [];
+
 // One-line plan summary shown in the plan list and viewer header.
 function planDescriptor(s) {
-  const trainingDays = s.days.filter(d => d.items.length).length;
+  const trainingDays = daysArr(s).filter(d => d.items.length).length;
   if (LB.isFlexPlan(s)) {
     const goal = s.sessions_per_week;
     return `Flexible · ${trainingDays} ${trainingDays === 1 ? 'workout' : 'workouts'}${goal ? ` · ${goal}×/week` : ''}`;
@@ -28,9 +30,27 @@ function planDescriptor(s) {
 }
 
 // ─── PlanScreen ────────────────────────────────────────────────────
-function PlanScreen({ store, setStore, go }) {
+function PlanScreen({ store, setStore, go, userId }) {
   const [archivedOpen, setArchivedOpen] = useStateS(false);
+  const [confirmEl, confirm] = useConfirm();
   const importRef = React.useRef(null);
+
+  const isDeload = store.statusMode === 'deload';
+  const deloadRemaining = isDeload ? LB.deloadDaysRemaining(store) : null;
+  const toggleDeload = async (e) => {
+    e.stopPropagation();
+    if (isDeload) {
+      if (!await confirm('End the deload week and return to normal training?', { title: 'End deload', ok: 'End deload' })) return;
+      await LB.endDeload(userId, store, setStore);
+    } else {
+      if (store.statusMode) {
+        if (!await confirm(`This will end your ${store.statusMode} status. Start a deload week instead?`, { title: 'Start deload', ok: 'Start deload' })) return;
+      } else if (!await confirm('Train your normal plan at ~50% load for one cycle. Weights pre-fill light and this week is excluded from progression. Start now?', { title: 'Start deload week', ok: 'Start deload' })) {
+        return;
+      }
+      await LB.startDeload(userId, store, setStore);
+    }
+  };
 
   const importPlan = (e) => {
     const file = e.target.files[0];
@@ -125,6 +145,19 @@ function PlanScreen({ store, setStore, go }) {
                   <Pill key={d.id} gold={!!d.items.length}>{d.name}</Pill>
                 ))}
               </div>
+              <button onClick={toggleDeload} style={{
+                  width: '100%', marginTop: 12, padding: '10px 12px', borderRadius: 6, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  background: isDeload ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                  border: `1px ${isDeload ? 'solid' : 'dashed'} ${isDeload ? UI.goldSoft : UI.hairStrong}`,
+                  color: isDeload ? UI.gold : UI.inkSoft,
+                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
+                }}>
+                  <i className={`fa-solid ${isDeload ? 'fa-arrow-rotate-left' : 'fa-battery-quarter'}`} style={{ fontSize: 12 }} />
+                  {isDeload
+                    ? (deloadRemaining != null ? `Deload active · ${deloadRemaining}d left · End` : 'Deload active · End')
+                    : 'Start deload week'}
+                </button>
             </BracketFrame>
           ) : (
             <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px' }}>
@@ -175,6 +208,7 @@ function PlanScreen({ store, setStore, go }) {
           );
         })()}
       </div>
+      {confirmEl}
     </Screen>
   );
 }
@@ -183,7 +217,7 @@ function PlanScreen({ store, setStore, go }) {
 // Reached from the home rest-day card. Day chips switch between days
 // (like the exercise chips in training); each day shows the weights/reps
 // that will be prefilled when training, with no controls that change it.
-function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
+function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId }) {
   const sch = store.schedules.find(s => s.id === (scheduleId || store.activeScheduleId));
   const isWeekday = sch ? LB.isWeekdayPlan(sch) : false;
   const isFlex = sch ? LB.isFlexPlan(sch) : false;
@@ -374,7 +408,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
           border: `1px solid ${UI.goldSoft}`, borderRadius: 4, background: UI.goldFaint,
           padding: '10px 14px', minHeight: 44,
         }}>
-          <span style={{ width: 6, height: 6, borderRadius: 2, background: UI.gold, flexShrink: 0 }} />
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: UI.gold, flexShrink: 0 }} />
           <span className="label" style={{ color: UI.gold, marginBottom: 0 }}>Active</span>
         </div>
       )}
@@ -629,7 +663,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan }) {
       {reactivateSheet && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.5)' }}
           onClick={() => setReactivateSheet(false)}>
-          <div style={{ background: UI.bg, borderRadius: '14px 14px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
+          <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
             onClick={e => e.stopPropagation()}>
             <div className="label" style={{ color: UI.inkFaint, marginBottom: 6 }}>REACTIVATE THIS VERSION</div>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 18, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
@@ -1093,7 +1127,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       {applyFromSheet && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
           onClick={() => setApplyFromSheet(false)}>
-          <div style={{ background: UI.bg, borderRadius: '14px 14px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
+          <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
             onClick={e => e.stopPropagation()}>
             <div className="label" style={{ color: UI.inkFaint, marginBottom: 18 }}>WHEN SHOULD THIS TAKE EFFECT?</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1270,10 +1304,22 @@ function dayTypeChip(dashed) {
 function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSelect = true }) {
   const [selectedPlan, setSelectedPlan] = useStateS(null);
   const [selectedIds, setSelectedIds] = useStateS(new Set());
+  const [tab, setTab] = useStateS('plans');
 
   const plans = store.schedules.filter(s =>
     s.days.some(d => d.items.length > 0 && (s.id !== schedule?.id || d.id !== currentDayId))
   );
+
+  // Templates whose exercises still exist — mapped to a copyable plan day.
+  const templates = (store.workoutTemplates || []).filter(t => (t.exercises || []).some(it => LB.findExercise(store, it.exId)));
+  const importTemplate = (t) => {
+    const items = (t.exercises || [])
+      .filter(it => LB.findExercise(store, it.exId))
+      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) }));
+    const day = { id: LB.uid(), name: t.name, items };
+    if (multiSelect) onCopy([{ day, migrateId: undefined }]);
+    else onCopy(day, undefined);
+  };
 
   const lastTrainedDate = (s) => {
     const dates = store.sessions
@@ -1301,7 +1347,41 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
   if (!selectedPlan) {
     return (
       <Sheet open={true} onClose={onClose} title="Import exercises from">
-        {plans.length === 0 ? (
+        {templates.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            {[['plans', 'Plans'], ['templates', 'Templates']].map(([key, label]) => (
+              <button key={key} onClick={() => setTab(key)} style={{
+                flex: 1, padding: '8px 0', borderRadius: 6, cursor: 'pointer',
+                background: tab === key ? UI.goldFaint : UI.bgInset,
+                border: `1px solid ${tab === key ? UI.goldSoft : UI.hairStrong}`,
+                color: tab === key ? UI.gold : UI.inkSoft,
+                fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+              }}>{label}</button>
+            ))}
+          </div>
+        )}
+        {tab === 'templates' ? (
+          templates.length === 0 ? (
+            <div style={{ padding: '24px 0', textAlign: 'center', color: UI.inkFaint, fontSize: 13 }}>No templates yet.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+              {templates.map(t => (
+                <button key={t.id} onClick={() => importTemplate(t)} style={{
+                  background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+                  borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+                  textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
+                }}
+                onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
+                onMouseLeave={ev => ev.currentTarget.style.borderColor = UI.hairStrong}>
+                  <div className="display" style={{ fontSize: 16 }}>{t.name}</div>
+                  <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 4, lineHeight: 1.5 }}>
+                    {(t.exercises || []).map(it => LB.findExercise(store, it.exId)?.name || '—').join(' · ')}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )
+        ) : plans.length === 0 ? (
           <div style={{ padding: '24px 0', textAlign: 'center', color: UI.inkFaint, fontSize: 13 }}>
             No plans with exercises yet.
           </div>
@@ -1310,7 +1390,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
             {plans.map(s => {
               const isSame = s.id === schedule?.id;
               const last = lastTrainedDate(s);
-              const dayCount = s.days.filter(d => d.items.length > 0 && (isSame ? d.id !== currentDayId : true)).length;
+              const dayCount = daysArr(s).filter(d => d.items.length > 0 && (isSame ? d.id !== currentDayId : true)).length;
               return (
                 <button key={s.id} onClick={() => { setSelectedPlan(s); setSelectedIds(new Set()); }} style={{
                   background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
@@ -1341,7 +1421,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 
   // Day list for selected plan
   const isSamePlan = selectedPlan.id === schedule?.id;
-  const days = selectedPlan.days.filter(d => d.items.length > 0 && (!isSamePlan || d.id !== currentDayId));
+  const days = daysArr(selectedPlan).filter(d => d.items.length > 0 && (!isSamePlan || d.id !== currentDayId));
 
   const confirmMulti = () => {
     const selections = days
@@ -1811,7 +1891,7 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
 }
 
 // ─── Create new schedule ─────────────────────────────────────────────
-function ScheduleNewScreen({ store, setStore, go }) {
+function ScheduleNewScreen({ store, setStore, go, userId }) {
   const [name, setName] = useStateS('');
   const [mode, setMode] = useStateS('cycle');
 

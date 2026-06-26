@@ -6,7 +6,7 @@ const { useState: useStateL, useMemo: useMemoL, useRef: useRefL, useEffect: useE
 const _lib = { tab: 'recent', q: '', filterTags: [], filterRestCats: [], filterUnilateral: null, filterPlan: null, filterEquipment: [], filtersOpen: false };
 
 // ─── LIBRARY ──────────────────────────────────────────────────────────
-function LibraryScreen({ store, setStore, go }) {
+function LibraryScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [tab, setTab] = useStateL(_lib.tab);
   const [q, setQ] = useStateL(_lib.q);
@@ -263,7 +263,7 @@ function LibraryScreen({ store, setStore, go }) {
               </div>
               {selecting ? (
                 <div style={{
-                  width: 20, height: 20, borderRadius: 3, flexShrink: 0,
+                  width: 20, height: 20, borderRadius: 4, flexShrink: 0,
                   border: `1px solid ${isSelected ? UI.danger : UI.hairStrong}`,
                   background: isSelected ? UI.danger : 'transparent',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -460,11 +460,13 @@ function SvgKnurl({ style }) {
     const w = Math.round(ref.current.getBoundingClientRect().width);
     if (w > 0) ref.current.setAttribute('width', w);
   }, []);
+  // Read the CSS variable at render time so the color matches the active theme.
+  const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
   return (
     <svg ref={ref} width="100%" height="3" style={{ display: 'block', overflow: 'hidden', ...style }}>
       {Array.from({ length: 100 }, (_, i) => {
         const x = (i - 1) * 5.2;
-        return <line key={i} x1={x} y1="3" x2={x + 1.73} y2="0" stroke="rgba(236,228,208,0.20)" strokeWidth="1.5" />;
+        return <line key={i} x1={x} y1="3" x2={x + 1.73} y2="0" stroke={`rgba(${knurlRgb},0.20)`} strokeWidth="1.5" />;
       })}
     </svg>
   );
@@ -620,6 +622,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editNoWeightReps, setEditNoWeightReps] = useStateL(autoEdit ? !!ex.no_weight_reps : false);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
   const [editProgressionReps, setEditProgressionReps] = useStateL(autoEdit ? (ex.progression_reps ?? null) : null);
+  const [editYoutubeUrl, setEditYoutubeUrl] = useStateL(autoEdit ? (ex.youtube_url || '') : '');
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
   const [showSizeInfoEdit, setShowSizeInfoEdit] = useStateL(false);
@@ -641,7 +644,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     }
   };
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditNoWeightReps(!!ex.no_weight_reps); setEditEquipment(ex.equipment || null); setEditProgressionReps(ex.progression_reps ?? null); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditNoWeightReps(!!ex.no_weight_reps); setEditEquipment(ex.equipment || null); setEditProgressionReps(ex.progression_reps ?? null); setEditYoutubeUrl(ex.youtube_url || ''); setEditMode(true); };
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
@@ -649,7 +652,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     const repsChanged = newProgressionReps !== (ex.progression_reps ?? null);
     setStore(s => {
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: editNoWeightReps, equipment: editEquipment || null, progression_reps: newProgressionReps }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: editNoWeightReps, equipment: editEquipment || null, progression_reps: newProgressionReps, youtube_url: editYoutubeUrl.trim() || null }
         : e);
       const schedules = (repsChanged && newProgressionReps != null)
         ? s.schedules.map(sch => ({ ...sch, days: sch.days.map(day => ({ ...day, items: (day.items || []).map(it => it.exId === exId ? { ...it, reps: newProgressionReps } : it) })) }))
@@ -841,6 +844,9 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                 }
               </div>
             </div>
+            <Field label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 12 }} />Form video</span>}>
+              <TextInput value={editYoutubeUrl} onChange={setEditYoutubeUrl} placeholder="YouTube link (optional)" />
+            </Field>
             <div style={{ display: 'flex', gap: 10 }}>
               <Btn kind="ghost" onClick={cancelEdit} style={{ flex: 1 }}>
                 {autoEdit ? 'Skip' : 'Cancel'}
@@ -864,6 +870,21 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
       </div>
 
       {!editMode && <div style={{ padding: '18px 22px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+        {/* Form video link */}
+        {ex.youtube_url && (
+          <a href={ex.youtube_url} target="_blank" rel="noopener noreferrer"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              padding: '11px 12px', borderRadius: 6, textDecoration: 'none',
+              border: `0.5px solid ${UI.hairStrong}`, background: UI.bgRaised,
+              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12,
+              letterSpacing: '0.1em', textTransform: 'uppercase',
+            }}>
+            <i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 16 }} />
+            Watch form video
+          </a>
+        )}
 
         {/* Stats — SubDials */}
         <div style={{ display: 'flex', justifyContent: 'space-around', padding: '6px 0' }}>
@@ -1228,15 +1249,28 @@ function StatsTab({ store, sessions, go }) {
   const isFlex = sch ? LB.isFlexPlan(sch) : false;
   const isCycleMode = sch && !LB.isWeekdayPlan(sch) && !!store.cycleStartDate;
   const cycleLen = sch?.days?.length || 1;
+  // Use getCycleNumForDate (version-aware) when versions exist; fall back to
+  // simple arithmetic for unversioned plans. Both return 1-indexed; convert to
+  // 0-indexed for internal use (display adds 1 back via selectedCycleNum + 1).
+  const todayISO = today.toISOString().slice(0, 10);
+  const currentCycleNum = (() => {
+    if (!isCycleMode) return 0;
+    if (sch?.versions?.length) return LB.getCycleNumForDate(sch, todayISO) - 1;
+    return Math.floor(Math.round((today.getTime() - LB.parseDate(store.cycleStartDate).getTime()) / 86400000) / cycleLen);
+  })();
+  // Start of the current cycle window — use the version-aware helper when versions exist
   const cycleWindowStart = (() => {
     if (!isCycleMode) return null;
+    if (sch?.versions?.length) {
+      const d = LB.getCycleStartForNum(sch, currentCycleNum + 1);
+      return d || null;
+    }
     const start = LB.parseDate(store.cycleStartDate);
     const n = Math.round((today.getTime() - start.getTime()) / 86400000);
     const idxInCycle = ((n % cycleLen) + cycleLen) % cycleLen;
     const d = new Date(today); d.setDate(today.getDate() - idxInCycle);
     return d;
   })();
-  const currentCycleNum = isCycleMode ? Math.floor(Math.round((today.getTime() - LB.parseDate(store.cycleStartDate).getTime()) / 86400000) / cycleLen) : 0;
 
   const [cycleViewOffset, setCycleViewOffset] = useStateL(0);
   const selectedCycleStart = isCycleMode && cycleWindowStart ? (() => {
@@ -1461,8 +1495,8 @@ function StatsTab({ store, sessions, go }) {
         ) : setsPerMuscle.map(({ muscle, sets }) => (
           <div key={muscle} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <div style={{ width: 100, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.05em' }}>{muscle}</div>
-            <div style={{ flex: 1, height: 3, background: UI.hair, borderRadius: 2, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${(sets / maxSets) * 100}%`, background: UI.gold, borderRadius: 2 }} />
+            <div style={{ flex: 1, height: 3, background: UI.hair, borderRadius: 4, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${(sets / maxSets) * 100}%`, background: UI.gold, borderRadius: 4 }} />
             </div>
             <div className="num" style={{ width: 24, textAlign: 'right', fontSize: 13, color: UI.gold }}>{sets}</div>
           </div>
@@ -1476,7 +1510,7 @@ function StatsTab({ store, sessions, go }) {
           {weeklyVolume.map(({ label, vol }, i) => (
             <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' }}>
               <div style={{
-                width: '100%', borderRadius: 3,
+                width: '100%', borderRadius: 4,
                 height: `${Math.max(3, (vol / maxWeekVol) * 68)}px`,
                 background: i === 7 ? UI.gold : UI.hair,
               }} />
@@ -2028,20 +2062,17 @@ const isImprovement = LB.isImprovement;
 const isDecline = LB.isDecline;
 
 // ─── SESSION DETAIL ──────────────────────────────────────────────────
-function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, back }) {
+function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, back, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [editing, setEditing] = useStateL(false);
   const [capturing, setCapturing] = useStateL(false);
   const [feelOpen, setFeelOpen] = useStateL(false);
+  const [tplFormOpen, setTplFormOpen] = useStateL(false);
+  const [tplName, setTplName] = useStateL('');
+  const [tplSaved, setTplSaved] = useStateL(false);
   const captureRef = useRefL(null);
-  // Screenshot watermark: VIPs get their home-screen background image instead
-  // of the default ZANE mark (TRAIN_BG_OVERRIDES lives in screens-home, loaded
-  // first → shared global scope). A real avatar isn't mirrored.
-  const _shotEmail = (store.user?.email || '').toLowerCase();
-  const _shotAdminPreview = _shotEmail === 'office@btc-prime.biz'
-    ? ({ mike: 'icons/IMG_6389.png', phoenix: 'icons/phoenix.png', marine: 'icons/marine.png', prince_abu: 'icons/prince_abu.png' })[localStorage.getItem('logbook-admin-bg-preview')]
-    : undefined;
-  const _shotLogo = _shotAdminPreview || TRAIN_BG_OVERRIDES[_shotEmail] || 'icons/zane-logo-2.png';
+  // Screenshot watermark: VIPs get their home-screen background image instead of the default ZANE mark.
+  const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo-2.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo-2.png';
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
@@ -2072,6 +2103,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
   const setFeel = (feel) => {
     setStore(st => ({ ...st, sessions: st.sessions.map(x => x.id === sessionId ? { ...x, feel } : x) }));
+  };
+
+  const saveAsTemplate = () => {
+    const name = tplName.trim();
+    if (!name) return;
+    const exercises = (s.entries || []).map(e => ({
+      exId: e.exId, name: e.name,
+      sets: e.plannedSets || (e.sets || []).filter(st => !st.warmup).length || 3,
+      reps: e.plannedReps ?? null,
+      repsPerSet: e.plannedRepsPerSet ?? null,
+      supersetGroup: e.supersetGroup ?? null,
+    }));
+    const tpl = { id: LB.uid(), name, exercises, createdAt: new Date().toISOString() };
+    setStore(st => ({ ...st, workoutTemplates: [tpl, ...(st.workoutTemplates || [])] }));
+    setTplFormOpen(false);
+    setTplSaved(true);
   };
 
   const deleteSession = async () => {
@@ -2178,7 +2225,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       if (w < pw) c.style.width = w + 'px';
       c.width = w; c.height = 3;
       const ctx = c.getContext('2d');
-      ctx.strokeStyle = 'rgba(236,228,208,0.20)';
+      const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
+      ctx.strokeStyle = `rgba(${knurlRgb},0.20)`;
       ctx.lineWidth = 1.5;
       for (let x = -2; x < w + 6; x += 5.2) {
         ctx.beginPath(); ctx.moveTo(x, 3); ctx.lineTo(x + 1.73, 0); ctx.stroke();
@@ -2301,6 +2349,29 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             </BracketFrame>
           );
         })()}
+
+        {/* Save as template — freestyle sessions only, right after finishing */}
+        {justFinished && !capturing && s.isFreestyle && (s.entries || []).length > 0 && (
+          tplSaved ? (
+            <div style={{ marginBottom: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 0', color: UI.gold, fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.08em' }}>
+              <i className="fa-solid fa-check" /> Saved as template
+            </div>
+          ) : tplFormOpen ? (
+            <div style={{ marginBottom: 4, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <Field label="Template name">
+                <TextInput value={tplName} onChange={setTplName} placeholder="e.g. Push A" autoFocus />
+              </Field>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <Btn kind="ghost" onClick={() => setTplFormOpen(false)} style={{ flex: 1 }}>Cancel</Btn>
+                <Btn onClick={saveAsTemplate} style={{ flex: 1 }}>Save template</Btn>
+              </div>
+            </div>
+          ) : (
+            <Btn kind="ghost" onClick={() => { setTplName(s.dayName && s.dayName !== 'Freestyle' ? s.dayName : ''); setTplFormOpen(true); }} style={{ width: '100%', marginBottom: 4 }}>
+              <i className="fa-solid fa-bookmark" style={{ marginRight: 8 }} /> Save as template
+            </Btn>
+          )
+        )}
 
         {/* Feel — prompt after finish, always editable */}
         {!capturing && (
@@ -2433,7 +2504,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           opacity: (st.done || hasData) ? (isWarm ? 0.5 : 1) : 0.3,
                           background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent',
                           border: `1px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
-                          borderRadius: 3, padding: '3px 8px',
+                          borderRadius: 4, padding: '3px 8px',
                           fontFamily: UI.fontNum, fontSize: 12,
                           color: isWarm ? UI.inkFaint : highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,
                         }}>
@@ -2445,7 +2516,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       );
                     })}
                     {(() => { const n = e.sets.filter(st => st.skipped).length; return n > 0 && (
-                      <span style={{ border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.05em' }}>
+                      <span style={{ border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.05em' }}>
                         {n} SET{n > 1 ? 'S' : ''} SKIPPED
                       </span>
                     ); })()}
@@ -2813,7 +2884,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
 
   const entries = session.entries || [];
   // Label weights in the trainee's own unit (stored numbers aren't converted).
-  const unit = session.unit || 'kg';
+  const unit = session.unit || UI.unit();
   const liveIdx = LB.inferCurrentExIdx(entries);
   const entry = entries[exIdx];
   const goLive = () => { setFollowLive(true); setExIdx(liveIdx); };
@@ -2906,6 +2977,19 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
             <div className="micro" style={{ marginTop: 4, color: UI.inkSoft }}>
               {entry.plannedSets} SETS · {entry.plannedReps} REPS PLANNED
             </div>
+            {(entry.category || entry.equipment || entry.movementType) && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
+                {entry.category && (
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.category}</span>
+                )}
+                {entry.equipment && (
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.equipment}</span>
+                )}
+                {entry.movementType && (
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.movementType}</span>
+                )}
+              </div>
+            )}
           </div>
 
           <Frame style={{ padding: '0 16px' }}>
@@ -3282,7 +3366,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
             <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
               {Array.from({ length: maxSets }, (_, si) => (
                 <div key={si} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <div style={{ width: 14, height: 2, borderRadius: 1, background: `rgba(var(--accent-rgb),${setAlphas[si] ?? 0.12})` }} />
+                  <div style={{ width: 14, height: 2, borderRadius: 4, background: `rgba(var(--accent-rgb),${setAlphas[si] ?? 0.12})` }} />
                   <span className="micro" style={{ color: UI.inkFaint }}>Set {si + 1}</span>
                 </div>
               ))}
@@ -3300,7 +3384,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {sess.sets.map((st, si) => (
                     <span key={si} style={{
-                      border: `1px solid ${UI.hair}`, borderRadius: 3, padding: '2px 7px',
+                      border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px',
                       fontFamily: UI.fontNum, fontSize: 11, color: UI.ink,
                     }}>
                       {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span>

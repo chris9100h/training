@@ -1,4 +1,4 @@
-const CACHE = 'zane-v2.402';
+const CACHE = 'zane-v2.412';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 // Works at any base path (e.g. /training/ on GitHub Pages, / on custom domain)
 const BASE = self.registration.scope.replace(/\/$/, '');
@@ -24,10 +24,14 @@ const ASSETS = [
   BASE + '/src/app.jsx',
   BASE + '/icons/icon-192.png',
   BASE + '/icons/icon-512.png',
-  BASE + '/icons/IMG_6389.png',
-  BASE + '/icons/phoenix.png',
-  BASE + '/icons/marine.png',
-  BASE + '/icons/prince_abu.png',
+  BASE + '/Background/Appy.png',
+  BASE + '/Background/phoenix.png',
+  BASE + '/Background/marine.png',
+  BASE + '/Background/prince_abu.png',
+  BASE + '/Background/Chris1.PNG',
+  BASE + '/Background/Chris2.PNG',
+  BASE + '/Background/akxyl.png',
+  BASE + '/Background/index.json',
 ];
 
 // CDN libraries the app boots with. Precached best-effort so the app is fully

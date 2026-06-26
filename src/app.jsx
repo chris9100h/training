@@ -131,7 +131,7 @@ function UpdateBanner({ onUpdate }) {
         padding: '32px 28px',
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         gap: 10, textAlign: 'center',
-        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(201,169,97,0.2)',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(var(--accent-rgb),0.2)',
       }}>
         <div style={{
           width: 48, height: 48, borderRadius: 6,
@@ -182,7 +182,7 @@ function WhatsNewModal({ entries, onDismiss }) {
         padding: '28px 26px',
         display: 'flex', flexDirection: 'column', gap: 18,
         overflowY: 'auto',
-        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(201,169,97,0.2)',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(var(--accent-rgb),0.2)',
         animation: 'fadeUp 0.3s ease',
       }}>
         <div className="micro-gold">WHAT'S NEW</div>
@@ -295,9 +295,11 @@ function App() {
   const localDirty                = useRefA(false); // true if user changed store after cache load
   const userIdRef                 = useRefA(null);  // current userId for stale-closure contexts
   const phaseRef                  = useRefA('init'); // current phase for stale-closure contexts
+  const routeRef                  = useRefA({ name: 'home' }); // current route for stale-closure contexts
 
   useEffectA(() => { userIdRef.current = userId; }, [userId]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
+  useEffectA(() => { routeRef.current = route; }, [route]);
 
   useEffectA(() => {
     if (store?.user?.email && store?.user?.name) {
@@ -366,14 +368,20 @@ function App() {
       LB.refreshHealthLogs(uid).then(fresh => {
         if (!fresh) return;
         setStore(s => {
-          const serverDailyIds  = new Set(fresh.dailyLogs.map(l => l.id));
-          const serverDailyDates = new Set(fresh.dailyLogs.map(l => l.date));
-          const serverCardioIds = new Set(fresh.cardioLogs.map(l => l.id));
+          const serverDailyIds    = new Set(fresh.dailyLogs.map(l => l.id));
+          const serverDailyDates  = new Set(fresh.dailyLogs.map(l => l.date));
+          const serverCardioIds   = new Set(fresh.cardioLogs.map(l => l.id));
+          const serverGlucoseIds  = new Set((fresh.glucoseLogs || []).map(l => l.id));
           // Daily logs are one-per-date: also drop a local row whose date the
           // server already has (a divergent id from a pre-RPC multi-device write).
-          const localOnlyDaily  = (s.dailyLogs  || []).filter(l => !serverDailyIds.has(l.id) && !serverDailyDates.has(l.date));
-          const localOnlyCardio = (s.cardioLogs || []).filter(l => !serverCardioIds.has(l.id));
-          return { ...s, dailyLogs: [...localOnlyDaily, ...fresh.dailyLogs], cardioLogs: [...localOnlyCardio, ...fresh.cardioLogs] };
+          const localOnlyDaily   = (s.dailyLogs   || []).filter(l => !serverDailyIds.has(l.id) && !serverDailyDates.has(l.date));
+          const localOnlyCardio  = (s.cardioLogs  || []).filter(l => !serverCardioIds.has(l.id));
+          const localOnlyGlucose = (s.glucoseLogs || []).filter(l => !serverGlucoseIds.has(l.id));
+          return { ...s,
+            dailyLogs:   [...localOnlyDaily,   ...fresh.dailyLogs],
+            cardioLogs:  [...localOnlyCardio,  ...fresh.cardioLogs],
+            glucoseLogs: [...localOnlyGlucose, ...(fresh.glucoseLogs || [])],
+          };
         });
       }).catch(() => {});
     };
@@ -381,6 +389,7 @@ function App() {
     const onHide = () => localStorage.setItem(KEY, Date.now());
     const onShow = (e) => {
       if (!e.persisted) return;
+      if (routeRef.current?.name === 'train') return;
       const ts = localStorage.getItem(KEY);
       const elapsed = ts ? Date.now() - Number(ts) : 0;
       if (elapsed > THRESHOLD) { window.location.reload(); return; }
@@ -392,6 +401,7 @@ function App() {
       if (document.hidden) {
         localStorage.setItem(KEY, Date.now());
       } else {
+        if (routeRef.current?.name === 'train') return;
         const ts = localStorage.getItem(KEY);
         const elapsed = ts ? Date.now() - Number(ts) : 0;
         if (elapsed > THRESHOLD) { window.location.reload(); return; }
@@ -884,6 +894,7 @@ function App() {
   // version string. iOS Safari ignores reg.update() when the app is in the
   // foreground, so this is the only reliable detection path.
   const checkSwUpdate = useCallbackA(() => {
+    if (routeRef.current?.name === 'train') return;
     // Resolve sw.js relative to the SW scope (or page URL before registration
     // settles) — works on both github.io/training/ and the zane-wo.com root.
     const swUrl = new URL('sw.js', swReg.current?.scope || window.location.href);
@@ -1046,6 +1057,9 @@ function App() {
   // Expose the weight-unit label globally so UI.unit() can read it anywhere
   // (display-only; the stored numbers stay the same).
   window.__UNIT = store?.settings?.unit || 'kg';
+
+  // Deload overlay flag — buildSeedSets reads this to pre-fill loads at ~50%.
+  window.__DELOAD = store?.statusMode === 'deload';
 
   // Two layout variants: the iPad sidebar layout (only on tab routes) and the
   // full-bleed layout (everything else). Navigating between a tab route and a

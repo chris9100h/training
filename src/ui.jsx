@@ -221,7 +221,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                       <div style={{ position: 'absolute', top: -2, right: -2, width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: '1.5px solid var(--bg)' }} />
                     )}
                     {!badge?.live && badge?.count > 0 && (
-                      <div style={{ position: 'absolute', top: -4, right: -6, minWidth: 14, height: 14, borderRadius: 7, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--bg)' }}>
+                      <div style={{ position: 'absolute', top: -4, right: -6, minWidth: 14, height: 14, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--bg)' }}>
                         <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: '#0a0805', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
                       </div>
                     )}
@@ -415,7 +415,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
               left: `${(idx + 0.5) * 100 / n}%`,
               top: KEY_TOP - 5,
               transform: 'translateX(-50%)',
-              width: 28, height: 2, borderRadius: 1,
+              width: 28, height: 2, borderRadius: 4,
               background: UI.gold,
               transition: 'left 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
               pointerEvents: 'none',
@@ -458,7 +458,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                     <div style={{ position: 'absolute', top: 5, right: 4, width: 8, height: 8, borderRadius: '50%', background: on ? '#0a0805' : 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}` }} />
                   )}
                   {!badge?.live && badge?.count > 0 && (
-                    <div style={{ position: 'absolute', top: 1, right: -2, minWidth: 16, height: 16, borderRadius: 8, background: on ? '#0a0805' : 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}`, padding: '0 3px' }}>
+                    <div style={{ position: 'absolute', top: 1, right: -2, minWidth: 16, height: 16, borderRadius: '50%', background: on ? '#0a0805' : 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}`, padding: '0 3px' }}>
                       <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: on ? 'var(--accent)' : '#0a0805', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
                     </div>
                   )}
@@ -570,7 +570,7 @@ function Pill({ children, gold = false, style = {}, ...rest }) {
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center',
-      padding: '3px 8px', borderRadius: 3,
+      padding: '3px 8px', borderRadius: 4,
       fontSize: 9, letterSpacing: '0.14em',
       fontFamily: UI.fontUi, fontWeight: 600, textTransform: 'uppercase',
       background: gold ? UI.goldFaint : 'transparent',
@@ -623,7 +623,7 @@ function Sheet({ open, onClose, title, titleColor, children }) {
         animation: 'sheet-up 0.22s ease',
         maxHeight: kbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
       }}>
-        <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 2, margin: '0 auto 16px' }} />
+        <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
         {title && (
           <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
             {title}
@@ -682,11 +682,13 @@ const ICON_CALENDAR = (
 // ─── useConfirm ─────────────────────────────────────────────────────
 function useConfirm() {
   const [state, setState] = React.useState(null);
-  const confirm = (message, { title = 'Confirm?', ok = 'OK', cancel = 'Cancel', danger = false } = {}) =>
-    new Promise(resolve => setState({ message, title, ok, cancel, danger, resolve }));
+  const confirm = (message, { title = 'Confirm?', ok = 'OK', cancel = 'Cancel', danger = false, preventBackdropClose = false } = {}) =>
+    new Promise(resolve => setState({ message, title, ok, cancel, danger, preventBackdropClose, resolve }));
   const close = (result) => { state?.resolve(result); setState(null); };
-  const el = state && (
-    <Sheet open={true} onClose={() => close(false)}>
+  // Portal into document.body so the confirm sheet always sits above any other
+  // Sheet (both zIndex: 100) regardless of where confirmEl is placed in the tree.
+  const el = state && ReactDOM.createPortal(
+    <Sheet open={true} onClose={state.preventBackdropClose ? null : () => close(false)}>
       <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, marginBottom: 10, textAlign: 'center' }}>{state.title}</div>
       <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 22, lineHeight: 1.5, textAlign: 'center' }}>{state.message}</div>
       <div style={{ display: 'flex', gap: 8 }}>
@@ -696,7 +698,8 @@ function useConfirm() {
           ...(state.danger ? { background: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.6)', boxShadow: '0 6px 20px rgba(var(--danger-rgb),0.25)' } : {}),
         }}>{state.ok}</Btn>
       </div>
-    </Sheet>
+    </Sheet>,
+    document.body
   );
   return [el, confirm];
 }

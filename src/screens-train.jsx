@@ -388,6 +388,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const isCardio = !!entry?.isCardio;
   const isUnilateral = !isCardio && (exercise?.movement_type ?? (exercise?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
   const isNoWeightReps = !isCardio && !!exercise?.no_weight_reps;
+  const isBodyweight = !isCardio && exercise?.equipment === 'bodyweight';
   const progressionTargetForSet = (workingSetIdx) => {
     if (!store.settings?.smartProgression) return null;
     const perSet = entry?.plannedRepsPerSet;
@@ -450,7 +451,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Reps: implausibly low/high vs pre-filled reference.
     // Weight: increment-based (calibrated per equipment config).
     // When both are off we show a combined message.
-    if (!bypassOutlierCheck && !entry.sets[setIdx]?.warmup) {
+    // Skipped during deload — loads are intentionally reduced, comparisons
+    // against the pre-deload reference would always fire as "too low".
+    const _isDeloadSet = store.statusMode === 'deload' || session.isDeload;
+    if (!bypassOutlierCheck && !entry.sets[setIdx]?.warmup && !_isDeloadSet) {
       const wIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
       const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
       const prevSet = wIdx >= 0 ? prevWorkingSets[wIdx] : undefined;
@@ -566,7 +570,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const prevSet = prevWorkingSetFor(setIdx);
     const updatedSets = entry.sets.map((st, k) => k === setIdx ? { ...st, done: true } : st);
 
+    // During a deload the loads are deliberately light — suppress all
+    // progression/PR/improvement/regression overlays so a planned easy week
+    // never reads as a jump or a decline.
+    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+
     const progressionResult = (() => {
+      if (isDeloadSession) return null;
       if (!store.settings?.smartProgression) return null;
       if (!updatedSets.filter(s => !s.warmup).every(s => s.done || s.skipped)) return null;
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
@@ -591,7 +601,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // beats the all-time e1RM record for this exercise — independent of smart
     // progression, max once per exercise. A first-ever set (no record yet) and
     // bodyweight sets (no kg) never count as a new best.
-    if (!entry.sets[setIdx]?.warmup && !progressionResult) {
+    if (!entry.sets[setIdx]?.warmup && !progressionResult && !isDeloadSession) {
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
       const cE1rm = (completed?.kg != null && cReps != null && cReps > 0) ? LB.e1rm(completed.kg, cReps) : 0;
@@ -607,7 +617,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, prevWorkingSetFor(k)));
-        if (!anyImprovementBefore && isDecline(completed, prevSet)) {
+        if (!anyImprovementBefore && isDecline(completed, prevSet) && store.settings?.showRegression !== false) {
           setRegressionSet(true);
           setTimeout(() => setRegressionSet(false), 2500);
         }
@@ -839,7 +849,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           }),
         };
       });
-      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isBonus && advanceCycle && { isBonus: false }) };
+      return { ...sess, entries, ended: now.toISOString(), ...(mins != null && { durationMinutes: mins }), ...(feel != null && { feel }), ...(store.statusMode === 'deload' ? { isDeload: true } : {}), ...(session.isFreestyle && freestyleName.trim() && { dayName: freestyleName.trim() }), ...(session.isBonus && advanceCycle && { isBonus: false }) };
     });
     const shouldAdvance = session.isBonus ? advanceCycle : true;
     setStore(s => {
@@ -1727,7 +1737,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const workingSetsArr = entry.sets.filter(s => !s.warmup);
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
-  const anyMissingData = !isNoWeightReps && workingSetsArr.some(st => !st.done && !st.skipped && (st.kg == null || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
+  const anyMissingData = !isNoWeightReps && workingSetsArr.some(st => !st.done && !st.skipped && ((!isBodyweight && st.kg == null) || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
 
   const checkAllSets = async () => {
     if (allWorkingDone || anyMissingData) return;
@@ -1949,7 +1959,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               const isSaving  = syncStatus === 'pending' && !storageFull;
               const dotColor  = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
               const pulse     = 'pulseDot 1.6s ease-in-out infinite';
-              return <div onClick={isProblem ? onRetrySync : undefined} style={{ width: 6, height: 6, borderRadius: 3, background: dotColor, animation: pulse, cursor: isProblem ? 'pointer' : 'default', flexShrink: 0 }} />;
+              return <div onClick={isProblem ? onRetrySync : undefined} style={{ width: 6, height: 6, borderRadius: 4, background: dotColor, animation: pulse, cursor: isProblem ? 'pointer' : 'default', flexShrink: 0 }} />;
             })()}
             {warmupActive
               ? <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>WARMUP</span>
@@ -1969,7 +1979,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               }}>
                 {Math.floor(restRemaining/60)}:{(restRemaining%60).toString().padStart(2,'0')}
               </span>
-              <div style={{ width: 44, height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden' }}>
+              <div style={{ width: 44, height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
               </div>
             </button>
@@ -2023,7 +2033,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* Day name + exercise position — sync status floats centered between them
           (the global top-center overlay would cover the timers above). */}
       <div style={{ flexShrink: 0, padding: '6px 22px 10px', position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <span className="micro-gold">{session.dayName}</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <span className="micro-gold">{session.dayName}</span>
+          {(store.statusMode === 'deload' || session.isDeload) && (
+            <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 6px' }}>DELOAD · 50%</span>
+          )}
+        </span>
         <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
           {String(exIdx + 1).padStart(2, '0')} <span style={{ color: UI.hair }}>/</span> {String(session.entries.length).padStart(2, '0')}
         </span>
@@ -2073,12 +2088,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
         {/* Exercise name */}
         <div style={{ flexShrink: 0 }}>
-          <div className="display" style={{
-            fontSize: entry.name.length > 28 ? 16 : entry.name.length > 22 ? 20 : entry.name.length > 16 ? 26 : 32,
-            color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>
-            {entry.name}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="display" style={{
+              flex: 1, minWidth: 0,
+              fontSize: entry.name.length > 28 ? 16 : entry.name.length > 22 ? 20 : entry.name.length > 16 ? 26 : 32,
+              color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {entry.name}
+            </div>
+            {exercise?.youtube_url && (
+              <a href={exercise.youtube_url} target="_blank" rel="noopener noreferrer"
+                aria-label="Watch form video"
+                style={{
+                  flexShrink: 0, width: 38, height: 38, borderRadius: 6,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  border: `0.5px solid ${UI.hairStrong}`, background: UI.bgRaised,
+                  color: '#FF0000', textDecoration: 'none',
+                }}>
+                <i className="fa-brands fa-youtube" style={{ fontSize: 18 }} />
+              </a>
+            )}
           </div>
           {(exercise?.category || exercise?.equipment || (exercise?.tags || []).length > 0) && (
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
@@ -2366,7 +2396,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
                   }}>
                     <div style={{
-                      width: 24, height: 24, borderRadius: 3, flexShrink: 0,
+                      width: 24, height: 24, borderRadius: 4, flexShrink: 0,
                       background: isCurrent ? UI.goldFaint : 'transparent',
                       outline: `1px solid ${isCurrent ? UI.gold : s.done ? UI.goldDeep : isWarmupRow ? UI.hair : UI.hairStrong}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -2427,18 +2457,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           updateSet(i, { done: false });
                           return;
                         }
-                        if (!isNoWeightReps && s.kg == null) return;
+                        if (!isNoWeightReps && !isBodyweight && s.kg == null) return;
                         _log(`row${i} → completeSet`);
                         completeSet(i);
                       }}
-                      disabled={!s.done && !s.skipped && !isNoWeightReps && (s.kg == null || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)))}
+                      disabled={!s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)))}
                       style={{
-                        width: 26, height: 26, borderRadius: 3, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (!isNoWeightReps && (s.kg == null || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null))) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
+                        width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (!isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null))) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
                         background: s.done ? UI.gold : 'transparent',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontSize: s.skipped ? 12 : 14, fontWeight: 700,
                         color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
-                        opacity: !s.done && !s.skipped && !isNoWeightReps && (s.kg == null || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
+                        opacity: !s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
                         flexShrink: 0, justifySelf: 'center',
                         WebkitTapHighlightColor: 'transparent',
                       }}>{s.skipped ? '×' : '✓'}</button>
@@ -2852,7 +2882,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               </div>
             )}
             {/* progress bar */}
-            <div style={{ height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden', marginTop: 18, width: 200 }}>
+            <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 18, width: 200 }}>
               <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
             </div>
           </div>
@@ -2898,7 +2928,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   const isSaving  = syncStatus === 'pending' && !storageFull;
                   const dotColor  = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
                   const pulse     = 'pulseDot 1.6s ease-in-out infinite';
-                  return <div onClick={isProblem ? onRetrySync : undefined} style={{ width: 6, height: 6, borderRadius: 3, background: dotColor, animation: pulse, cursor: isProblem ? 'pointer' : 'default', flexShrink: 0 }} />;
+                  return <div onClick={isProblem ? onRetrySync : undefined} style={{ width: 6, height: 6, borderRadius: 4, background: dotColor, animation: pulse, cursor: isProblem ? 'pointer' : 'default', flexShrink: 0 }} />;
                 })()}
                 <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>WARMUP</span>
               </div>
@@ -2961,7 +2991,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {warmupOverlaySets.map((ws, wi) => (
                 <div key={wi} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
                   <div style={{
-                    height: 3, width: '100%', borderRadius: 2,
+                    height: 3, width: '100%', borderRadius: 4,
                     background: ws.done ? UI.gold : wi === warmupOverlayNum - 1 ? UI.goldSoft : UI.hair,
                     boxShadow: wi === warmupOverlayNum - 1 ? `0 0 6px rgba(var(--accent-rgb),0.5)` : 'none',
                     transition: 'background 0.3s',
@@ -2973,6 +3003,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 </div>
               ))}
             </div>
+            {entry.note ? (
+              <div style={{ marginTop: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}` }}>
+                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{entry.note}</div>
+              </div>
+            ) : null}
           </div>
         </>
       )}
@@ -3014,7 +3049,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </div>
 
           {/* Progress bar */}
-          <div style={{ height: 2, background: UI.hair, borderRadius: 1, overflow: 'hidden', marginTop: 22, width: 180 }}>
+          <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 22, width: 180 }}>
             <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
           </div>
 
@@ -3076,7 +3111,7 @@ function setInputStyle(done, current) {
   return {
     background: done ? 'transparent' : current ? 'rgba(var(--accent-rgb),0.06)' : UI.bgInset,
     border: `1px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.hair}`,
-    borderRadius: 3, outline: 'none',
+    borderRadius: 4, outline: 'none',
     color: done ? UI.inkSoft : UI.ink,
     fontFamily: UI.fontNum, fontSize: 15, fontWeight: 500,
     fontVariantNumeric: 'tabular-nums',

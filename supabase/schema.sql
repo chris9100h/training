@@ -30,7 +30,8 @@ CREATE TABLE public.zane_exercises (
   category text,
   unilateral boolean NOT NULL DEFAULT false,
   equipment text,
-  progression_reps integer
+  progression_reps integer,
+  youtube_url text
 );
 
 CREATE TABLE public.zane_schedules (
@@ -57,7 +58,8 @@ CREATE TABLE public.zane_sessions (
   duration_minutes integer,
   feel text,
   is_bonus boolean NOT NULL DEFAULT false,
-  is_freestyle boolean NOT NULL DEFAULT false
+  is_freestyle boolean NOT NULL DEFAULT false,
+  is_deload boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE public.zane_session_entries (
@@ -165,6 +167,7 @@ CREATE TABLE public.zane_user_settings (
   reminder_time text NOT NULL DEFAULT '07:00'::text,
   next_reminder_at timestamp with time zone,
   show_warmup_in_summary boolean NOT NULL DEFAULT true,
+  show_regression boolean NOT NULL DEFAULT true,
   show_coaching_tab boolean DEFAULT false,
   be_your_own_coach boolean NOT NULL DEFAULT false,
   session_timeout_minutes integer DEFAULT 90,
@@ -178,7 +181,8 @@ CREATE TABLE public.zane_user_settings (
   default_checkin_schema jsonb,
   status_mode text,
   status_mode_since timestamp with time zone,
-  active_cardio_plan_id text
+  active_cardio_plan_id text,
+  deload_prompt_dismissed_at timestamp with time zone
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -231,7 +235,8 @@ CREATE TABLE public.zane_coaching_notes (
   body text NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   read_at timestamp with time zone,
-  thread_id text
+  thread_id text,
+  attachments jsonb
 );
 
 CREATE TABLE public.zane_coaching_macros (
@@ -1310,4 +1315,20 @@ ALTER TABLE zane_cardio_plans ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "zane_cardio_plans_own"
   ON zane_cardio_plans FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- ── Workout templates (migration 0107) ─────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS zane_workout_templates (
+  id          text        PRIMARY KEY,
+  user_id     uuid        REFERENCES auth.users NOT NULL,
+  name        text        NOT NULL,
+  exercises   jsonb       NOT NULL DEFAULT '[]',
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE zane_workout_templates ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_workout_templates_own"
+  ON zane_workout_templates FOR ALL
   USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);

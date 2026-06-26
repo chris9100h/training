@@ -52,6 +52,70 @@ function adherenceColor(a) {
   return 'var(--danger)';
 }
 
+// ─── glucose helpers ─────────────────────────────────────────────────────────
+
+const GLUCOSE_FACTOR = 18.0182; // mmol/L → mg/dL
+function glucoseDisplay(mmol, unit) {
+  if (mmol == null) return null;
+  return unit === 'mgdl' ? Math.round(mmol * GLUCOSE_FACTOR) : Math.round(mmol * 10) / 10;
+}
+function glucoseFromInput(raw, unit) {
+  const n = parseFloat(String(raw).replace(',', '.'));
+  if (!isFinite(n) || n <= 0) return null;
+  return unit === 'mgdl' ? Math.round(n / GLUCOSE_FACTOR * 1000) / 1000 : n;
+}
+const glucoseUnitLabel = unit => unit === 'mgdl' ? 'mg/dL' : 'mmol/L';
+const GLUCOSE_CTX_LABELS = { fasted: 'Fasted', fed: 'Fed', other: 'Other' };
+// fasting normal range in mmol/L
+const GLUCOSE_REF_LOW = 3.9, GLUCOSE_REF_HIGH = 5.6, GLUCOSE_REF_FED = 7.8;
+
+// Scatter chart: one point per reading, coloured by context, with a reference
+// band for the fasting normal range (3.9–5.6 mmol/L).
+function GlucoseScatterChart({ readings, from, to, unit }) {
+  const pts = (readings || []).filter(r => r.valueMmol != null && r.date >= from && r.date <= to)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+  if (!pts.length) return <HealthChartEmpty />;
+  const W = 320, padL = 42, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
+  const H = padTop + plotH + padBottom, plotW = W - padL - padR;
+
+  const refLow  = unit === 'mgdl' ? Math.round(GLUCOSE_REF_LOW  * GLUCOSE_FACTOR) : GLUCOSE_REF_LOW;
+  const refHigh = unit === 'mgdl' ? Math.round(GLUCOSE_REF_HIGH * GLUCOSE_FACTOR) : GLUCOSE_REF_HIGH;
+  const refFed  = unit === 'mgdl' ? Math.round(GLUCOSE_REF_FED  * GLUCOSE_FACTOR) : GLUCOSE_REF_FED;
+  const dispVals = pts.map(p => glucoseDisplay(p.valueMmol, unit));
+  const rawMin = Math.min(...dispVals, refLow);
+  const rawMax = Math.max(...dispVals, refFed);
+  const dom = UI.chartDomain(rawMin, rawMax);
+  const totalDays = Math.max(1, healthDayDiff(from, to));
+  const xOf = d => padL + (healthDayDiff(from, d) / totalDays) * plotW;
+  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
+  const dec = dom.range >= (unit === 'mgdl' ? 40 : 2) ? 0 : 1;
+  const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+  const CTX_COLORS = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft };
+  const fedY = yOf(refFed).toFixed(1);
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+      {/* fasted reference band */}
+      <rect x={padL} y={yOf(refHigh).toFixed(1)} width={plotW} height={(yOf(refLow) - yOf(refHigh)).toFixed(1)}
+        fill="rgba(var(--accent-rgb),0.07)" />
+      {/* fed upper reference line */}
+      <line x1={padL} y1={fedY} x2={W - padR} y2={fedY} stroke="#4a9fe0" strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
+      {gridVals.map((v, i) => (
+        <g key={i}>
+          {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
+          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Number(v.toFixed(dec))}</text>
+        </g>
+      ))}
+      <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+      {pts.map((p, i) => {
+        const disp = glucoseDisplay(p.valueMmol, unit);
+        return <circle key={i} cx={xOf(p.date).toFixed(1)} cy={yOf(disp).toFixed(1)} r={3}
+          fill={CTX_COLORS[p.context] || UI.inkSoft} opacity={0.85} />;
+      })}
+    </svg>
+  );
+}
+
 // ─── chart primitives ─────────────────────────────────────────────────────────
 
 function HealthChartEmpty({ label }) {
@@ -231,7 +295,7 @@ function MacroLegend() {
     <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 10 }}>
       {[['Protein', MACRO_COLORS.protein], ['Carbs', MACRO_COLORS.carbs], ['Fat', MACRO_COLORS.fat], ['Target', UI.ink]].map(([lbl, col]) => (
         <div key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 9, height: 9, borderRadius: 2, background: col, display: 'inline-block' }} />
+          <span style={{ width: 9, height: 9, borderRadius: 4, background: col, display: 'inline-block' }} />
           <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.04em' }}>{lbl}</span>
         </div>
       ))}
@@ -241,9 +305,8 @@ function MacroLegend() {
 
 // ─── Daily log sheet ──────────────────────────────────────────────────────────
 
-function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus }) {
+function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit }) {
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
-  const manualCal = !!store.settings?.manualCalories;
   const todayISO = LB.todayISO();
   const dayStatusPeriod = useMemoH(() => {
     const ts = new Date(date + 'T12:00:00').getTime();
@@ -272,6 +335,49 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   const [confirmEl, confirm] = useConfirm();
   // Snapshot of the form as it was opened, to detect unsaved edits on dismiss.
   const initialSnap = useRefH({ form: empty, coach: {}, net: false });
+
+  // ── Glucose readings for this day ──
+  const glUnit = glucoseUnit || 'mmol';
+  const glucoseForDay = useMemoH(
+    () => (glucoseLogs || []).filter(l => l.date === date).sort((a, b) => a.time.localeCompare(b.time)),
+    [glucoseLogs, date]
+  );
+  const emptyGl = { value: '', time: '', context: 'fasted', note: '' };
+  const [addingGlucose, setAddingGlucose] = useStateH(false);
+  const [glForm, setGlForm] = useStateH(emptyGl);
+  const [editingGlucoseId, setEditingGlucoseId] = useStateH(null);
+  const [confirmDeleteGlId, setConfirmDeleteGlId] = useStateH(null);
+  const setGl = (k, v) => setGlForm(f => ({ ...f, [k]: v }));
+
+  useEffectH(() => {
+    if (!open) { setAddingGlucose(false); setGlForm(emptyGl); setEditingGlucoseId(null); setConfirmDeleteGlId(null); }
+  }, [open]);
+
+  const saveGlucose = async () => {
+    const mmol = glucoseFromInput(glForm.value, glUnit);
+    if (mmol == null) return;
+    const time = glForm.time || new Date().toTimeString().slice(0, 5);
+    if (editingGlucoseId) {
+      const origEntry = (store.glucoseLogs || []).find(l => l.id === editingGlucoseId);
+      const updated = { ...origEntry, time, valueMmol: mmol, context: glForm.context || 'fasted', note: glForm.note.trim() || null };
+      setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).map(l => l.id === editingGlucoseId ? updated : l) }));
+      setEditingGlucoseId(null); setAddingGlucose(false); setGlForm(emptyGl);
+      const { error } = await LB.supabase.from('zane_glucose_logs').update({ time, value_mmol: mmol, context: updated.context, note: updated.note }).eq('id', editingGlucoseId).eq('user_id', userId);
+      if (error && origEntry) setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).map(l => l.id === editingGlucoseId ? origEntry : l) }));
+    } else {
+      const entry = { id: LB.uid(), date, time, valueMmol: mmol, context: glForm.context || 'fasted', note: glForm.note.trim() || null, createdAt: new Date().toISOString() };
+      setStore(s => ({ ...s, glucoseLogs: [entry, ...(s.glucoseLogs || [])] }));
+      setAddingGlucose(false); setGlForm(emptyGl);
+      const { error } = await LB.supabase.from('zane_glucose_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_mmol: entry.valueMmol, context: entry.context, note: entry.note });
+      if (error) setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== entry.id) }));
+    }
+  };
+
+  const deleteGlucose = async (id) => {
+    setConfirmDeleteGlId(null);
+    setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== id) }));
+    await LB.supabase.from('zane_glucose_logs').delete().eq('id', id).eq('user_id', userId);
+  };
 
   useEffectH(() => {
     if (!open) return;
@@ -312,7 +418,6 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   const autoCals = netCarbs
     ? (netAllFilled ? caloriesFromMacros(pVal, cVal, fVal, fibVal) : null)
     : caloriesFromMacros(pVal, cVal, fVal);
-  const caloriesManual = netCarbs ? !netAllFilled : manualCal;
 
   // Confirm before a backdrop tap throws away unsaved edits to this day.
   const isDirty = () =>
@@ -328,7 +433,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     if (!canSave) return;
     const protein = healthInt(form.protein), carbs = healthInt(form.carbs), fat = healthInt(form.fat);
     const fiber = netCarbs ? healthInt(form.fiber) : null;
-    const calories = caloriesManual ? healthInt(form.calories) : autoCals;
+    const calories = form.calories !== '' ? healthInt(form.calories) : autoCals;
     // Today = treat as training if planned (assume the user will train).
     // Past days = only training if a session was actually done.
     const isTraining = date === LB.todayISO()
@@ -478,13 +583,8 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         </div>
       )}
       <div style={{ marginBottom: 16 }}>
-        <div style={labelStyle}>Calories (kcal){caloriesManual ? '' : (netCarbs ? ' · net carbs' : ' · from macros')}</div>
-        {caloriesManual
-          ? <input type="number" inputMode="decimal" placeholder="—" value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
-          : <div style={{ ...inputStyle, color: autoCals != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
-              {autoCals != null ? autoCals : '—'}
-            </div>
-        }
+        <div style={labelStyle}>Calories (kcal){autoCals != null && form.calories === '' ? (netCarbs ? ' · net carbs' : ' · from macros') : ''}</div>
+        <input type="number" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
       </div>
 
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>HYDRATION</div>
@@ -506,6 +606,97 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       <div style={{ marginBottom: 18 }}>
         <div style={labelStyle}>Off-plan note <span style={{ textTransform: 'none', fontWeight: 400, color: UI.inkGhost }}>(optional · prefills check-in)</span></div>
         <textarea rows={2} placeholder="e.g. Birthday cake, 2 slices" value={form.offPlanNote} onChange={e => set('offPlanNote', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
+      </div>
+
+      {/* ── Glucose ── */}
+      <div style={{ marginTop: 8, marginBottom: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+          <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>GLUCOSE</span>
+          <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{glucoseUnitLabel(glUnit)}</span>
+        </div>
+        {glucoseForDay.map(g => {
+          const disp = glucoseDisplay(g.valueMmol, glUnit);
+          const ctxColor = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft }[g.context] || UI.inkSoft;
+          const isConfirm = confirmDeleteGlId === g.id;
+          return (
+            <div key={g.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px' }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{g.time}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: ctxColor, display: 'inline-block', flexShrink: 0 }} />
+                    <span className="num" style={{ fontSize: 15, color: UI.ink }}>{disp}</span>
+                  </div>
+                  {g.note && <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{g.note}</div>}
+                </div>
+                <button onClick={() => { setEditingGlucoseId(g.id); setAddingGlucose(true); setConfirmDeleteGlId(null); setGlForm({ value: String(glucoseDisplay(g.valueMmol, glUnit)), time: g.time, context: g.context, note: g.note || '' }); }} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 11, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>
+                  <i className="fa-solid fa-pencil" />
+                </button>
+                <button onClick={() => setConfirmDeleteGlId(isConfirm ? null : g.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
+              </div>
+              {isConfirm && (
+                <div style={{ display: 'flex', gap: 0, borderTop: `0.5px solid ${UI.hairStrong}` }}>
+                  <button onClick={() => setConfirmDeleteGlId(null)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>Cancel</button>
+                  <button onClick={() => deleteGlucose(g.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: '#e05a5a' }}>Delete</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {addingGlucose ? (
+          <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(() => {
+              const glInputSt = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+              return (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={labelStyle}>Value ({glucoseUnitLabel(glUnit)})</div>
+                    <input type="number" inputMode="decimal" placeholder="—" value={glForm.value} onChange={e => setGl('value', e.target.value)} style={{ ...glInputSt, fontFamily: UI.fontNum }} autoFocus />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={labelStyle}>Time</div>
+                    <input type="text" inputMode="numeric" placeholder="HH:MM" maxLength={5}
+                      value={glForm.time}
+                      onChange={e => {
+                        let v = e.target.value.replace(/[^0-9:]/g, '');
+                        if (v.length === 2 && !v.includes(':') && glForm.time.length < 2) v += ':';
+                        setGl('time', v);
+                      }}
+                      style={glInputSt} />
+                  </div>
+                </div>
+              );
+            })()}
+            <div>
+              <div style={labelStyle}>Context</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {['fasted', 'fed', 'other'].map(c => (
+                  <button key={c} onClick={() => setGl('context', c)} style={{
+                    flex: 1, padding: '6px 4px', cursor: 'pointer', borderRadius: 4,
+                    border: `0.5px solid ${glForm.context === c ? 'var(--accent)' : UI.hairStrong}`,
+                    background: glForm.context === c ? 'var(--accent)' : 'transparent',
+                    color: glForm.context === c ? '#0a0805' : UI.inkFaint,
+                    fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>{GLUCOSE_CTX_LABELS[c]}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={labelStyle}>Note (optional)</div>
+              <input type="text" placeholder="…" value={glForm.note} onChange={e => setGl('note', e.target.value)} style={inputStyle} />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => { setAddingGlucose(false); setGlForm(emptyGl); setEditingGlucoseId(null); }} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={saveGlucose} disabled={!glForm.value} style={{ flex: 2 }}>{editingGlucoseId ? 'Update' : 'Add'}</Btn>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => { setAddingGlucose(true); setEditingGlucoseId(null); }} style={{
+            width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
+            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }}>+ Add reading</button>
+        )}
       </div>
 
       {coachFields.length > 0 && (
@@ -908,6 +1099,88 @@ function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
   );
 }
 
+// ─── Glucose card ─────────────────────────────────────────────────────────────
+
+function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
+  const today = LB.todayISO();
+  const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
+  const { start, end } = healthWindow(tfDays(tf));
+  const unitLabel = glucoseUnitLabel(unit);
+  const refLow  = unit === 'mgdl' ? Math.round(GLUCOSE_REF_LOW  * GLUCOSE_FACTOR) : GLUCOSE_REF_LOW;
+  const refHigh = unit === 'mgdl' ? Math.round(GLUCOSE_REF_HIGH * GLUCOSE_FACTOR) : GLUCOSE_REF_HIGH;
+  const dec = unit === 'mgdl' ? 0 : 1;
+
+  const inWindow = useMemoH(
+    () => (glucoseLogs || []).filter(l => l.date >= start && l.date <= end),
+    [glucoseLogs, tf, today]
+  );
+
+  // Latest reading as headline
+  const latest = inWindow.length
+    ? inWindow.reduce((a, b) => (a.date > b.date || (a.date === b.date && a.time > b.time)) ? a : b)
+    : null;
+  const latestDisp = latest ? glucoseDisplay(latest.valueMmol, unit) : null;
+
+  // Notes feed: readings with a note, newest first, max 20
+  const sortedReadings = useMemoH(() =>
+    [...inWindow].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 30),
+    [inWindow]
+  );
+  const CTX_COLORS = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft };
+
+  return (
+    <HealthChartCard title="Glucose" icon="fa-droplet" tf={tf} setTf={setTf}
+      headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle}>
+      {!inWindow.length ? (
+        <HealthChartEmpty label="No glucose readings in this range" />
+      ) : (
+        <>
+          <GlucoseScatterChart readings={inWindow} from={start} to={end} unit={unit} />
+          {/* Reference legend */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+            <div style={{ height: 8, width: 28, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 2, flexShrink: 0 }} />
+            <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>
+              Normal fasting {refLow.toFixed(dec)}–{refHigh.toFixed(dec)} {unitLabel}
+            </span>
+            <span style={{ flex: 1 }} />
+            {['fasted', 'fed', 'other'].map(c => (
+              <span key={c} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: CTX_COLORS[c], display: 'inline-block' }} />
+                <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>{GLUCOSE_CTX_LABELS[c]}</span>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4, marginBottom: 2 }}>
+            <div style={{ width: 28, flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+              <div style={{ width: '100%', borderTop: '1.5px dashed #4a9fe0', opacity: 0.5 }} />
+            </div>
+            <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>
+              Normal postprandial &lt;{(unit === 'mgdl' ? Math.round(GLUCOSE_REF_FED * GLUCOSE_FACTOR) : GLUCOSE_REF_FED).toFixed(dec)} {unitLabel} (2h after meal)
+            </span>
+          </div>
+          {sortedReadings.length > 0 && (
+            <>
+              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {sortedReadings.map(n => (
+                  <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: CTX_COLORS[n.context] || UI.inkSoft, display: 'inline-block', flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
+                    </div>
+                    <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{glucoseDisplay(n.valueMmol, unit)}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </HealthChartCard>
+  );
+}
+
 // ─── HealthScreen ─────────────────────────────────────────────────────────────
 
 function HealthScreen({ store, setStore, go, userId }) {
@@ -1041,15 +1314,17 @@ function HealthScreen({ store, setStore, go, userId }) {
 
   // Cache targets in localStorage so the adherence bar and macro target row
   // are at their final height on the very first render (no jump when settings load).
+  // Key is scoped per user so switching accounts never bleeds a stale cache.
+  const targetsCacheKey = 'logbook-health-targets-' + userId;
   const [cachedTargets, setCachedTargets] = useStateH(() => {
-    try { return JSON.parse(localStorage.getItem('logbook-health-targets') || 'null'); } catch { return null; }
+    try { return JSON.parse(localStorage.getItem(targetsCacheKey) || 'null'); } catch { return null; }
   });
   // targets is null until coachingMacros loads (async). Use cached value from the
   // previous visit so adherence bar + target rows are visible on the first render.
   const effectiveTargets = targets ?? cachedTargets;
   useEffectH(() => {
     if (targets === null && cachedTargets !== null) return; // don't overwrite a good cache with a transient null
-    try { localStorage.setItem('logbook-health-targets', JSON.stringify(targets)); } catch {}
+    try { localStorage.setItem(targetsCacheKey, JSON.stringify(targets)); } catch {}
     if (targets !== cachedTargets) setCachedTargets(targets);
   }, [targets]);
 
@@ -1135,7 +1410,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   // Reorderable card order, persisted per device. Missing ids (e.g. after a new
   // card ships) are inserted at their default position, not appended at the end.
   const CARD_ORDER_KEY = 'logbook-health-card-order';
-  const DEFAULT_CARD_ORDER = ['week', 'today', 'macros', 'adherence', 'weight', 'cardio', 'steps'];
+  const DEFAULT_CARD_ORDER = ['week', 'today', 'macros', 'adherence', 'weight', 'cardio', 'steps', 'glucose'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]'); } catch (_) {}
@@ -1311,6 +1586,9 @@ function HealthScreen({ store, setStore, go, userId }) {
         <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
       </HealthChartCard>
     ) : null,
+    glucose: (store.glucoseLogs || []).length > 0
+      ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} tf={tf} setTf={setTf} dragHandle={handle} />
+      : null,
   };
 
   return (
@@ -1346,10 +1624,10 @@ function HealthScreen({ store, setStore, go, userId }) {
           cursor: 'pointer',
           WebkitTapHighlightColor: 'transparent',
         }}>
-          <i className={`fa-solid ${store.statusMode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach'}`} style={{ fontSize: 14, color: 'var(--accent)' }} />
+          <i className={`fa-solid ${store.statusMode === 'sick' ? 'fa-bed-pulse' : store.statusMode === 'deload' ? 'fa-battery-quarter' : 'fa-umbrella-beach'}`} style={{ fontSize: 14, color: 'var(--accent)' }} />
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
-              {store.statusMode === 'sick' ? 'Sick' : 'Vacation'}
+              {store.statusMode === 'sick' ? 'Sick' : store.statusMode === 'deload' ? 'Deload' : 'Vacation'}
               {store.statusModeSince ? ` · Since ${new Date(store.statusModeSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}
             </div>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Tap to manage or deactivate</div>
@@ -1371,7 +1649,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       </div>
 
-      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} />
+      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} />
     </Screen>
@@ -1383,10 +1661,12 @@ function HealthScreen({ store, setStore, go, userId }) {
 function HealthClientLogs({ clientStore }) {
   const logs = clientStore?.dailyLogs || [];
   const cardioLogs = clientStore?.cardioLogs || [];
+  const glucoseLogs = clientStore?.glucoseLogs || [];
+  const glucoseUnit = clientStore?.settings?.glucoseUnit ?? 'mmol';
   const [tf, setTf] = useStateH('1W');
 
   const COACH_ORDER_KEY = 'logbook-coach-health-card-order';
-  const DEFAULT_COACH_ORDER = ['week', 'today', 'weight', 'steps', 'macros', 'cardio', 'adherence', 'weekly'];
+  const DEFAULT_COACH_ORDER = ['week', 'today', 'weight', 'steps', 'macros', 'cardio', 'adherence', 'glucose', 'weekly'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(COACH_ORDER_KEY) || '[]'); } catch (_) {}
@@ -1507,7 +1787,7 @@ function HealthClientLogs({ clientStore }) {
     };
   }, [logs, clientStore?.sessions, clientStore?.cardioLogs, clientStore?.schedules, clientStore?.activeScheduleId, clientStore?.cycleStartDate, clientStore?.weekPlanStartDate, today, selectedDate, tf]);
 
-  if (!logs.length && !cardioLogs.length) {
+  if (!logs.length && !cardioLogs.length && !glucoseLogs.length) {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
         <i className="fa-solid fa-heart-pulse" style={{ fontSize: 28, color: UI.inkGhost }} />
@@ -1558,6 +1838,9 @@ function HealthClientLogs({ clientStore }) {
         <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
       </HealthChartCard>
     ),
+    glucose: glucoseLogs.length > 0
+      ? <GlucoseCard glucoseLogs={glucoseLogs} unit={glucoseUnit} tf={tf} setTf={setTf} dragHandle={handle} />
+      : null,
     weekly: weeks.length ? (
       <Card style={{ padding: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -1628,7 +1911,7 @@ function ExportSheet({ open, onClose, store }) {
 
   const sessionsByDay = () => {
     const m = {};
-    (store.sessions || []).filter(s => s.ended && s.date >= from && s.date <= to).forEach(s => {
+    (store.sessions || []).filter(s => s.ended && (s.date || '').slice(0, 10) >= from && (s.date || '').slice(0, 10) <= to).forEach(s => {
       const d = typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10);
       if (!m[d]) m[d] = [];
       m[d].push(s);
@@ -1639,7 +1922,7 @@ function ExportSheet({ open, onClose, store }) {
   const doExportCSV = () => {
     setExporting('csv');
     try {
-      const unit = store.settings?.unit || 'kg';
+      const unit = store.settings?.unit || UI.unit();
       const logs = logsInRange();
       const cardio = cardioByDay();
       const sessions = sessionsByDay();
@@ -1700,7 +1983,7 @@ function ExportSheet({ open, onClose, store }) {
       const logs = logsInRange();
       const cardio = cardioByDay();
       const sessions = sessionsByDay();
-      const unit = store.settings?.unit || 'kg';
+      const unit = store.settings?.unit || UI.unit();
       const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c9a961';
       const cardBg  = '#201e2c';
       const inkText = '#e5e2ef';

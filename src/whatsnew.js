@@ -16,6 +16,47 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.412',
+    title: 'Deload week, templates & more',
+    items: [
+      'Deload week is here — start one from the Plans tab (or wait for the app to nudge you). Weights pre-fill at 50% of your last session automatically. One full cycle or week later the deload ends by itself and training picks up exactly where it left off.',
+      'After every 8 completed cycles (or 8 weeks for weekday plans, or 8×frequency sessions for flex plans), the app congratulates you right when you finish your last training day of that block and asks if you want a deload. Say "not now" and it resets the counter for another 8.',
+      'Workout templates: finish a freestyle session and save it as a template — then start future sessions from it, or drop it straight into any plan day. Find them in the Library under a new Templates tab.',
+      'Exercise videos: paste a YouTube link onto any exercise. A play button shows up in the exercise editor, the detail view, and right in the training screen when you\'re about to do that exercise.',
+      'Images in coaching chat — coaches and clients can both send photos in any thread. Tap the attachment icon, pick a photo, done. Thumbnails show inline in the conversation.',
+      'Light theme contrast improvements, knurl textures now visible in library screenshots, and several smaller fixes across the app.',
+    ],
+  },
+  {
+    id: 'v2.406',
+    title: 'Blood Glucose Tracking',
+    items: [
+      'Log blood glucose readings any time of day — straight from the daily log sheet. Add as many readings as you want, pick the context (fasted, fed, or other), and attach a note if something was off.',
+      'A scatter chart on the Health tab shows your readings over time, with reference bands for the normal fasting range (3.9–5.6 mmol/L) and the postprandial limit (< 7.8 mmol/L). Dots are colour-coded by context so patterns jump out.',
+      'Prefer mg/dL? Flip the unit in Health settings — values are always stored in mmol/L and converted on the fly, so you can switch back anytime without losing anything.',
+      'Coaches see their clients\' glucose data on the Daily tab too.',
+    ],
+  },
+  {
+    id: 'v2.405',
+    title: 'Training settings & a rest timer fix',
+    items: [
+      'Training settings are now organised into three sub-sections — Session, Weights & Progression, and Notifications. Easier to find things, less scrolling.',
+      'New toggle under Session: turn off the regression indicator if seeing "you did worse" mid-workout isn\'t your thing. It\'s off, it never happened. 🙈',
+      'Fixed: the rest timer used to jump to the wrong value when switching exercises mid-rest (after a cache reload). It now correctly holds whatever countdown it started with.',
+      'Minor: the app no longer does unnecessary background refreshes when you switch back to it during a session — slightly snappier return.',
+    ],
+  },
+  {
+    id: 'v2.404',
+    title: 'Push done right + visual polish',
+    items: [
+      'Push notifications are now properly verified before going live — enter the 6-digit code from the notification and the toggle flips on. A countdown bar shows the remaining 2 minutes; it turns orange under 30 seconds.',
+      'No code entered in time? The slider goes back to off and the subscription is cancelled — no more half-enabled state sitting in the background.',
+      'Cleaned up a bunch of visual inconsistencies across the app: border radii, accent colours, and weight unit labels are now consistent throughout.',
+    ],
+  },
+  {
     id: 'v2.401',
     title: 'Smoother taps',
     items: [

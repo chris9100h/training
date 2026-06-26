@@ -111,6 +111,7 @@ Deno.serve(async (req) => {
     nonce        = '',
     _relay       = false,
     cancel       = false,
+    verify       = false,
   } = await req.json().catch(() => ({}));
   const text = message || bodyText || '';
 
@@ -128,7 +129,7 @@ Deno.serve(async (req) => {
     delaySeconds = Math.min(Math.max(0, Number(delaySeconds) || 0), MAX_DELAY);
     const settRes = await dbFetch(`zane_user_settings?user_id=eq.${encodeURIComponent(targetUserId)}&select=push_enabled`);
     const [sett] = await settRes.json().catch(() => [null]);
-    if (!cancel && !sett?.push_enabled) {
+    if (!cancel && !verify && !sett?.push_enabled) {
       return new Response(JSON.stringify({ skipped: true }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
