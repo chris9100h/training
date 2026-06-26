@@ -843,7 +843,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ...e,
           sets: e.sets.map(st => {
             if (st.done || st.warmup || st.skipped) return st;
-            if (!hasDone) return st;
+            if (!hasDone) return { ...st, skipped: true };
             const hasValue = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
             return hasValue ? { ...st, done: true } : st;
           }),
