@@ -459,6 +459,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [vipBgSheet, setVipBgSheet] = useStateSet(false);
   const [vipBgListSheet, setVipBgListSheet] = useStateSet(false);
   const [vipBgList, setVipBgList] = useStateSet([]);
+  const [vipBgOptions, setVipBgOptions] = useStateSet(null);
   const [vipBgEmail, setVipBgEmail] = useStateSet('');
   const [vipBgKey, setVipBgKey] = useStateSet('');
   const [vipBgSaving, setVipBgSaving] = useStateSet(false);
@@ -595,6 +596,9 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
     if (!isAdmin || !vipBgSheet) return;
     let mounted = true;
     LB.supabase.rpc('get_user_vip_backgrounds').then(({ data }) => { if (mounted) setVipBgList(data || []); }).catch(() => {});
+    if (!vipBgOptions) {
+      fetch('Background/index.json').then(r => r.json()).then(data => { if (mounted) setVipBgOptions(data); }).catch(() => { if (mounted) setVipBgOptions([]); });
+    }
     return () => { mounted = false; };
   }, [isAdmin, vipBgSheet]);
 
@@ -1851,14 +1855,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
       {/* ══ VIP backgrounds sheet (admin) ══ */}
       <SettingsSheet open={vipBgSheet} onClose={() => setVipBgSheet(false)} title="VIP Backgrounds">
         {(() => {
-          const VIP_OPTIONS = [
-            { key: 'Background/Appy.png',       label: 'Appy' },
-            { key: 'Background/phoenix.png',     label: 'Phoenix' },
-            { key: 'Background/marine.png',      label: 'Marine' },
-            { key: 'Background/prince_abu.png',  label: 'Prince Abu' },
-            { key: 'Background/Chris1.PNG',      label: 'Chris 1' },
-            { key: 'Background/Chris2.PNG',      label: 'Chris 2' },
-          ];
+          const opts = vipBgOptions;
           const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
@@ -1876,9 +1873,10 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
                   value={vipBgKey}
                   onChange={e => setVipBgKey(e.target.value)}
                   style={{ ...iStyle, appearance: 'none', WebkitAppearance: 'none', cursor: 'pointer' }}
+                  disabled={!opts}
                 >
-                  <option value="">— None (clear) —</option>
-                  {VIP_OPTIONS.map(o => (
+                  <option value="">{opts ? '— None (clear) —' : 'Loading…'}</option>
+                  {(opts || []).map(o => (
                     <option key={o.key} value={o.key}>{o.label}</option>
                   ))}
                 </select>
@@ -1902,21 +1900,14 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
       {/* ══ VIP backgrounds — current assignments sub-sheet ══ */}
       <SettingsSheet open={vipBgListSheet} onClose={() => setVipBgListSheet(false)} title="Current Assignments">
         {(() => {
-          const VIP_OPTIONS = [
-            { key: 'Background/Appy.png',       label: 'Appy' },
-            { key: 'Background/phoenix.png',     label: 'Phoenix' },
-            { key: 'Background/marine.png',      label: 'Marine' },
-            { key: 'Background/prince_abu.png',  label: 'Prince Abu' },
-            { key: 'Background/Chris1.PNG',      label: 'Chris 1' },
-            { key: 'Background/Chris2.PNG',      label: 'Chris 2' },
-          ];
+          const opts = vipBgOptions || [];
           if (vipBgList.length === 0) {
             return <div className="micro" style={{ color: UI.inkGhost, padding: '4px 0 12px' }}>No backgrounds assigned yet.</div>;
           }
           return (
             <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
               {vipBgList.map((row, i) => {
-                const opt = VIP_OPTIONS.find(o => o.key === row.bg_key);
+                const opt = opts.find(o => o.key === row.bg_key);
                 return (
                   <div key={row.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
                     <div style={{ minWidth: 0 }}>
