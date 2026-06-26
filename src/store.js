@@ -346,28 +346,55 @@ async function importFromBackup(backup, userId) {
   }
 }
 
-// Builds a complete export object for backup. Unlike JSON.stringify(store), this
-// fetches ALL session entries from the DB (no boot-window restriction) so older
-// sessions are fully preserved. Strips server-derived and relational fields that
-// have no meaning in a backup (exerciseBests, coaching, nextReminderAt).
+// Builds a complete export object for backup. Fetches ALL session entries and
+// all coaching data fresh from DB (no boot-window restriction). Strips only
+// ephemeral/server-derived fields that have no meaning outside the live session.
 async function exportBackup(store, userId) {
-  const { data: allEntryRows } = await _supabase
-    .from('zane_session_entries')
-    .select('*, sets:zane_sets(*)')
-    .eq('user_id', userId)
-    .order('entry_idx');
+  // Collect all coaching relationship IDs (regular + self + support tickets)
+  const regularCoachingIds = [
+    ...(store.coaching?.asCoach || []).map(r => r.id),
+    ...(store.coaching?.asClient ? [store.coaching.asClient.id] : []),
+    ...(store.coaching?.asSelf ? [store.coaching.asSelf.id] : []),
+  ];
+  const supportCoachingIds = (store.supportTickets || []).map(t => t.coachingId).filter(Boolean);
+  const allCoachingIds = [...new Set([...regularCoachingIds, ...supportCoachingIds])];
+
+  const fetches = [
+    _supabase.from('zane_session_entries').select('*, sets:zane_sets(*)').eq('user_id', userId).order('entry_idx'),
+  ];
+  if (allCoachingIds.length) {
+    fetches.push(
+      _supabase.from('zane_coaching_notes').select('*').in('coaching_id', allCoachingIds).order('created_at'),
+      _supabase.from('zane_coaching_threads').select('*').in('coaching_id', allCoachingIds).order('created_at'),
+      _supabase.from('zane_coaching_macros').select('*').in('coaching_id', allCoachingIds).order('set_at'),
+      _supabase.from('zane_checkins').select('*').in('coaching_id', allCoachingIds).order('week_start'),
+    );
+  }
+
+  const [entriesRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
+
   const bySession = {};
-  for (const e of (allEntryRows || [])) {
+  for (const e of (entriesRes.data || [])) {
     if (!bySession[e.session_id]) bySession[e.session_id] = [];
     bySession[e.session_id].push(e);
   }
-  const { exerciseBests, coaching, nextReminderAt, ...rest } = store;
+
+  const { exerciseBests, nextReminderAt, supportUnread, adminSupportUnread, ...rest } = store;
   return {
+    _version: 2,
+    _exportedAt: new Date().toISOString(),
     ...rest,
     sessions: store.sessions.map(s => ({
       ...s,
       entries: bySession[s.id] ? mapEntryRows(bySession[s.id]) : s.entries,
     })),
+    coaching: allCoachingIds.length ? {
+      relationships: store.coaching,
+      notes: notesRes?.data || [],
+      threads: threadsRes?.data || [],
+      macros: macrosRes?.data || [],
+      checkins: checkinsRes?.data || [],
+    } : store.coaching,
   };
 }
 
