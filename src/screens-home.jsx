@@ -1590,7 +1590,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         body = `You've logged ${goal} training sessions — solid work. A deload week now means you come back stronger. Want to start one?`;
       }
     } else if (LB.isWeekdayPlan(sch)) {
-      const anchorStr = store?.deloadPromptDismissedAt || store?.weekPlanStartDate;
+      const firstSession = (store?.sessions || []).filter(s => s.ended && s.date).map(s => s.date.slice(0, 10)).sort()[0] || null;
+      const anchorStr = store?.deloadPromptDismissedAt || store?.weekPlanStartDate || firstSession;
       if (anchorStr) {
         const anchorD = new Date(anchorStr.slice(0, 10) + 'T12:00:00');
         const daysElapsed = Math.round((todayD - anchorD) / 86400000);
