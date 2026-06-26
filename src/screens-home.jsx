@@ -1633,7 +1633,23 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const yes = await confirm(body, { title, ok: 'Start deload', cancel: 'Not now' });
       const stamp = new Date().toISOString();
       setStore(s => ({ ...s, deloadPromptDismissedAt: stamp }));
-      if (yes) await LB.startDeload(userId, { ...store, deloadPromptDismissedAt: stamp }, setStore);
+      if (yes) {
+        // For versioned cycle plans: align the deload window to the start of the next
+        // cycle so it covers exactly one full cycle of training. The nudge fires on the
+        // last training day, which may be followed by rest days; without this shift the
+        // cycleLen clock would include those rest days and end the deload 1–n days early.
+        let sinceISO = null;
+        if (!LB.isFlexPlan(sch) && !LB.isWeekdayPlan(sch) && sch.versions?.length) {
+          const cyclePos = LB.getCyclePosForDate(sch, todayStr);
+          const cycleLen = days.length;
+          if (cyclePos !== null && cycleLen > 0) {
+            const nextCycleStart = new Date(todayStr + 'T00:00:00');
+            nextCycleStart.setDate(nextCycleStart.getDate() + (cycleLen - cyclePos));
+            sinceISO = nextCycleStart.toISOString();
+          }
+        }
+        await LB.startDeload(userId, { ...store, deloadPromptDismissedAt: stamp }, setStore, sinceISO);
+      }
     })();
   }, [store?.statusMode, store?.inProgress, store?.deloadPromptDismissedAt, store?.sessions, sch]);
 

@@ -2744,14 +2744,19 @@ function deloadDaysRemaining(store, now = new Date()) {
   const sch = (store.schedules || []).find(s => s.id === store.activeScheduleId);
   if (sch && isFlexPlan(sch)) return null;
   const days = deloadPlanDays(store) || 7;
-  const elapsed = Math.floor((now - new Date(store.statusModeSince)) / 86400000);
+  // Clamp to 0 so a future statusModeSince (nudge-aligned to next cycle start)
+  // shows the full duration rather than a negative elapsed.
+  const elapsed = Math.max(0, Math.floor((now - new Date(store.statusModeSince)) / 86400000));
   return Math.max(0, days - elapsed);
 }
 
 // Start a deload: switch status mode to 'deload' and open a status period.
 // Mirrors the optimistic setStore + write pattern of the home status toggle.
-async function startDeload(userId, store, setStore) {
-  const startedAt = new Date().toISOString();
+// sinceISO: optional ISO string to use as statusModeSince instead of now — used
+// by the nudge to align the deload window to the start of the next cycle so it
+// covers exactly one full cycle of training (not a partial one starting mid-cycle).
+async function startDeload(userId, store, setStore, sinceISO = null) {
+  const startedAt = sinceISO || new Date().toISOString();
   const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
   setStore(s => ({
     ...s, statusMode: 'deload', statusModeSince: startedAt,

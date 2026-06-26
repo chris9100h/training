@@ -19,12 +19,12 @@ window.WHATS_NEW = [
     id: 'v2.412',
     title: 'Deload week, templates & more',
     items: [
-      'Deload week is here — start one from the Plans tab (or wait for the app to suggest it). Weights are automatically pre-filled at 50% of your last session so you don\'t have to think. One cycle or week later, the deload ends by itself and training picks up where it left off.',
-      'The app congratulates you after every 8 completed cycles (or weeks, or sessions for flex plans) and asks if you\'d like a deload — right when you finish the last training day of that block. Say "not now" and it leaves you alone for 8 more cycles.',
-      'Workout templates: save a finished freestyle session as a template, then start future sessions from it — or import it straight into a plan day. Find them in the Library.',
-      'Exercise videos: paste a YouTube link onto any exercise and a play button appears in the exercise editor, the exercise detail, and during training. Useful for form reminders.',
-      'Coaches can now send images in chat — tap the attachment icon in any thread, pick a photo, done.',
-      'Several fixes: light theme contrast improvements, library knurl textures visible in screenshots, and a handful of smaller visual tweaks.',
+      'Deload week is here — start one from the Plans tab (or wait for the app to nudge you). Weights pre-fill at 50% of your last session automatically. One full cycle or week later the deload ends by itself and training picks up exactly where it left off.',
+      'After every 8 completed cycles (or 8 weeks for weekday plans, or 8×frequency sessions for flex plans), the app congratulates you right when you finish your last training day of that block and asks if you want a deload. Say "not now" and it resets the counter for another 8.',
+      'Workout templates: finish a freestyle session and save it as a template — then start future sessions from it, or drop it straight into any plan day. Find them in the Library under a new Templates tab.',
+      'Exercise videos: paste a YouTube link onto any exercise. A play button shows up in the exercise editor, the detail view, and right in the training screen when you\'re about to do that exercise.',
+      'Images in coaching chat — coaches and clients can both send photos in any thread. Tap the attachment icon, pick a photo, done. Thumbnails show inline in the conversation.',
+      'Light theme contrast improvements, knurl textures now visible in library screenshots, and several smaller fixes across the app.',
     ],
   },
   {
