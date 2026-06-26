@@ -2924,6 +2924,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 </div>
                 <div style={{ textAlign: 'center', padding: '0 18px', marginBottom: 10 }}>
                   <span style={{ fontFamily: UI.fontDisplay, fontWeight: 700, fontSize: 18, color: UI.inkSoft, letterSpacing: '0.01em' }}>{entry.name}</span>
+                  {entry.note ? <div style={{ marginTop: 6, fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.4 }}>{entry.note}</div> : null}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '0 14px' }}>
                   <div style={{ flex: 1, textAlign: 'center' }}>
