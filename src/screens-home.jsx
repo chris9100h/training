@@ -1574,6 +1574,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
     const todayD = new Date(todayStr + 'T12:00:00');
     let shouldPrompt = false;
+    let deloadCycleInfo = null; // { cyclePos, cycleLen } for next-cycle-start alignment
     let title = '8 cycles done! 🎉';
     let body = "You've completed 8 full training cycles — that's serious dedication. A deload week now means you come back stronger. Want to start one?";
 
@@ -1623,7 +1624,40 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           } else {
             eligible = cycleNum % 8 === 0;
           }
-          if (eligible) shouldPrompt = true;
+          if (eligible) {
+            shouldPrompt = true;
+            deloadCycleInfo = { cyclePos, cycleLen: days.length };
+          }
+        }
+      }
+    } else {
+      // Unversioned cycle plan: fall back to store.cycleStartDate for position.
+      const cycleLen = (sch.days || []).length;
+      const cycleStartStr = store?.cycleStartDate;
+      if (cycleLen && cycleStartStr) {
+        const cycleStartD = new Date(cycleStartStr + 'T12:00:00');
+        const daysFromStart = Math.round((todayD - cycleStartD) / 86400000);
+        if (daysFromStart >= 0) {
+          const cycleNum = Math.floor(daysFromStart / cycleLen) + 1;
+          const cyclePos = daysFromStart % cycleLen;
+          const lastTrainingIdx = (sch.days || []).reduce((last, d, i) => ((d.items || []).length > 0 ? i : last), -1);
+          if (lastTrainingIdx >= 0 && cyclePos === lastTrainingIdx) {
+            const anchorStr = store?.deloadPromptDismissedAt;
+            let eligible;
+            if (anchorStr) {
+              const anchorD2 = new Date(anchorStr.slice(0, 10) + 'T12:00:00');
+              const anchorDaysFromStart = Math.round((anchorD2 - cycleStartD) / 86400000);
+              const anchorCycleNum = anchorDaysFromStart >= 0 ? Math.floor(anchorDaysFromStart / cycleLen) + 1 : 0;
+              const diff = cycleNum - anchorCycleNum;
+              eligible = diff > 0 && diff % 8 === 0;
+            } else {
+              eligible = cycleNum % 8 === 0;
+            }
+            if (eligible) {
+              shouldPrompt = true;
+              deloadCycleInfo = { cyclePos, cycleLen };
+            }
+          }
         }
       }
     }
@@ -1635,14 +1669,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const stamp = new Date().toISOString();
       setStore(s => ({ ...s, deloadPromptDismissedAt: stamp }));
       if (yes) {
-        // For versioned cycle plans: align the deload window to the start of the next
-        // cycle so it covers exactly one full cycle of training. The nudge fires on the
-        // last training day, which may be followed by rest days; without this shift the
-        // cycleLen clock would include those rest days and end the deload 1–n days early.
+        // Align deload window to next cycle start so rest days at end of cycle don't
+        // shorten the deload. Works for both versioned and unversioned cycle plans.
         let sinceISO = null;
-        if (!LB.isFlexPlan(sch) && !LB.isWeekdayPlan(sch) && sch.versions?.length) {
-          const cyclePos = LB.getCyclePosForDate(sch, todayStr);
-          const cycleLen = days.length;
+        if (!LB.isFlexPlan(sch) && !LB.isWeekdayPlan(sch) && deloadCycleInfo) {
+          const { cyclePos, cycleLen } = deloadCycleInfo;
           if (cyclePos !== null && cycleLen > 0) {
             const nextCycleStart = new Date(todayStr + 'T00:00:00');
             nextCycleStart.setDate(nextCycleStart.getDate() + (cycleLen - cyclePos));
