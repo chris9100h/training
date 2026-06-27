@@ -276,6 +276,32 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
   const [reactivateDate, setReactivateDate] = useStateS('');
   const [editingStartDate, setEditingStartDate] = useStateS(false);
   const [editStartDateVal, setEditStartDateVal] = useStateS('');
+  const [backupSheet, setBackupSheet] = useStateS(false);
+  const [backups, setBackups] = useStateS(null);
+
+  const openBackupSheet = async () => {
+    setBackupSheet(true);
+    if (!sch) return;
+    const { data } = await LB.supabase
+      .from('zane_schedule_backups')
+      .select('id, days, schedule_name, created_at')
+      .eq('schedule_id', sch.id)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    setBackups(data || []);
+  };
+
+  const restoreBackup = async (backup) => {
+    if (!await confirm(
+      `Restore the backup from ${new Date(backup.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}?\n\nThis replaces your current training days.`,
+      { ok: 'Restore', danger: true }
+    )) return;
+    setStore(s => ({
+      ...s,
+      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, days: backup.days } : x),
+    }));
+    setBackupSheet(false);
+  };
 
   React.useEffect(() => {
     const row = chipRowRef.current;
@@ -414,6 +440,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
       )}
       <Btn kind="ghost" onClick={duplicate} style={{ flex: 1, fontSize: 12 }}>Duplicate</Btn>
       <Btn kind="ghost" onClick={exportPlan} style={{ flex: 1, fontSize: 12 }}>Export</Btn>
+      <Btn kind="ghost" onClick={openBackupSheet} style={{ flex: 1, fontSize: 12 }}>Backups</Btn>
     </>
   );
 
@@ -681,6 +708,44 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
               <Btn disabled={!reactivateDate} onClick={() => doReactivate(reactivateDate)} style={{ flexShrink: 0 }}>
                 Apply
               </Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {backupSheet && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setBackupSheet(false)}>
+          <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))', maxHeight: '70vh', display: 'flex', flexDirection: 'column' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="label" style={{ color: UI.inkFaint, marginBottom: 4, flexShrink: 0 }}>PLAN BACKUPS</div>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 16, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none', flexShrink: 0 }}>
+              Automatic snapshots saved whenever you update your training days. Restoring replaces your current days.
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {backups === null && (
+                <div style={{ color: UI.inkFaint, fontSize: 13, textAlign: 'center', padding: '16px 0' }}>Loading…</div>
+              )}
+              {backups !== null && backups.length === 0 && (
+                <div style={{ color: UI.inkFaint, fontSize: 13, textAlign: 'center', padding: '16px 0' }}>No backups yet. Backups are saved automatically when you update your plan.</div>
+              )}
+              {(backups || []).map(b => {
+                const date = new Date(b.created_at);
+                const dayCount = (b.days || []).filter(d => (d.items || []).length > 0).length;
+                return (
+                  <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: UI.bgRaised }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>
+                        {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </div>
+                      <div className="micro" style={{ color: UI.inkFaint, marginTop: 2, letterSpacing: '0.06em' }}>
+                        {date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · {(b.days || []).length} days · {dayCount} training
+                      </div>
+                    </div>
+                    <Btn kind="ghost" onClick={() => restoreBackup(b)} style={{ fontSize: 11, flexShrink: 0 }}>Restore</Btn>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

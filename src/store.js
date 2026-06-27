@@ -929,6 +929,18 @@ async function syncStore(prev, next, userId) {
     const removed = prev.schedules.filter(s => !next.schedules.find(x => x.id === s.id));
     if (upsert.length)  ops.push(_supabase.from('zane_schedules').upsert(upsert.map(({ mode, ...s }) => ({ ...s, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_schedules').delete().in('id', removed.map(s => s.id)));
+    // Fire-and-forget backup whenever days changes to a valid non-empty array.
+    // Never blocks the main sync; failures are silently ignored.
+    const toBackup = upsert.filter(s => {
+      const p = prev.schedules.find(x => x.id === s.id);
+      const daysChanged = !p || JSON.stringify(p.days) !== JSON.stringify(s.days);
+      return daysChanged && Array.isArray(s.days) && s.days.length > 0;
+    });
+    if (toBackup.length) {
+      _supabase.from('zane_schedule_backups').insert(
+        toBackup.map(s => ({ id: uid(), user_id: userId, schedule_id: s.id, schedule_name: s.name, days: s.days }))
+      ).then(() => {}).catch(() => {});
+    }
   }
 
   let sessionUpserts = [];
