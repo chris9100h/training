@@ -977,29 +977,44 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           </Field>
         )}
 
-        {isFlex && (
-          <Field label="Weekly goal">
-            <Toggle on={draft.sessions_per_week != null} onToggle={() => setDraft(d => ({
-              ...d,
-              sessions_per_week: d.sessions_per_week != null ? null
-                : Math.min(7, Math.max(1, (d.days || []).filter(x => x.items?.length > 0).length || 3)),
-            }))} />
-          </Field>
-        )}
-        {isFlex && draft.sessions_per_week != null && (
-          <Field label="Sessions per week">
-            <Stepper value={draft.sessions_per_week} step={1} min={1} max={7}
-              suffix="/ week"
-              onChange={v => setDraft(d => ({ ...d, sessions_per_week: Math.min(7, Math.max(1, Math.round(v))) }))} />
-          </Field>
-        )}
-        {isFlex && (
-          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, lineHeight: 1.5, marginTop: -8, paddingBottom: 4 }}>
-            {draft.sessions_per_week != null
-              ? `Target: ${draft.sessions_per_week}× per week — used for your weekly adherence score and deload timing.`
-              : 'No target set — just train whenever. Adherence and deload timing won\'t apply.'}
-          </div>
-        )}
+        {isFlex && (() => {
+          const hasGoal = draft.sessions_per_week != null;
+          const toggle = () => setDraft(d => ({
+            ...d,
+            sessions_per_week: d.sessions_per_week != null ? null
+              : Math.min(7, Math.max(1, (d.days || []).filter(x => x.items?.length > 0).length || 3)),
+          }));
+          return (
+            <Field label="Weekly goal">
+              <button onClick={toggle} style={{
+                display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                background: UI.bgInset, border: `1px solid ${hasGoal ? UI.goldSoft : UI.hairStrong}`,
+                borderRadius: 4, padding: '10px 12px', cursor: 'pointer', textAlign: 'left',
+              }}>
+                <div style={{ width: 44, height: 26, borderRadius: 13, flexShrink: 0, position: 'relative', background: hasGoal ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
+                  <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>
+                    {hasGoal ? `${draft.sessions_per_week}× per week` : 'No target'}
+                  </div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
+                    {hasGoal
+                      ? 'Used for your weekly adherence score and deload timing.'
+                      : 'Just train whenever — adherence and deload timing won\'t apply.'}
+                  </div>
+                </div>
+              </button>
+              {hasGoal && (
+                <div style={{ marginTop: 10, width: '100%' }}>
+                  <Stepper value={draft.sessions_per_week} step={1} min={1} max={7}
+                    suffix="/ week"
+                    onChange={v => setDraft(d => ({ ...d, sessions_per_week: Math.min(7, Math.max(1, Math.round(v))) }))} />
+                </div>
+              )}
+            </Field>
+          );
+        })()}
 
         {isActive && !isWeekday && !isFlex && (
           <Field label="Cycle start date (Day 1)">
