@@ -1104,10 +1104,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (!cn || cn <= 0) return dayIdx;
     const cs = LB.getCycleStartForNum(sch, cn);
     if (!cs) return dayIdx;
-    return Math.max(0, Math.min(
-      Math.round((new Date(todayISO + 'T12:00:00') - cs) / 86400000),
-      (sch.days?.length || 1) - 1
-    ));
+    cs.setHours(12, 0, 0, 0);
+    const csStr = cs.toISOString().slice(0, 10);
+    const activeV = sch.versions.find(v => v.validFrom <= csStr) || sch.versions[sch.versions.length - 1];
+    const vOffset = activeV?.cycleOffset || 0;
+    const daysFromCycleStart = Math.round((new Date(todayISO + 'T12:00:00') - cs) / 86400000);
+    return Math.max(0, Math.min(daysFromCycleStart + vOffset, (sch.days?.length || 1) - 1));
   })();
 
   const [weekOffset, setWeekOffset] = useState(0);
@@ -1255,15 +1257,17 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const cycleStart = getCycleStartForNum(sch, targetCN);
       if (!cycleStart) return [];
       cycleStart.setHours(12, 0, 0, 0);
-      const targetDays = LB.getPlanDaysForDate(sch, cycleStart.toISOString().slice(0, 10));
+      const csStr = cycleStart.toISOString().slice(0, 10);
+      const activeV = sch.versions.find(v => v.validFrom <= csStr) || sch.versions[sch.versions.length - 1];
+      const vOffset = activeV?.cycleOffset || 0;
+      const logicalStart = new Date(cycleStart.getTime() - vOffset * 86400000);
+      logicalStart.setHours(12, 0, 0, 0);
+      const targetDays = LB.getPlanDaysForDate(sch, csStr);
       const anchor = LB.parseDate(store.cycleStartDate);
-      return targetDays.map((_, i) => {
-        const date = new Date(cycleStart.getTime() + i * 86400000);
-        const dateStr = date.toISOString().slice(0, 10);
-        const planPos = LB.getCyclePosForDate(sch, dateStr) ?? i;
-        const d = targetDays[planPos] || targetDays[i];
+      return targetDays.map((d, i) => {
+        const date = new Date(logicalStart.getTime() + i * 86400000);
         const daysFromStart = Math.round((date - anchor) / 86400000);
-        return { ...d, slotIdx: i, planPos, date, daysFromStart, isToday: weekOffset === 0 && i === todayStripIdx };
+        return { ...d, slotIdx: i, planPos: i, date, daysFromStart, isToday: weekOffset === 0 && i === todayStripIdx };
       });
     }
     return sch.days.map((d, i) => {
