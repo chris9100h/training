@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.415',
+    title: 'Your Flex Plan, Your Rules',
+    items: [
+      'The weekly session goal on flex plans is now optional — toggle it on for consistency tracking, or leave it off and just train when life allows. No target, no guilt.',
+      'The 7-session-per-week limit is gone. Set whatever your schedule demands — the stepper may have opinions.',
+      'Fixed: switching a flex plan back to a regular cycle plan no longer leaves a stale ×/week badge behind.',
+    ],
+  },
+  {
     id: 'v2.414',
     title: 'Light Mode Polish',
     items: [
