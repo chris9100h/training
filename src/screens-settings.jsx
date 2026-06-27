@@ -2598,16 +2598,23 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     <span style={{ fontSize: 13, fontFamily: UI.fontUi, fontWeight: 600, color: isRest ? UI.inkFaint : UI.ink }}>{day.name}</span>
                     {!isRest && <span className="micro" style={{ color: UI.inkGhost }}>{(day.items || []).length} ex</span>}
                   </div>
-                  {!isRest && (day.items || []).map((it, j) => (
-                    <div key={it.exId || j} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0 6px 20px', borderTop: j > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</div>
+                  {!isRest && (day.items || []).map((it, j) => {
+                    const isUni = it.unilateral || it.movement_type === 'unilateral';
+                    const isMob = it.movement_type === 'mobility';
+                    return (
+                      <div key={it.exId || j} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0 7px 20px', borderTop: j > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name || '—'}</div>
+                          {(isUni || isMob) && (
+                            <div className="micro" style={{ color: UI.inkGhost, marginTop: 1 }}>{isMob ? 'MOBILITY' : 'UNILATERAL'}</div>
+                          )}
+                        </div>
+                        <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>
+                          {it.sets} × {it.reps || '—'}
+                        </span>
                       </div>
-                      <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>
-                        {it.sets} × {it.reps}
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               );
             })}
