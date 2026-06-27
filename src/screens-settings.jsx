@@ -392,6 +392,9 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [signupsSheet, setSignupsSheet] = useStateSet(false);
   const [onboardedUsers, setOnboardedUsers] = useStateSet([]);
   const [onboardedSheet, setOnboardedSheet] = useStateSet(false);
+  const [adminUserDetail, setAdminUserDetail] = useStateSet(null); // { userId, name, plans, exercises }
+  const [adminUserDetailLoading, setAdminUserDetailLoading] = useStateSet(false);
+  const [adminUserDetailSheet, setAdminUserDetailSheet] = useStateSet(false);
   const [seenSignups, setSeenSignups] = useStateSet(() => {
     try { return new Set(JSON.parse(localStorage.getItem('logbook-seen-signups') || '[]')); } catch (_) { return new Set(); }
   });
@@ -2519,7 +2522,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
               <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 10 }}>{onboardedUsers.length} users with at least one plan</div>
               {onboardedUsers.map((u, i) => (
-                <div key={u.user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                <button key={u.user_id} onClick={() => {
+                  setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, plans: null, exercises: null });
+                  setAdminUserDetailLoading(true);
+                  setAdminUserDetailSheet(true);
+                  LB.supabase.rpc('get_user_detail_admin', { p_user_id: u.user_id })
+                    .then(({ data, error }) => {
+                      if (error || !data) { setAdminUserDetailLoading(false); return; }
+                      setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, plans: data.plans || [], exercises: data.exercises || [] });
+                      setAdminUserDetailLoading(false);
+                    }).catch(() => setAdminUserDetailLoading(false));
+                }} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                   <div style={{ width: 34, height: 34, borderRadius: '50%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, color: UI.inkSoft }}>{(u.name || u.email || '?')[0].toUpperCase()}</span>
                   </div>
@@ -2531,8 +2544,57 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email} · joined {fmtAgo(u.joined_at)}</div>
                   </div>
                   <span className="micro" style={{ color: UI.inkSoft, flexShrink: 0 }}>{u.plan_count} {u.plan_count === 1 ? 'plan' : 'plans'}</span>
-                </div>
+                </button>
               ))}
+            </div>
+          )
+        }
+      </SettingsSheet>
+
+      {/* ══ User detail sheet (admin — plans + exercises) ══ */}
+      <SettingsSheet open={adminUserDetailSheet} onClose={() => setAdminUserDetailSheet(false)} title={adminUserDetail?.name || adminUserDetail?.email || 'User'}>
+        {adminUserDetailLoading
+          ? <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '8px 0' }}>Loading…</div>
+          : adminUserDetail && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingBottom: 8 }}>
+              <div>
+                <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 8 }}>PLANS</div>
+                {(adminUserDetail.plans || []).length === 0
+                  ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No plans.</div>
+                  : (adminUserDetail.plans || []).map((p, i) => (
+                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, color: p.archived ? UI.inkFaint : UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                        <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>
+                          {p.day_count} {p.day_count === 1 ? 'day' : 'days'}
+                          {p.is_flex ? ' · flex' : ''}
+                          {p.sessions_per_week ? ` · ${p.sessions_per_week}×/week` : ''}
+                        </div>
+                      </div>
+                      {p.archived && <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>ARCHIVED</span>}
+                    </div>
+                  ))
+                }
+              </div>
+              <div>
+                <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 8 }}>EXERCISES · {(adminUserDetail.exercises || []).length}</div>
+                {(adminUserDetail.exercises || []).length === 0
+                  ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No exercises.</div>
+                  : (adminUserDetail.exercises || []).map((e, i) => (
+                    <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</div>
+                        <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>
+                          {[e.category, e.equipment].filter(Boolean).join(' · ')}
+                        </div>
+                      </div>
+                      {e.movement_type && e.movement_type !== 'bilateral' && (
+                        <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>{e.movement_type.toUpperCase()}</span>
+                      )}
+                    </div>
+                  ))
+                }
+              </div>
             </div>
           )
         }
