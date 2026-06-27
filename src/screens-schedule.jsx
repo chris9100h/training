@@ -898,9 +898,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     const turningOn = !isFlex;
     setDraft(d => {
       const next = { ...d, is_flex: turningOn };
-      if (turningOn && next.sessions_per_week == null) {
-        const trainingDays = (d.days || []).filter(x => x.items?.length > 0).length;
-        next.sessions_per_week = Math.min(7, Math.max(1, trainingDays || 3));
+      if (!turningOn) {
+        next.sessions_per_week = null;
       }
       return next;
     });
@@ -979,8 +978,17 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         )}
 
         {isFlex && (
-          <Field label="Sessions per week goal">
-            <Stepper value={draft.sessions_per_week ?? 4} step={1} min={1}
+          <Field label="Weekly goal">
+            <Toggle on={draft.sessions_per_week != null} onToggle={() => setDraft(d => ({
+              ...d,
+              sessions_per_week: d.sessions_per_week != null ? null
+                : Math.min(7, Math.max(1, (d.days || []).filter(x => x.items?.length > 0).length || 3)),
+            }))} />
+          </Field>
+        )}
+        {isFlex && draft.sessions_per_week != null && (
+          <Field label="Sessions per week">
+            <Stepper value={draft.sessions_per_week} step={1} min={1} max={7}
               suffix="/ week"
               onChange={v => setDraft(d => ({ ...d, sessions_per_week: Math.min(7, Math.max(1, Math.round(v))) }))} />
             <div className="micro" style={{ marginTop: 8, textAlign: 'center' }}>Used to measure your weekly consistency</div>
