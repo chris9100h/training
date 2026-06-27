@@ -1197,12 +1197,11 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                   />
                 </div>
               </div>
-              {!isWeekday && draft.days.filter(d => d.items?.length > 0).length > 1 && (
+              {!isWeekday && draft.days.length > 1 && (
                 <div>
                   <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>START WITH DAY</div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {draft.days.filter(d => d.items?.length > 0).map((d, _i) => {
-                      const realIdx = draft.days.indexOf(d);
+                    {draft.days.map((d, realIdx) => {
                       const active = applyFromDayIdx === realIdx;
                       return (
                         <button key={d.id} onClick={() => setApplyFromDayIdx(realIdx)} style={{
