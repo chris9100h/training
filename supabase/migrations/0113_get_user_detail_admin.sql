@@ -11,6 +11,9 @@ BEGIN
   END IF;
   RETURN (
     SELECT jsonb_build_object(
+      'active_schedule_id', (
+        SELECT us.active_schedule_id FROM zane_user_settings us WHERE us.user_id = p_user_id
+      ),
       'plans', (
         SELECT COALESCE(jsonb_agg(
           jsonb_build_object(

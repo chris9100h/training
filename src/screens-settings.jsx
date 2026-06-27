@@ -2531,7 +2531,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   LB.supabase.rpc('get_user_detail_admin', { p_user_id: u.user_id })
                     .then(({ data, error }) => {
                       if (error || !data) { setAdminUserDetailLoading(false); return; }
-                      setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, plans: data.plans || [], exercises: data.exercises || [] });
+                      setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, activeScheduleId: data.active_schedule_id || null, plans: data.plans || [] });
                       setAdminUserDetailLoading(false);
                     }).catch(() => setAdminUserDetailLoading(false));
                 }} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
@@ -2562,23 +2562,29 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 8 }}>PLANS</div>
               {(adminUserDetail.plans || []).length === 0
                 ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No plans.</div>
-                : (adminUserDetail.plans || []).map((p, i) => (
-                  <button key={p.id} onClick={() => { setAdminPlanDetail(p); setAdminPlanDetailSheet(true); }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, color: p.archived ? UI.inkFaint : UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
-                      <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>
-                        {p.day_count} {p.day_count === 1 ? 'day' : 'days'}
-                        {p.is_flex ? ' · flex' : ''}
-                        {p.sessions_per_week ? ` · ${p.sessions_per_week}×/week` : ''}
-                      </div>
-                    </div>
-                    {p.archived
-                      ? <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>ARCHIVED</span>
-                      : <i className="fa-solid fa-chevron-right" style={{ fontSize: 10, color: UI.inkGhost }} />
-                    }
-                  </button>
-                ))
+                : (adminUserDetail.plans || []).map((p, i) => {
+                    const isActive = p.id === adminUserDetail.activeScheduleId;
+                    return (
+                      <button key={p.id} onClick={() => { setAdminPlanDetail(p); setAdminPlanDetailSheet(true); }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 13, color: p.archived ? UI.inkFaint : UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                            {isActive && <span className="micro" style={{ color: 'var(--accent)', flexShrink: 0 }}>ACTIVE</span>}
+                          </div>
+                          <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>
+                            {p.day_count} {p.day_count === 1 ? 'day' : 'days'}
+                            {p.is_flex ? ' · flex' : ''}
+                            {p.sessions_per_week ? ` · ${p.sessions_per_week}×/week` : ''}
+                          </div>
+                        </div>
+                        {p.archived
+                          ? <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>ARCHIVED</span>
+                          : <i className="fa-solid fa-chevron-right" style={{ fontSize: 10, color: UI.inkGhost }} />
+                        }
+                      </button>
+                    );
+                  })
               }
             </div>
           )
