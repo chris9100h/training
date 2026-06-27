@@ -1005,13 +1005,25 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                   </div>
                 </div>
               </button>
-              {hasGoal && (
-                <div style={{ marginTop: 10, width: '100%' }}>
-                  <Stepper value={draft.sessions_per_week} step={1} min={1} max={7}
-                    suffix="/ week"
-                    onChange={v => setDraft(d => ({ ...d, sessions_per_week: Math.min(7, Math.max(1, Math.round(v))) }))} />
-                </div>
-              )}
+              {hasGoal && (() => {
+                const spw = draft.sessions_per_week;
+                const hint = spw >= 50 ? '50 sessions. You win.' :
+                             spw > 30  ? 'At this point the gym should pay you.' :
+                             spw > 20  ? 'Dude. Really?' :
+                             spw > 14  ? '…okay, you\'re serious about this.' :
+                             spw > 10  ? 'Calm down, dude.' :
+                             spw > 7   ? 'Oh, an overachiever. We see you. 👀' : null;
+                return (
+                  <div style={{ marginTop: 10, width: '100%' }}>
+                    <Stepper value={spw} step={1} min={1} max={50}
+                      suffix="/ week"
+                      onChange={v => setDraft(d => ({ ...d, sessions_per_week: Math.min(50, Math.max(1, Math.round(v))) }))} />
+                    {hint && (
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, textAlign: 'center', lineHeight: 1.4 }}>{hint}</div>
+                    )}
+                  </div>
+                );
+              })()}
             </Field>
           );
         })()}
