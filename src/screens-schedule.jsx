@@ -1012,7 +1012,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                              spw > 20  ? 'Dude. Really?' :
                              spw > 14  ? '…okay, you\'re serious about this.' :
                              spw > 10  ? 'Calm down, dude.' :
-                             spw > 7   ? 'Oh, an overachiever. We see you. 👀' : null;
+                             spw > 7   ? 'Oh, an overachiever. We see you.' :
+                             spw >= 4  ? 'Solid.' :
+                             spw >= 2  ? 'That\'s a start.' :
+                                         'Better than nothing.';
                 return (
                   <div style={{ marginTop: 10, width: '100%' }}>
                     <Stepper value={spw} step={1} min={1} max={50}
