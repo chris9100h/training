@@ -397,6 +397,10 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [adminUserDetailSheet, setAdminUserDetailSheet] = useStateSet(false);
   const [adminPlanDetail, setAdminPlanDetail] = useStateSet(null); // plan object with days
   const [adminPlanDetailSheet, setAdminPlanDetailSheet] = useStateSet(false);
+  const [adminPlanSelectedDayId, setAdminPlanSelectedDayId] = useStateSet(null);
+  useEffectSet(() => {
+    setAdminPlanSelectedDayId(adminPlanDetail?.days?.[0]?.id || null);
+  }, [adminPlanDetail]);
   const [seenSignups, setSeenSignups] = useStateSet(() => {
     try { return new Set(JSON.parse(localStorage.getItem('logbook-seen-signups') || '[]')); } catch (_) { return new Set(); }
   });
@@ -2591,41 +2595,70 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         }
       </SettingsSheet>
 
-      {/* ══ Plan detail sheet (admin — days + exercises) ══ */}
+      {/* ══ Plan detail sheet (admin — day chips + exercise cards) ══ */}
       <SettingsSheet open={adminPlanDetailSheet} onClose={() => setAdminPlanDetailSheet(false)} title={adminPlanDetail?.name || 'Plan'}>
-        {adminPlanDetail && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 8 }}>
-            {(adminPlanDetail.days || []).map((day, i) => {
-              const isRest = day.name === 'REST' || !(day.items || []).length;
-              return (
-                <div key={day.id || i}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: isRest ? 0 : 8 }}>
-                    <span className="micro" style={{ color: 'var(--accent)' }}>D{i + 1}</span>
-                    <span style={{ fontSize: 13, fontFamily: UI.fontUi, fontWeight: 600, color: isRest ? UI.inkFaint : UI.ink }}>{day.name}</span>
-                    {!isRest && <span className="micro" style={{ color: UI.inkGhost }}>{(day.items || []).length} ex</span>}
+        {adminPlanDetail && (() => {
+          const days = adminPlanDetail.days || [];
+          const day = days.find(d => d.id === adminPlanSelectedDayId) || days[0];
+          const dayIdx = days.findIndex(d => d.id === (day?.id));
+          const isRest = !day || !(day.items || []).length || day.name === 'REST';
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, margin: '0 -16px' }}>
+              {/* chip row */}
+              <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none', padding: '0 16px 14px' }}>
+                {days.map((d, i) => {
+                  const active = d.id === (day?.id);
+                  const rest = !d.items?.length || d.name === 'REST';
+                  return (
+                    <button key={d.id || i} onClick={() => setAdminPlanSelectedDayId(d.id)} style={{
+                      flexShrink: 0, maxWidth: 120, padding: '6px 12px 4px', borderRadius: 4,
+                      border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
+                      background: active ? UI.goldFaint : 'transparent',
+                      cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
+                    }}>
+                      <div style={{ fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em', fontWeight: 600, color: active ? UI.gold : rest ? UI.inkFaint : UI.inkSoft, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</div>
+                      <div style={{ fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: active ? UI.gold : UI.inkFaint, marginTop: 1 }}>Day {i + 1}</div>
+                    </button>
+                  );
+                })}
+              </div>
+              {/* day content */}
+              {day && (
+                <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 8 }}>
+                  <div>
+                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>DAY {dayIdx + 1}</div>
+                    <div className="display" style={{ fontSize: 30, color: isRest ? UI.inkSoft : UI.ink, fontStyle: isRest ? 'italic' : 'normal', lineHeight: 1.05, letterSpacing: '-0.01em' }}>{day.name}</div>
                   </div>
-                  {!isRest && (day.items || []).map((it, j) => {
+                  {isRest ? (
+                    <div style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: 36, textAlign: 'center' }}>
+                      <div className="display-it" style={{ fontSize: 32, color: UI.inkSoft, fontWeight: 300, marginBottom: 6 }}>Recover.</div>
+                      <div style={{ fontSize: 13, color: UI.inkFaint }}>Recovery is part of the plan.</div>
+                    </div>
+                  ) : (day.items || []).map((it, k) => {
                     const isUni = it.unilateral || it.movement_type === 'unilateral';
                     const isMob = it.movement_type === 'mobility';
                     return (
-                      <div key={it.exId || j} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0 7px 20px', borderTop: j > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name || '—'}</div>
-                          {(isUni || isMob) && (
-                            <div className="micro" style={{ color: UI.inkGhost, marginTop: 1 }}>{isMob ? 'MOBILITY' : 'UNILATERAL'}</div>
-                          )}
+                      <div key={it.exId || k} style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi }}>
+                              {it.name || '—'}
+                              {isUni && <span className="micro" style={{ marginLeft: 6, color: UI.inkFaint }}>UNI</span>}
+                              {isMob && <span className="micro" style={{ marginLeft: 6, color: UI.inkFaint }}>MOB</span>}
+                            </span>
+                          </div>
+                          <span className="num" style={{ fontSize: 13, color: UI.inkSoft, flexShrink: 0 }}>
+                            {it.sets} × {it.reps || '—'}
+                          </span>
                         </div>
-                        <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>
-                          {it.sets} × {it.reps || '—'}
-                        </span>
                       </div>
                     );
                   })}
                 </div>
-              );
-            })}
-          </div>
-        )}
+              )}
+            </div>
+          );
+        })()}
       </SettingsSheet>
 
       {/* ══ Push notifications sheet ══ */}
