@@ -843,7 +843,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ...e,
           sets: e.sets.map(st => {
             if (st.done || st.warmup || st.skipped) return st;
-            if (!hasDone) return st;
+            if (!hasDone) return { ...st, skipped: true };
             const hasValue = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
             return hasValue ? { ...st, done: true } : st;
           }),
@@ -1796,7 +1796,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {newBestSet && ReactDOM.createPortal(
         <div style={{
           position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 155, pointerEvents: 'none',
-          background: 'rgb(8,6,3)',
+          background: 'var(--bg-body)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
         }}>
@@ -1821,7 +1821,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {improvedSet && ReactDOM.createPortal(
         <div style={{
           position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 150, pointerEvents: 'none',
-          background: 'rgb(8,6,3)',
+          background: 'var(--bg-body)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
         }}>
@@ -1847,7 +1847,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {regressionSet && ReactDOM.createPortal(
         <div style={{
           position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 150, pointerEvents: 'none',
-          background: 'rgb(8,6,3)',
+          background: 'var(--bg-body)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
         }}>
@@ -1872,7 +1872,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {progressionUnlocked && ReactDOM.createPortal(
         <div onClick={() => { setProgressionUnlocked(null); if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); } }} style={{
           position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 160,
-          background: 'rgb(8,6,3)',
+          background: 'var(--bg-body)',
           animation: 'improvedFade 4s ease forwards',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: 8,
@@ -3016,7 +3016,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {postWarmupRest && (
         <div style={{
           position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 61,
-          background: 'rgb(8,6,3)',
+          background: 'var(--bg-body)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           padding: '0 32px',
         }}>

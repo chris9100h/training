@@ -16,6 +16,43 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.418',
+    title: 'Bug Fix + Plan Backups',
+    items: [
+      '🐛 Critical bug fixed: deleting any exercise from your library was silently wiping all training days from every plan. It didn\'t matter if the exercise was used in a plan or not — gone. This is now fixed.',
+      '🗄️ Your plans are now backed up automatically. Every time you save changes to your training days, a snapshot is stored. Up to 10 backups per plan, always on hand.',
+      'To restore: open a plan → Backups button → pick a snapshot → Restore. Done.',
+    ],
+  },
+  {
+    id: 'v2.416',
+    title: 'Smarter Plan Versioning',
+    items: [
+      'Renaming a training day now also triggers the "apply from date" question — not just adding or removing days. Changed Push to Chest? The app asks from when, so the history of each day stays where it belongs.',
+      'When switching to a new plan version, you can now choose which day to start on — not just Day 1. Starting a new plan tomorrow but you\'re mid-rotation? Pick Day 4, and the schedule continues exactly where your week is.',
+      'Rest days are included in the start-day picker, so any position in the cycle is fair game.',
+      '"From the beginning" is gone from the versioning sheet. Nobody actually uses retroactive plan rewrites — it only confused things.',
+    ],
+  },
+  {
+    id: 'v2.415',
+    title: 'Your Flex Plan, Your Rules',
+    items: [
+      'The weekly session goal on flex plans is now optional — toggle it on for consistency tracking, or leave it off and just train when life allows. No target, no guilt.',
+      'The 7-session-per-week limit is gone. Set whatever your schedule demands — the stepper may have opinions.',
+      'Fixed: switching a flex plan back to a regular cycle plan no longer leaves a stale ×/week badge behind.',
+    ],
+  },
+  {
+    id: 'v2.414',
+    title: 'Light Mode Polish',
+    items: [
+      'Cards, surfaces and borders are now properly visible in light mode — all the subtle cream tints have been replaced with theme-aware ink tints.',
+      'The NEW BEST, IMPROVEMENT and regression overlays now match your active theme instead of always going full black.',
+      'Success greens and skipped-day chips have better contrast on the light background.',
+    ],
+  },
+  {
     id: 'v2.412',
     title: 'Deload week, templates & more',
     items: [

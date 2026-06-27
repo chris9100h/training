@@ -1332,3 +1332,20 @@ ALTER TABLE zane_workout_templates ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "zane_workout_templates_own"
   ON zane_workout_templates FOR ALL
   USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- ── Schedule backups (migration 0114) ──────────────────────────────────────────
+
+CREATE TABLE zane_schedule_backups (
+  id            text        PRIMARY KEY,
+  user_id       uuid        REFERENCES auth.users NOT NULL,
+  schedule_id   text        NOT NULL,
+  schedule_name text        NOT NULL,
+  days          jsonb       NOT NULL,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE zane_schedule_backups ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "own backups"
+  ON zane_schedule_backups FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);

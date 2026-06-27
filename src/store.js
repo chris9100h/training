@@ -929,6 +929,29 @@ async function syncStore(prev, next, userId) {
     const removed = prev.schedules.filter(s => !next.schedules.find(x => x.id === s.id));
     if (upsert.length)  ops.push(_supabase.from('zane_schedules').upsert(upsert.map(({ mode, ...s }) => ({ ...s, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_schedules').delete().in('id', removed.map(s => s.id)));
+    // Fire-and-forget backup whenever days changes to a valid non-empty array.
+    // Never blocks the main sync; failures are silently ignored.
+    const toBackup = upsert.filter(s => {
+      const p = prev.schedules.find(x => x.id === s.id);
+      const daysChanged = !p || JSON.stringify(p.days) !== JSON.stringify(s.days);
+      return daysChanged && Array.isArray(s.days) && s.days.length > 0;
+    });
+    if (toBackup.length) {
+      _supabase.from('zane_schedule_backups').insert(
+        toBackup.map(s => ({ id: uid(), user_id: userId, schedule_id: s.id, schedule_name: s.name, days: s.days }))
+      ).then(() => {
+        toBackup.forEach(s => {
+          _supabase.from('zane_schedule_backups')
+            .select('id').eq('schedule_id', s.id).order('created_at', { ascending: false })
+            .then(({ data }) => {
+              if (data && data.length > 10) {
+                _supabase.from('zane_schedule_backups').delete()
+                  .in('id', data.slice(10).map(r => r.id)).then(() => {}).catch(() => {});
+              }
+            }).catch(() => {});
+        });
+      }).catch(() => {});
+    }
   }
 
   let sessionUpserts = [];
@@ -1678,7 +1701,7 @@ function getCyclePosForDate(schedule, dateStr) {
       const daysLen = (v.days || []).length;
       if (!daysLen) return 0;
       const daysDiff = Math.round((new Date(dateStr + 'T12:00:00') - new Date(v.validFrom + 'T12:00:00')) / 86400000);
-      return ((daysDiff % daysLen) + daysLen) % daysLen;
+      return (((daysDiff + (v.cycleOffset || 0)) % daysLen) + daysLen) % daysLen;
     }
   }
   // Before plan started: extend oldest version backwards (negative daysDiff wraps correctly)
@@ -1686,7 +1709,7 @@ function getCyclePosForDate(schedule, dateStr) {
   const daysLen = (oldest.days || []).length;
   if (!daysLen) return 0;
   const daysDiff = Math.round((new Date(dateStr + 'T12:00:00') - new Date(oldest.validFrom + 'T12:00:00')) / 86400000);
-  return ((daysDiff % daysLen) + daysLen) % daysLen;
+  return (((daysDiff + (oldest.cycleOffset || 0)) % daysLen) + daysLen) % daysLen;
 }
 
 // Index in schedule.versions (newest-first) of the version active on dateStr —

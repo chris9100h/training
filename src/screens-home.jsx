@@ -608,7 +608,7 @@ function CardioPROverlay({ pr, onDone }) {
   // status bar); inside a <Screen> (overflow:hidden) iOS clips position:fixed.
   return ReactDOM.createPortal(
     <div onClick={onDone} style={{
-      position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 200, background: 'rgb(8,6,3)',
+      position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 200, background: 'var(--bg-body)',
       animation: 'improvedFade 3.8s ease forwards',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
     }}>
@@ -1095,10 +1095,27 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   const currentCycleNum = dayCount > 0 ? Math.floor(todayN / dayCount) : 0;
 
+  // For versioned cycle plans with cycleOffset, "today's array index" in the strip
+  // differs from dayIdx (plan position). Without offset they're always equal.
+  const todayStripIdx = (() => {
+    if (!sch?.versions?.length || weekdayMode || isFlex) return dayIdx;
+    const todayISO = new Date().toISOString().slice(0, 10);
+    const cn = LB.getCycleNumForDate(sch, todayISO);
+    if (!cn || cn <= 0) return dayIdx;
+    const cs = LB.getCycleStartForNum(sch, cn);
+    if (!cs) return dayIdx;
+    cs.setHours(12, 0, 0, 0);
+    const csStr = cs.toISOString().slice(0, 10);
+    const activeV = sch.versions.find(v => v.validFrom <= csStr) || sch.versions[sch.versions.length - 1];
+    const vOffset = activeV?.cycleOffset || 0;
+    const daysFromCycleStart = Math.round((new Date(todayISO + 'T12:00:00') - cs) / 86400000);
+    return Math.max(0, Math.min(daysFromCycleStart + vOffset, (sch.days?.length || 1) - 1));
+  })();
+
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedWd, setSelectedWd] = useState(todayWd);
   const [skipReasonModal, setSkipReasonModal] = useState(null);
-  const [selectedSlot, setSelectedSlot] = useState(dayIdx);
+  const [selectedSlot, setSelectedSlot] = useState(todayStripIdx);
   const [warmupPromptData, setWarmupPromptData] = useState(null);
   const [notLoggedModalOpen, setNotLoggedModalOpen] = useState(false);
   const [cardioLogOpen, setCardioLogOpen] = useState(false);
@@ -1170,7 +1187,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     setWeekOffset(next);
     if (next === 0) {
       if (weekdayMode || cycleWeekView) setSelectedWd(todayWd);
-      else setSelectedSlot(dayIdx);
+      else setSelectedSlot(todayStripIdx);
     } else if (!weekdayMode && !cycleWeekView) {
       setSelectedSlot(dayCount - 1);
     }
@@ -1240,12 +1257,17 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const cycleStart = getCycleStartForNum(sch, targetCN);
       if (!cycleStart) return [];
       cycleStart.setHours(12, 0, 0, 0);
-      const targetDays = LB.getPlanDaysForDate(sch, cycleStart.toISOString().slice(0, 10));
+      const csStr = cycleStart.toISOString().slice(0, 10);
+      const activeV = sch.versions.find(v => v.validFrom <= csStr) || sch.versions[sch.versions.length - 1];
+      const vOffset = activeV?.cycleOffset || 0;
+      const logicalStart = new Date(cycleStart.getTime() - vOffset * 86400000);
+      logicalStart.setHours(12, 0, 0, 0);
+      const targetDays = LB.getPlanDaysForDate(sch, csStr);
       const anchor = LB.parseDate(store.cycleStartDate);
       return targetDays.map((d, i) => {
-        const date = new Date(cycleStart.getTime() + i * 86400000);
+        const date = new Date(logicalStart.getTime() + i * 86400000);
         const daysFromStart = Math.round((date - anchor) / 86400000);
-        return { ...d, slotIdx: i, date, daysFromStart, isToday: weekOffset === 0 && i === dayIdx };
+        return { ...d, slotIdx: i, planPos: i, date, daysFromStart, isToday: weekOffset === 0 && i === todayStripIdx };
       });
     }
     return sch.days.map((d, i) => {
@@ -1253,7 +1275,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const date = new Date(); date.setDate(date.getDate() + daysFromToday);
       return { ...d, slotIdx: i, date, isToday: weekOffset === 0 && i === dayIdx };
     });
-  }, [sch, dayIdx, dayCount, weekdayMode, cycleWeekView, todayWd, weekOffset, store.cycleStartDate]);
+  }, [sch, dayIdx, todayStripIdx, dayCount, weekdayMode, cycleWeekView, todayWd, weekOffset, store.cycleStartDate]);
 
   const activeDay = useMemo(() => {
     if (!sch) return day;
@@ -1287,7 +1309,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     return d;
   }, [weekdayMode, cycleWeekView, selectedWd, todayWd, weekOffset, selectedSlot, dayIdx, dayCount, week]);
 
-  const isViewingToday = weekOffset === 0 && ((weekdayMode || cycleWeekView) ? selectedWd === todayWd : selectedSlot === dayIdx);
+  const isViewingToday = weekOffset === 0 && ((weekdayMode || cycleWeekView) ? selectedWd === todayWd : selectedSlot === todayStripIdx);
   const isActiveRest = !activeDay?.items?.length;
 
   // "DAY X OF Y" denominator: with plan versioning the top-level sch.days holds
@@ -1343,13 +1365,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (isFlex) {
       return `${isViewingToday ? (store.statusMode === 'deload' ? 'DELOAD · ' : 'NEXT UP · ') : ''}DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
     }
+    // For versioned cycle plans with cycleOffset, planPos is the plan day index;
+    // for all other cycle plans planPos is absent and selectedSlot equals plan position.
+    const dayNum = (week[selectedSlot]?.planPos ?? selectedSlot) + 1;
     if (isViewingToday) {
       if (weekdayMode) return `${todayWord} · ${WEEKDAYS_FULL[selectedWd].toUpperCase()}`;
       if (cycleWeekView) {
         const sel = week.find(d => d.weekday === selectedWd);
         return `${todayWord} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
       }
-      return `${todayWord} · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
+      return `${todayWord} · DAY ${dayNum} OF ${viewedDayCount}`;
     }
     const dateStr = sessionDate.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
     if (weekdayMode) return dateStr;
@@ -1357,7 +1382,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const sel = week.find(d => d.weekday === selectedWd);
       return `${dateStr} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
     }
-    return `${dateStr} · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
+    return `${dateStr} · DAY ${dayNum} OF ${viewedDayCount}`;
   }, [isFlex, isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week, store.statusMode]);
 
   const avgDayDuration = useMemo(() => {
@@ -2359,8 +2384,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 onClick={() => (weekdayMode || cycleWeekView) ? setSelectedWd(i) : setSelectedSlot(i)}
                 style={{
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
-                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isStatusDay ? 'rgba(var(--accent-rgb),0.06)' : isSkipped ? 'rgba(160,160,160,0.07)' : 'transparent',
-                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(var(--danger-rgb),0.4)' : isStatusDay ? 'rgba(var(--accent-rgb),0.25)' : isSkipped ? 'rgba(160,160,160,0.3)' : d.isToday ? UI.hairStrong : UI.hair}`,
+                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isStatusDay ? 'rgba(var(--accent-rgb),0.06)' : isSkipped ? 'var(--neutral-tint)' : 'transparent',
+                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(var(--danger-rgb),0.4)' : isStatusDay ? 'rgba(var(--accent-rgb),0.25)' : isSkipped ? 'var(--neutral-border-sm)' : d.isToday ? UI.hairStrong : UI.hair}`,
                   borderRadius: 4, cursor: 'pointer',
                   minHeight: 56,
                 }}>
@@ -2522,7 +2547,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                       {improvementCount === 0 && regressionCount === 0 ? null : (
                         <>
                           {improvementCount > 0 && (
-                            <span style={{ color: '#7bc47b', fontWeight: 600 }}>↑ {improvementCount}</span>
+                            <span style={{ color: 'var(--success-text)', fontWeight: 600 }}>↑ {improvementCount}</span>
                           )}
                           {regressionCount > 0 && (
                             <span style={{ color: UI.danger, fontWeight: 600 }}>↓ {regressionCount}</span>
@@ -2613,7 +2638,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   <span className="num" style={{ color: UI.gold, fontSize: 10 }}>{Math.round(LB.totalVolume(lastSession)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>{UI.unit()}</span></span>
                 </div>
               </Frame>
-              <Frame onClick={() => setNotLoggedModalOpen(true)} style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: 'rgba(var(--danger-rgb),0.05)', border: '0.5px solid rgba(var(--danger-rgb),0.2)', cursor: 'pointer' }}>
+              <Frame onClick={() => setNotLoggedModalOpen(true)} style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: 'rgba(var(--danger-rgb),0.15)', border: '0.5px solid rgba(var(--danger-rgb),0.40)', cursor: 'pointer' }}>
                 <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>
                   {recentBannerDay.dayName} · {recentBannerDay.daysAgo === 1 ? 'YESTERDAY' : `${recentBannerDay.daysAgo}D AGO`}
                 </div>

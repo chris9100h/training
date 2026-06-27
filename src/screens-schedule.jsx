@@ -276,6 +276,32 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
   const [reactivateDate, setReactivateDate] = useStateS('');
   const [editingStartDate, setEditingStartDate] = useStateS(false);
   const [editStartDateVal, setEditStartDateVal] = useStateS('');
+  const [backupSheet, setBackupSheet] = useStateS(false);
+  const [backups, setBackups] = useStateS(null);
+
+  const openBackupSheet = async () => {
+    setBackupSheet(true);
+    if (!sch) return;
+    const { data } = await LB.supabase
+      .from('zane_schedule_backups')
+      .select('id, days, schedule_name, created_at')
+      .eq('schedule_id', sch.id)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    setBackups(data || []);
+  };
+
+  const restoreBackup = async (backup) => {
+    if (!await confirm(
+      `Restore the backup from ${new Date(backup.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}?\n\nThis replaces your current training days.`,
+      { ok: 'Restore', danger: true }
+    )) return;
+    setStore(s => ({
+      ...s,
+      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, days: backup.days } : x),
+    }));
+    setBackupSheet(false);
+  };
 
   React.useEffect(() => {
     const row = chipRowRef.current;
@@ -400,11 +426,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
   };
 
   const planActions = fromPlan && (
-    <>
-      {!isActivePlan && <Btn kind="ghost" onClick={activate} style={{ flex: 1, fontSize: 12 }}>Activate</Btn>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+      {!isActivePlan && <Btn kind="ghost" onClick={activate} style={{ fontSize: 12 }}>Activate</Btn>}
       {isActivePlan && (
         <div style={{
-          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
           border: `1px solid ${UI.goldSoft}`, borderRadius: 4, background: UI.goldFaint,
           padding: '10px 14px', minHeight: 44,
         }}>
@@ -412,9 +438,12 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
           <span className="label" style={{ color: UI.gold, marginBottom: 0 }}>Active</span>
         </div>
       )}
-      <Btn kind="ghost" onClick={duplicate} style={{ flex: 1, fontSize: 12 }}>Duplicate</Btn>
-      <Btn kind="ghost" onClick={exportPlan} style={{ flex: 1, fontSize: 12 }}>Export</Btn>
-    </>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Btn kind="ghost" onClick={duplicate} style={{ flex: 1, fontSize: 12 }}>Duplicate</Btn>
+        <Btn kind="ghost" onClick={exportPlan} style={{ flex: 1, fontSize: 12 }}>Export</Btn>
+        <Btn kind="ghost" onClick={openBackupSheet} style={{ flex: 1, fontSize: 12 }}>Backups</Btn>
+      </div>
+    </div>
   );
 
   const dayHeader = (
@@ -685,6 +714,44 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
           </div>
         </div>
       )}
+
+      {backupSheet && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setBackupSheet(false)}>
+          <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))', maxHeight: '70vh', display: 'flex', flexDirection: 'column' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="label" style={{ color: UI.inkFaint, marginBottom: 4, flexShrink: 0 }}>PLAN BACKUPS</div>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 16, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none', flexShrink: 0 }}>
+              Automatic snapshots saved whenever you update your training days. Restoring replaces your current days.
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {backups === null && (
+                <div style={{ color: UI.inkFaint, fontSize: 13, textAlign: 'center', padding: '16px 0' }}>Loading…</div>
+              )}
+              {backups !== null && backups.length === 0 && (
+                <div style={{ color: UI.inkFaint, fontSize: 13, textAlign: 'center', padding: '16px 0' }}>No backups yet. Backups are saved automatically when you update your plan.</div>
+              )}
+              {(backups || []).map(b => {
+                const date = new Date(b.created_at);
+                const dayCount = (b.days || []).filter(d => (d.items || []).length > 0).length;
+                return (
+                  <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: UI.bgRaised }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>
+                        {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </div>
+                      <div className="micro" style={{ color: UI.inkFaint, marginTop: 2, letterSpacing: '0.06em' }}>
+                        {date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · {(b.days || []).length} days · {dayCount} training
+                      </div>
+                    </div>
+                    <Btn kind="ghost" onClick={() => restoreBackup(b)} style={{ fontSize: 11, flexShrink: 0 }}>Restore</Btn>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </Screen>
   );
 }
@@ -710,6 +777,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const [pickingType, setPickingType] = useStateS(false);
   const [applyFromSheet, setApplyFromSheet] = useStateS(false);
   const [applyFromDate, setApplyFromDate] = useStateS('');
+  const [applyFromDayIdx, setApplyFromDayIdx] = useStateS(0);
   const [editingDay, setEditingDay] = useStateS(null);
 
   const reorderDays = (from, to) => {
@@ -745,7 +813,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     setPickingType(false);
   };
 
-  const doSave = async (effectiveFrom) => {
+  const doSave = async (effectiveFrom, startDayIdx) => {
     let savedDraft = draft;
     if (effectiveFrom) {
       // Snapshot the original plan as a version entry
@@ -757,6 +825,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         : (store.cycleStartDate || null);
       const existingVersions = original.versions || [];
       const newVersionEntry = { validFrom: effectiveFrom, days: draft.days };
+      if (startDayIdx && startDayIdx > 0) newVersionEntry.cycleOffset = startDayIdx;
       let versions;
       if (existingVersions.length === 0) {
         // First versioned change — anchor the original plan
@@ -832,9 +901,13 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       ? JSON.stringify([...(original.days || [])].map(d => d.weekday).sort()) !==
         JSON.stringify([...(draft.days || [])].map(d => d.weekday).sort())
       : draft.days.length !== original.days.length ||
-        draft.days.some((d, i) => d.id !== (original.days[i] || {}).id);
+        draft.days.some((d, i) => {
+          const orig = original.days[i] || {};
+          return d.id !== orig.id || d.name !== orig.name;
+        });
     if (!structurallyChanged) { doSave(null); return; }
     setApplyFromDate('');
+    setApplyFromDayIdx(0);
     setApplyFromSheet(true);
   };
   const deleteSch = async () => {
@@ -898,9 +971,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     const turningOn = !isFlex;
     setDraft(d => {
       const next = { ...d, is_flex: turningOn };
-      if (turningOn && next.sessions_per_week == null) {
-        const trainingDays = (d.days || []).filter(x => x.items?.length > 0).length;
-        next.sessions_per_week = Math.min(7, Math.max(1, trainingDays || 3));
+      if (!turningOn) {
+        next.sessions_per_week = null;
       }
       return next;
     });
@@ -978,14 +1050,62 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           </Field>
         )}
 
-        {isFlex && (
-          <Field label="Sessions per week goal">
-            <Stepper value={draft.sessions_per_week ?? 4} step={1} min={1}
-              suffix="/ week"
-              onChange={v => setDraft(d => ({ ...d, sessions_per_week: Math.min(7, Math.max(1, Math.round(v))) }))} />
-            <div className="micro" style={{ marginTop: 8, textAlign: 'center' }}>Used to measure your weekly consistency</div>
-          </Field>
-        )}
+        {isFlex && (() => {
+          const hasGoal = draft.sessions_per_week != null;
+          const toggle = () => setDraft(d => ({
+            ...d,
+            sessions_per_week: d.sessions_per_week != null ? null
+              : Math.min(7, Math.max(1, (d.days || []).filter(x => x.items?.length > 0).length || 3)),
+          }));
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span className="label">Weekly goal</span>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                background: UI.bgInset, border: `1px solid ${hasGoal ? UI.goldSoft : UI.hairStrong}`,
+                borderRadius: 4, padding: '10px 12px',
+              }}>
+                <button onClick={toggle} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                  <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasGoal ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
+                    <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                  </div>
+                </button>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>
+                    {hasGoal ? `${draft.sessions_per_week}× per week` : 'No target'}
+                  </div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
+                    {hasGoal
+                      ? 'Used for your weekly adherence score and deload timing.'
+                      : 'Just train whenever — adherence and deload timing won\'t apply.'}
+                  </div>
+                </div>
+              </div>
+              {hasGoal && (() => {
+                const spw = draft.sessions_per_week;
+                const hint = spw >= 50 ? '50 sessions. You win.' :
+                             spw > 30  ? 'At this point the gym should pay you.' :
+                             spw > 20  ? 'Dude. Really?' :
+                             spw > 14  ? '…okay, you\'re serious about this.' :
+                             spw > 10  ? 'Calm down, dude.' :
+                             spw > 7   ? 'Oh, an overachiever. We see you.' :
+                             spw >= 4  ? 'Solid.' :
+                             spw >= 2  ? 'That\'s a start.' :
+                                         'Better than nothing.';
+                return (
+                  <div style={{ marginTop: 10, width: '100%' }}>
+                    <Stepper value={spw} step={1} min={1} max={50}
+                      suffix="/ week"
+                      onChange={v => setDraft(d => ({ ...d, sessions_per_week: Math.min(50, Math.max(1, Math.round(v))) }))} />
+                    {hint && (
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, textAlign: 'center', lineHeight: 1.4 }}>{hint}</div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          );
+        })()}
 
         {isActive && !isWeekday && !isFlex && (
           <Field label="Cycle start date (Day 1)">
@@ -1130,10 +1250,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
             onClick={e => e.stopPropagation()}>
             <div className="label" style={{ color: UI.inkFaint, marginBottom: 18 }}>WHEN SHOULD THIS TAKE EFFECT?</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <Btn onClick={() => { setApplyFromSheet(false); doSave(null); }}>
-                From the beginning
-              </Btn>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${applyFromDate ? UI.goldSoft : UI.hairStrong}` }}>
                   <input
@@ -1143,14 +1260,34 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                     style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: applyFromDate ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
                   />
                 </div>
-                <Btn
-                  disabled={!applyFromDate}
-                  onClick={() => { if (!applyFromDate) return; setApplyFromSheet(false); doSave(applyFromDate); }}
-                  style={{ flexShrink: 0 }}
-                >
-                  Apply from date
-                </Btn>
               </div>
+              {!isWeekday && draft.days.length > 1 && (
+                <div>
+                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>START WITH DAY</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {draft.days.map((d, realIdx) => {
+                      const active = applyFromDayIdx === realIdx;
+                      return (
+                        <button key={d.id} onClick={() => setApplyFromDayIdx(realIdx)} style={{
+                          padding: '5px 11px 4px', borderRadius: 4, cursor: 'pointer',
+                          border: `1px solid ${active ? UI.goldSoft : UI.hairStrong}`,
+                          background: active ? UI.goldFaint : 'transparent',
+                          WebkitTapHighlightColor: 'transparent',
+                        }}>
+                          <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, color: active ? UI.gold : UI.inkSoft }}>{d.name}</div>
+                          <div style={{ fontFamily: UI.fontUi, fontSize: 8, color: active ? UI.gold : UI.inkFaint, letterSpacing: '0.08em' }}>Day {realIdx + 1}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <Btn
+                disabled={!applyFromDate}
+                onClick={() => { if (!applyFromDate) return; setApplyFromSheet(false); doSave(applyFromDate, applyFromDayIdx); }}
+              >
+                Apply from date
+              </Btn>
             </div>
           </div>
         </div>

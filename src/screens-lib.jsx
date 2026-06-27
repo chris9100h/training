@@ -676,12 +676,10 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
       exercises: s.exercises.filter(e => e.id !== exId),
       schedules: s.schedules.map(sch => ({
         ...sch,
-        days: Object.fromEntries(
-          Object.entries(sch.days || {}).map(([k, day]) => [
-            k,
-            { ...day, items: (day.items || []).filter(item => item.exId !== exId) },
-          ])
-        ),
+        days: (sch.days || []).map(day => ({
+          ...day,
+          items: (day.items || []).filter(item => item.exId !== exId),
+        })),
       })),
     }));
     go({ name: 'lib' });
@@ -2043,7 +2041,7 @@ function FeelSelector({ value, onChange }) {
               flex: 1, padding: '7px 2px', borderRadius: 4, cursor: 'pointer',
               border: `1px solid ${active ? f.color : UI.hairStrong}`,
               background: active ? `${f.color}22` : 'transparent',
-              color: active ? f.color : UI.inkFaint,
+              color: active ? f.color : UI.inkSoft,
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: active ? 600 : 400,
               letterSpacing: '0.07em', WebkitTapHighlightColor: 'transparent',
             }}>
@@ -2501,9 +2499,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       const hasData = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
                       return (
                         <span key={j} style={{
-                          opacity: (st.done || hasData) ? (isWarm ? 0.5 : 1) : 0.3,
+                          opacity: (st.done || hasData) ? (isWarm ? 0.65 : 1) : 0.45,
                           background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent',
-                          border: `1px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
+                          border: `1px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong}`,
                           borderRadius: 4, padding: '3px 8px',
                           fontFamily: UI.fontNum, fontSize: 12,
                           color: isWarm ? UI.inkFaint : highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,

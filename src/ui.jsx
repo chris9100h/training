@@ -203,7 +203,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                   borderRadius: 6,
                   background: on
                     ? `rgba(var(--accent-rgb),0.12)`
-                    : 'rgba(236,228,208,0.025)',
+                    : 'var(--surface-tint-sm)',
                   border: `1px solid ${on ? UI.goldSoft : UI.hairStrong}`,
                   color: on ? UI.gold : UI.inkSoft,
                   fontFamily: UI.fontDisplay,
@@ -237,7 +237,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
               <button onClick={() => setSwitchModal(true)} style={{
                 display: 'flex', alignItems: 'center', gap: 12,
                 width: '100%', padding: '12px 14px', borderRadius: 6,
-                background: 'rgba(236,228,208,0.03)',
+                background: 'var(--surface-tint-sm)',
                 border: `1px solid ${UI.hairStrong}`,
                 cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
@@ -322,7 +322,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                   }}
                   style={{
                     flex: 1,
-                    background: hasOther ? 'rgba(236,228,208,0.04)' : 'transparent',
+                    background: hasOther ? 'var(--surface-tint-md)' : 'transparent',
                     border: `1px solid ${hasOther ? UI.hairStrong : UI.hair}`,
                     borderRadius: 6,
                     padding: '28px 20px',
@@ -335,7 +335,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                 >
                   <div style={{
                     width: 64, height: 64, borderRadius: 4,
-                    background: 'rgba(236,228,208,0.06)',
+                    background: 'var(--surface-tint-lg)',
                     border: `1px solid ${UI.hairStrong}`,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontFamily: UI.fontDisplay, fontSize: 32, color: UI.inkSoft, fontWeight: 700,
@@ -512,7 +512,7 @@ function Card({ children, accent = false, style = {}, ...rest }) {
     <div style={{
       background: accent
         ? `rgba(var(--accent-rgb),0.06)`
-        : 'rgba(236,228,208,0.02)',
+        : 'var(--surface-tint)',
       border: `1px solid ${accent ? UI.goldSoft : UI.hairStrong}`,
       borderRadius: 6,
       padding: 16,
@@ -739,7 +739,7 @@ function Frame({ children, accent = false, style = {}, padding = 18, onClick }) 
     <div onClick={onClick} style={{
       background: accent
         ? `rgba(var(--accent-rgb),0.06)`
-        : 'rgba(236,228,208,0.02)',
+        : 'var(--surface-tint)',
       border: `1px solid ${accent ? UI.goldSoft : UI.hairStrong}`,
       borderRadius: 6,
       padding,

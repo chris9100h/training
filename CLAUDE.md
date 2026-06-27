@@ -130,6 +130,8 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`zane_workout_templates`:** `id` (text), `user_id` (uuid), `name` (text), `exercises` (jsonb — `[{ exId, name, sets, reps, repsPerSet, supersetGroup }]`, structure only, no logged sets), `created_at` (timestamptz). Store field: `store.workoutTemplates`. Synced via `syncStore` diff (like `cardioPlans`). Saved from a finished freestyle session, used to start a freestyle session ("From template") or imported into a plan day (Plans|Templates sub-tab in the day import picker). Migration 0107.
 
+**`zane_schedule_backups`:** `id` (text), `user_id` (uuid), `schedule_id` (text), `schedule_name` (text), `days` (jsonb — same format as `zane_schedules.days`, always a non-empty array), `created_at` (timestamptz). Automatic snapshots of a schedule's `days`, written fire-and-forget from `syncStore` whenever `days` changes to a valid non-empty array. Never written if `days` is empty or malformed (guards against backing up broken state). Used by the "Backups" button in the plan viewer to restore a previous day layout. Initial snapshot of all valid plans inserted via Migration 0114.
+
 **`zane_feature_grants`:** `feature` (text), `email` (text)
 
 **`zane_profiles`:** `id` (uuid), `name` (text), `approved` (boolean, default = `signup_default_approved()` — auto-approved unless the global `zane_app_config.signup_requires_approval` flag is on)

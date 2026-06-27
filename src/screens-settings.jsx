@@ -390,6 +390,17 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [budgetDraft, setBudgetDraft] = useStateSet(20);
   const [recentSignups, setRecentSignups] = useStateSet([]);
   const [signupsSheet, setSignupsSheet] = useStateSet(false);
+  const [onboardedUsers, setOnboardedUsers] = useStateSet([]);
+  const [onboardedSheet, setOnboardedSheet] = useStateSet(false);
+  const [adminUserDetail, setAdminUserDetail] = useStateSet(null); // { userId, name, plans }
+  const [adminUserDetailLoading, setAdminUserDetailLoading] = useStateSet(false);
+  const [adminUserDetailSheet, setAdminUserDetailSheet] = useStateSet(false);
+  const [adminPlanDetail, setAdminPlanDetail] = useStateSet(null); // plan object with days
+  const [adminPlanDetailSheet, setAdminPlanDetailSheet] = useStateSet(false);
+  const [adminPlanSelectedDayId, setAdminPlanSelectedDayId] = useStateSet(null);
+  useEffectSet(() => {
+    setAdminPlanSelectedDayId(adminPlanDetail?.days?.[0]?.id || null);
+  }, [adminPlanDetail]);
   const [seenSignups, setSeenSignups] = useStateSet(() => {
     try { return new Set(JSON.parse(localStorage.getItem('logbook-seen-signups') || '[]')); } catch (_) { return new Set(); }
   });
@@ -616,6 +627,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       setAutoApproveLeft(row ? (row.auto_approve_remaining ?? null) : null);
     }).catch(() => {});
     LB.supabase.rpc('get_recent_signups', { p_limit: 50 }).then(({ data, error }) => { if (mounted && !error) setRecentSignups(data || []); }).catch(() => {});
+    LB.supabase.rpc('get_users_with_plans').then(({ data, error }) => { if (mounted && !error) setOnboardedUsers(data || []); }).catch(() => {});
     LB.supabase.rpc('get_support_chats').then(({ data }) => { if (mounted) setSupportInbox(data || []); }).catch(() => {});
     return () => { mounted = false; };
   }, [isAdmin]);
@@ -625,6 +637,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     if (!isAdmin || (!accountSheet && !adminSheet)) return;
     let mounted = true;
     LB.supabase.rpc('get_recent_signups', { p_limit: 50 }).then(({ data, error }) => { if (mounted && !error) setRecentSignups(data || []); }).catch(() => {});
+    LB.supabase.rpc('get_users_with_plans').then(({ data, error }) => { if (mounted && !error) setOnboardedUsers(data || []); }).catch(() => {});
     LB.supabase.rpc('get_support_chats').then(({ data }) => { if (mounted) setSupportInbox(data || []); }).catch(() => {});
     return () => { mounted = false; };
   }, [isAdmin, accountSheet, adminSheet]);
@@ -1962,6 +1975,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   Open registration for a batch — auto-approved until used up, then turns back on.
                 </div>
                 <NavRow label="Recent sign-ups" hint={unseenCount > 0 ? `${unseenCount} new` : `${recentSignups.length}`} onTap={() => setSignupsSheet(true)} />
+                <NavRow label="Onboarded" hint={`${onboardedUsers.length}`} onTap={() => setOnboardedSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
               </Frame>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
@@ -2501,6 +2515,154 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <button onClick={() => markSignupSeen(u.user_id)} style={{ ...accentBtn, padding: '5px 10px' }}>Got it</button>
                 </div>
               ))}
+            </div>
+          );
+        })()}
+      </SettingsSheet>
+
+      {/* ══ Onboarded users sheet (admin) ══ */}
+      <SettingsSheet open={onboardedSheet} onClose={() => setOnboardedSheet(false)} title="Onboarded">
+        {onboardedUsers.length === 0
+          ? <div className="micro" style={{ color: UI.inkGhost, padding: '4px 0 12px' }}>No users with plans yet.</div>
+          : (
+            <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+              <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 10 }}>{onboardedUsers.length} users with at least one plan</div>
+              {onboardedUsers.map((u, i) => (
+                <button key={u.user_id} onClick={() => {
+                  setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, plans: null, exercises: null });
+                  setAdminUserDetailLoading(true);
+                  setAdminUserDetailSheet(true);
+                  LB.supabase.rpc('get_user_detail_admin', { p_user_id: u.user_id })
+                    .then(({ data, error }) => {
+                      if (error || !data) { setAdminUserDetailLoading(false); return; }
+                      setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, activeScheduleId: data.active_schedule_id || null, plans: data.plans || [] });
+                      setAdminUserDetailLoading(false);
+                    }).catch(() => setAdminUserDetailLoading(false));
+                }} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, color: UI.inkSoft }}>{(u.name || u.email || '?')[0].toUpperCase()}</span>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</span>
+                      <span className="micro" style={{ flexShrink: 0, color: u.approved ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.75)' }}>{u.approved ? 'ACTIVE' : 'PENDING'}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email} · joined {fmtAgo(u.joined_at)}</div>
+                  </div>
+                  <span className="micro" style={{ color: UI.inkSoft, flexShrink: 0 }}>{u.plan_count} {u.plan_count === 1 ? 'plan' : 'plans'}</span>
+                </button>
+              ))}
+            </div>
+          )
+        }
+      </SettingsSheet>
+
+      {/* ══ User detail sheet (admin — plans list) ══ */}
+      <SettingsSheet open={adminUserDetailSheet} onClose={() => setAdminUserDetailSheet(false)} title={adminUserDetail?.name || adminUserDetail?.email || 'User'}>
+        {adminUserDetailLoading
+          ? <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '8px 0' }}>Loading…</div>
+          : adminUserDetail && (
+            <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+              <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 8 }}>PLANS</div>
+              {(adminUserDetail.plans || []).length === 0
+                ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No plans.</div>
+                : (adminUserDetail.plans || []).map((p, i) => {
+                    const isActive = p.id === adminUserDetail.activeScheduleId;
+                    return (
+                      <button key={p.id} onClick={() => { setAdminPlanDetail(p); setAdminPlanDetailSheet(true); }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 13, color: p.archived ? UI.inkFaint : UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                            {isActive && <span className="micro" style={{ color: 'var(--accent)', flexShrink: 0 }}>ACTIVE</span>}
+                          </div>
+                          <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>
+                            {p.is_flex ? 'flex' : (p.days || []).some(d => d.weekday != null) ? 'weekday' : 'cycle'}
+                            {' · '}{p.day_count} {p.day_count === 1 ? 'day' : 'days'}
+                            {p.sessions_per_week ? ` · ${p.sessions_per_week}×/week` : ''}
+                          </div>
+                        </div>
+                        {p.archived
+                          ? <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>ARCHIVED</span>
+                          : <i className="fa-solid fa-chevron-right" style={{ fontSize: 10, color: UI.inkGhost }} />
+                        }
+                      </button>
+                    );
+                  })
+              }
+            </div>
+          )
+        }
+      </SettingsSheet>
+
+      {/* ══ Plan detail sheet (admin — day chips + exercise cards) ══ */}
+      <SettingsSheet open={adminPlanDetailSheet} onClose={() => setAdminPlanDetailSheet(false)} title={adminPlanDetail?.name || 'Plan'}>
+        {adminPlanDetail && (() => {
+          const days = adminPlanDetail.days || [];
+          const day = days.find(d => d.id === adminPlanSelectedDayId) || days[0];
+          const dayIdx = days.findIndex(d => d.id === (day?.id));
+          const isRest = !day || !(day.items || []).length || day.name === 'REST';
+          const planType = adminPlanDetail.is_flex ? 'flex' : days.some(d => d.weekday != null) ? 'weekday' : 'cycle';
+          const trainingDays = days.filter(d => (d.items || []).length && d.name !== 'REST').length;
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, margin: '0 -16px' }}>
+              {/* plan type */}
+              <div className="micro" style={{ color: UI.inkGhost, padding: '0 16px 10px' }}>
+                {planType.toUpperCase()} · {trainingDays} {trainingDays === 1 ? 'workout' : 'workouts'}
+                {adminPlanDetail.sessions_per_week ? ` · ${adminPlanDetail.sessions_per_week}×/week` : ''}
+              </div>
+              {/* chip row */}
+              <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none', padding: '0 16px 14px' }}>
+                {days.map((d, i) => {
+                  const active = d.id === (day?.id);
+                  const rest = !d.items?.length || d.name === 'REST';
+                  return (
+                    <button key={d.id || i} onClick={() => setAdminPlanSelectedDayId(d.id)} style={{
+                      flexShrink: 0, maxWidth: 120, padding: '6px 12px 4px', borderRadius: 4,
+                      border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
+                      background: active ? UI.goldFaint : 'transparent',
+                      cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
+                    }}>
+                      <div style={{ fontSize: 10, fontFamily: UI.fontUi, letterSpacing: '0.07em', fontWeight: 600, color: active ? UI.gold : rest ? UI.inkFaint : UI.inkSoft, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</div>
+                      <div style={{ fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: active ? UI.gold : UI.inkFaint, marginTop: 1 }}>Day {i + 1}</div>
+                    </button>
+                  );
+                })}
+              </div>
+              {/* day content */}
+              {day && (
+                <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 8 }}>
+                  <div>
+                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>DAY {dayIdx + 1}</div>
+                    <div className="display" style={{ fontSize: 30, color: isRest ? UI.inkSoft : UI.ink, fontStyle: isRest ? 'italic' : 'normal', lineHeight: 1.05, letterSpacing: '-0.01em' }}>{day.name}</div>
+                  </div>
+                  {isRest ? (
+                    <div style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: 36, textAlign: 'center' }}>
+                      <div className="display-it" style={{ fontSize: 32, color: UI.inkSoft, fontWeight: 300, marginBottom: 6 }}>Recover.</div>
+                      <div style={{ fontSize: 13, color: UI.inkFaint }}>Recovery is part of the plan.</div>
+                    </div>
+                  ) : (day.items || []).map((it, k) => {
+                    const isUni = it.unilateral || it.movement_type === 'unilateral';
+                    const isMob = it.movement_type === 'mobility';
+                    return (
+                      <div key={it.exId || k} style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi }}>
+                              {it.name || '—'}
+                              {isUni && <span className="micro" style={{ marginLeft: 6, color: UI.inkFaint }}>UNI</span>}
+                              {isMob && <span className="micro" style={{ marginLeft: 6, color: UI.inkFaint }}>MOB</span>}
+                            </span>
+                          </div>
+                          <span className="num" style={{ fontSize: 13, color: UI.inkSoft, flexShrink: 0 }}>
+                            {it.sets} × {it.reps || '—'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })()}
