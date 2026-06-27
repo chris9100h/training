@@ -985,7 +985,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
               : Math.min(7, Math.max(1, (d.days || []).filter(x => x.items?.length > 0).length || 3)),
           }));
           return (
-            <Field label="Weekly goal">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span className="label">Weekly goal</span>
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 12, width: '100%',
                 background: UI.bgInset, border: `1px solid ${hasGoal ? UI.goldSoft : UI.hairStrong}`,
@@ -1029,7 +1030,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                   </div>
                 );
               })()}
-            </Field>
+            </div>
           );
         })()}
 
