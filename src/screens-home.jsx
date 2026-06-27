@@ -1095,10 +1095,25 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   const currentCycleNum = dayCount > 0 ? Math.floor(todayN / dayCount) : 0;
 
+  // For versioned cycle plans with cycleOffset, "today's array index" in the strip
+  // differs from dayIdx (plan position). Without offset they're always equal.
+  const todayStripIdx = (() => {
+    if (!sch?.versions?.length || weekdayMode || isFlex) return dayIdx;
+    const todayISO = new Date().toISOString().slice(0, 10);
+    const cn = LB.getCycleNumForDate(sch, todayISO);
+    if (!cn || cn <= 0) return dayIdx;
+    const cs = LB.getCycleStartForNum(sch, cn);
+    if (!cs) return dayIdx;
+    return Math.max(0, Math.min(
+      Math.round((new Date(todayISO + 'T12:00:00') - cs) / 86400000),
+      (sch.days?.length || 1) - 1
+    ));
+  })();
+
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedWd, setSelectedWd] = useState(todayWd);
   const [skipReasonModal, setSkipReasonModal] = useState(null);
-  const [selectedSlot, setSelectedSlot] = useState(dayIdx);
+  const [selectedSlot, setSelectedSlot] = useState(todayStripIdx);
   const [warmupPromptData, setWarmupPromptData] = useState(null);
   const [notLoggedModalOpen, setNotLoggedModalOpen] = useState(false);
   const [cardioLogOpen, setCardioLogOpen] = useState(false);
@@ -1170,7 +1185,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     setWeekOffset(next);
     if (next === 0) {
       if (weekdayMode || cycleWeekView) setSelectedWd(todayWd);
-      else setSelectedSlot(dayIdx);
+      else setSelectedSlot(todayStripIdx);
     } else if (!weekdayMode && !cycleWeekView) {
       setSelectedSlot(dayCount - 1);
     }
@@ -1242,10 +1257,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       cycleStart.setHours(12, 0, 0, 0);
       const targetDays = LB.getPlanDaysForDate(sch, cycleStart.toISOString().slice(0, 10));
       const anchor = LB.parseDate(store.cycleStartDate);
-      return targetDays.map((d, i) => {
+      return targetDays.map((_, i) => {
         const date = new Date(cycleStart.getTime() + i * 86400000);
+        const dateStr = date.toISOString().slice(0, 10);
+        const planPos = LB.getCyclePosForDate(sch, dateStr) ?? i;
+        const d = targetDays[planPos] || targetDays[i];
         const daysFromStart = Math.round((date - anchor) / 86400000);
-        return { ...d, slotIdx: i, date, daysFromStart, isToday: weekOffset === 0 && i === dayIdx };
+        return { ...d, slotIdx: i, planPos, date, daysFromStart, isToday: weekOffset === 0 && i === todayStripIdx };
       });
     }
     return sch.days.map((d, i) => {
@@ -1253,7 +1271,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const date = new Date(); date.setDate(date.getDate() + daysFromToday);
       return { ...d, slotIdx: i, date, isToday: weekOffset === 0 && i === dayIdx };
     });
-  }, [sch, dayIdx, dayCount, weekdayMode, cycleWeekView, todayWd, weekOffset, store.cycleStartDate]);
+  }, [sch, dayIdx, todayStripIdx, dayCount, weekdayMode, cycleWeekView, todayWd, weekOffset, store.cycleStartDate]);
 
   const activeDay = useMemo(() => {
     if (!sch) return day;
@@ -1287,7 +1305,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     return d;
   }, [weekdayMode, cycleWeekView, selectedWd, todayWd, weekOffset, selectedSlot, dayIdx, dayCount, week]);
 
-  const isViewingToday = weekOffset === 0 && ((weekdayMode || cycleWeekView) ? selectedWd === todayWd : selectedSlot === dayIdx);
+  const isViewingToday = weekOffset === 0 && ((weekdayMode || cycleWeekView) ? selectedWd === todayWd : selectedSlot === todayStripIdx);
   const isActiveRest = !activeDay?.items?.length;
 
   // "DAY X OF Y" denominator: with plan versioning the top-level sch.days holds
@@ -1343,13 +1361,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (isFlex) {
       return `${isViewingToday ? (store.statusMode === 'deload' ? 'DELOAD · ' : 'NEXT UP · ') : ''}DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
     }
+    // For versioned cycle plans with cycleOffset, planPos is the plan day index;
+    // for all other cycle plans planPos is absent and selectedSlot equals plan position.
+    const dayNum = (week[selectedSlot]?.planPos ?? selectedSlot) + 1;
     if (isViewingToday) {
       if (weekdayMode) return `${todayWord} · ${WEEKDAYS_FULL[selectedWd].toUpperCase()}`;
       if (cycleWeekView) {
         const sel = week.find(d => d.weekday === selectedWd);
         return `${todayWord} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
       }
-      return `${todayWord} · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
+      return `${todayWord} · DAY ${dayNum} OF ${viewedDayCount}`;
     }
     const dateStr = sessionDate.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
     if (weekdayMode) return dateStr;
@@ -1357,7 +1378,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const sel = week.find(d => d.weekday === selectedWd);
       return `${dateStr} · DAY ${(sel?.slotIdx ?? 0) + 1} OF ${viewedDayCount}`;
     }
-    return `${dateStr} · DAY ${selectedSlot + 1} OF ${viewedDayCount}`;
+    return `${dateStr} · DAY ${dayNum} OF ${viewedDayCount}`;
   }, [isFlex, isViewingToday, weekdayMode, cycleWeekView, selectedWd, selectedSlot, viewedDayCount, sessionDate, week, store.statusMode]);
 
   const avgDayDuration = useMemo(() => {
