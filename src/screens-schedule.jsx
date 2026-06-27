@@ -986,14 +986,16 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           }));
           return (
             <Field label="Weekly goal">
-              <button onClick={toggle} style={{
+              <div style={{
                 display: 'flex', alignItems: 'center', gap: 12, width: '100%',
                 background: UI.bgInset, border: `1px solid ${hasGoal ? UI.goldSoft : UI.hairStrong}`,
-                borderRadius: 4, padding: '10px 12px', cursor: 'pointer', textAlign: 'left',
+                borderRadius: 4, padding: '10px 12px',
               }}>
-                <div style={{ width: 44, height: 26, borderRadius: 13, flexShrink: 0, position: 'relative', background: hasGoal ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
-                  <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
-                </div>
+                <button onClick={toggle} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                  <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasGoal ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
+                    <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                  </div>
+                </button>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>
                     {hasGoal ? `${draft.sessions_per_week}× per week` : 'No target'}
@@ -1004,7 +1006,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                       : 'Just train whenever — adherence and deload timing won\'t apply.'}
                   </div>
                 </div>
-              </button>
+              </div>
               {hasGoal && (() => {
                 const spw = draft.sessions_per_week;
                 const hint = spw >= 50 ? '50 sessions. You win.' :
