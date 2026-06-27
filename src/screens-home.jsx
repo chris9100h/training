@@ -2613,7 +2613,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   <span className="num" style={{ color: UI.gold, fontSize: 10 }}>{Math.round(LB.totalVolume(lastSession)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>{UI.unit()}</span></span>
                 </div>
               </Frame>
-              <Frame onClick={() => setNotLoggedModalOpen(true)} style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: 'rgba(var(--danger-rgb),0.08)', border: '0.5px solid rgba(var(--danger-rgb),0.30)', cursor: 'pointer' }}>
+              <Frame onClick={() => setNotLoggedModalOpen(true)} style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: UI.bgRaised, border: `0.5px solid rgba(var(--danger-rgb),0.40)`, cursor: 'pointer' }}>
                 <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>
                   {recentBannerDay.dayName} · {recentBannerDay.daysAgo === 1 ? 'YESTERDAY' : `${recentBannerDay.daysAgo}D AGO`}
                 </div>
