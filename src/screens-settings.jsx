@@ -392,9 +392,11 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [signupsSheet, setSignupsSheet] = useStateSet(false);
   const [onboardedUsers, setOnboardedUsers] = useStateSet([]);
   const [onboardedSheet, setOnboardedSheet] = useStateSet(false);
-  const [adminUserDetail, setAdminUserDetail] = useStateSet(null); // { userId, name, plans, exercises }
+  const [adminUserDetail, setAdminUserDetail] = useStateSet(null); // { userId, name, plans }
   const [adminUserDetailLoading, setAdminUserDetailLoading] = useStateSet(false);
   const [adminUserDetailSheet, setAdminUserDetailSheet] = useStateSet(false);
+  const [adminPlanDetail, setAdminPlanDetail] = useStateSet(null); // plan object with days
+  const [adminPlanDetailSheet, setAdminPlanDetailSheet] = useStateSet(false);
   const [seenSignups, setSeenSignups] = useStateSet(() => {
     try { return new Set(JSON.parse(localStorage.getItem('logbook-seen-signups') || '[]')); } catch (_) { return new Set(); }
   });
@@ -2551,53 +2553,66 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         }
       </SettingsSheet>
 
-      {/* ══ User detail sheet (admin — plans + exercises) ══ */}
+      {/* ══ User detail sheet (admin — plans list) ══ */}
       <SettingsSheet open={adminUserDetailSheet} onClose={() => setAdminUserDetailSheet(false)} title={adminUserDetail?.name || adminUserDetail?.email || 'User'}>
         {adminUserDetailLoading
           ? <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '8px 0' }}>Loading…</div>
           : adminUserDetail && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingBottom: 8 }}>
-              <div>
-                <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 8 }}>PLANS</div>
-                {(adminUserDetail.plans || []).length === 0
-                  ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No plans.</div>
-                  : (adminUserDetail.plans || []).map((p, i) => (
-                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, color: p.archived ? UI.inkFaint : UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
-                        <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>
-                          {p.day_count} {p.day_count === 1 ? 'day' : 'days'}
-                          {p.is_flex ? ' · flex' : ''}
-                          {p.sessions_per_week ? ` · ${p.sessions_per_week}×/week` : ''}
-                        </div>
+            <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+              <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 8 }}>PLANS</div>
+              {(adminUserDetail.plans || []).length === 0
+                ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No plans.</div>
+                : (adminUserDetail.plans || []).map((p, i) => (
+                  <button key={p.id} onClick={() => { setAdminPlanDetail(p); setAdminPlanDetailSheet(true); }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, color: p.archived ? UI.inkFaint : UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                      <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>
+                        {p.day_count} {p.day_count === 1 ? 'day' : 'days'}
+                        {p.is_flex ? ' · flex' : ''}
+                        {p.sessions_per_week ? ` · ${p.sessions_per_week}×/week` : ''}
                       </div>
-                      {p.archived && <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>ARCHIVED</span>}
                     </div>
-                  ))
-                }
-              </div>
-              <div>
-                <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 8 }}>EXERCISES · {(adminUserDetail.exercises || []).length}</div>
-                {(adminUserDetail.exercises || []).length === 0
-                  ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No exercises.</div>
-                  : (adminUserDetail.exercises || []).map((e, i) => (
-                    <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</div>
-                        <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>
-                          {[e.category, e.equipment].filter(Boolean).join(' · ')}
-                        </div>
-                      </div>
-                      {e.movement_type && e.movement_type !== 'bilateral' && (
-                        <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>{e.movement_type.toUpperCase()}</span>
-                      )}
-                    </div>
-                  ))
-                }
-              </div>
+                    {p.archived
+                      ? <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>ARCHIVED</span>
+                      : <i className="fa-solid fa-chevron-right" style={{ fontSize: 10, color: UI.inkGhost }} />
+                    }
+                  </button>
+                ))
+              }
             </div>
           )
         }
+      </SettingsSheet>
+
+      {/* ══ Plan detail sheet (admin — days + exercises) ══ */}
+      <SettingsSheet open={adminPlanDetailSheet} onClose={() => setAdminPlanDetailSheet(false)} title={adminPlanDetail?.name || 'Plan'}>
+        {adminPlanDetail && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 8 }}>
+            {(adminPlanDetail.days || []).map((day, i) => {
+              const isRest = day.name === 'REST' || !(day.items || []).length;
+              return (
+                <div key={day.id || i}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: isRest ? 0 : 8 }}>
+                    <span className="micro" style={{ color: 'var(--accent)' }}>D{i + 1}</span>
+                    <span style={{ fontSize: 13, fontFamily: UI.fontUi, fontWeight: 600, color: isRest ? UI.inkFaint : UI.ink }}>{day.name}</span>
+                    {!isRest && <span className="micro" style={{ color: UI.inkGhost }}>{(day.items || []).length} ex</span>}
+                  </div>
+                  {!isRest && (day.items || []).map((it, j) => (
+                    <div key={it.exId || j} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0 6px 20px', borderTop: j > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</div>
+                      </div>
+                      <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>
+                        {it.sets} × {it.reps}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </SettingsSheet>
 
       {/* ══ Push notifications sheet ══ */}
