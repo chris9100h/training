@@ -390,6 +390,8 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [budgetDraft, setBudgetDraft] = useStateSet(20);
   const [recentSignups, setRecentSignups] = useStateSet([]);
   const [signupsSheet, setSignupsSheet] = useStateSet(false);
+  const [onboardedUsers, setOnboardedUsers] = useStateSet([]);
+  const [onboardedSheet, setOnboardedSheet] = useStateSet(false);
   const [seenSignups, setSeenSignups] = useStateSet(() => {
     try { return new Set(JSON.parse(localStorage.getItem('logbook-seen-signups') || '[]')); } catch (_) { return new Set(); }
   });
@@ -616,6 +618,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       setAutoApproveLeft(row ? (row.auto_approve_remaining ?? null) : null);
     }).catch(() => {});
     LB.supabase.rpc('get_recent_signups', { p_limit: 50 }).then(({ data, error }) => { if (mounted && !error) setRecentSignups(data || []); }).catch(() => {});
+    LB.supabase.rpc('get_users_with_plans').then(({ data, error }) => { if (mounted && !error) setOnboardedUsers(data || []); }).catch(() => {});
     LB.supabase.rpc('get_support_chats').then(({ data }) => { if (mounted) setSupportInbox(data || []); }).catch(() => {});
     return () => { mounted = false; };
   }, [isAdmin]);
@@ -625,6 +628,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     if (!isAdmin || (!accountSheet && !adminSheet)) return;
     let mounted = true;
     LB.supabase.rpc('get_recent_signups', { p_limit: 50 }).then(({ data, error }) => { if (mounted && !error) setRecentSignups(data || []); }).catch(() => {});
+    LB.supabase.rpc('get_users_with_plans').then(({ data, error }) => { if (mounted && !error) setOnboardedUsers(data || []); }).catch(() => {});
     LB.supabase.rpc('get_support_chats').then(({ data }) => { if (mounted) setSupportInbox(data || []); }).catch(() => {});
     return () => { mounted = false; };
   }, [isAdmin, accountSheet, adminSheet]);
@@ -1962,6 +1966,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   Open registration for a batch — auto-approved until used up, then turns back on.
                 </div>
                 <NavRow label="Recent sign-ups" hint={unseenCount > 0 ? `${unseenCount} new` : `${recentSignups.length}`} onTap={() => setSignupsSheet(true)} />
+                <NavRow label="Onboarded" hint={`${onboardedUsers.length}`} onTap={() => setOnboardedSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
               </Frame>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
@@ -2504,6 +2509,33 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             </div>
           );
         })()}
+      </SettingsSheet>
+
+      {/* ══ Onboarded users sheet (admin) ══ */}
+      <SettingsSheet open={onboardedSheet} onClose={() => setOnboardedSheet(false)} title="Onboarded">
+        {onboardedUsers.length === 0
+          ? <div className="micro" style={{ color: UI.inkGhost, padding: '4px 0 12px' }}>No users with plans yet.</div>
+          : (
+            <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+              <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 10 }}>{onboardedUsers.length} users with at least one plan</div>
+              {onboardedUsers.map((u, i) => (
+                <div key={u.user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, color: UI.inkSoft }}>{(u.name || u.email || '?')[0].toUpperCase()}</span>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</span>
+                      <span className="micro" style={{ flexShrink: 0, color: u.approved ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.75)' }}>{u.approved ? 'ACTIVE' : 'PENDING'}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email} · joined {fmtAgo(u.joined_at)}</div>
+                  </div>
+                  <span className="micro" style={{ color: UI.inkSoft, flexShrink: 0 }}>{u.plan_count} {u.plan_count === 1 ? 'plan' : 'plans'}</span>
+                </div>
+              ))}
+            </div>
+          )
+        }
       </SettingsSheet>
 
       {/* ══ Push notifications sheet ══ */}
