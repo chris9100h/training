@@ -710,6 +710,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const [pickingType, setPickingType] = useStateS(false);
   const [applyFromSheet, setApplyFromSheet] = useStateS(false);
   const [applyFromDate, setApplyFromDate] = useStateS('');
+  const [applyFromDayIdx, setApplyFromDayIdx] = useStateS(0);
   const [editingDay, setEditingDay] = useStateS(null);
 
   const reorderDays = (from, to) => {
@@ -745,7 +746,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     setPickingType(false);
   };
 
-  const doSave = async (effectiveFrom) => {
+  const doSave = async (effectiveFrom, startDayIdx) => {
     let savedDraft = draft;
     if (effectiveFrom) {
       // Snapshot the original plan as a version entry
@@ -757,6 +758,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         : (store.cycleStartDate || null);
       const existingVersions = original.versions || [];
       const newVersionEntry = { validFrom: effectiveFrom, days: draft.days };
+      if (startDayIdx && startDayIdx > 0) newVersionEntry.cycleOffset = startDayIdx;
       let versions;
       if (existingVersions.length === 0) {
         // First versioned change — anchor the original plan
@@ -832,9 +834,13 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       ? JSON.stringify([...(original.days || [])].map(d => d.weekday).sort()) !==
         JSON.stringify([...(draft.days || [])].map(d => d.weekday).sort())
       : draft.days.length !== original.days.length ||
-        draft.days.some((d, i) => d.id !== (original.days[i] || {}).id);
+        draft.days.some((d, i) => {
+          const orig = original.days[i] || {};
+          return d.id !== orig.id || d.name !== orig.name;
+        });
     if (!structurallyChanged) { doSave(null); return; }
     setApplyFromDate('');
+    setApplyFromDayIdx(0);
     setApplyFromSheet(true);
   };
   const deleteSch = async () => {
@@ -1177,7 +1183,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
             onClick={e => e.stopPropagation()}>
             <div className="label" style={{ color: UI.inkFaint, marginBottom: 18 }}>WHEN SHOULD THIS TAKE EFFECT?</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <Btn onClick={() => { setApplyFromSheet(false); doSave(null); }}>
                 From the beginning
               </Btn>
@@ -1190,14 +1196,35 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                     style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: applyFromDate ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
                   />
                 </div>
-                <Btn
-                  disabled={!applyFromDate}
-                  onClick={() => { if (!applyFromDate) return; setApplyFromSheet(false); doSave(applyFromDate); }}
-                  style={{ flexShrink: 0 }}
-                >
-                  Apply from date
-                </Btn>
               </div>
+              {!isWeekday && draft.days.filter(d => d.items?.length > 0).length > 1 && (
+                <div>
+                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>START WITH DAY</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {draft.days.filter(d => d.items?.length > 0).map((d, _i) => {
+                      const realIdx = draft.days.indexOf(d);
+                      const active = applyFromDayIdx === realIdx;
+                      return (
+                        <button key={d.id} onClick={() => setApplyFromDayIdx(realIdx)} style={{
+                          padding: '5px 11px 4px', borderRadius: 4, cursor: 'pointer',
+                          border: `1px solid ${active ? UI.goldSoft : UI.hairStrong}`,
+                          background: active ? UI.goldFaint : 'transparent',
+                          WebkitTapHighlightColor: 'transparent',
+                        }}>
+                          <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, color: active ? UI.gold : UI.inkSoft }}>{d.name}</div>
+                          <div style={{ fontFamily: UI.fontUi, fontSize: 8, color: active ? UI.gold : UI.inkFaint, letterSpacing: '0.08em' }}>Day {realIdx + 1}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <Btn
+                disabled={!applyFromDate}
+                onClick={() => { if (!applyFromDate) return; setApplyFromSheet(false); doSave(applyFromDate, applyFromDayIdx); }}
+              >
+                Apply from date
+              </Btn>
             </div>
           </div>
         </div>

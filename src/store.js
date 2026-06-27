@@ -1678,7 +1678,7 @@ function getCyclePosForDate(schedule, dateStr) {
       const daysLen = (v.days || []).length;
       if (!daysLen) return 0;
       const daysDiff = Math.round((new Date(dateStr + 'T12:00:00') - new Date(v.validFrom + 'T12:00:00')) / 86400000);
-      return ((daysDiff % daysLen) + daysLen) % daysLen;
+      return (((daysDiff + (v.cycleOffset || 0)) % daysLen) + daysLen) % daysLen;
     }
   }
   // Before plan started: extend oldest version backwards (negative daysDiff wraps correctly)
@@ -1686,7 +1686,7 @@ function getCyclePosForDate(schedule, dateStr) {
   const daysLen = (oldest.days || []).length;
   if (!daysLen) return 0;
   const daysDiff = Math.round((new Date(dateStr + 'T12:00:00') - new Date(oldest.validFrom + 'T12:00:00')) / 86400000);
-  return ((daysDiff % daysLen) + daysLen) % daysLen;
+  return (((daysDiff + (oldest.cycleOffset || 0)) % daysLen) + daysLen) % daysLen;
 }
 
 // Index in schedule.versions (newest-first) of the version active on dateStr —
