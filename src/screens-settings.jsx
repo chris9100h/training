@@ -2577,8 +2577,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             {isActive && <span className="micro" style={{ color: 'var(--accent)', flexShrink: 0 }}>ACTIVE</span>}
                           </div>
                           <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 2 }}>
-                            {p.day_count} {p.day_count === 1 ? 'day' : 'days'}
-                            {p.is_flex ? ' · flex' : ''}
+                            {p.is_flex ? 'flex' : (p.days || []).some(d => d.weekday != null) ? 'weekday' : 'cycle'}
+                            {' · '}{p.day_count} {p.day_count === 1 ? 'day' : 'days'}
                             {p.sessions_per_week ? ` · ${p.sessions_per_week}×/week` : ''}
                           </div>
                         </div>
@@ -2602,8 +2602,15 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           const day = days.find(d => d.id === adminPlanSelectedDayId) || days[0];
           const dayIdx = days.findIndex(d => d.id === (day?.id));
           const isRest = !day || !(day.items || []).length || day.name === 'REST';
+          const planType = adminPlanDetail.is_flex ? 'flex' : days.some(d => d.weekday != null) ? 'weekday' : 'cycle';
+          const trainingDays = days.filter(d => (d.items || []).length && d.name !== 'REST').length;
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 0, margin: '0 -16px' }}>
+              {/* plan type */}
+              <div className="micro" style={{ color: UI.inkGhost, padding: '0 16px 10px' }}>
+                {planType.toUpperCase()} · {trainingDays} {trainingDays === 1 ? 'workout' : 'workouts'}
+                {adminPlanDetail.sessions_per_week ? ` · ${adminPlanDetail.sessions_per_week}×/week` : ''}
+              </div>
               {/* chip row */}
               <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none', padding: '0 16px 14px' }}>
                 {days.map((d, i) => {
