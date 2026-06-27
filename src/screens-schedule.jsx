@@ -991,8 +991,14 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             <Stepper value={draft.sessions_per_week} step={1} min={1} max={7}
               suffix="/ week"
               onChange={v => setDraft(d => ({ ...d, sessions_per_week: Math.min(7, Math.max(1, Math.round(v))) }))} />
-            <div className="micro" style={{ marginTop: 8, textAlign: 'center' }}>Used to measure your weekly consistency</div>
           </Field>
+        )}
+        {isFlex && (
+          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, lineHeight: 1.5, marginTop: -8, paddingBottom: 4 }}>
+            {draft.sessions_per_week != null
+              ? `Target: ${draft.sessions_per_week}× per week — used for your weekly adherence score and deload timing.`
+              : 'No target set — just train whenever. Adherence and deload timing won\'t apply.'}
+          </div>
         )}
 
         {isActive && !isWeekday && !isFlex && (
