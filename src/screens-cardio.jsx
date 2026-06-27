@@ -1252,8 +1252,8 @@ function TodayCardioWidget({ store, setStore, todayISO, userId, onPR }) {
           return (
             <div key={plan.id} style={{
               padding: '10px 14px',
-              background: doneLog ? 'rgba(123,196,123,0.05)' : UI.bgInset,
-              border: `0.5px solid ${doneLog ? 'rgba(123,196,123,0.25)' : UI.hairStrong}`,
+              background: doneLog ? 'var(--success-tint-xs)' : UI.bgInset,
+              border: `0.5px solid ${doneLog ? 'var(--success-border)' : UI.hairStrong}`,
               borderRadius: 6, display: 'flex', alignItems: 'center', gap: 12,
             }}>
               <i className={`fa-solid ${act.icon}`} style={{ fontSize: 14, color: doneLog ? UI.ok : 'var(--accent)', flexShrink: 0 }} />

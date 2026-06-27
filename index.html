@@ -33,6 +33,18 @@
     /* RGB triple used by decorative textures (knurl, guilloche). Flipped to a
        dark value in light mode so the hash marks stay visible on a pale bg. */
     --knurl-rgb: 236,228,208;
+    /* Surface tints — cream-on-dark defaults; overridden in light mode */
+    --surface-tint:      rgba(236,228,208,0.02);
+    --surface-tint-sm:   rgba(236,228,208,0.03);
+    --surface-tint-md:   rgba(236,228,208,0.04);
+    --surface-tint-lg:   rgba(236,228,208,0.06);
+    --root-glow:         rgba(236,228,208,0.06);
+    --white-tint-sm:     rgba(255,255,255,0.03);
+    --success-tint-xs:   rgba(123,196,123,0.05);
+    --success-border:    rgba(123,196,123,0.25);
+    --neutral-tint:      rgba(160,160,160,0.07);
+    --neutral-border-sm: rgba(160,160,160,0.3);
+    --success-text:      #7bc47b;
     --accent: #c9a961;
     --accent-light: #e5c97e;
     --accent-deep: #8b6f3d;
@@ -64,7 +76,7 @@
     margin: 0 auto;
     width: 100%; max-width: 440px;
     background: var(--bg);
-    box-shadow: 0 0 0 1px rgba(236,228,208,0.06);
+    box-shadow: 0 0 0 1px var(--root-glow);
     display: flex; flex-direction: column;
     overflow: hidden;
   }
@@ -299,6 +311,18 @@ window.applyDarkMode = function(key) {
   s.setProperty('--hair', m.hair || _DARK_HAIR);
   s.setProperty('--hair-strong', m.hairStrong || _DARK_HAIR_STRONG);
   s.setProperty('--knurl-rgb', m.knurlRgb || '236,228,208');
+  var isLight = (key === 'light');
+  s.setProperty('--surface-tint',      isLight ? 'rgba(31,27,22,0.05)'  : 'rgba(236,228,208,0.02)');
+  s.setProperty('--surface-tint-sm',   isLight ? 'rgba(31,27,22,0.07)'  : 'rgba(236,228,208,0.03)');
+  s.setProperty('--surface-tint-md',   isLight ? 'rgba(31,27,22,0.09)'  : 'rgba(236,228,208,0.04)');
+  s.setProperty('--surface-tint-lg',   isLight ? 'rgba(31,27,22,0.11)'  : 'rgba(236,228,208,0.06)');
+  s.setProperty('--root-glow',         isLight ? 'rgba(31,27,22,0.18)'  : 'rgba(236,228,208,0.06)');
+  s.setProperty('--white-tint-sm',     isLight ? 'rgba(31,27,22,0.05)'  : 'rgba(255,255,255,0.03)');
+  s.setProperty('--success-tint-xs',   isLight ? 'rgba(70,130,70,0.12)' : 'rgba(123,196,123,0.05)');
+  s.setProperty('--success-border',    isLight ? 'rgba(70,130,70,0.40)' : 'rgba(123,196,123,0.25)');
+  s.setProperty('--neutral-tint',      isLight ? 'rgba(31,27,22,0.08)'  : 'rgba(160,160,160,0.07)');
+  s.setProperty('--neutral-border-sm', isLight ? 'rgba(31,27,22,0.20)'  : 'rgba(160,160,160,0.3)');
+  s.setProperty('--success-text',      isLight ? '#2e7a30'              : '#7bc47b');
   var tc = document.querySelector('meta[name="theme-color"]');
   if (tc) tc.content = m.bg;
 };

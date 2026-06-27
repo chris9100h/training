@@ -100,7 +100,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {/* Sick / vacation status banner */}
           {clientStore.statusMode && (
-            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: 'rgba(255,255,255,0.03)', borderBottom: `0.5px solid ${UI.hairStrong}` }}>
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: 'var(--white-tint-sm)', borderBottom: `0.5px solid ${UI.hairStrong}` }}>
               <i className={`fa-solid ${clientStore.statusMode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach'}`} style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', fontWeight: 600 }}>
                 {clientStore.statusMode === 'sick' ? 'SICK' : 'VACATION'}
@@ -444,7 +444,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                 </div>
               </div>
               {trainedToday && (
-                <span className="micro" style={{ color: '#7bc47b', marginRight: 4 }}>DONE</span>
+                <span className="micro" style={{ color: 'var(--success-text)', marginRight: 4 }}>DONE</span>
               )}
               <ChevronRight />
             </div>
@@ -553,7 +553,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                     <div style={{
                       height: '100%', borderRadius: 4,
                       width: `${w.pct ?? 0}%`,
-                      background: w.pct >= 80 ? '#7bc47b' : w.pct >= 50 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.7)',
+                      background: w.pct >= 80 ? 'var(--success-text)' : w.pct >= 50 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.7)',
                       transition: 'width 0.3s ease',
                     }} />
                   )}
@@ -562,7 +562,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   {w.planned === 0 ? (
                     <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>no plan</span>
                   ) : (
-                    <span className="num" style={{ fontSize: 12, color: w.pct >= 80 ? '#7bc47b' : w.pct >= 50 ? UI.gold : 'rgba(var(--danger-rgb),0.8)' }}>
+                    <span className="num" style={{ fontSize: 12, color: w.pct >= 80 ? 'var(--success-text)' : w.pct >= 50 ? UI.gold : 'rgba(var(--danger-rgb),0.8)' }}>
                       {w.done}/{w.planned}
                     </span>
                   )}
@@ -650,7 +650,7 @@ function AdherenceChart({ weeks }) {
       {data.map((w, i) => {
         const x = gap + i * (barW + gap);
         const h = w.pct > 0 ? Math.max(2, (w.pct / 100) * H) : 0;
-        const color = w.pct >= 80 ? '#7bc47b' : w.pct >= 50 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.7)';
+        const color = w.pct >= 80 ? 'var(--success-text)' : w.pct >= 50 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.7)';
         const labelText = w.label.length > 8 ? w.label.slice(0, 6) : w.label;
         return (
           <g key={i}>
@@ -746,7 +746,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <span style={{ fontSize: 11, color: trend >= 0 ? '#7bc47b' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>
+        <span style={{ fontSize: 11, color: trend >= 0 ? 'var(--success-text)' : 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>
           <i className={`fa-solid fa-arrow-trend-${trend >= 0 ? 'up' : 'down'}`} style={{ marginRight: 4 }} />
           {trend >= 0 ? '+' : ''}{Math.round(trend).toLocaleString('en-US')}{unit}
           <span style={{ color: UI.inkFaint, marginLeft: 5 }}>since {isWd ? 'week 1' : 'cycle 1'}</span>

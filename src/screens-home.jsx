@@ -2359,8 +2359,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 onClick={() => (weekdayMode || cycleWeekView) ? setSelectedWd(i) : setSelectedSlot(i)}
                 style={{
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
-                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isStatusDay ? 'rgba(var(--accent-rgb),0.06)' : isSkipped ? 'rgba(160,160,160,0.07)' : 'transparent',
-                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(var(--danger-rgb),0.4)' : isStatusDay ? 'rgba(var(--accent-rgb),0.25)' : isSkipped ? 'rgba(160,160,160,0.3)' : d.isToday ? UI.hairStrong : UI.hair}`,
+                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isStatusDay ? 'rgba(var(--accent-rgb),0.06)' : isSkipped ? 'var(--neutral-tint)' : 'transparent',
+                  border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(var(--danger-rgb),0.4)' : isStatusDay ? 'rgba(var(--accent-rgb),0.25)' : isSkipped ? 'var(--neutral-border-sm)' : d.isToday ? UI.hairStrong : UI.hair}`,
                   borderRadius: 4, cursor: 'pointer',
                   minHeight: 56,
                 }}>
@@ -2522,7 +2522,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                       {improvementCount === 0 && regressionCount === 0 ? null : (
                         <>
                           {improvementCount > 0 && (
-                            <span style={{ color: '#7bc47b', fontWeight: 600 }}>↑ {improvementCount}</span>
+                            <span style={{ color: 'var(--success-text)', fontWeight: 600 }}>↑ {improvementCount}</span>
                           )}
                           {regressionCount > 0 && (
                             <span style={{ color: UI.danger, fontWeight: 600 }}>↓ {regressionCount}</span>
