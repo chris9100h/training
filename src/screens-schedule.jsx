@@ -1184,9 +1184,6 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             onClick={e => e.stopPropagation()}>
             <div className="label" style={{ color: UI.inkFaint, marginBottom: 18 }}>WHEN SHOULD THIS TAKE EFFECT?</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <Btn onClick={() => { setApplyFromSheet(false); doSave(null); }}>
-                From the beginning
-              </Btn>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${applyFromDate ? UI.goldSoft : UI.hairStrong}` }}>
                   <input
