@@ -939,7 +939,18 @@ async function syncStore(prev, next, userId) {
     if (toBackup.length) {
       _supabase.from('zane_schedule_backups').insert(
         toBackup.map(s => ({ id: uid(), user_id: userId, schedule_id: s.id, schedule_name: s.name, days: s.days }))
-      ).then(() => {}).catch(() => {});
+      ).then(() => {
+        toBackup.forEach(s => {
+          _supabase.from('zane_schedule_backups')
+            .select('id').eq('schedule_id', s.id).order('created_at', { ascending: false })
+            .then(({ data }) => {
+              if (data && data.length > 10) {
+                _supabase.from('zane_schedule_backups').delete()
+                  .in('id', data.slice(10).map(r => r.id)).then(() => {}).catch(() => {});
+              }
+            }).catch(() => {});
+        });
+      }).catch(() => {});
     }
   }
 
