@@ -426,11 +426,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
   };
 
   const planActions = fromPlan && (
-    <>
-      {!isActivePlan && <Btn kind="ghost" onClick={activate} style={{ flex: 1, fontSize: 12 }}>Activate</Btn>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+      {!isActivePlan && <Btn kind="ghost" onClick={activate} style={{ fontSize: 12 }}>Activate</Btn>}
       {isActivePlan && (
         <div style={{
-          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
           border: `1px solid ${UI.goldSoft}`, borderRadius: 4, background: UI.goldFaint,
           padding: '10px 14px', minHeight: 44,
         }}>
@@ -438,10 +438,12 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
           <span className="label" style={{ color: UI.gold, marginBottom: 0 }}>Active</span>
         </div>
       )}
-      <Btn kind="ghost" onClick={duplicate} style={{ flex: 1, fontSize: 12 }}>Duplicate</Btn>
-      <Btn kind="ghost" onClick={exportPlan} style={{ flex: 1, fontSize: 12 }}>Export</Btn>
-      <Btn kind="ghost" onClick={openBackupSheet} style={{ flex: 1, fontSize: 12 }}>Backups</Btn>
-    </>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Btn kind="ghost" onClick={duplicate} style={{ flex: 1, fontSize: 12 }}>Duplicate</Btn>
+        <Btn kind="ghost" onClick={exportPlan} style={{ flex: 1, fontSize: 12 }}>Export</Btn>
+        <Btn kind="ghost" onClick={openBackupSheet} style={{ flex: 1, fontSize: 12 }}>Backups</Btn>
+      </div>
+    </div>
   );
 
   const dayHeader = (
