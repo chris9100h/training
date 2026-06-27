@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.414',
+    title: 'Light Mode Polish',
+    items: [
+      'Cards, surfaces and borders are now properly visible in light mode — all the subtle cream tints have been replaced with theme-aware ink tints.',
+      'The NEW BEST, IMPROVEMENT and regression overlays now match your active theme instead of always going full black.',
+      'Success greens and skipped-day chips have better contrast on the light background.',
+    ],
+  },
+  {
     id: 'v2.412',
     title: 'Deload week, templates & more',
     items: [
