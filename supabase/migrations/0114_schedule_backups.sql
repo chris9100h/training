@@ -28,4 +28,4 @@ SELECT
   days
 FROM zane_schedules
 WHERE jsonb_typeof(days) = 'array'
-  AND jsonb_array_length(days) > 0;
+  AND days != '[]'::jsonb;
