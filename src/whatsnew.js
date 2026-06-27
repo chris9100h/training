@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.418',
+    title: 'Bug Fix + Plan Backups',
+    items: [
+      '🐛 Critical bug fixed: deleting any exercise from your library was silently wiping all training days from every plan. It didn\'t matter if the exercise was used in a plan or not — gone. This is now fixed.',
+      '🗄️ Your plans are now backed up automatically. Every time you save changes to your training days, a snapshot is stored. Up to 10 backups per plan, always on hand.',
+      'To restore: open a plan → Backups button → pick a snapshot → Restore. Done.',
+    ],
+  },
+  {
     id: 'v2.416',
     title: 'Smarter Plan Versioning',
     items: [
