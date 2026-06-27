@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.416',
+    title: 'Smarter Plan Versioning',
+    items: [
+      'Renaming a training day now also triggers the "apply from date" question — not just adding or removing days. Changed Push to Chest? The app asks when the new name takes effect, so your history stays clean.',
+      'When switching to a new plan version, you can now choose which day to start on — not just Day 1. Starting a new plan tomorrow but you\'re mid-rotation? Pick Day 4, and the schedule continues exactly where your week is.',
+      'Rest days are included in the start-day picker, so any position in the cycle is fair game.',
+      '"From the beginning" is gone from the versioning sheet. Nobody actually uses retroactive plan rewrites — it only confused things.',
+    ],
+  },
+  {
     id: 'v2.415',
     title: 'Your Flex Plan, Your Rules',
     items: [
