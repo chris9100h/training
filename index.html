@@ -39,7 +39,7 @@
     --surface-tint-md:   rgba(236,228,208,0.04);
     --surface-tint-lg:   rgba(236,228,208,0.06);
     --root-glow:         rgba(236,228,208,0.06);
-    --white-tint-sm:     rgba(255,255,255,0.03);
+    --overlay-tint:      rgba(255,255,255,0.03);
     --success-tint-xs:   rgba(123,196,123,0.05);
     --success-border:    rgba(123,196,123,0.25);
     --neutral-tint:      rgba(160,160,160,0.07);
@@ -280,13 +280,24 @@ window.applyAccentColor(localStorage.getItem('logbook-accent-color') || 'copper'
 </script>
 
 <script>
-// ink/inkSoft/hair/hairStrong/knurlRgb default to the dark-theme :root values
-// when a mode omits them; the light (creme) mode flips ink dark and the
-// decorative textures to a dark line so they stay visible on a pale surface.
-var _DARK_INK = '#ece4d0';
-var _DARK_INK_SOFT = 'rgba(236,228,208,0.66)';
-var _DARK_HAIR = 'rgba(236,228,208,0.10)';
-var _DARK_HAIR_STRONG = 'rgba(236,228,208,0.18)';
+// Properties not listed in a mode object fall back to these dark-theme defaults.
+var _DARK_INK          = '#ece4d0';
+var _DARK_INK_SOFT     = 'rgba(236,228,208,0.66)';
+var _DARK_HAIR         = 'rgba(236,228,208,0.10)';
+var _DARK_HAIR_STRONG  = 'rgba(236,228,208,0.18)';
+var _DARK_TINTS = {
+  surfaceTint:     'rgba(236,228,208,0.02)',
+  surfaceTintSm:   'rgba(236,228,208,0.03)',
+  surfaceTintMd:   'rgba(236,228,208,0.04)',
+  surfaceTintLg:   'rgba(236,228,208,0.06)',
+  rootGlow:        'rgba(236,228,208,0.06)',
+  overlayTint:     'rgba(255,255,255,0.03)',
+  successTintXs:   'rgba(123,196,123,0.05)',
+  successBorder:   'rgba(123,196,123,0.25)',
+  neutralTint:     'rgba(160,160,160,0.07)',
+  neutralBorderSm: 'rgba(160,160,160,0.3)',
+  successText:     '#7bc47b',
+};
 window.DARK_MODES = {
   dark:  { bg: '#1a1820', bgRaised: '#252334', bgInset: '#2f2c3c', bgBody: '#141218', bgRgb: '26,24,32', inkFaint: 'rgba(236,228,208,0.54)', inkGhost: 'rgba(236,228,208,0.24)' },
   black: { bg: '#07060a', bgRaised: '#100d0b', bgInset: '#1a1611', bgBody: '#050409', bgRgb: '7,6,10', inkFaint: 'rgba(236,228,208,0.34)', inkGhost: 'rgba(236,228,208,0.14)' },
@@ -294,10 +305,22 @@ window.DARK_MODES = {
     bg: '#f2ede4', bgRaised: '#eae3d6', bgInset: '#e2dacb', bgBody: '#e8e1d4', bgRgb: '242,237,228',
     ink: '#1f1b16', inkSoft: 'rgba(31,27,22,0.66)', inkFaint: 'rgba(31,27,22,0.44)', inkGhost: 'rgba(31,27,22,0.16)',
     hair: 'rgba(31,27,22,0.20)', hairStrong: 'rgba(31,27,22,0.42)', knurlRgb: '31,27,22',
+    surfaceTint:     'rgba(31,27,22,0.05)',
+    surfaceTintSm:   'rgba(31,27,22,0.07)',
+    surfaceTintMd:   'rgba(31,27,22,0.09)',
+    surfaceTintLg:   'rgba(31,27,22,0.11)',
+    rootGlow:        'rgba(31,27,22,0.18)',
+    overlayTint:     'rgba(31,27,22,0.05)',
+    successTintXs:   'rgba(70,130,70,0.12)',
+    successBorder:   'rgba(70,130,70,0.40)',
+    neutralTint:     'rgba(31,27,22,0.08)',
+    neutralBorderSm: 'rgba(31,27,22,0.20)',
+    successText:     '#2e7a30',
   },
 };
 window.applyDarkMode = function(key) {
   var m = window.DARK_MODES[key] || window.DARK_MODES.dark;
+  var t = _DARK_TINTS;
   var s = document.documentElement.style;
   s.setProperty('--bg', m.bg);
   s.setProperty('--bg-raised', m.bgRaised);
@@ -311,18 +334,17 @@ window.applyDarkMode = function(key) {
   s.setProperty('--hair', m.hair || _DARK_HAIR);
   s.setProperty('--hair-strong', m.hairStrong || _DARK_HAIR_STRONG);
   s.setProperty('--knurl-rgb', m.knurlRgb || '236,228,208');
-  var isLight = (key === 'light');
-  s.setProperty('--surface-tint',      isLight ? 'rgba(31,27,22,0.05)'  : 'rgba(236,228,208,0.02)');
-  s.setProperty('--surface-tint-sm',   isLight ? 'rgba(31,27,22,0.07)'  : 'rgba(236,228,208,0.03)');
-  s.setProperty('--surface-tint-md',   isLight ? 'rgba(31,27,22,0.09)'  : 'rgba(236,228,208,0.04)');
-  s.setProperty('--surface-tint-lg',   isLight ? 'rgba(31,27,22,0.11)'  : 'rgba(236,228,208,0.06)');
-  s.setProperty('--root-glow',         isLight ? 'rgba(31,27,22,0.18)'  : 'rgba(236,228,208,0.06)');
-  s.setProperty('--white-tint-sm',     isLight ? 'rgba(31,27,22,0.05)'  : 'rgba(255,255,255,0.03)');
-  s.setProperty('--success-tint-xs',   isLight ? 'rgba(70,130,70,0.12)' : 'rgba(123,196,123,0.05)');
-  s.setProperty('--success-border',    isLight ? 'rgba(70,130,70,0.40)' : 'rgba(123,196,123,0.25)');
-  s.setProperty('--neutral-tint',      isLight ? 'rgba(31,27,22,0.08)'  : 'rgba(160,160,160,0.07)');
-  s.setProperty('--neutral-border-sm', isLight ? 'rgba(31,27,22,0.20)'  : 'rgba(160,160,160,0.3)');
-  s.setProperty('--success-text',      isLight ? '#2e7a30'              : '#7bc47b');
+  s.setProperty('--surface-tint',      m.surfaceTint     || t.surfaceTint);
+  s.setProperty('--surface-tint-sm',   m.surfaceTintSm   || t.surfaceTintSm);
+  s.setProperty('--surface-tint-md',   m.surfaceTintMd   || t.surfaceTintMd);
+  s.setProperty('--surface-tint-lg',   m.surfaceTintLg   || t.surfaceTintLg);
+  s.setProperty('--root-glow',         m.rootGlow        || t.rootGlow);
+  s.setProperty('--overlay-tint',      m.overlayTint     || t.overlayTint);
+  s.setProperty('--success-tint-xs',   m.successTintXs   || t.successTintXs);
+  s.setProperty('--success-border',    m.successBorder   || t.successBorder);
+  s.setProperty('--neutral-tint',      m.neutralTint     || t.neutralTint);
+  s.setProperty('--neutral-border-sm', m.neutralBorderSm || t.neutralBorderSm);
+  s.setProperty('--success-text',      m.successText     || t.successText);
   var tc = document.querySelector('meta[name="theme-color"]');
   if (tc) tc.content = m.bg;
 };
