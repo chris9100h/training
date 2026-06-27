@@ -608,7 +608,7 @@ function CardioPROverlay({ pr, onDone }) {
   // status bar); inside a <Screen> (overflow:hidden) iOS clips position:fixed.
   return ReactDOM.createPortal(
     <div onClick={onDone} style={{
-      position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 200, background: 'rgb(8,6,3)',
+      position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 200, background: 'var(--bg-body)',
       animation: 'improvedFade 3.8s ease forwards',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
     }}>
