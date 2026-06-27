@@ -676,12 +676,10 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
       exercises: s.exercises.filter(e => e.id !== exId),
       schedules: s.schedules.map(sch => ({
         ...sch,
-        days: Object.fromEntries(
-          Object.entries(sch.days || {}).map(([k, day]) => [
-            k,
-            { ...day, items: (day.items || []).filter(item => item.exId !== exId) },
-          ])
-        ),
+        days: (sch.days || []).map(day => ({
+          ...day,
+          items: (day.items || []).filter(item => item.exId !== exId),
+        })),
       })),
     }));
     go({ name: 'lib' });
