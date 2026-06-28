@@ -1877,11 +1877,15 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     })};
   });
   const removeItem = (idx) => setDraft(d => ({ ...d, items: normalizeSupersets(d.items.filter((_, i) => i !== idx)) }));
-  const addExercise = (exId) => {
-    const ex = LB.findExercise(store, exId);
-    const isCardioEx = ex?.movement_type === 'cardio';
-    const defaultReps = ex?.progression_reps ?? 8;
-    setDraft(d => ({ ...d, items: [...d.items, { exId, sets: isCardioEx ? 0 : 3, reps: isCardioEx ? 0 : defaultReps }] }));
+  const addExercise = (exIds) => {
+    const ids = Array.isArray(exIds) ? exIds : [exIds];
+    const newItems = ids.map(exId => {
+      const ex = LB.findExercise(store, exId);
+      const isCardioEx = ex?.movement_type === 'cardio';
+      const defaultReps = ex?.progression_reps ?? 8;
+      return { exId, sets: isCardioEx ? 0 : 3, reps: isCardioEx ? 0 : defaultReps };
+    });
+    setDraft(d => ({ ...d, items: [...d.items, ...newItems] }));
     setAddingEx(false);
   };
   const copyItemsFromDay = (sourceDay, migrateId) => {
@@ -2047,7 +2051,9 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
   const [q, setQ] = useStateS('');
   const [filterTags, setFilterTags] = useStateS([]);
   const [creatingNew, setCreatingNew] = useStateS(null);
+  const [selected, setSelected] = useStateS([]);
   const toggleFilter = (m) => setFilterTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
+  const toggleSelect = (id) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
 
   const list = useMemoS(() => {
     const ql = q.toUpperCase();
@@ -2061,7 +2067,7 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
   }, [store.exercises, q, filterTags]);
 
   return (
-    <Sheet open={true} onClose={onClose} title="Select exercise">
+    <Sheet open={true} onClose={onClose} title="Select exercises">
       <Field label="">
         <TextInput value={q} onChange={v => setQ(v.toUpperCase())} placeholder="Search or type…" />
       </Field>
@@ -2072,24 +2078,33 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
         ))}
       </div>
       <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', maxHeight: 240, overflow: 'auto', overscrollBehavior: 'contain' }}>
-        {list.map((e, ei) => (
-          <React.Fragment key={e.id}>
-          <button onClick={() => onPick(e.id)} style={{
-            background: 'transparent', border: 'none', textAlign: 'left',
-            padding: '11px 0', cursor: 'pointer',
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
-            width: '100%',
-          }}>
-            <span className="display" style={{ fontSize: 17, color: UI.ink }}>{e.name}</span>
-            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-              {(e.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
-            </div>
-          </button>
-          {ei < list.length - 1 && <div className="knurl" />}
-          </React.Fragment>
-        ))}
+        {list.map((e, ei) => {
+          const isSel = selected.includes(e.id);
+          return (
+            <React.Fragment key={e.id}>
+            <button onClick={() => toggleSelect(e.id)} style={{
+              background: isSel ? UI.goldFaint : 'transparent', border: 'none', textAlign: 'left',
+              padding: '11px 8px', cursor: 'pointer', borderRadius: 4,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+              width: '100%', boxSizing: 'border-box',
+            }}>
+              <span className="display" style={{ fontSize: 17, color: isSel ? UI.gold : UI.ink }}>{e.name}</span>
+              <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
+                {isSel && <i className="fa fa-check-circle" style={{ color: UI.gold, fontSize: 15 }} />}
+                {(e.tags || []).map(t => <Pill key={t} gold={isSel}>{t}</Pill>)}
+              </div>
+            </button>
+            {ei < list.length - 1 && <div className="knurl" />}
+            </React.Fragment>
+          );
+        })}
         {list.length === 0 && <div className="micro" style={{ padding: '20px 0', textAlign: 'center', color: UI.inkFaint }}>No exercises found</div>}
       </div>
+      {selected.length > 0 && (
+        <Btn onClick={() => onPick(selected)} style={{ marginTop: 12 }}>
+          Add {selected.length} exercise{selected.length !== 1 ? 's' : ''} →
+        </Btn>
+      )}
       {q && !list.find(e => e.name.toUpperCase() === q.toUpperCase()) && (
         <button onClick={() => setCreatingNew(q)} style={{
           background: UI.goldFaint, border: `1px dashed ${UI.goldSoft}`,
@@ -2103,7 +2118,7 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
           initialName={creatingNew}
           store={store}
           setStore={setStore}
-          onCreated={(id) => { onPick(id); }}
+          onCreated={(id) => { onPick([id]); }}
           onClose={() => setCreatingNew(null)}
         />
       )}
