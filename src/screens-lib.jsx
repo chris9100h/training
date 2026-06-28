@@ -2568,6 +2568,15 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   const [draftDate, setDraftDate] = useStateL(session.date ? session.date.slice(0, 10) : '');
   const [draftDuration, setDraftDuration] = useStateL(duration != null ? String(Math.round(duration / 5) * 5) : '0');
   const [draftEntries, setDraftEntries] = useStateL(() => JSON.parse(JSON.stringify(session.entries)));
+  const [confirmEl, confirm] = useConfirm();
+  const origDate = session.date ? session.date.slice(0, 10) : '';
+  const origDuration = duration != null ? String(Math.round(duration / 5) * 5) : '0';
+  const origEntriesJson = useRefL(() => JSON.stringify(session.entries));
+  const isDirty = draftDate !== origDate || draftDuration !== origDuration || JSON.stringify(draftEntries) !== origEntriesJson.current;
+  const requestClose = async () => {
+    if (isDirty && !await confirm('Your edits won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    onClose();
+  };
 
   const updateSet = (eIdx, sIdx, patch) => {
     setDraftEntries(entries => entries.map((e, i) =>
@@ -2609,7 +2618,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   };
 
   return (
-    <Sheet open={true} onClose={onClose} title="Edit session">
+    <Sheet open={true} onClose={requestClose} title="Edit session">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 160 }}>
         <div>
           <span className="label">Date</span>
@@ -2688,10 +2697,11 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
           })}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn kind="ghost" onClick={onClose} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn kind="ghost" onClick={requestClose} style={{ flex: 1 }}>Cancel</Btn>
           <Btn onClick={save} style={{ flex: 2 }}>Save</Btn>
         </div>
       </div>
+      {confirmEl}
     </Sheet>
   );
 }

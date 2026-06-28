@@ -649,30 +649,35 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
   const empty = () => ({ date: todayStr, type: '', duration: '', distance: '', paceFeeling: null, effort: null, note: '' });
   const [form, setForm] = useState(empty);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const [confirmEl, confirm] = useConfirm();
+  const initialSnap = useRef(null);
 
   useEffect(() => {
     if (!open) return;
-    if (editLog) {
-      const du = getDistUnit();
-      setForm({
-        date: editLog.date,
-        type: editLog.type || '',
-        duration: editLog.durationMinutes ? String(editLog.durationMinutes) : '',
-        distance: editLog.distanceM != null ? mToDisplay(editLog.distanceM, du) : '',
-        paceFeeling: editLog.paceFeeling ?? null,
-        effort: editLog.effort ?? null,
-        note: editLog.note || '',
-      });
-    } else {
-      const du = getDistUnit();
-      setForm({
-        ...empty(),
-        type: prefill?.type || '',
-        duration: prefill?.durationMinutes ? String(prefill.durationMinutes) : '',
-        distance: prefill?.distanceM != null ? mToDisplay(prefill.distanceM, du) : '',
-      });
-    }
+    const du = getDistUnit();
+    const next = editLog ? {
+      date: editLog.date,
+      type: editLog.type || '',
+      duration: editLog.durationMinutes ? String(editLog.durationMinutes) : '',
+      distance: editLog.distanceM != null ? mToDisplay(editLog.distanceM, du) : '',
+      paceFeeling: editLog.paceFeeling ?? null,
+      effort: editLog.effort ?? null,
+      note: editLog.note || '',
+    } : {
+      ...empty(),
+      type: prefill?.type || '',
+      duration: prefill?.durationMinutes ? String(prefill.durationMinutes) : '',
+      distance: prefill?.distanceM != null ? mToDisplay(prefill.distanceM, du) : '',
+    };
+    setForm(next);
+    initialSnap.current = next;
   }, [open, editLog?.id]);
+
+  const isDirty = initialSnap.current != null && JSON.stringify(form) !== JSON.stringify(initialSnap.current);
+  const requestClose = async () => {
+    if (isDirty && !await confirm('Your cardio entry won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    onClose();
+  };
 
   // Unique types from history, most-recently-used first
   const typeChips = useMemo(() => {
@@ -728,7 +733,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
   };
 
   return (
-    <Sheet open={open} onClose={onClose} title={editLog ? 'EDIT CARDIO' : 'LOG CARDIO'}>
+    <Sheet open={open} onClose={requestClose} title={editLog ? 'EDIT CARDIO' : 'LOG CARDIO'}>
       {/* Date */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Date</div>
@@ -835,6 +840,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
       </div>
 
       <Btn onClick={save} disabled={!canSave} style={{ width: '100%' }}>SAVE</Btn>
+      {confirmEl}
     </Sheet>
   );
 }

@@ -1845,6 +1845,8 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const [copyingFrom, setCopyingFrom] = useStateS(false);
   const [editingItem, setEditingItem] = useStateS(null);
   const [pickingType, setPickingType] = useStateS(false);
+  const [confirmEl, confirm] = useConfirm();
+  const initialDay = React.useRef(JSON.stringify(day));
 
   // A superset group is only meaningful as a contiguous run of >= 2 adjacent
   // items. After a move/remove, drop the group id from any item no longer next
@@ -1866,6 +1868,12 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const itemsListRef = UI.useDragReorder({ onReorder: reorderItems });
 
   if (!draft) return null;
+
+  const isDirty = JSON.stringify(draft) !== initialDay.current;
+  const requestClose = async () => {
+    if (isDirty && !await confirm('Your changes to this day won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    onClose();
+  };
 
   const updateItem = (idx, patch) => setDraft(d => {
     const item = d.items[idx];
@@ -1927,7 +1935,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   );
 
   return (
-    <Sheet open={true} onClose={onClose} title="Edit day">
+    <Sheet open={true} onClose={requestClose} title="Edit day">
       <Field label="Day type">
         <button onClick={() => setPickingType(true)} style={{
           width: '100%', textAlign: 'left', background: UI.bgInset,
@@ -2043,6 +2051,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
           onPick={(type) => { setDraft(d => ({ ...d, name: type })); setPickingType(false); }}
         />
       )}
+      {confirmEl}
     </Sheet>
   );
 }

@@ -735,19 +735,29 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
   const prefilledFromCoach = !store.settings?.macroTargets && !!effective;
   const empty = { proteinTraining: '', carbsTraining: '', fatTraining: '', proteinRest: '', carbsRest: '', fatRest: '' };
   const [form, setForm] = useStateH(empty);
+  const [confirmEl, confirm] = useConfirm();
+  const initialSnap = useRefH(null);
 
   useEffectH(() => {
     if (!open) return;
     const m = effective || {};
-    setForm({
+    const next = {
       proteinTraining: m.proteinTraining != null ? String(m.proteinTraining) : '',
       carbsTraining: m.carbsTraining != null ? String(m.carbsTraining) : '',
       fatTraining: m.fatTraining != null ? String(m.fatTraining) : '',
       proteinRest: m.proteinRest != null ? String(m.proteinRest) : '',
       carbsRest: m.carbsRest != null ? String(m.carbsRest) : '',
       fatRest: m.fatRest != null ? String(m.fatRest) : '',
-    });
+    };
+    setForm(next);
+    initialSnap.current = next;
   }, [open]);
+
+  const isDirty = initialSnap.current != null && JSON.stringify(form) !== JSON.stringify(initialSnap.current);
+  const requestClose = async () => {
+    if (isDirty && !await confirm('Your macro targets won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    onClose();
+  };
 
   const calsTraining = caloriesFromMacros(healthInt(form.proteinTraining), healthInt(form.carbsTraining), healthInt(form.fatTraining));
   const calsRest = caloriesFromMacros(healthInt(form.proteinRest), healthInt(form.carbsRest), healthInt(form.fatRest));
@@ -780,7 +790,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
   );
 
   return (
-    <Sheet open={open} onClose={onClose} title="Macro Targets">
+    <Sheet open={open} onClose={requestClose} title="Macro Targets">
       {prefilledFromCoach && (
         <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.08)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, marginBottom: 14 }}>
           Prefilled from your coach — edit to set your own.
@@ -789,6 +799,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
       {section('Training', 'TRAINING DAY', calsTraining)}
       {section('Rest', 'REST DAY', calsRest)}
       <Btn onClick={save} style={{ width: '100%' }}>Save Targets</Btn>
+      {confirmEl}
     </Sheet>
   );
 }

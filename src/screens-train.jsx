@@ -1338,6 +1338,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === entry.exId ? { ...e, note: exNoteVal.trim() } : e) }));
     setExNoteOpen(false);
   };
+  const requestCloseExNote = async () => {
+    const dirty = exNoteVal !== (exercise?.note || '');
+    if (dirty && !await confirm('Your exercise note won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    setExNoteOpen(false);
+  };
 
   const swapExercise = async () => {
     if (!await confirm(`Swap "${entry.name}"?`, { ok: 'Swap' })) return;
@@ -2753,7 +2758,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {/* exercise note editor */}
-      <Sheet open={exNoteOpen} onClose={() => setExNoteOpen(false)} title="Exercise note">
+      <Sheet open={exNoteOpen} onClose={requestCloseExNote} title="Exercise note">
         <textarea
           value={exNoteVal}
           onChange={e => setExNoteVal(e.target.value)}
