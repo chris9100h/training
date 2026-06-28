@@ -16,6 +16,14 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.419',
+    title: 'Mixed Units — finally',
+    items: [
+      '🇬🇧 For everyone who lifts in kg but runs in miles: there\'s now a "Mixed" option in your unit settings. kg for iron, miles for cardio. Civilised.',
+      'Find it under Settings → Appearance → Unit preference.',
+    ],
+  },
+  {
     id: 'v2.418',
     title: 'Bug Fix + Plan Backups',
     items: [
