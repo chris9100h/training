@@ -1074,6 +1074,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [showCycleStep, setShowCycleStep] = useStateT(false);
   const [advanceCycle, setAdvanceCycle] = useStateT(false);
   const [cycleFromPickedDay, setCycleFromPickedDay] = useStateT(false);
+  const [intensityOpen, setIntensityOpen] = useStateT(false);
   const [notePicker, setNotePicker] = useStateT(false);
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
@@ -2486,6 +2487,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </div>
 
           {!isCardio && (
+            <button className="intensity-glow" onClick={() => setIntensityOpen(true)} style={{
+              width: '100%', marginTop: 6, padding: '8px 0',
+              background: 'rgba(var(--accent-rgb),0.08)',
+              border: '1px solid rgba(var(--accent-rgb),0.5)',
+              borderRadius: 6, cursor: 'pointer',
+              color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
+              letterSpacing: '0.14em', WebkitTapHighlightColor: 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            }}>
+              <i className="fa fa-bolt" style={{ fontSize: 10 }} />
+              INTENSITY
+            </button>
+          )}
+
+          {!isCardio && (
             <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
               <button onClick={addSet} style={{
                 flex: 1, padding: '9px 0', background: 'transparent',
@@ -2737,6 +2753,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Exercise note</div>
             <div style={{ fontSize: 12, color: UI.inkSoft }}>Permanent — shown every session. Settings, technique cues.</div>
           </button>
+        </div>
+      </Sheet>
+
+      {/* intensity technique picker */}
+      <Sheet open={intensityOpen} onClose={() => setIntensityOpen(false)} title="Intensity technique">
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '32px 0 16px', gap: 12 }}>
+          <i className="fa fa-bolt" style={{ fontSize: 32, color: 'var(--accent)', filter: 'drop-shadow(0 0 10px rgba(var(--accent-rgb),0.7))' }} />
+          <div className="display" style={{ fontSize: 22, color: UI.ink }}>Coming soon</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, textAlign: 'center', lineHeight: 1.6 }}>
+            Drop sets, Myo-Reps and more{'\n'}are on their way.
+          </div>
         </div>
       </Sheet>
 
