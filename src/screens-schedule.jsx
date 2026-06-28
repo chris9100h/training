@@ -296,9 +296,19 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
       `Restore the backup from ${new Date(backup.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}?\n\nThis replaces your current training days.`,
       { ok: 'Restore', danger: true }
     )) return;
+    const today = LB.todayISO();
     setStore(s => ({
       ...s,
-      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, days: backup.days } : x),
+      schedules: s.schedules.map(x => {
+        if (x.id !== sch.id) return x;
+        if (!(x.versions || []).length) {
+          return { ...x, days: backup.days };
+        }
+        const newVer = { validFrom: today, days: backup.days };
+        const newVersions = LB.dedupeVersionsByDate([newVer, ...(x.versions || [])])
+          .sort((a, b) => b.validFrom.localeCompare(a.validFrom));
+        return { ...x, days: backup.days, versions: newVersions };
+      }),
     }));
     setBackupSheet(false);
   };
