@@ -1991,7 +1991,11 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                     fontSize: 12, color: UI.gold, background: UI.goldFaint,
                     border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
                     padding: '3px 8px', whiteSpace: 'nowrap',
-                  }}>{it.repsPerSet && it.repsPerSet.length > 1 ? it.repsPerSet.join('/') : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`}</div>
+                    display: 'flex', alignItems: 'center', gap: 5,
+                  }}>
+                    <span>{it.repsPerSet && it.repsPerSet.length > 1 ? it.repsPerSet.join('/') : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`}</span>
+                    <i className="fa fa-pencil" style={{ fontSize: 9, opacity: 0.7 }} />
+                  </div>
                   <button data-reorder-ignore="true" onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...dayEditIconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
                 </div>
               );
