@@ -1725,7 +1725,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           </Row>
           <Row label="Unit preference">
             <button style={accentBtn} onClick={() => setUnitPickerOpen(true)}>
-              {store.settings?.unit === 'lbs' ? 'Imperial' : 'Metric'}
+              {store.settings?.unit === 'lbs' ? 'Imperial' : store.settings?.unit === 'mixed' ? 'Mixed' : 'Metric'}
             </button>
           </Row>
           <div style={{ marginTop: 24 }}>
@@ -1757,6 +1757,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           onDone={(chosenUnit) => {
             setUnitPickerOpen(false);
             localStorage.setItem('logbook-unit-prompted', '1');
+            // Mixed = kg weight + mi distance; sync the cardio dist key so
+            // all cardio screens immediately reflect the chosen distance unit.
+            const distUnit = chosenUnit === 'lbs' ? 'mi' : chosenUnit === 'mixed' ? 'mi' : 'km';
+            try { localStorage.setItem('logbook-cardio-dist-unit', distUnit); } catch (_) {}
             setStore(s => s ? { ...s, settings: { ...s.settings, unit: chosenUnit } } : s);
           }}
         />

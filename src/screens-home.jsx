@@ -3058,8 +3058,9 @@ function PendingApprovalScreen({ onSignOut }) {
 // ─── UNIT PROMPT (existing users) ────────────────────────────────────────────
 function UnitPromptModal({ onDone }) {
   const opts = [
-    { id: 'kg', label: 'Metric', sub: 'kg / km', icon: 'fa-ruler-combined' },
-    { id: 'lbs', label: 'Imperial', sub: 'lbs / mi', icon: 'fa-flag' },
+    { id: 'kg',    label: 'Metric',   sub: 'kg / km', icon: 'fa-ruler-combined' },
+    { id: 'lbs',   label: 'Imperial', sub: 'lbs / mi', icon: 'fa-flag' },
+    { id: 'mixed', label: 'Mixed',    sub: 'kg / mi',  icon: 'fa-scale-unbalanced' },
   ];
   return (
     <div style={{
