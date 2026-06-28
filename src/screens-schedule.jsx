@@ -2101,7 +2101,7 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
         {list.length === 0 && <div className="micro" style={{ padding: '20px 0', textAlign: 'center', color: UI.inkFaint }}>No exercises found</div>}
       </div>
       {selected.length > 0 && (
-        <Btn onClick={() => onPick(selected)} style={{ marginTop: 12 }}>
+        <Btn onClick={() => onPick(selected)} style={{ marginTop: 12, width: '100%' }}>
           Add {selected.length} exercise{selected.length !== 1 ? 's' : ''} →
         </Btn>
       )}
