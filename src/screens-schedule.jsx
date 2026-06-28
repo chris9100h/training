@@ -278,6 +278,10 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
   const [editStartDateVal, setEditStartDateVal] = useStateS('');
   const [backupSheet, setBackupSheet] = useStateS(false);
   const [backups, setBackups] = useStateS(null);
+  const [restoreFromSheet, setRestoreFromSheet] = useStateS(false);
+  const [restoreFromDate, setRestoreFromDate] = useStateS('');
+  const [restoreFromDayIdx, setRestoreFromDayIdx] = useStateS(0);
+  const [pendingBackup, setPendingBackup] = useStateS(null);
 
   const openBackupSheet = async () => {
     setBackupSheet(true);
@@ -296,21 +300,44 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
       `Restore the backup from ${new Date(backup.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}?\n\nThis replaces your current training days.`,
       { ok: 'Restore', danger: true }
     )) return;
-    const today = LB.todayISO();
+    if (!(sch?.versions || []).length) {
+      // Unversioned plan — just replace days directly
+      setBackupSheet(false);
+      setStore(s => ({
+        ...s,
+        schedules: s.schedules.map(x => x.id === sch.id ? { ...x, days: backup.days } : x),
+      }));
+      return;
+    }
+    // Versioned plan — ask for effective date (date picker appears on top of backup list)
+    setPendingBackup(backup);
+    setRestoreFromDate(LB.todayISO());
+    setRestoreFromDayIdx(0);
+    setRestoreFromSheet(true);
+  };
+
+  const doRestoreBackup = (date, dayIdx) => {
+    if (!pendingBackup || !date) return;
+    const newVer = { validFrom: date, days: pendingBackup.days };
+    if (dayIdx > 0) newVer.cycleOffset = dayIdx;
     setStore(s => ({
       ...s,
       schedules: s.schedules.map(x => {
         if (x.id !== sch.id) return x;
-        if (!(x.versions || []).length) {
-          return { ...x, days: backup.days };
-        }
-        const newVer = { validFrom: today, days: backup.days };
-        const newVersions = LB.dedupeVersionsByDate([newVer, ...(x.versions || [])])
-          .sort((a, b) => b.validFrom.localeCompare(a.validFrom));
-        return { ...x, days: backup.days, versions: newVersions };
+        // Always add as a new version entry — no deduplication so the backup
+        // is always a distinct version even when the date matches an existing one.
+        // For same-date ties the backup wins (comparator puts newVer first).
+        const newVersions = [newVer, ...(x.versions || [])].sort((a, b) => {
+          const cmp = b.validFrom.localeCompare(a.validFrom);
+          if (cmp !== 0) return cmp;
+          return a === newVer ? -1 : 1;
+        });
+        return { ...x, days: newVersions[0].days, versions: newVersions };
       }),
     }));
+    setRestoreFromSheet(false);
     setBackupSheet(false);
+    setPendingBackup(null);
   };
 
   React.useEffect(() => {
@@ -719,6 +746,53 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
               </div>
               <Btn disabled={!reactivateDate} onClick={() => doReactivate(reactivateDate)} style={{ flexShrink: 0 }}>
                 Apply
+              </Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {restoreFromSheet && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 400, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
+          onClick={() => { setRestoreFromSheet(false); setPendingBackup(null); }}>
+          <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="label" style={{ color: UI.inkFaint, marginBottom: 18 }}>WHEN SHOULD THIS TAKE EFFECT?</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${restoreFromDate ? UI.goldSoft : UI.hairStrong}` }}>
+                <input
+                  type="date"
+                  value={restoreFromDate}
+                  onChange={e => setRestoreFromDate(e.target.value)}
+                  style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: restoreFromDate ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
+                />
+              </div>
+              {!isWeekday && (pendingBackup?.days || []).length > 1 && (
+                <div>
+                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>START WITH DAY</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {(pendingBackup?.days || []).map((d, realIdx) => {
+                      const active = restoreFromDayIdx === realIdx;
+                      return (
+                        <button key={d.id} onClick={() => setRestoreFromDayIdx(realIdx)} style={{
+                          padding: '5px 11px 4px', borderRadius: 4, cursor: 'pointer',
+                          border: `1px solid ${active ? UI.goldSoft : UI.hairStrong}`,
+                          background: active ? UI.goldFaint : 'transparent',
+                          WebkitTapHighlightColor: 'transparent',
+                        }}>
+                          <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, color: active ? UI.gold : UI.inkSoft }}>{d.name}</div>
+                          <div style={{ fontFamily: UI.fontUi, fontSize: 8, color: active ? UI.gold : UI.inkFaint, letterSpacing: '0.08em' }}>Day {realIdx + 1}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <Btn
+                disabled={!restoreFromDate}
+                onClick={() => { if (!restoreFromDate) return; doRestoreBackup(restoreFromDate, restoreFromDayIdx); }}
+              >
+                Restore from date
               </Btn>
             </div>
           </div>
