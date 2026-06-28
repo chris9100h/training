@@ -45,10 +45,6 @@
     --neutral-tint:      rgba(160,160,160,0.07);
     --neutral-border-sm: rgba(160,160,160,0.3);
     --success-text:      #7bc47b;
-    /* Status bar overlay: transparent in dark modes (dark bg shows through
-       the black-translucent status bar naturally); set to a dark colour in
-       light mode so the always-white iOS status bar icons stay readable. */
-    --status-bar-bg: transparent;
     --accent: #c9a961;
     --accent-light: #e5c97e;
     --accent-deep: #8b6f3d;
@@ -73,19 +69,6 @@
     /* phone-shaped viewport on desktop */
     display: flex; justify-content: center; align-items: stretch;
     background: var(--bg-body);
-  }
-  /* In light mode, lay a dark strip behind the iOS status bar so that
-     the always-white icons (clock, battery) remain visible over the
-     pale app background. With black-translucent the status bar is
-     transparent — whatever renders behind it shows through.  */
-  body::before {
-    content: '';
-    position: fixed;
-    top: 0; left: 0; right: 0;
-    height: env(safe-area-inset-top, 0px);
-    background: var(--status-bar-bg);
-    z-index: 99999;
-    pointer-events: none;
   }
   #root {
     position: fixed;
@@ -364,9 +347,6 @@ window.applyDarkMode = function(key) {
   s.setProperty('--success-text',      m.successText     || t.successText);
   var tc = document.querySelector('meta[name="theme-color"]');
   if (tc) tc.content = m.bg;
-  // Light mode: white status-bar icons (forced by black-translucent) would be
-  // invisible on the pale background — cover the safe-area strip with a dark tint.
-  s.setProperty('--status-bar-bg', key === 'light' ? 'rgba(31,27,22,0.88)' : 'transparent');
 };
 window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 </script>
