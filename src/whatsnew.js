@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.421',
+    title: 'Fewer Taps, No Nasty Surprises',
+    items: [
+      '🏋️ Multi-add exercises to a plan day: select several at once and drop them all in with a single tap. No more opening the picker ten times for ten exercises.',
+      '🛡️ Five sheets now protect your unsaved work — the day editor, session history edit, cardio log, exercise note, and macro targets all ask "Discard changes?" before eating your input. Accidental swipe-downs are no longer a tragedy.',
+      '✏️ The rep count badge in the plan editor now sports a pencil icon — because tapping it opens full set/rep configuration, including per-set reps. The secret is out.',
+    ],
+  },
+  {
     id: 'v2.420',
     title: 'Fewer Taps, No Nasty Surprises',
     items: [
