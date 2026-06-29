@@ -2891,6 +2891,15 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
           const fmtSet = s => {
             if (!s) return '—';
             if (s.skipped && !s.done) return 'skipped';
+            const drops = s.drops && s.drops.length > 0 ? s.drops : null;
+            if (s.technique === 'drop' && drops) {
+              return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+            }
+            if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
+              const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
+              const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
+              return `${chain} (${total})`;
+            }
             const repsStr = (s.repsL != null || s.repsR != null)
               ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
               : (s.reps ?? '—');
@@ -3158,6 +3167,66 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
             {(entry.sets || []).map((s, i) => {
               const done = s.done || s.skipped;
               const unilateral = s.repsL != null || s.repsR != null;
+              const drops = s.drops && s.drops.length > 0 ? s.drops : null;
+
+              // Drop set
+              if (s.technique === 'drop' && drops) return (
+                <React.Fragment key={i}>
+                <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>DROP SET</span>
+                    <div style={{ marginLeft: 'auto' }}>
+                      {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
+                             : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                    {drops.map((d, di) => (
+                      <React.Fragment key={di}>
+                        {di > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>→</span>}
+                        <span className="num" style={{ fontSize: 13, color: UI.ink }}>{d.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {d.reps ?? '—'}</span>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+                {i < entry.sets.length - 1 && <div className="knurl" />}
+                </React.Fragment>
+              );
+
+              // Myo-rep / myo-rep match
+              if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
+                const isMatch = s.technique === 'myorep_match';
+                const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
+                return (
+                  <React.Fragment key={i}>
+                  <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
+                      {total > 0 && <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{total} total</span>}
+                      <div style={{ marginLeft: 'auto' }}>
+                        {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
+                               : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                      {drops.map((d, di) => (
+                        <React.Fragment key={di}>
+                          {di > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>↺</span>}
+                          <span className="num" style={{ fontSize: 13, color: UI.ink }}>
+                            {di === 0 && <>{d.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × </>}{d.reps ?? '—'}
+                          </span>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
+                  {i < entry.sets.length - 1 && <div className="knurl" />}
+                  </React.Fragment>
+                );
+              }
+
+              // Normal set
               return (
                 <React.Fragment key={i}>
                 <div style={{
