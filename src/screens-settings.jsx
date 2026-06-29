@@ -900,9 +900,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       const backupDate = latestSession ? new Date(latestSession.ended).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }) : 'unknown date';
       const ok = await confirm(`This backup contains data up to ${backupDate}. Your current data will be downloaded first, then replaced.`, { title: 'Restore backup?', ok: 'Restore', danger: true });
       if (!ok) return;
+      // Safety export happens BEFORE setImporting so the a.click() download
+      // fully completes before any import fetch requests start. On iOS Safari,
+      // triggering a download mid-import causes subsequent fetches to fail.
+      try { await exportData(`zane-before-import-${LB.todayISO()}.json`); } catch (_) {}
       setImporting(true);
       try {
-        try { await exportData(`zane-before-import-${LB.todayISO()}.json`); } catch (_) { /* pre-import backup failed — proceed anyway */ }
         await LB.importFromBackup(backup, userId); LB.clearLocal(userId); window.location.reload();
       }
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
