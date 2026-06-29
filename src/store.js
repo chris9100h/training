@@ -1822,6 +1822,33 @@ function nextDay(state) {
 // - The in-progress session keeps its LOCAL entries/restStart (authoritative).
 // - A fresh session without entries (outside the boot window) keeps the cached
 //   entries — windowing must never wipe history already on the device.
+// When the server returns entries without technique/drops (race: flushSync hasn't
+// finished writing sets yet when a background loadFromSupabase runs), preserve the
+// richer local values. Matches sets by id; if server has null but local has a value,
+// the local value wins.
+function mergeEntrySets(serverEntries, cachedEntries) {
+  if (!(serverEntries || []).length || !(cachedEntries || []).length) return serverEntries;
+  const cachedSetMap = new Map();
+  for (const e of cachedEntries) {
+    for (const st of (e.sets || [])) {
+      if (st.id) cachedSetMap.set(st.id, st);
+    }
+  }
+  return serverEntries.map(e => ({
+    ...e,
+    sets: (e.sets || []).map(st => {
+      if (!st.id) return st;
+      const cached = cachedSetMap.get(st.id);
+      if (!cached) return st;
+      return {
+        ...st,
+        technique: st.technique ?? cached.technique ?? null,
+        drops: st.drops ?? cached.drops ?? null,
+      };
+    }),
+  }));
+}
+
 function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
   const baseIds = baseSessions ? new Set(baseSessions.map(s => s.id)) : null;
   // Sessions deleted locally: once confirmed synced (in base) but no longer in
@@ -1836,7 +1863,13 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     const mem = (curSessions || []).find(x => x.id === s.id);
     if (!mem) return s;
     const isActive = s.id === inProgressId;
-    const keepCachedEntries = !isActive && !(s.entries || []).length && (mem.entries || []).length > 0;
+    const hasServerEntries = (s.entries || []).length > 0;
+    const hasCachedEntries = (mem.entries || []).length > 0;
+    const keepCachedEntries = !isActive && !hasServerEntries && hasCachedEntries;
+    // If both sides have entries, merge at the set level so technique/drops from
+    // local (not yet flushed to the server) aren't silently wiped.
+    const mergedEntries = !isActive && hasServerEntries && hasCachedEntries
+      ? mergeEntrySets(s.entries, mem.entries) : null;
     return {
       ...s,
       currentExIdx: mem.currentExIdx ?? 0,
@@ -1844,6 +1877,7 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
       // for the active session, local entries/restStart/restDuration are authoritative
       ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null, restDuration: mem.restDuration ?? null } : {}),
       ...(keepCachedEntries ? { entries: mem.entries } : {}),
+      ...(mergedEntries ? { entries: mergedEntries } : {}),
     };
   });
   // Keep sessions the server hasn't stored yet — i.e. created on this device

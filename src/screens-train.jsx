@@ -1669,11 +1669,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // closed-over `store` yet (its setStore hasn't re-rendered the screen)
     setStore(s => {
       const newEx = LB.findExercise(s, newExId);
+      const isNewCardio = newEx?.movement_type === 'cardio';
       return {
         ...s,
         sessions: s.sessions.map(x => x.id !== session.id ? x : {
           ...x,
-          entries: x.entries.map((e, i) => i !== exIdx ? e : { ...e, exId: newExId, name: newEx?.name || e.name }),
+          entries: x.entries.map((e, i) => {
+            if (i !== exIdx) return e;
+            if (isNewCardio) {
+              return { ...e, exId: newExId, name: newEx?.name || e.name, isCardio: true, plannedSets: 0, sets: [], cardioDone: false, cardioData: null };
+            }
+            return { ...e, exId: newExId, name: newEx?.name || e.name };
+          }),
         }),
       };
     });
@@ -1689,22 +1696,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const sess = s.sessions.find(x => x.id === session.id);
         if (!sess) return s;
         const newEx = LB.findExercise(s, newExId);
-        const isUni = newEx?.movement_type === 'unilateral';
-        const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
-        const last = LB.bestRecentEntry(s, newExId, session.dayId);
-        const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
-        const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
-        const newEntry = {
-          exId: newExId,
-          name: newEx?.name || newExId,
-          plannedSets: 3,
-          plannedReps: null,
-          plannedRepsPerSet: null,
-          sets: seedSets,
-          note: '',
-          supersetGroup: null,
-          addedDuringSession: true,
-        };
+        const isNewCardio = newEx?.movement_type === 'cardio';
+        let newEntry;
+        if (isNewCardio) {
+          newEntry = { exId: newExId, name: newEx?.name || newExId, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: null, addedDuringSession: true };
+        } else {
+          const isUni = newEx?.movement_type === 'unilateral';
+          const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
+          const last = LB.bestRecentEntry(s, newExId, session.dayId);
+          const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
+          const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+          newEntry = { exId: newExId, name: newEx?.name || newExId, plannedSets: 3, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: null, addedDuringSession: true };
+        }
         return {
           ...s,
           sessions: s.sessions.map(x => x.id !== session.id ? x : {
@@ -1730,29 +1733,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const sess = s.sessions.find(x => x.id === session.id);
       if (!sess) return s;
       const newEx = LB.findExercise(s, newExId);
-      const isUni = newEx?.movement_type === 'unilateral';
-      const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
-      const last = LB.bestRecentEntry(s, newExId, session.dayId);
-      const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
-      const mother = targetIdx !== null ? sess.entries[targetIdx] : null;
-      const setCount = mother ? (mother.plannedSets ?? mother.sets?.length ?? 3) : 3;
-      const seedSets = LB.buildSeedSets({ sets: setCount, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+      const isNewCardio = newEx?.movement_type === 'cardio';
       const currentIdx = sess.currentExIdx || 0;
       const insertIdx = targetIdx !== null ? targetIdx + 1 : currentIdx + 1;
       const group = targetIdx !== null
         ? (sess.entries[targetIdx]?.supersetGroup || LB.uid())
         : null;
-      const newEntry = {
-        exId: newExId,
-        name: newEx?.name || newExId,
-        plannedSets: setCount,
-        plannedReps: null,
-        plannedRepsPerSet: null,
-        sets: seedSets,
-        note: '',
-        supersetGroup: group,
-        addedDuringSession: true,
-      };
+      let newEntry;
+      if (isNewCardio) {
+        newEntry = { exId: newExId, name: newEx?.name || newExId, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: group, addedDuringSession: true };
+      } else {
+        const isUni = newEx?.movement_type === 'unilateral';
+        const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
+        const last = LB.bestRecentEntry(s, newExId, session.dayId);
+        const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
+        const mother = targetIdx !== null ? sess.entries[targetIdx] : null;
+        const setCount = mother ? (mother.plannedSets ?? mother.sets?.length ?? 3) : 3;
+        const seedSets = LB.buildSeedSets({ sets: setCount, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+        newEntry = { exId: newExId, name: newEx?.name || newExId, plannedSets: setCount, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: group, addedDuringSession: true };
+      }
       const withNew = [
         ...sess.entries.slice(0, insertIdx),
         newEntry,
