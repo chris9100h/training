@@ -1421,6 +1421,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         } else {
           kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
           setKbField(null); setKbRaw(''); setKbFresh(false);
+          armKbShield();
         }
       }
       return;
