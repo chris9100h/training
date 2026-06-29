@@ -1056,7 +1056,16 @@ function App() {
 
   // Expose the weight-unit label globally so UI.unit() can read it anywhere
   // (display-only; the stored numbers stay the same).
-  window.__UNIT = store?.settings?.unit || 'kg';
+  // 'mixed' = kg weight + mi distance; __UNIT only covers the weight side.
+  // Keep logbook-cardio-dist-unit in sync so all cardio screens pick up the
+  // correct distance unit on boot (not just when the picker is used).
+  const _u = store?.settings?.unit;
+  window.__UNIT = (_u === 'lbs') ? 'lbs' : 'kg';
+  try {
+    if (_u === 'mixed') localStorage.setItem('logbook-cardio-dist-unit', 'mi');
+    else if (_u === 'kg') localStorage.setItem('logbook-cardio-dist-unit', 'km');
+    else if (_u === 'lbs') localStorage.setItem('logbook-cardio-dist-unit', 'mi');
+  } catch (_) {}
 
   // Deload overlay flag — buildSeedSets reads this to pre-fill loads at ~50%.
   window.__DELOAD = store?.statusMode === 'deload';

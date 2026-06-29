@@ -16,6 +16,34 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.422',
+    title: '⚡ Drop Sets, Myo-Reps & Myo-Rep Match',
+    items: [
+      '⚡ Intensity techniques are here. Tap the glowing INTENSITY button under any exercise during training to unlock three new ways to train past failure — no extra logging, no workarounds, just tap and go.',
+      'Drop Set: strip the weight and keep pushing without ending the set. Log the full drop chain (e.g. 100kg×8 → 80kg×6 → 60kg×5) in one go. Every drop shows in your session summary.',
+      'Myo-Reps: essentially rest-pause — one activation set, then a series of short-rest mini sets while the muscle is still loaded. Time-efficient and brutal in the best way.',
+      'Myo-Rep Match: targets the exact total rep count from your preceding Myo-Rep set. A live progress bar fills and glows with every mini set — keep going until you match it. Go past failure, with precision.',
+      'Several bug fixes and improvements.',
+    ],
+  },
+  {
+    id: 'v2.421',
+    title: 'Fewer Taps, No Nasty Surprises',
+    items: [
+      '🏋️ Multi-add exercises to a plan day: select several at once and drop them all in with a single tap. No more opening the picker ten times for ten exercises.',
+      '🛡️ Five sheets now protect your unsaved work — the day editor, session history edit, cardio log, exercise note, and macro targets all ask "Discard changes?" before eating your input. Accidental swipe-downs are no longer a tragedy.',
+      '✏️ The rep count badge in the plan editor now sports a pencil icon — because tapping it opens full set/rep configuration, including per-set reps. The secret is out.',
+    ],
+  },
+  {
+    id: 'v2.419',
+    title: 'Mixed Units — finally',
+    items: [
+      '🇬🇧 For everyone who lifts in kg but runs in miles: there\'s now a "Mixed" option in your unit settings. kg for iron, miles for cardio. Civilised.',
+      'Find it under Settings → Appearance → Unit preference.',
+    ],
+  },
+  {
     id: 'v2.418',
     title: 'Bug Fix + Plan Backups',
     items: [

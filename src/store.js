@@ -450,6 +450,8 @@ function mapEntryRows(entryRows) {
         done: st.done,
         skipped: st.skipped,
         warmup: st.warmup,
+        technique: st.technique ?? null,
+        drops: st.drops ?? null,
       })),
   }));
 }
@@ -833,7 +835,8 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
   // Normalize set fields for comparison — guards against null vs undefined and missing
   // keys when comparing sets from an old (pre-migration) store format with new format.
   const normSet = s => [s.kg ?? null, s.reps ?? null, s.repsL ?? null, s.repsR ?? null,
-                        s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0].join('|');
+                        s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0,
+                        s.technique ?? '', JSON.stringify(s.drops ?? null)].join('|');
 
   for (const s of sessions) {
     const entries = s.entries || [];
@@ -874,6 +877,8 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
             done: set.done ?? false,
             skipped: set.skipped ?? false,
             warmup: set.warmup ?? false,
+            technique: set.technique ?? null,
+            drops: set.drops ?? null,
             updated_at: now,
           });
         }
@@ -1456,9 +1461,10 @@ function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweight
       // progression-suggested next weight. Without this, a 100 kg lift with a
       // +5 kg suggestion would seed 52.5 kg instead of the correct 50 kg.
       const baseKg = deload && prev?.kg != null ? prev.kg : suggestion.kg;
+      const seedReps = targetReps ?? suggestion.reps;
       return isUni
-        ? { kg: dl(baseKg), repsL: suggestion.reps, repsR: suggestion.reps, done: false }
-        : { kg: dl(baseKg), reps: suggestion.reps, done: false };
+        ? { kg: dl(baseKg), repsL: seedReps, repsR: seedReps, done: false }
+        : { kg: dl(baseKg), reps: seedReps, done: false };
     }
     if (smartProgression && prev) {
       return isUni
@@ -1816,6 +1822,34 @@ function nextDay(state) {
 // - The in-progress session keeps its LOCAL entries/restStart (authoritative).
 // - A fresh session without entries (outside the boot window) keeps the cached
 //   entries — windowing must never wipe history already on the device.
+// When the server returns entries without technique/drops (race: flushSync hasn't
+// finished writing sets yet when a background loadFromSupabase runs), preserve the
+// richer local values. Matches by position (entry index, set index) — sets have no
+// id in the store model. Also preserves in-memory-only cardio fields (isCardio,
+// cardioDone, cardioData) that are never stored in the DB.
+function mergeEntrySets(serverEntries, cachedEntries) {
+  if (!(serverEntries || []).length || !(cachedEntries || []).length) return serverEntries;
+  return serverEntries.map((e, ei) => {
+    const cachedEntry = cachedEntries[ei];
+    if (!cachedEntry) return e;
+    return {
+      ...e,
+      ...(cachedEntry.isCardio != null ? { isCardio: cachedEntry.isCardio } : {}),
+      ...(cachedEntry.cardioDone != null ? { cardioDone: cachedEntry.cardioDone } : {}),
+      ...(cachedEntry.cardioData !== undefined ? { cardioData: cachedEntry.cardioData } : {}),
+      sets: (e.sets || []).map((st, si) => {
+        const cached = (cachedEntry.sets || [])[si];
+        if (!cached) return st;
+        return {
+          ...st,
+          technique: st.technique ?? cached.technique ?? null,
+          drops: st.drops ?? cached.drops ?? null,
+        };
+      }),
+    };
+  });
+}
+
 function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
   const baseIds = baseSessions ? new Set(baseSessions.map(s => s.id)) : null;
   // Sessions deleted locally: once confirmed synced (in base) but no longer in
@@ -1830,7 +1864,13 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     const mem = (curSessions || []).find(x => x.id === s.id);
     if (!mem) return s;
     const isActive = s.id === inProgressId;
-    const keepCachedEntries = !isActive && !(s.entries || []).length && (mem.entries || []).length > 0;
+    const hasServerEntries = (s.entries || []).length > 0;
+    const hasCachedEntries = (mem.entries || []).length > 0;
+    const keepCachedEntries = !isActive && !hasServerEntries && hasCachedEntries;
+    // If both sides have entries, merge at the set level so technique/drops from
+    // local (not yet flushed to the server) aren't silently wiped.
+    const mergedEntries = !isActive && hasServerEntries && hasCachedEntries
+      ? mergeEntrySets(s.entries, mem.entries) : null;
     return {
       ...s,
       currentExIdx: mem.currentExIdx ?? 0,
@@ -1838,6 +1878,7 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
       // for the active session, local entries/restStart/restDuration are authoritative
       ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null, restDuration: mem.restDuration ?? null } : {}),
       ...(keepCachedEntries ? { entries: mem.entries } : {}),
+      ...(mergedEntries ? { entries: mergedEntries } : {}),
     };
   });
   // Keep sessions the server hasn't stored yet — i.e. created on this device
@@ -1960,7 +2001,7 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
     const perSet = plannedRepsPerSet && plannedRepsPerSet.length > 1
       ? (plannedRepsPerSet[i] ?? plannedRepsPerSet[plannedRepsPerSet.length - 1])
       : null;
-    const baseReps = ex?.progression_reps ?? perSet ?? plannedReps;
+    const baseReps = perSet ?? ex?.progression_reps ?? plannedReps;
     return (effReps(s) ?? 0) >= (baseReps ?? 0) + range;
   });
   if (!allHitTop) return null;
@@ -1970,7 +2011,7 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
   const cappedKg = maxKg ? Math.min(newKg, maxKg) : newKg;
   if (cappedKg <= refKg) return null;
 
-  const baseRepsFirst = ex?.progression_reps ?? (plannedRepsPerSet?.[0] ?? plannedReps);
+  const baseRepsFirst = plannedRepsPerSet?.[0] ?? ex?.progression_reps ?? plannedReps;
   return { kg: cappedKg, reps: baseRepsFirst ?? null };
 }
 

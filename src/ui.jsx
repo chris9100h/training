@@ -879,20 +879,25 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
   const [focus, setFocus] = React.useState(false);
   const inputRef = React.useRef(null);
   const savedSel = React.useRef(null);
+
+  React.useLayoutEffect(() => {
+    if (type === 'password') return;
+    const el = inputRef.current;
+    if (!el || document.activeElement !== el) return;
+    const sel = savedSel.current;
+    savedSel.current = null;
+    if (sel?.start != null) {
+      try { el.setSelectionRange(sel.start, sel.end); } catch (_) {}
+    }
+  });
+
   const handleChange = (e) => {
     if (type !== 'password') {
-      try { savedSel.current = { start: e.target.selectionStart, end: e.target.selectionEnd }; } catch(_) {}
+      try { savedSel.current = { start: e.target.selectionStart, end: e.target.selectionEnd }; } catch (_) {}
     }
     onChange(e.target.value);
   };
-  React.useLayoutEffect(() => {
-    if (type === 'password') return;
-    const sel = savedSel.current;
-    savedSel.current = null;
-    if (sel && sel.start != null && inputRef.current && document.activeElement === inputRef.current) {
-      try { inputRef.current.setSelectionRange(sel.start, sel.end); } catch(e) {}
-    }
-  });
+
   return (
     <div style={{
       borderBottom: `1px solid ${focus ? UI.gold : UI.hairStrong}`,
@@ -901,7 +906,10 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
     }}>
       <input
         ref={inputRef}
-        value={value} onChange={handleChange}
+        value={value}
+        onChange={handleChange}
+        autoCorrect="off"
+        spellCheck={false}
         type={type} placeholder={placeholder} autoFocus={autoFocus}
         onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
         {...rest}

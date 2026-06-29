@@ -892,7 +892,7 @@ AS $function$
   INSERT INTO zane_sets (
     id, session_id, entry_id, user_id,
     set_idx, kg, reps, reps_l, reps_r,
-    done, skipped, warmup, updated_at
+    done, skipped, warmup, technique, drops, updated_at
   )
   SELECT
     s->>'id',
@@ -907,6 +907,8 @@ AS $function$
     COALESCE((s->>'done')::boolean,    false),
     COALESCE((s->>'skipped')::boolean, false),
     COALESCE((s->>'warmup')::boolean,  false),
+    NULLIF(s->>'technique', ''),
+    CASE WHEN s->'drops' IS NOT NULL AND s->'drops' != 'null'::jsonb THEN s->'drops' ELSE NULL END,
     (s->>'updated_at')::timestamptz
   FROM jsonb_array_elements(p_sets) AS s
   ON CONFLICT (id) DO UPDATE SET
@@ -917,6 +919,8 @@ AS $function$
     done       = EXCLUDED.done,
     skipped    = EXCLUDED.skipped,
     warmup     = EXCLUDED.warmup,
+    technique  = EXCLUDED.technique,
+    drops      = EXCLUDED.drops,
     updated_at = EXCLUDED.updated_at
   WHERE zane_sets.updated_at < EXCLUDED.updated_at;
 $function$;
@@ -990,17 +994,22 @@ AS $function$
       'plannedRepsPerSet', e.planned_reps_per_set,
       'note', e.note,
       'supersetGroup', e.superset_group,
+      'category', ex.category,
+      'equipment', ex.equipment,
+      'movementType', ex.movement_type,
       'sets', COALESCE((
         SELECT jsonb_agg(
           jsonb_build_object(
             'kg', st.kg, 'reps', st.reps, 'repsL', st.reps_l, 'repsR', st.reps_r,
-            'done', st.done, 'skipped', st.skipped, 'warmup', st.warmup
+            'done', st.done, 'skipped', st.skipped, 'warmup', st.warmup,
+            'technique', st.technique, 'drops', st.drops
           ) ORDER BY st.set_idx)
         FROM zane_sets st WHERE st.entry_id = e.id
       ), '[]'::jsonb)
     ) ORDER BY e.entry_idx
   ), '[]'::jsonb)
   FROM zane_session_entries e
+  LEFT JOIN zane_exercises ex ON ex.id = e.ex_id
   WHERE e.session_id = p_session_id;
 $function$;
 

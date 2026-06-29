@@ -395,7 +395,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const perSetVal = perSet && perSet.length > 1
       ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
       : null;
-    const base = (exercise?.progression_reps ?? perSetVal ?? entry?.plannedReps) ?? 0;
+    const base = (perSetVal ?? exercise?.progression_reps ?? entry?.plannedReps) ?? 0;
     const target = base + (store.settings?.progressionRangeTop ?? 4);
     return target > 0 ? target : null;
   };
@@ -434,7 +434,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return (st.kg < prevSet.kg && rA <= rB) || (st.kg === prevSet.kg && rA < rB);
   };
 
-  const completeSet = (setIdx, bypassOutlierCheck = false) => {
+  const completeSet = (setIdx, bypassOutlierCheck = false, afterSuccess = null) => {
     // Unlock AudioContext on this user gesture so the rest-timer beep works on iOS
     // even when the tempo feature is disabled (only other init path).
     try {
@@ -531,6 +531,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
     setKbField(null); setKbRaw(''); setKbFresh(false);
     armKbShield();
+    if (afterSuccess) afterSuccess();
     recentCompleteRef.current[setIdx] = Date.now();
     lastCompleteRef.current = Date.now();
     _log(`completeSet(${setIdx}) → lastCompleteRef stamped`);
@@ -673,6 +674,119 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
   };
 
+  const finishDropSet = (drops) => {
+    if (!drops.length || dropSetIdx == null) return;
+    const first = drops[0];
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+        ...en,
+        sets: en.sets.map((st, si) => si !== dropSetIdx ? st : {
+          ...st,
+          kg: first.kg,
+          reps: first.reps,
+          done: true,
+          technique: 'drop',
+          drops,
+        }),
+      }),
+    }));
+    setFlashSet(dropSetIdx);
+    setTimeout(() => setFlashSet(null), 1400);
+    kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+    const targetIdx = dropSetIdx;
+    setDropSetIdx(null);
+    // Improvement / regression / new best overlays (same logic as completeSet)
+    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+    if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && first.kg != null && first.reps > 0) {
+      const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
+      const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
+      const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
+      const cE1rm = LB.e1rm(first.kg, first.reps);
+      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id, session.dayId);
+      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
+      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
+      if (isNewBest) {
+        newBestShownRef.current[entry.exId] = true;
+        setNewBestSet(true); setTimeout(() => setNewBestSet(false), 2500);
+      } else if (isImprovement(first, prevSet)) {
+        setImprovedSet(true); setTimeout(() => setImprovedSet(false), 2500);
+      } else {
+        const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
+          if (s.warmup) return false;
+          const wk = entry.sets.slice(0, k + 1).filter(x => !x.warmup).length - 1;
+          return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
+        });
+        if (!anyImpBefore && isDecline(first, prevSet) && store.settings?.showRegression !== false) {
+          setRegressionSet(true); setTimeout(() => setRegressionSet(false), 2500);
+        }
+      }
+    }
+    // Rest timer + navigation
+    const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
+    if (!entry.sets[targetIdx]?.warmup) persistRestStart(Date.now(), restDef);
+    if (updatedSets.every(st => st.done)) setTimeout(() => navigate(1), 600);
+  };
+
+  const cancelMyo = () => {
+    setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null);
+    kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+    setKbField(null); setKbRaw(''); setKbFresh(false);
+  };
+
+  const finishMyoSet = (drops, technique) => {
+    if (!drops.length || myoSetIdx == null) return;
+    const first = drops[0];
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+        ...en,
+        sets: en.sets.map((st, si) => si !== myoSetIdx ? st : {
+          ...st,
+          kg: first.kg,
+          reps: first.reps,
+          done: true,
+          technique,
+          drops,
+        }),
+      }),
+    }));
+    setFlashSet(myoSetIdx);
+    setTimeout(() => setFlashSet(null), 1400);
+    kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+    const targetIdx = myoSetIdx;
+    setMyoSetIdx(null); setMyoTechnique(null); setMyoDrops([]); setMyoTarget(null);
+    // Improvement / regression / new best overlays
+    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+    if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && first.kg != null && first.reps > 0) {
+      const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
+      const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
+      const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
+      const cE1rm = LB.e1rm(first.kg, first.reps);
+      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id, session.dayId);
+      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
+      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
+      if (isNewBest) {
+        newBestShownRef.current[entry.exId] = true;
+        setNewBestSet(true); setTimeout(() => setNewBestSet(false), 2500);
+      } else if (isImprovement(first, prevSet)) {
+        setImprovedSet(true); setTimeout(() => setImprovedSet(false), 2500);
+      } else {
+        const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
+          if (s.warmup) return false;
+          const wk = entry.sets.slice(0, k + 1).filter(x => !x.warmup).length - 1;
+          return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
+        });
+        if (!anyImpBefore && isDecline(first, prevSet) && store.settings?.showRegression !== false) {
+          setRegressionSet(true); setTimeout(() => setRegressionSet(false), 2500);
+        }
+      }
+    }
+    if (!entry.sets[targetIdx]?.warmup) persistRestStart(Date.now(), restDef);
+    const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
+    if (updatedSets.every(st => st.done)) setTimeout(() => navigate(1), 600);
+  };
+
   const addSet = () => {
     const bwKg = exercise?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
     updateSession(sess => ({
@@ -733,10 +847,31 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (willBeAllDone) navigate(1);
   };
 
+  const jumpToNextSet = (completedIdx) => {
+    const nextIdx = entry.sets.findIndex((s, i) => i > completedIdx && !s.done && !s.skipped);
+    if (nextIdx !== -1) {
+      const field = isNoWeightReps ? (isUnilateral ? 'repsL' : 'reps') : 'kg';
+      setTimeout(() => activateKb(nextIdx, field), 400);
+    } else {
+      const nextEntry = session.entries[exIdx + 1];
+      if (nextEntry && !nextEntry.isCardio) {
+        const nextSetIdx = nextEntry.sets.findIndex(s => !s.done && !s.skipped);
+        if (nextSetIdx !== -1) {
+          const nextEx = store.exercises?.find(e => e.id === nextEntry.exId);
+          const nextIsNoWeight = !!nextEx?.no_weight_reps;
+          const nextIsUni = (nextEx?.movement_type ?? (nextEx?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
+          pendingFocusRef.current = { setIdx: nextSetIdx, field: nextIsNoWeight ? (nextIsUni ? 'repsL' : 'reps') : 'kg' };
+        }
+      }
+    }
+  };
+
   const checkSet = () => {
     const idx = entry.sets.findIndex(s => !s.done && !s.skipped);
     if (idx < 0) return;
-    completeSet(idx);
+    if (dropSetIdx === idx) { finishDropSet(dropDropsRef.current); return; }
+    if (myoSetIdx === idx) { finishMyoSet(myoDropsRef.current, myoTechnique); return; }
+    completeSet(idx, false, () => jumpToNextSet(idx));
   };
 
   const logCardio = () => {
@@ -1074,6 +1209,52 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [showCycleStep, setShowCycleStep] = useStateT(false);
   const [advanceCycle, setAdvanceCycle] = useStateT(false);
   const [cycleFromPickedDay, setCycleFromPickedDay] = useStateT(false);
+  const [intensityOpen, setIntensityOpen] = useStateT(false);
+  const [dropSetIdx, setDropSetIdx] = useStateT(null);
+  const [dropDrops, setDropDrops] = useStateT([]);
+  const dropDropsRef = useRefT([]);
+  dropDropsRef.current = dropDrops;
+  const [myoSetIdx, setMyoSetIdx] = useStateT(null);
+  const [myoTechnique, setMyoTechnique] = useStateT(null);
+  const [myoDrops, setMyoDrops] = useStateT([]);
+  const myoDropsRef = useRefT([]);
+  myoDropsRef.current = myoDrops;
+  const [myoTarget, setMyoTarget] = useStateT(null);
+  // Persist intensity state so a background/resume on iOS doesn't wipe mid-set progress
+  useEffectT(() => {
+    if (dropSetIdx != null || myoSetIdx != null) {
+      try {
+        localStorage.setItem('logbook-intensity-state', JSON.stringify({
+          sessionId, exIdx,
+          dropSetIdx, dropDrops,
+          myoSetIdx, myoDrops, myoTechnique, myoTarget,
+        }));
+      } catch {}
+    } else {
+      localStorage.removeItem('logbook-intensity-state');
+    }
+  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, sessionId, exIdx]);
+  useEffectT(() => {
+    try {
+      const raw = localStorage.getItem('logbook-intensity-state');
+      if (!raw) return;
+      const st = JSON.parse(raw);
+      if (st.sessionId !== sessionId || st.exIdx !== exIdx) return;
+      const targetEntry = session?.entries[exIdx];
+      if (st.dropSetIdx != null && !targetEntry?.sets[st.dropSetIdx]?.done) {
+        setDropSetIdx(st.dropSetIdx);
+        const dd = st.dropDrops || [];
+        setDropDrops(dd); dropDropsRef.current = dd;
+      }
+      if (st.myoSetIdx != null && !targetEntry?.sets[st.myoSetIdx]?.done) {
+        setMyoSetIdx(st.myoSetIdx);
+        const md = st.myoDrops || [];
+        setMyoDrops(md); myoDropsRef.current = md;
+        setMyoTechnique(st.myoTechnique || null);
+        setMyoTarget(st.myoTarget ?? null);
+      }
+    } catch {}
+  }, [sessionId, exIdx]);
   const [notePicker, setNotePicker] = useStateT(false);
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
@@ -1115,6 +1296,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return result;
   }, [store.cardioLogs]);
   const pendingNavRef = useRefT(false);
+  const pendingFocusRef = useRefT(null);
   // Records when a set was last completed via the checkbox; used to ignore
   // iOS ghost-clicks that fire 200-400ms after completion and would otherwise
   // re-enter the onClick handler with s.done=true and undo the completion.
@@ -1125,6 +1307,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const lastCompleteRef = useRefT(0);
 
   useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); }, [exIdx, sessionId]);
+  useEffectT(() => {
+    const pf = pendingFocusRef.current;
+    if (!pf) return;
+    pendingFocusRef.current = null;
+    setTimeout(() => activateKb(pf.setIdx, pf.field), 150);
+  }, [exIdx]);
   useEffectT(() => {
     if (!entry?.isCardio) return;
     const du = localStorage.getItem(CARDIO_DIST_KEY_T) || 'km';
@@ -1237,7 +1425,57 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }, 80);
   };
 
+  const activateDropKb = (dropIdx, field) => {
+    const d = dropDropsRef.current[dropIdx];
+    const val = field === 'kg'
+      ? (d?.kg != null ? String(d.kg).replace('.', ',') : '')
+      : (d?.reps != null ? String(d.reps) : '');
+    kbFieldRef.current = { setIdx: 'drop', dropIdx, field };
+    kbRawRef.current = val;
+    kbFreshRef.current = true;
+    setKbField({ setIdx: 'drop', dropIdx, field });
+    setKbRaw(val);
+    setKbFresh(true);
+  };
+
+  const activateMyo = (dropIdx, field) => {
+    const d = myoDropsRef.current[dropIdx];
+    const val = field === 'kg'
+      ? (d?.kg != null ? String(d.kg).replace('.', ',') : '')
+      : (d?.reps != null ? String(d.reps) : '');
+    kbFieldRef.current = { setIdx: 'myo', dropIdx, field };
+    kbRawRef.current = val;
+    kbFreshRef.current = true;
+    setKbField({ setIdx: 'myo', dropIdx, field });
+    setKbRaw(val);
+    setKbFresh(true);
+  };
+
   const kbApply = (newRaw, field, setIdx) => {
+    if (setIdx === 'drop') {
+      const dropIdx = kbFieldRef.current?.dropIdx;
+      if (typeof dropIdx !== 'number') return;
+      if (field === 'kg') {
+        const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
+        if (newRaw === '' || !isNaN(num)) setDropDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: num ?? null } : d));
+      } else {
+        const num = newRaw === '' ? null : parseInt(newRaw, 10);
+        if (newRaw === '' || !isNaN(num)) setDropDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: num ?? null } : d));
+      }
+      return;
+    }
+    if (setIdx === 'myo') {
+      const dropIdx = kbFieldRef.current?.dropIdx;
+      if (typeof dropIdx !== 'number') return;
+      if (field === 'kg') {
+        const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
+        if (newRaw === '' || !isNaN(num)) setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: num ?? null } : d));
+      } else {
+        const num = newRaw === '' ? null : parseInt(newRaw, 10);
+        if (newRaw === '' || !isNaN(num)) setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: num ?? null } : d));
+      }
+      return;
+    }
     _log(`kbApply(set${setIdx} ${field} '${newRaw}')`);
     if (field === 'kg') {
       const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
@@ -1288,6 +1526,44 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const kbAdjust = (dir) => {
     if (!kbFieldRef.current) return;
     const { setIdx, field } = kbFieldRef.current;
+    if (setIdx === 'drop') {
+      const { dropIdx } = kbFieldRef.current;
+      if (field === 'kg') {
+        const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
+        const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
+        const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+        const newRaw = String(next).replace('.', ',');
+        kbRawRef.current = newRaw;
+        setKbRaw(newRaw);
+        setDropDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: next } : d));
+      } else {
+        const cur = parseInt(kbRawRef.current, 10) || 0;
+        const next = Math.max(0, cur + dir);
+        kbRawRef.current = String(next);
+        setKbRaw(String(next));
+        setDropDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: next } : d));
+      }
+      return;
+    }
+    if (setIdx === 'myo') {
+      const { dropIdx } = kbFieldRef.current;
+      if (field === 'kg') {
+        const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
+        const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
+        const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+        const newRaw = String(next).replace('.', ',');
+        kbRawRef.current = newRaw;
+        setKbRaw(newRaw);
+        setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: next } : d));
+      } else {
+        const cur = parseInt(kbRawRef.current, 10) || 0;
+        const next = Math.max(0, cur + dir);
+        kbRawRef.current = String(next);
+        setKbRaw(String(next));
+        setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: next } : d));
+      }
+      return;
+    }
     if (field === 'kg') {
       const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
       const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
@@ -1318,6 +1594,43 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const kbConfirm = () => {
     if (!kbFieldRef.current) { _log('kbConfirm: NULL kbField (ignored)'); return; }
     const { setIdx, field } = kbFieldRef.current;
+    if (setIdx === 'drop') {
+      const { dropIdx } = kbFieldRef.current;
+      kbApply(kbRawRef.current, field, setIdx);
+      if (field === 'kg') {
+        activateDropKb(dropIdx, 'reps');
+      } else {
+        const drops = dropDropsRef.current;
+        if (dropIdx + 1 < drops.length) {
+          setTimeout(() => activateDropKb(dropIdx + 1, 'kg'), 50);
+        } else {
+          kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+          setKbField(null); setKbRaw(''); setKbFresh(false);
+          armKbShield();
+        }
+      }
+      return;
+    }
+    if (setIdx === 'myo') {
+      const { dropIdx } = kbFieldRef.current;
+      kbApply(kbRawRef.current, field, setIdx);
+      if (field === 'kg') {
+        activateMyo(dropIdx, 'reps');
+      } else {
+        if (dropIdx === 0) {
+          // Activation reps confirmed → auto-add first mini
+          const activKg = myoDropsRef.current[0]?.kg ?? null;
+          const newIdx = myoDropsRef.current.length;
+          setMyoDrops(prev => [...prev, { kg: activKg, reps: null }]);
+          setTimeout(() => activateMyo(newIdx, 'reps'), 80);
+        } else {
+          kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+          setKbField(null); setKbRaw(''); setKbFresh(false);
+          armKbShield();
+        }
+      }
+      return;
+    }
     _log(`kbConfirm: set${setIdx} field=${field} raw='${kbRawRef.current}'`);
     kbApply(kbRawRef.current, field, setIdx);
     if (field === 'kg') {
@@ -1328,6 +1641,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       activateKb(setIdx, 'repsR');
     } else {
       _log(`kbConfirm: ${field}→completeSet(${setIdx})`);
+      if (dropSetIdx === setIdx || myoSetIdx === setIdx) return;
       completeSet(setIdx);
       const nextIdx = entry.sets.findIndex((s, i) => i > setIdx && !s.done);
       if (nextIdx !== -1) setTimeout(() => activateKb(nextIdx, isUnilateral ? 'repsL' : 'reps'), 350);
@@ -1338,29 +1652,43 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === entry.exId ? { ...e, note: exNoteVal.trim() } : e) }));
     setExNoteOpen(false);
   };
+  const requestCloseExNote = async () => {
+    const dirty = exNoteVal !== (exercise?.note || '');
+    if (dirty && !await confirm('Your exercise note won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    setExNoteOpen(false);
+  };
 
   const swapExercise = async () => {
     if (!await confirm(`Swap "${entry.name}"?`, { ok: 'Swap' })) return;
     setSwapOpen(true);
   };
 
-  const doSwap = (newExId) => {
+  const doSwap = (ids) => {
+    const newExId = Array.isArray(ids) ? ids[0] : ids;
     // resolve the name from fresh state — a just-created exercise isn't in the
     // closed-over `store` yet (its setStore hasn't re-rendered the screen)
     setStore(s => {
       const newEx = LB.findExercise(s, newExId);
+      const isNewCardio = newEx?.movement_type === 'cardio';
       return {
         ...s,
         sessions: s.sessions.map(x => x.id !== session.id ? x : {
           ...x,
-          entries: x.entries.map((e, i) => i !== exIdx ? e : { ...e, exId: newExId, name: newEx?.name || e.name }),
+          entries: x.entries.map((e, i) => {
+            if (i !== exIdx) return e;
+            if (isNewCardio) {
+              return { ...e, exId: newExId, name: newEx?.name || e.name, isCardio: true, plannedSets: 0, sets: [], cardioDone: false, cardioData: null };
+            }
+            return { ...e, exId: newExId, name: newEx?.name || e.name };
+          }),
         }),
       };
     });
     setSwapOpen(false);
   };
 
-  const doAdd = (newExId) => {
+  const doAdd = (ids) => {
+    const newExId = Array.isArray(ids) ? ids[0] : ids;
     setAddOpen(false);
     if (session.entries.length === 0) {
       // First exercise in an empty session — skip the superset prompt and insert directly.
@@ -1368,22 +1696,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const sess = s.sessions.find(x => x.id === session.id);
         if (!sess) return s;
         const newEx = LB.findExercise(s, newExId);
-        const isUni = newEx?.movement_type === 'unilateral';
-        const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
-        const last = LB.bestRecentEntry(s, newExId, session.dayId);
-        const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
-        const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
-        const newEntry = {
-          exId: newExId,
-          name: newEx?.name || newExId,
-          plannedSets: 3,
-          plannedReps: null,
-          plannedRepsPerSet: null,
-          sets: seedSets,
-          note: '',
-          supersetGroup: null,
-          addedDuringSession: true,
-        };
+        const isNewCardio = newEx?.movement_type === 'cardio';
+        let newEntry;
+        if (isNewCardio) {
+          newEntry = { exId: newExId, name: newEx?.name || newExId, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: null, addedDuringSession: true };
+        } else {
+          const isUni = newEx?.movement_type === 'unilateral';
+          const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
+          const last = LB.bestRecentEntry(s, newExId, session.dayId);
+          const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
+          const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+          newEntry = { exId: newExId, name: newEx?.name || newExId, plannedSets: 3, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: null, addedDuringSession: true };
+        }
         return {
           ...s,
           sessions: s.sessions.map(x => x.id !== session.id ? x : {
@@ -1409,29 +1733,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const sess = s.sessions.find(x => x.id === session.id);
       if (!sess) return s;
       const newEx = LB.findExercise(s, newExId);
-      const isUni = newEx?.movement_type === 'unilateral';
-      const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
-      const last = LB.bestRecentEntry(s, newExId, session.dayId);
-      const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
-      const mother = targetIdx !== null ? sess.entries[targetIdx] : null;
-      const setCount = mother ? (mother.plannedSets ?? mother.sets?.length ?? 3) : 3;
-      const seedSets = LB.buildSeedSets({ sets: setCount, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+      const isNewCardio = newEx?.movement_type === 'cardio';
       const currentIdx = sess.currentExIdx || 0;
       const insertIdx = targetIdx !== null ? targetIdx + 1 : currentIdx + 1;
       const group = targetIdx !== null
         ? (sess.entries[targetIdx]?.supersetGroup || LB.uid())
         : null;
-      const newEntry = {
-        exId: newExId,
-        name: newEx?.name || newExId,
-        plannedSets: setCount,
-        plannedReps: null,
-        plannedRepsPerSet: null,
-        sets: seedSets,
-        note: '',
-        supersetGroup: group,
-        addedDuringSession: true,
-      };
+      let newEntry;
+      if (isNewCardio) {
+        newEntry = { exId: newExId, name: newEx?.name || newExId, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: group, addedDuringSession: true };
+      } else {
+        const isUni = newEx?.movement_type === 'unilateral';
+        const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
+        const last = LB.bestRecentEntry(s, newExId, session.dayId);
+        const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
+        const mother = targetIdx !== null ? sess.entries[targetIdx] : null;
+        const setCount = mother ? (mother.plannedSets ?? mother.sets?.length ?? 3) : 3;
+        const seedSets = LB.buildSeedSets({ sets: setCount, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+        newEntry = { exId: newExId, name: newEx?.name || newExId, plannedSets: setCount, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: group, addedDuringSession: true };
+      }
       const withNew = [
         ...sess.entries.slice(0, insertIdx),
         newEntry,
@@ -2083,7 +2403,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         })}
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: `0 22px ${kbField ? 240 : 20}px`, display: 'flex', flexDirection: 'column', gap: 16 }}>
       {entry ? (<>
 
         {/* Exercise name */}
@@ -2387,98 +2707,363 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       <div className="knurl" style={{ marginBottom: 2 }} />
                     </>
                   )}
-                  <div data-kb-row={i} style={{
-                    display: 'grid',
-                    gridTemplateColumns: isNoWeightReps ? '28px 1fr 28px' : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px'),
-                    gap: 8, alignItems: 'center',
-                    padding: '10px 4px',
-                    opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
-                    animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
-                  }}>
-                    <div style={{
-                      width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-                      background: isCurrent ? UI.goldFaint : 'transparent',
-                      outline: `1px solid ${isCurrent ? UI.gold : s.done ? UI.goldDeep : isWarmupRow ? UI.hair : UI.hairStrong}`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontFamily: UI.fontNum, fontSize: isWarmupRow ? 8 : 10, fontWeight: 500,
-                      color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
-                    }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
-
-                    {isNoWeightReps ? <div /> : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
-                      {isWarmupRow
-                        ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
-                        : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
-                      }
-                    </div>}
-
-                    {!isNoWeightReps && <KgInput
-                      value={s.kg}
-                      done={s.done || s.skipped}
-                      style={setInputStyle(s.done || s.skipped, isCurrent)}
-                      onActivate={() => activateKb(i, 'kg')}
-                      kbRaw={kbRaw}
-                      isKbActive={kbField?.setIdx === i && kbField?.field === 'kg'}
-                      onChange={kg => updateSession(sess => ({
-                        ...sess,
-                        entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
-                          ...en,
-                          sets: en.sets.map((st, si) =>
-                            si === i ? { ...st, kg, done: false }
-                            : store.settings?.weightFillDown !== false && si > i && !st.done && !st.warmup ? { ...st, kg }
-                            : st
-                          ),
-                        }),
-                      }))}
-                    />}
-
-                    {!isNoWeightReps && (isUnilateral ? (
-                      <>
-                        <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
-                        <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
-                      </>
-                    ) : (
-                      <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
-                    ))}
-
-                    <button
-                      data-complete-btn
-                      onPointerDown={e => { _log(`row${i} pointerdown done=${s.done}`); e.stopPropagation(); }}
-                      onClick={() => {
-                        const now = Date.now();
-                        _log(`row${i} click done=${s.done} skipped=${s.skipped}`);
-                        if (s.skipped) { updateSet(i, { skipped: false }); return; }
-                        if (s.done) {
-                          const globalDelta = now - (lastCompleteRef.current || 0);
-                          const rowDelta = now - (recentCompleteRef.current[i] || 0);
-                          _log(`row${i} uncheck? globalΔ=${globalDelta}ms rowΔ=${rowDelta}ms`);
-                          if (globalDelta < 2000) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
-                          if (rowDelta < 3000) { _log(`row${i} BLOCKED by row guard (${rowDelta}ms)`); return; }
-                          _log(`row${i} UNCHECK → updateSet done:false`);
-                          updateSet(i, { done: false });
-                          return;
-                        }
-                        if (!isNoWeightReps && !isBodyweight && s.kg == null) return;
-                        _log(`row${i} → completeSet`);
-                        completeSet(i);
-                      }}
-                      disabled={!s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)))}
-                      style={{
-                        width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (!isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null))) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
-                        background: s.done ? UI.gold : 'transparent',
+                  {(() => {
+                    const isDropActive = dropSetIdx === i && !s.done;
+                    const isMyoActive = myoSetIdx === i && !s.done;
+                    const isIntensityActive = isDropActive || isMyoActive;
+                    return (
+                    <div data-kb-row={i} style={{
+                      display: 'grid',
+                      gridTemplateColumns: isIntensityActive ? '28px 1fr' : (isNoWeightReps ? '28px 1fr 28px' : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px')),
+                      gap: 8, alignItems: 'center',
+                      padding: '10px 4px',
+                      opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
+                      animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
+                    }}>
+                      <div style={{
+                        width: 24, height: 24, borderRadius: 4, flexShrink: 0,
+                        background: isCurrent ? UI.goldFaint : 'transparent',
+                        outline: `1px solid ${isCurrent ? UI.gold : s.done ? UI.goldDeep : isWarmupRow ? UI.hair : UI.hairStrong}`,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: s.skipped ? 12 : 14, fontWeight: 700,
-                        color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
-                        opacity: !s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
-                        flexShrink: 0, justifySelf: 'center',
-                        WebkitTapHighlightColor: 'transparent',
-                      }}>{s.skipped ? '×' : '✓'}</button>
+                        fontFamily: UI.fontNum, fontSize: isWarmupRow ? 8 : 10, fontWeight: 500,
+                        color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
+                      }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
-                  </div>
+                      {isIntensityActive ? null : isNoWeightReps ? <div /> : (
+                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match') && s.done
+                          ? <span style={{
+                              display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
+                              fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
+                              background: 'rgba(var(--accent-rgb),0.12)',
+                              border: '0.5px solid rgba(var(--accent-rgb),0.35)',
+                              borderRadius: 4, padding: '2px 6px',
+                            }}>{s.technique === 'drop' ? 'DS' : s.technique === 'myorep_match' ? 'MM' : 'MR'}</span>
+                          : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
+                              {isWarmupRow
+                                ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
+                                : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
+                              }
+                            </div>
+                      )}
+
+                      {!isIntensityActive && !isNoWeightReps && <KgInput
+                        value={s.kg}
+                        done={s.done || s.skipped}
+                        style={setInputStyle(s.done || s.skipped, isCurrent)}
+                        onActivate={() => activateKb(i, 'kg')}
+                        kbRaw={kbRaw}
+                        isKbActive={kbField?.setIdx === i && kbField?.field === 'kg'}
+                        onChange={kg => updateSession(sess => ({
+                          ...sess,
+                          entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+                            ...en,
+                            sets: en.sets.map((st, si) =>
+                              si === i ? { ...st, kg, done: false }
+                              : store.settings?.weightFillDown !== false && si > i && !st.done && !st.warmup ? { ...st, kg }
+                              : st
+                            ),
+                          }),
+                        }))}
+                      />}
+
+                      {!isIntensityActive && !isNoWeightReps && (isUnilateral ? (
+                        <>
+                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                        </>
+                      ) : (
+                        <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                      ))}
+
+                      {!isIntensityActive && <button
+                        data-complete-btn
+                        onPointerDown={e => { _log(`row${i} pointerdown done=${s.done}`); e.stopPropagation(); }}
+                        onClick={() => {
+                          const now = Date.now();
+                          _log(`row${i} click done=${s.done} skipped=${s.skipped}`);
+                          if (s.skipped) { updateSet(i, { skipped: false }); return; }
+                          if (s.done) {
+                            const globalDelta = now - (lastCompleteRef.current || 0);
+                            const rowDelta = now - (recentCompleteRef.current[i] || 0);
+                            _log(`row${i} uncheck? globalΔ=${globalDelta}ms rowΔ=${rowDelta}ms`);
+                            if (globalDelta < 2000) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
+                            if (rowDelta < 3000) { _log(`row${i} BLOCKED by row guard (${rowDelta}ms)`); return; }
+                            _log(`row${i} UNCHECK → updateSet done:false`);
+                            updateSet(i, { done: false });
+                            return;
+                          }
+                          if (dropSetIdx === i || myoSetIdx === i) return;
+                          if (!isNoWeightReps && !isBodyweight && s.kg == null) return;
+                          _log(`row${i} → completeSet`);
+                          completeSet(i);
+                        }}
+                        disabled={!s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)))}
+                        style={{
+                          width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (!isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null))) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
+                          background: s.done ? UI.gold : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: s.skipped ? 12 : 14, fontWeight: 700,
+                          color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
+                          opacity: !s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
+                          flexShrink: 0, justifySelf: 'center',
+                          WebkitTapHighlightColor: 'transparent',
+                        }}>{s.skipped ? '×' : '✓'}</button>}
+
+                    </div>
+                    );
+                  })()}
+                  {dropSetIdx === i && !s.done && (
+                    <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
+                        <span className="micro-gold">DROP SET</span>
+                        <button onClick={() => {
+                          setDropSetIdx(null); setDropDrops([]);
+                          kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+                        }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                      </div>
+                      {dropDrops.map((d, di) => {
+                        const isKgA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'kg';
+                        const isRepsA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'reps';
+                        return (
+                          <div key={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
+                            <div style={{
+                              width: 24, height: 24, borderRadius: 4, flexShrink: 0,
+                              background: 'rgba(var(--accent-rgb),0.08)',
+                              outline: `1px solid rgba(var(--accent-rgb),0.3)`,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: UI.gold,
+                            }}>↓</div>
+                            <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>
+                              {di === 0 ? 'top' : `drop ${di + 1}`}
+                            </div>
+                            <KbCell
+                              text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
+                              placeholder="—"
+                              onActivate={() => activateDropKb(di, 'kg')}
+                              style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                            />
+                            <KbCell
+                              text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
+                              placeholder="—"
+                              onActivate={() => activateDropKb(di, 'reps')}
+                              style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                            />
+                            <button onClick={() => dropDrops.length > 1 && setDropDrops(prev => prev.filter((_, idx) => idx !== di))}
+                              disabled={dropDrops.length <= 1}
+                              style={{
+                                width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
+                                background: 'transparent', color: UI.inkFaint, fontSize: 14,
+                                cursor: dropDrops.length <= 1 ? 'default' : 'pointer',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                opacity: dropDrops.length <= 1 ? 0.2 : 1, flexShrink: 0,
+                                WebkitTapHighlightColor: 'transparent',
+                              }}>×</button>
+                          </div>
+                        );
+                      })}
+                      <div style={{ display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
+                        <button onClick={() => {
+                          const newIdx = dropDropsRef.current.length;
+                          setDropDrops(prev => [...prev, { kg: null, reps: null }]);
+                          setTimeout(() => activateDropKb(newIdx, 'kg'), 80);
+                        }} style={{
+                          flex: 1, padding: '8px 0', background: 'transparent',
+                          border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
+                          color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
+                          letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                        }}>↓ ADD DROP</button>
+                        <button onClick={() => finishDropSet(dropDropsRef.current)}
+                          disabled={!dropDrops[0]?.reps}
+                          style={{
+                            flex: 2, padding: '8px 0',
+                            background: dropDrops[0]?.reps ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                            border: `1px solid ${dropDrops[0]?.reps ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                            borderRadius: 6, color: dropDrops[0]?.reps ? 'var(--accent)' : UI.inkGhost,
+                            fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                            cursor: dropDrops[0]?.reps ? 'pointer' : 'default',
+                            WebkitTapHighlightColor: 'transparent',
+                          }}>✓ FINISH</button>
+                      </div>
+                    </div>
+                  )}
+                  {s.technique === 'drop' && s.done && (s.drops || []).length > 1 && (
+                    <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8, borderLeft: `2px solid rgba(var(--accent-rgb),0.2)` }}>
+                      {(s.drops || []).slice(1).map((d, di) => (
+                        <div key={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px', gap: 8, alignItems: 'center', padding: '4px 4px', opacity: 0.5 }}>
+                          <div style={{
+                            width: 24, height: 24, borderRadius: 4,
+                            outline: `1px solid rgba(var(--accent-rgb),0.2)`,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: UI.goldSoft,
+                          }}>↓</div>
+                          <div />
+                          <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                          </div>
+                          <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.reps ?? '—'}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* Myo-Rep active inline rows */}
+                  {myoSetIdx === i && !s.done && (() => {
+                    const myoTotalReps = myoDrops.reduce((acc, d) => acc + (d.reps || 0), 0);
+                    const myoProgress = myoTarget ? Math.min(1, myoTotalReps / myoTarget) : 0;
+                    const canFinish = myoDrops.length >= 2 && myoDrops[0]?.reps != null;
+                    const activationDone = myoDrops[0]?.reps != null;
+                    return (
+                      <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
+                          <span className="micro-gold">{myoTechnique === 'myorep_match' ? 'MYO REP MATCH' : 'MYO-REPS'}</span>
+                          <button onClick={cancelMyo} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                        </div>
+                        {/* Match progress counter */}
+                        {myoTechnique === 'myorep_match' && myoTarget != null && (
+                          <div style={{ padding: '6px 4px 4px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+                              <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.1em' }}>MATCH</span>
+                              <div>
+                                <span className="num" style={{ fontSize: 20, fontWeight: 700, color: myoProgress >= 1 ? UI.gold : UI.ink, transition: 'color 0.3s ease' }}>{myoTotalReps}</span>
+                                <span className="num" style={{ fontSize: 12, color: UI.inkGhost }}> / {myoTarget}</span>
+                              </div>
+                            </div>
+                            <div style={{ position: 'relative', height: 6, borderRadius: 999, background: 'rgba(var(--accent-rgb),0.12)', margin: '0 0 4px' }}>
+                              <div style={{
+                                position: 'absolute', left: 0, top: 0, height: '100%',
+                                width: `${Math.min(1, myoProgress) * 100}%`,
+                                minWidth: myoProgress > 0 ? 8 : 0,
+                                borderRadius: 999,
+                                background: myoProgress >= 1 ? 'var(--accent)' : 'rgba(var(--accent-rgb),0.75)',
+                                boxShadow: myoProgress > 0 ? `0 0 ${Math.round(4 + myoProgress * 10)}px ${Math.round(2 + myoProgress * 6)}px rgba(var(--accent-rgb),${(0.3 + myoProgress * 0.5).toFixed(2)})` : 'none',
+                                transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease',
+                              }} />
+                            </div>
+                          </div>
+                        )}
+                        {myoDrops.map((d, di) => {
+                          const isActiv = di === 0;
+                          const isKgA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'kg';
+                          const isRepsA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'reps';
+                          return (
+                            <div key={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
+                              <div style={{
+                                width: 24, height: 24, borderRadius: 4, flexShrink: 0,
+                                background: 'rgba(var(--accent-rgb),0.08)',
+                                outline: `1px solid rgba(var(--accent-rgb),0.3)`,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontFamily: UI.fontUi, fontSize: isActiv ? 9 : 10, fontWeight: 700, color: UI.gold,
+                              }}>{isActiv ? 'ACT' : '↺'}</div>
+                              <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>{isActiv ? 'activation' : `myo ${di}`}</div>
+                              {/* kg — editable for activation (myo only), read-only for match activation + all minis */}
+                              {isActiv && myoTechnique === 'myorep' ? (
+                                <KbCell
+                                  text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
+                                  placeholder="—"
+                                  onActivate={() => activateMyo(di, 'kg')}
+                                  style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                                />
+                              ) : (
+                                <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <span className="num" style={{ fontSize: 15, color: UI.inkGhost }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                                </div>
+                              )}
+                              <KbCell
+                                text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
+                                placeholder="—"
+                                onActivate={() => activateMyo(di, 'reps')}
+                                style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                              />
+                              {isActiv ? (
+                                <div />
+                              ) : (
+                                <button onClick={() => myoDrops.length > 2 && setMyoDrops(prev => prev.filter((_, idx) => idx !== di))}
+                                  disabled={myoDrops.length <= 2}
+                                  style={{
+                                    width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
+                                    background: 'transparent', color: UI.inkFaint, fontSize: 14,
+                                    cursor: myoDrops.length <= 2 ? 'default' : 'pointer',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    opacity: myoDrops.length <= 2 ? 0.2 : 1, flexShrink: 0,
+                                    WebkitTapHighlightColor: 'transparent',
+                                  }}>×</button>
+                              )}
+                            </div>
+                          );
+                        })}
+                        <div style={{ display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
+                          {activationDone && (
+                            <button onClick={() => {
+                              const newIdx = myoDropsRef.current.length;
+                              const activKg = myoDropsRef.current[0]?.kg ?? null;
+                              setMyoDrops(prev => [...prev, { kg: activKg, reps: null }]);
+                              setTimeout(() => activateMyo(newIdx, 'reps'), 80);
+                            }} style={{
+                              flex: 1, padding: '8px 0', background: 'transparent',
+                              border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
+                              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
+                              letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                            }}>↺ ADD MYO</button>
+                          )}
+                          <button onClick={() => finishMyoSet(myoDropsRef.current, myoTechnique)}
+                            disabled={!canFinish}
+                            style={{
+                              flex: 2, padding: '8px 0',
+                              background: canFinish ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                              border: `1px solid ${canFinish ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                              borderRadius: 6, color: canFinish ? 'var(--accent)' : UI.inkGhost,
+                              fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                              cursor: canFinish ? 'pointer' : 'default',
+                              WebkitTapHighlightColor: 'transparent',
+                            }}>✓ FINISH</button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {/* Completed myo rows */}
+                  {(s.technique === 'myorep' || s.technique === 'myorep_match') && s.done && (s.drops || []).length > 1 && (
+                    <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8, borderLeft: `2px solid rgba(var(--accent-rgb),0.2)` }}>
+                      {(s.drops || []).slice(1).map((d, di) => (
+                        <div key={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px', gap: 8, alignItems: 'center', padding: '4px 4px', opacity: 0.5 }}>
+                          <div style={{
+                            width: 24, height: 24, borderRadius: 4,
+                            outline: `1px solid rgba(var(--accent-rgb),0.2)`,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: UI.goldSoft,
+                          }}>↺</div>
+                          <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>myo {di + 1}</div>
+                          <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                          </div>
+                          <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.reps ?? '—'}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {(() => { const t = (s.drops || []).reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? <div style={{ marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>Total {t}</div> : null; })()}
+                    </div>
+                  )}
                   {i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) && <div className="knurl" />}
                 </React.Fragment>
               );
             })}
           </div>
+
+          {!isCardio && (
+            <button className="intensity-glow" onClick={() => setIntensityOpen(true)} style={{
+              width: '100%', marginTop: 6, padding: '8px 0',
+              background: 'rgba(var(--accent-rgb),0.08)',
+              border: '1px solid rgba(var(--accent-rgb),0.5)',
+              borderRadius: 6, cursor: 'pointer',
+              color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
+              letterSpacing: '0.14em', WebkitTapHighlightColor: 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            }}>
+              <i className="fa fa-bolt" style={{ fontSize: 10 }} />
+              INTENSITY
+            </button>
+          )}
 
           {!isCardio && (
             <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
@@ -2735,6 +3320,89 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </div>
       </Sheet>
 
+      {/* intensity technique picker */}
+      <Sheet open={intensityOpen} onClose={() => setIntensityOpen(false)} title="Intensity">
+        {(() => {
+          const startDrop = () => {
+            const target = currentSetIdx >= 0
+              ? currentSetIdx
+              : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
+            if (target < 0) return;
+            const s = entry.sets[target];
+            const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null }];
+            setDropDrops(initDrops);
+            dropDropsRef.current = initDrops;
+            setDropSetIdx(target);
+            setIntensityOpen(false);
+            setTimeout(() => activateDropKb(0, 'kg'), 150);
+          };
+          const startMyo = (technique) => {
+            const target = currentSetIdx >= 0
+              ? currentSetIdx
+              : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
+            if (target < 0) return;
+            const s = entry.sets[target];
+            const anchor = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
+            // For match: activation kg locked to the preceding myo set's activation kg
+            const initKg = technique === 'myorep_match' ? (anchor?.drops?.[0]?.kg ?? s?.kg ?? null) : (s?.kg ?? null);
+            const initDrops = [{ kg: initKg, reps: s?.reps ?? null }];
+            setMyoDrops(initDrops);
+            myoDropsRef.current = initDrops;
+            setMyoSetIdx(target);
+            setMyoTechnique(technique);
+            if (technique === 'myorep_match') {
+              setMyoTarget(anchor ? anchor.drops.reduce((sum, d) => sum + (d.reps || 0), 0) : null);
+            }
+            setIntensityOpen(false);
+            // Match: kg is read-only, start straight at reps; Myo: start at kg
+            setTimeout(() => activateMyo(0, technique === 'myorep_match' ? 'reps' : 'kg'), 150);
+          };
+          const myoMatchTarget = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
+          const btnBase = (active) => ({
+            width: '100%', textAlign: 'left', cursor: active ? 'pointer' : 'default',
+            background: active ? 'rgba(var(--accent-rgb),0.07)' : UI.bgInset,
+            border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`,
+            borderRadius: 6, padding: '14px 16px',
+            display: 'flex', alignItems: 'center', gap: 14,
+            opacity: active ? 1 : 0.45,
+            WebkitTapHighlightColor: 'transparent',
+          });
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {/* Drop Set */}
+              <button onClick={startDrop} style={btnBase(true)}>
+                <i className="fa-solid fa-angles-down" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>DROP SET</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Descend the weight, keep the reps coming</div>
+                </div>
+              </button>
+              {/* Myo-Rep row: two compact buttons matching DROP style */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <button onClick={() => startMyo('myorep')} style={btnBase(true)}>
+                  <i className="fa-solid fa-rotate" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>MYO REP</div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, marginTop: 2 }}>Activation + minis to failure</div>
+                  </div>
+                </button>
+                <button onClick={() => startMyo('myorep_match')} disabled={!myoMatchTarget} style={btnBase(!!myoMatchTarget)}>
+                  <i className="fa-solid fa-bullseye" style={{ fontSize: 18, color: myoMatchTarget ? 'var(--accent)' : UI.inkFaint, width: 20, textAlign: 'center', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: myoMatchTarget ? 'var(--accent)' : UI.inkFaint }}>MYO MATCH</div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, marginTop: 2 }}>
+                      {myoMatchTarget
+                        ? `Target: ${myoMatchTarget.drops.reduce((s, d) => s + (d.reps || 0), 0)} reps`
+                        : 'Do a Myo Rep set first'}
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+      </Sheet>
+
       {/* session note editor */}
       <Sheet open={sessionNoteOpen} onClose={() => setSessionNoteOpen(false)} title="Session note">
         <textarea
@@ -2753,7 +3421,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {/* exercise note editor */}
-      <Sheet open={exNoteOpen} onClose={() => setExNoteOpen(false)} title="Exercise note">
+      <Sheet open={exNoteOpen} onClose={requestCloseExNote} title="Exercise note">
         <textarea
           value={exNoteVal}
           onChange={e => setExNoteVal(e.target.value)}
@@ -2824,10 +3492,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {/* exercise swap picker */}
-      {swapOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSwapOpen(false)} onPick={doSwap} />}
+      {swapOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSwapOpen(false)} onPick={doSwap} singleSelect />}
 
       {/* exercise add picker */}
-      {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
+      {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} singleSelect />}
 
       {/* superset modal — step 1: ask yes/no; step 2: pick exercise to link */}
       {addSupersetData && (

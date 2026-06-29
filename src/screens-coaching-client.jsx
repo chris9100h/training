@@ -355,7 +355,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
   const ended = sessions.filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   const [chartOpen, setChartOpen] = useStateC(null);
   const [planOpen, setPlanOpen] = useStateC(false);
-  const unit = clientStore.settings?.unit || UI.unit();
+  const unit = (clientStore.settings?.unit === 'lbs') ? 'lbs' : 'kg';
 
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   const trainingDayCount = activeSch ? (Array.isArray(activeSch.days) ? activeSch.days : []).filter(d => d.items?.length > 0).length : 0;
@@ -736,7 +736,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(p.avg).toFixed(1)}`).join(' ');
   const areaPath = `${linePath} L${px(n-1).toFixed(1)},${PAD_T + plotH} L${px(0).toFixed(1)},${PAD_T + plotH} Z`;
   const trend = allGroups[allGroups.length - 1].avg - allGroups[0].avg;
-  const unit = clientStore?.settings?.unit || 'kg';
+  const unit = (clientStore?.settings?.unit === 'lbs') ? 'lbs' : 'kg';
   const periodLabel = isWd ? 'WEEK' : `CYCLE (${cycleLen}d)`;
   const fmtY = v => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`;
   const gridVals = [dom.min, dom.min + dom.range / 2, dom.max];
@@ -1174,7 +1174,7 @@ const CARDIO_ACTIVITY_MAP = {
 function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initialSelected, onClearSelected }) {
   const [subTab, setSubTab] = useStateC('workouts');
   const [selected, setSelected] = useStateC(initialSelected || null);
-  const unit = clientStore.settings?.unit || UI.unit();
+  const unit = (clientStore.settings?.unit === 'lbs') ? 'lbs' : 'kg';
   const [noteOpen, setNoteOpen] = useStateC(false);
   const [noteBody, setNoteBody] = useStateC('');
   const [noteSaving, setNoteSaving] = useStateC(false);

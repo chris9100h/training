@@ -318,7 +318,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
         </div>
       )}
 
-      {creating && <ExerciseCreator onClose={() => setCreating(false)} store={store} setStore={setStore} />}
+      {creating && <ExerciseCreator onClose={() => setCreating(false)} store={store} setStore={setStore} initialTags={filterTags} />}
 
       {filtersOpen && (
         <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
@@ -480,10 +480,10 @@ function KnurlCanvas({ style }) {
   return <canvas data-knurl="1" style={{ display: 'block', width: '100%', height: 3, ...style }} />;
 }
 
-function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '' }) {
+function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '', initialTags = [] }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateL(initialName);
-  const [selectedTags, setSelectedTags] = useStateL([]);
+  const [selectedTags, setSelectedTags] = useStateL(initialTags);
   const [category, setCategory] = useStateL(null);
   const [movementType, setMovementType] = useStateL('bilateral');
   const [noWeightReps, setNoWeightReps] = useStateL(false);
@@ -2209,6 +2209,17 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     }
     const avatarRect = (avatarEl && avatarEl.getBoundingClientRect().height) ? avatarEl.getBoundingClientRect() : null;
     const KNURL_GAP = 14;
+    // Limit chip containers that vertically overlap the avatar so they don't
+    // bleed into it. Same gap as knurl lines.
+    if (avatarRect) {
+      captureRef.current.querySelectorAll('[data-shot-chips]').forEach(el => {
+        const r = el.getBoundingClientRect();
+        if (r.bottom > avatarRect.top && r.top < avatarRect.bottom) {
+          const maxW = Math.round(avatarRect.left - r.left - KNURL_GAP);
+          if (maxW > 0 && maxW < r.width) el.style.maxWidth = maxW + 'px';
+        }
+      });
+    }
     captureRef.current.querySelectorAll('canvas[data-knurl]').forEach(c => {
       const pw = c.parentElement ? c.parentElement.offsetWidth : 320;
       let w = pw;
@@ -2468,6 +2479,46 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 const prev = prevEntryMap[e.exId];
                 const exObj = store.exercises.find(ex => ex.id === e.exId);
                 const exName = exObj?.name ?? e.name;
+
+                // Cardio entry — show activity summary instead of sets
+                // isCardio may be missing on entries loaded from DB (not a DB column),
+                // so derive it from the exercise's movement_type as fallback.
+                const isEntryCardio = !!e.isCardio || exObj?.movement_type === 'cardio';
+                if (isEntryCardio) {
+                  // cardioData is in-memory only; for historical sessions look up
+                  // from store.cardioLogs by session date + exercise name.
+                  let cd = e.cardioData;
+                  if (!cd) {
+                    const sessionDate = s.date?.slice(0, 10);
+                    const logs = sessionDate ? (store.cardioLogs || []).filter(cl => cl.date === sessionDate) : [];
+                    const exNameLower = (exObj?.name || e.name || '').toLowerCase();
+                    const match = logs.find(cl => cl.type?.toLowerCase() === exNameLower) || logs[0] || null;
+                    if (match) cd = { type: match.type, durationMinutes: match.durationMinutes, distanceM: match.distanceM ?? null };
+                  }
+                  const du = localStorage.getItem('logbook-cardio-dist-unit') || 'km';
+                  const parts = [];
+                  if (cd?.type) parts.push(cd.type.charAt(0).toUpperCase() + cd.type.slice(1));
+                  if (cd?.durationMinutes) parts.push(`${cd.durationMinutes} min`);
+                  if (cd?.distanceM != null) parts.push(du === 'mi' ? `${(cd.distanceM / 1609.344).toFixed(2)} mi` : `${(cd.distanceM / 1000).toFixed(1)} km`);
+                  const done = e.cardioDone ?? !!cd;
+                  return (
+                    <div key={i}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+                        <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{exName}</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        {done ? (
+                          <span style={{ border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 10px', fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.03em' }}>
+                            {parts.length > 0 ? parts.join(' · ') : '✓'}
+                          </span>
+                        ) : (
+                          <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint }}>—</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
                 const isCheckboxOnly = !!exObj?.no_weight_reps;
                 const filteredSets = e.sets.filter(st => !st.skipped && (showWarmup || !st.warmup));
                 // Compare working sets by position, warm-ups excluded on both sides.
@@ -2497,6 +2548,108 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       const anyImprovementBefore = !isWarm && filteredSets.slice(0, j).some((s, k) => !s.warmup && (isPR(s, e.exId) || isImprovement(s, prevWorkingFor(k))));
                       const decline = !isWarm && !anyImprovementBefore && isDecline(st, prevSet);
                       const hasData = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
+
+                      // Drop set: DS badge + chips connected by arrows
+                      if (st.technique === 'drop' && !isCheckboxOnly) {
+                        const drops = (st.drops && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
+                        const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
+                        const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
+                        const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
+                        return (
+                          <div key={j} style={{
+                            width: '100%', marginTop: j > 0 ? 6 : 0,
+                            borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`,
+                            paddingLeft: 10,
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                              <span style={{
+                                fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
+                                color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint,
+                                background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)',
+                                border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`,
+                                borderRadius: 4, padding: '2px 6px',
+                              }}>DROP SET</span>
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
+                            </div>
+                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4, overflow: 'hidden' }}>
+                              {drops.map((d, di) => (
+                                <React.Fragment key={di}>
+                                  {di > 0 && (
+                                    <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>→</span>
+                                  )}
+                                  <span style={{
+                                    background: chipBg,
+                                    border: `1px solid ${chipBorder}`,
+                                    borderRadius: 4, padding: '3px 8px',
+                                    fontFamily: UI.fontNum, fontSize: 12,
+                                    color: chipColor,
+                                    opacity: di === 0 ? 1 : 0.75,
+                                  }}>
+                                    {d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>
+                                    <span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>
+                                    {d.reps ?? '—'}
+                                  </span>
+                                </React.Fragment>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // Myo-rep / myo-rep match: badge + activation chip + mini chips
+                      if ((st.technique === 'myorep' || st.technique === 'myorep_match') && !isCheckboxOnly) {
+                        const drops = (st.drops && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
+                        const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
+                        const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
+                        const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
+                        const isMatch = st.technique === 'myorep_match';
+                        return (
+                          <div key={j} style={{
+                            width: '100%', marginTop: j > 0 ? 6 : 0,
+                            borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`,
+                            paddingLeft: 10,
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                              <span style={{
+                                fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
+                                color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint,
+                                background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)',
+                                border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`,
+                                borderRadius: 4, padding: '2px 6px',
+                              }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
+                            </div>
+                            <div data-shot-chips="1" style={{ display: 'inline-flex', flexDirection: 'column', gap: 4, overflow: 'hidden' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                                {drops.map((d, di) => (
+                                  <React.Fragment key={di}>
+                                    {di > 0 && (
+                                      <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>↺</span>
+                                    )}
+                                    <span style={{
+                                      background: di === 0 ? chipBg : 'transparent',
+                                      border: `1px solid ${di === 0 ? chipBorder : UI.hair}`,
+                                      borderRadius: 4, padding: '3px 8px',
+                                      fontFamily: UI.fontNum, fontSize: 12,
+                                      color: di === 0 ? chipColor : UI.inkSoft,
+                                      opacity: di === 0 ? 1 : 0.7,
+                                    }}>
+                                      {di === 0 && <>{d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span></>}
+                                      {d.reps ?? '—'}
+                                    </span>
+                                  </React.Fragment>
+                                ))}
+                              </div>
+                              {(() => { const t = drops.reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? (
+                                <div style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>
+                                  Total {t}
+                                </div>
+                              ) : null; })()}
+                            </div>
+                          </div>
+                        );
+                      }
+
                       return (
                         <span key={j} style={{
                           opacity: (st.done || hasData) ? (isWarm ? 0.65 : 1) : 0.45,
@@ -2568,6 +2721,15 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   const [draftDate, setDraftDate] = useStateL(session.date ? session.date.slice(0, 10) : '');
   const [draftDuration, setDraftDuration] = useStateL(duration != null ? String(Math.round(duration / 5) * 5) : '0');
   const [draftEntries, setDraftEntries] = useStateL(() => JSON.parse(JSON.stringify(session.entries)));
+  const [confirmEl, confirm] = useConfirm();
+  const origDate = session.date ? session.date.slice(0, 10) : '';
+  const origDuration = duration != null ? String(Math.round(duration / 5) * 5) : '0';
+  const origEntriesJson = useRefL(() => JSON.stringify(session.entries));
+  const isDirty = draftDate !== origDate || draftDuration !== origDuration || JSON.stringify(draftEntries) !== origEntriesJson.current;
+  const requestClose = async () => {
+    if (isDirty && !await confirm('Your edits won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    onClose();
+  };
 
   const updateSet = (eIdx, sIdx, patch) => {
     setDraftEntries(entries => entries.map((e, i) =>
@@ -2609,7 +2771,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   };
 
   return (
-    <Sheet open={true} onClose={onClose} title="Edit session">
+    <Sheet open={true} onClose={requestClose} title="Edit session">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 160 }}>
         <div>
           <span className="label">Date</span>
@@ -2688,10 +2850,11 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
           })}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn kind="ghost" onClick={onClose} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn kind="ghost" onClick={requestClose} style={{ flex: 1 }}>Cancel</Btn>
           <Btn onClick={save} style={{ flex: 2 }}>Save</Btn>
         </div>
       </div>
+      {confirmEl}
     </Sheet>
   );
 }
@@ -2702,7 +2865,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
   const lastEntries = session.last_session_entries || [];
   // Label weights in the trainee's own unit (stored numbers aren't converted),
   // so a coach watching an lbs client never sees their lifts marked "kg".
-  const unit        = session.unit || 'kg';
+  const unit        = (session.unit === 'lbs') ? 'lbs' : 'kg';
   const duration    = session.ended && session.started_at
     ? Math.round((new Date(session.ended) - new Date(session.started_at)) / 60000)
     : null;
@@ -2728,6 +2891,15 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
           const fmtSet = s => {
             if (!s) return '—';
             if (s.skipped && !s.done) return 'skipped';
+            const drops = s.drops && s.drops.length > 0 ? s.drops : null;
+            if (s.technique === 'drop' && drops) {
+              return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+            }
+            if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
+              const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
+              const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
+              return `${chain} (${total})`;
+            }
             const repsStr = (s.repsL != null || s.repsR != null)
               ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
               : (s.reps ?? '—');
@@ -2883,7 +3055,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
 
   const entries = session.entries || [];
   // Label weights in the trainee's own unit (stored numbers aren't converted).
-  const unit = session.unit || UI.unit();
+  const unit = (session.unit === 'lbs') ? 'lbs' : 'kg';
   const liveIdx = LB.inferCurrentExIdx(entries);
   const entry = entries[exIdx];
   const goLive = () => { setFollowLive(true); setExIdx(liveIdx); };
@@ -2995,6 +3167,66 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
             {(entry.sets || []).map((s, i) => {
               const done = s.done || s.skipped;
               const unilateral = s.repsL != null || s.repsR != null;
+              const drops = s.drops && s.drops.length > 0 ? s.drops : null;
+
+              // Drop set
+              if (s.technique === 'drop' && drops) return (
+                <React.Fragment key={i}>
+                <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>DROP SET</span>
+                    <div style={{ marginLeft: 'auto' }}>
+                      {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
+                             : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                    {drops.map((d, di) => (
+                      <React.Fragment key={di}>
+                        {di > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>→</span>}
+                        <span className="num" style={{ fontSize: 13, color: UI.ink }}>{d.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {d.reps ?? '—'}</span>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+                {i < entry.sets.length - 1 && <div className="knurl" />}
+                </React.Fragment>
+              );
+
+              // Myo-rep / myo-rep match
+              if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
+                const isMatch = s.technique === 'myorep_match';
+                const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
+                return (
+                  <React.Fragment key={i}>
+                  <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
+                      {total > 0 && <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{total} total</span>}
+                      <div style={{ marginLeft: 'auto' }}>
+                        {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
+                               : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                      {drops.map((d, di) => (
+                        <React.Fragment key={di}>
+                          {di > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>↺</span>}
+                          <span className="num" style={{ fontSize: 13, color: UI.ink }}>
+                            {di === 0 && <>{d.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × </>}{d.reps ?? '—'}
+                          </span>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
+                  {i < entry.sets.length - 1 && <div className="knurl" />}
+                  </React.Fragment>
+                );
+              }
+
+              // Normal set
               return (
                 <React.Fragment key={i}>
                 <div style={{

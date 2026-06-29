@@ -649,30 +649,35 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
   const empty = () => ({ date: todayStr, type: '', duration: '', distance: '', paceFeeling: null, effort: null, note: '' });
   const [form, setForm] = useState(empty);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const [confirmEl, confirm] = useConfirm();
+  const initialSnap = useRef(null);
 
   useEffect(() => {
     if (!open) return;
-    if (editLog) {
-      const du = getDistUnit();
-      setForm({
-        date: editLog.date,
-        type: editLog.type || '',
-        duration: editLog.durationMinutes ? String(editLog.durationMinutes) : '',
-        distance: editLog.distanceM != null ? mToDisplay(editLog.distanceM, du) : '',
-        paceFeeling: editLog.paceFeeling ?? null,
-        effort: editLog.effort ?? null,
-        note: editLog.note || '',
-      });
-    } else {
-      const du = getDistUnit();
-      setForm({
-        ...empty(),
-        type: prefill?.type || '',
-        duration: prefill?.durationMinutes ? String(prefill.durationMinutes) : '',
-        distance: prefill?.distanceM != null ? mToDisplay(prefill.distanceM, du) : '',
-      });
-    }
+    const du = getDistUnit();
+    const next = editLog ? {
+      date: editLog.date,
+      type: editLog.type || '',
+      duration: editLog.durationMinutes ? String(editLog.durationMinutes) : '',
+      distance: editLog.distanceM != null ? mToDisplay(editLog.distanceM, du) : '',
+      paceFeeling: editLog.paceFeeling ?? null,
+      effort: editLog.effort ?? null,
+      note: editLog.note || '',
+    } : {
+      ...empty(),
+      type: prefill?.type || '',
+      duration: prefill?.durationMinutes ? String(prefill.durationMinutes) : '',
+      distance: prefill?.distanceM != null ? mToDisplay(prefill.distanceM, du) : '',
+    };
+    setForm(next);
+    initialSnap.current = next;
   }, [open, editLog?.id]);
+
+  const isDirty = initialSnap.current != null && JSON.stringify(form) !== JSON.stringify(initialSnap.current);
+  const requestClose = async () => {
+    if (isDirty && !await confirm('Your cardio entry won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    onClose();
+  };
 
   // Unique types from history, most-recently-used first
   const typeChips = useMemo(() => {
@@ -728,7 +733,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
   };
 
   return (
-    <Sheet open={open} onClose={onClose} title={editLog ? 'EDIT CARDIO' : 'LOG CARDIO'}>
+    <Sheet open={open} onClose={requestClose} title={editLog ? 'EDIT CARDIO' : 'LOG CARDIO'}>
       {/* Date */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Date</div>
@@ -835,6 +840,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
       </div>
 
       <Btn onClick={save} disabled={!canSave} style={{ width: '100%' }}>SAVE</Btn>
+      {confirmEl}
     </Sheet>
   );
 }
@@ -1060,6 +1066,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const defaultLogoStyle = { width: '85%', maxWidth: 320, opacity: isLightMode ? 0.14 : 0.04, filter: isLightMode ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const today = LB.todaysDay(store);
   const sch = today?.schedule;
+  const hasPlans = (store.schedules?.length || 0) > 0;
   const day = today?.day;
   const dayIdx = today?.idx ?? 0;
   const dayCount = sch?.days?.length || 0;
@@ -1868,7 +1875,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       }
       const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, activeDay.id);
       const isUnilateral = ex?.unilateral || false;
-      const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps, undefined, seedRefs[it.exId]);
+      const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps, it.repsPerSet || null, seedRefs[it.exId]);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
       const seedSets = LB.buildSeedSets(it, last, suggestion, isUnilateral, !!store.settings?.smartProgression, bodyweightKg);
       return {
@@ -1954,6 +1961,36 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (dy > 65 && dy > dx * 1.5) setQuickActionsOpen(true);
   };
   const onTouchCancel = () => { swipeRef.current = { y: null, x: null }; setPullDelta(0); };
+  // Pointer-event equivalents for mouse/trackpad (desktop + iPad with Magic Keyboard).
+  // Skip touch pointers — those are already handled by the Touch events above.
+  const onPointerDownPull = (e) => {
+    if (e.pointerType === 'touch' || quickActionsOpen) return;
+    swipeRef.current = { y: e.clientY, x: e.clientX };
+  };
+  const onPointerMovePull = (e) => {
+    if (e.pointerType === 'touch' || !e.buttons) return;
+    const start = swipeRef.current;
+    if (!start.y) return;
+    const dy = e.clientY - start.y;
+    const dx = Math.abs(e.clientX - start.x);
+    if (dy > 0 && dy > dx * 0.5) setPullDelta(dy);
+    else setPullDelta(0);
+  };
+  const onPointerUpPull = (e) => {
+    if (e.pointerType === 'touch') return;
+    const start = swipeRef.current;
+    if (!start.y) return;
+    const dy = e.clientY - start.y;
+    const dx = Math.abs(e.clientX - start.x);
+    swipeRef.current = { y: null, x: null };
+    setPullDelta(0);
+    if (dy > 65 && dy > dx * 1.5) setQuickActionsOpen(true);
+  };
+  const onPointerCancelPull = (e) => {
+    if (e.pointerType === 'touch') return;
+    swipeRef.current = { y: null, x: null };
+    setPullDelta(0);
+  };
 
   const handleSetStatus = async (mode, startDateStr = null) => {
     const current = store.statusMode ?? null;
@@ -2110,44 +2147,6 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     go({ name: 'train', sessionId: session.id });
   };
 
-  // ─── No-plan fallback
-  if (!sch) {
-    const hasPlans = store.schedules?.length > 0;
-    return (
-      <Screen style={{ position: 'relative' }}>
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
-          <img src={trainBg} style={isCustomBg
-            ? { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' }
-            : defaultLogoStyle} />
-        </div>
-        <TopBar
-          title={<span>HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span></span>}
-          sub={new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
-          right={<button onClick={() => go({ name: 'settings' })} style={{ background: 'transparent', border: `1px solid ${UI.hairStrong}`, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', color: UI.inkSoft, width: 36, height: 36, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          </button>}
-        />
-        <div style={{ padding: 22 }}>
-          {hasPlans ? (
-            <Empty
-              title="No active plan"
-              sub="You have plans ready — just pick one to activate."
-              action={<Btn onClick={() => go({ name: 'plan' })}>View plans</Btn>}
-              icon={ICON_CALENDAR}
-            />
-          ) : (
-            <Empty
-              title="No plan yet"
-              sub="Create a training plan to get started."
-              action={<Btn onClick={() => go({ name: 'schedule-new' })}>Create plan</Btn>}
-              icon={ICON_CALENDAR}
-            />
-          )}
-        </div>
-        {confirmEl}
-      </Screen>
-    );
-  }
 
   const cardioBanner = selectedDayCardioLogs.length > 0 ? (() => {
     const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch(_) { return 'km'; } })();
@@ -2183,7 +2182,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
-      <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+      <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel} onPointerDown={onPointerDownPull} onPointerMove={onPointerMovePull} onPointerUp={onPointerUpPull} onPointerCancel={onPointerCancelPull} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
       {/* Background watermark — VIP image from store.settings.vipBackground or default ZANE logo */}
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
         <img src={trainBg} style={isCustomBg
@@ -2191,7 +2190,47 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           : defaultLogoStyle} />
       </div>
 
-      {/* Header */}
+      {/* No-plan fallback — rendered inline so all sheets below stay mounted */}
+      {!sch && (
+        <div style={{ position: 'relative', zIndex: 1, flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <TopBar
+            title={<span>HEY, <span style={{ color: UI.gold }}>{(store.user.name || '').toUpperCase()}</span></span>}
+            sub={new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' })}
+            right={<button onClick={() => go({ name: 'settings' })} style={{ background: 'transparent', border: `1px solid ${UI.hairStrong}`, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', color: UI.inkSoft, width: 36, height: 36, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l-.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>}
+          />
+          <div style={{
+            flexShrink: 0,
+            height: Math.min(pullDelta * 0.4, 28),
+            overflow: 'hidden',
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+            transition: pullDelta === 0 ? 'height 0.25s ease' : 'none',
+            pointerEvents: 'none',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 4,
+              opacity: Math.min(1, pullDelta / 50),
+              color: pullDelta >= 65 ? UI.gold : UI.inkFaint,
+              transition: pullDelta === 0 ? 'opacity 0.25s ease, color 0.15s ease' : 'color 0.1s ease',
+            }}>
+              <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.18em', fontWeight: 600 }}>
+                {pullDelta >= 65 ? 'RELEASE' : 'QUICK ACTIONS'}
+              </span>
+              <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
+          </div>
+          <div style={{ padding: 22 }}>
+            {hasPlans
+              ? <Empty title="No active plan" sub="You have plans ready — just pick one to activate." action={<Btn onClick={() => go({ name: 'plan' })}>View plans</Btn>} icon={ICON_CALENDAR} />
+              : <Empty title="No plan yet" sub="Create a training plan to get started." action={<Btn onClick={() => go({ name: 'schedule-new' })}>Create plan</Btn>} icon={ICON_CALENDAR} />}
+          </div>
+        </div>
+      )}
+
+      {/* Plan content — header + body, only when a plan is active */}
+      {sch && <>
       <div style={{
         flexShrink: 0,
         padding: `calc(env(safe-area-inset-top, 0px) + 12px) 22px 0`,
@@ -2245,7 +2284,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         <div className="knurl" style={{ marginLeft: -22, marginRight: -22 }} />
       </div>
 
-      {/* Pull-down indicator — fades in as the user pulls, turns gold at threshold */}
+      {/* Pull-down indicator — right below plan header */}
       <div style={{
         flexShrink: 0,
         height: Math.min(pullDelta * 0.4, 28),
@@ -2791,6 +2830,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         );
       })()}
       {confirmEl}
+      </>}{/* end {sch && ...} plan content */}
 
       {/* Quick actions sheet — triggered by swipe-down */}
       <Sheet open={quickActionsOpen} onClose={() => setQuickActionsOpen(false)} title="Quick actions" titleColor="var(--accent)">
@@ -3058,8 +3098,9 @@ function PendingApprovalScreen({ onSignOut }) {
 // ─── UNIT PROMPT (existing users) ────────────────────────────────────────────
 function UnitPromptModal({ onDone }) {
   const opts = [
-    { id: 'kg', label: 'Metric', sub: 'kg / km', icon: 'fa-ruler-combined' },
-    { id: 'lbs', label: 'Imperial', sub: 'lbs / mi', icon: 'fa-flag' },
+    { id: 'kg',    label: 'Metric',   sub: 'kg / km', icon: 'fa-ruler-combined' },
+    { id: 'lbs',   label: 'Imperial', sub: 'lbs / mi', icon: 'fa-flag' },
+    { id: 'mixed', label: 'Mixed',    sub: 'kg / mi',  icon: 'fa-scale-unbalanced' },
   ];
   return (
     <div style={{
