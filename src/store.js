@@ -1961,7 +1961,7 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
     const perSet = plannedRepsPerSet && plannedRepsPerSet.length > 1
       ? (plannedRepsPerSet[i] ?? plannedRepsPerSet[plannedRepsPerSet.length - 1])
       : null;
-    const baseReps = ex?.progression_reps ?? perSet ?? plannedReps;
+    const baseReps = perSet ?? ex?.progression_reps ?? plannedReps;
     return (effReps(s) ?? 0) >= (baseReps ?? 0) + range;
   });
   if (!allHitTop) return null;
@@ -1971,7 +1971,7 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
   const cappedKg = maxKg ? Math.min(newKg, maxKg) : newKg;
   if (cappedKg <= refKg) return null;
 
-  const baseRepsFirst = ex?.progression_reps ?? (plannedRepsPerSet?.[0] ?? plannedReps);
+  const baseRepsFirst = plannedRepsPerSet?.[0] ?? ex?.progression_reps ?? plannedReps;
   return { kg: cappedKg, reps: baseRepsFirst ?? null };
 }
 

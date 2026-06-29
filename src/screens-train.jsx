@@ -395,7 +395,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const perSetVal = perSet && perSet.length > 1
       ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
       : null;
-    const base = (exercise?.progression_reps ?? perSetVal ?? entry?.plannedReps) ?? 0;
+    const base = (perSetVal ?? exercise?.progression_reps ?? entry?.plannedReps) ?? 0;
     const target = base + (store.settings?.progressionRangeTop ?? 4);
     return target > 0 ? target : null;
   };
