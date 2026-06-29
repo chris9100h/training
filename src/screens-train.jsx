@@ -869,7 +869,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const checkSet = () => {
     const idx = entry.sets.findIndex(s => !s.done && !s.skipped);
     if (idx < 0) return;
-    if (dropSetIdx === idx || myoSetIdx === idx) return;
+    if (dropSetIdx === idx) { finishDropSet(dropDropsRef.current); return; }
+    if (myoSetIdx === idx) { finishMyoSet(myoDropsRef.current, myoTechnique); return; }
     completeSet(idx, false, () => jumpToNextSet(idx));
   };
 
