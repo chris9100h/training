@@ -3245,7 +3245,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             setMyoTechnique(technique);
             if (technique === 'myorep_match') {
               const anchor = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
-              setMyoTarget(anchor ? anchor.drops[0].reps : null);
+              setMyoTarget(anchor ? anchor.drops.reduce((s, d) => s + (d.reps || 0), 0) : null);
             }
             setIntensityOpen(false);
             setTimeout(() => activateMyo(0, 'kg'), 150);
@@ -3311,7 +3311,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', color: myoMatchTarget ? 'var(--accent)' : UI.inkFaint }}>MYO MATCH</div>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, lineHeight: 1.4 }}>
                     {myoMatchTarget
-                      ? `Match ${myoMatchTarget.drops[0].reps} reps`
+                      ? `Match ${myoMatchTarget.drops.reduce((s, d) => s + (d.reps || 0), 0)} reps`
                       : 'Do a Myo Rep set first'}
                   </div>
                 </button>
