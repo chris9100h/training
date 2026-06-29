@@ -1933,7 +1933,7 @@ function ExportSheet({ open, onClose, store }) {
   const doExportCSV = () => {
     setExporting('csv');
     try {
-      const unit = store.settings?.unit || UI.unit();
+      const unit = (store.settings?.unit === 'lbs') ? 'lbs' : 'kg';
       const logs = logsInRange();
       const cardio = cardioByDay();
       const sessions = sessionsByDay();
@@ -1994,7 +1994,7 @@ function ExportSheet({ open, onClose, store }) {
       const logs = logsInRange();
       const cardio = cardioByDay();
       const sessions = sessionsByDay();
-      const unit = store.settings?.unit || UI.unit();
+      const unit = (store.settings?.unit === 'lbs') ? 'lbs' : 'kg';
       const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c9a961';
       const cardBg  = '#201e2c';
       const inkText = '#e5e2ef';

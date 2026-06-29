@@ -2865,7 +2865,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
   const lastEntries = session.last_session_entries || [];
   // Label weights in the trainee's own unit (stored numbers aren't converted),
   // so a coach watching an lbs client never sees their lifts marked "kg".
-  const unit        = session.unit || 'kg';
+  const unit        = (session.unit === 'lbs') ? 'lbs' : 'kg';
   const duration    = session.ended && session.started_at
     ? Math.round((new Date(session.ended) - new Date(session.started_at)) / 60000)
     : null;
@@ -3055,7 +3055,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
 
   const entries = session.entries || [];
   // Label weights in the trainee's own unit (stored numbers aren't converted).
-  const unit = session.unit || UI.unit();
+  const unit = (session.unit === 'lbs') ? 'lbs' : 'kg';
   const liveIdx = LB.inferCurrentExIdx(entries);
   const entry = entries[exIdx];
   const goLive = () => { setFollowLive(true); setExIdx(liveIdx); };
