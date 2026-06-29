@@ -2630,7 +2630,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                 ))}
                               </div>
                               {(() => { const t = drops.reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? (
-                                <div style={{ border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', letterSpacing: '0.03em' }}>
+                                <div style={{ border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.03em', alignSelf: 'flex-start' }}>
                                   Total {t}
                                 </div>
                               ) : null; })()}
