@@ -1119,6 +1119,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [dropSetOpen, setDropSetOpen] = useStateT(false);
   const [dropSetIdx, setDropSetIdx] = useStateT(null);
   const [dropDrops, setDropDrops] = useStateT([]);
+  const dropKgRefs = useRefT([]);
   const [notePicker, setNotePicker] = useStateT(false);
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
@@ -2537,13 +2538,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
                   </div>
                   {s.technique === 'drop' && s.done && (s.drops || []).length > 1 && (
-                    <div style={{ paddingBottom: 6 }}>
+                    <div style={{
+                      marginLeft: 36, marginTop: 2, paddingLeft: 10, paddingBottom: 6,
+                      borderLeft: `2px solid rgba(var(--accent-rgb),0.2)`,
+                    }}>
                       {(s.drops || []).slice(1).map((d, di) => (
-                        <div key={di} style={{
-                          display: 'flex', alignItems: 'center', gap: 5,
-                          paddingLeft: 40 + (di + 1) * 18, marginTop: 3,
-                        }}>
-                          <span style={{ fontSize: 8, color: UI.inkGhost, fontFamily: UI.fontUi }}>↓</span>
+                        <div key={di} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                          <span style={{ fontSize: 8, color: UI.gold, fontFamily: UI.fontUi, flexShrink: 0 }}>↓</span>
                           <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                             {d.kg}{UI.unit()} × {d.reps}
                           </span>
@@ -2870,16 +2871,29 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       <Sheet open={dropSetOpen} onClose={() => setDropSetOpen(false)} title="Drop Set">
         {(() => {
           const updateDrop = (i, field, raw) => {
-            const val = field === 'kg' ? (parseFloat(String(raw).replace(',', '.')) || null) : (parseInt(raw, 10) || null);
+            const val = field === 'kg'
+              ? (parseFloat(String(raw).replace(',', '.')) || null)
+              : (parseInt(raw, 10) || null);
             setDropDrops(prev => prev.map((d, di) => di === i ? { ...d, [field]: isNaN(val) ? null : val } : d));
           };
-          const addDrop = () => setDropDrops(prev => {
-            const last = prev[prev.length - 1];
-            return [...prev, { kg: last?.kg ?? null, reps: null }];
-          });
+          const addDrop = () => {
+            setDropDrops(prev => {
+              const last = prev[prev.length - 1];
+              return [...prev, { kg: null, reps: null }];
+            });
+            setTimeout(() => {
+              const nextRef = dropKgRefs.current[dropDrops.length];
+              if (nextRef) { nextRef.focus(); nextRef.select(); }
+            }, 50);
+          };
           const removeDrop = (i) => setDropDrops(prev => prev.filter((_, di) => di !== i));
           const canFinish = dropDrops.length >= 1 && dropDrops[0].kg != null && dropDrops[0].reps != null;
-          const inputSt = { background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '8px 10px', color: UI.ink, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          const inputSt = {
+            background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 4, padding: '8px 10px',
+            color: UI.ink, fontFamily: UI.fontNum, fontSize: 15,
+            outline: 'none', width: '100%', boxSizing: 'border-box',
+          };
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {dropDrops.map((d, i) => (
@@ -2888,10 +2902,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div>
                     {i === 0 && <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{UI.unit().toUpperCase()}</div>}
                     <input
+                      ref={el => { dropKgRefs.current[i] = el; }}
                       type="text" inputMode="decimal"
                       value={d.kg != null ? String(d.kg).replace('.', ',') : ''}
                       onChange={e => updateDrop(i, 'kg', e.target.value)}
-                      placeholder="kg"
+                      onFocus={e => e.target.select()}
+                      placeholder={i === 0 ? '—' : String(dropDrops[i - 1]?.kg ?? '—')}
                       style={inputSt}
                     />
                   </div>
@@ -2901,6 +2917,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       type="text" inputMode="numeric"
                       value={d.reps != null ? String(d.reps) : ''}
                       onChange={e => updateDrop(i, 'reps', e.target.value)}
+                      onFocus={e => e.target.select()}
                       placeholder="—"
                       style={inputSt}
                     />

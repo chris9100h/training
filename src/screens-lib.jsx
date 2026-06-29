@@ -2498,12 +2498,15 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       const decline = !isWarm && !anyImprovementBefore && isDecline(st, prevSet);
                       const hasData = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
 
-                      // Drop set: full-width stacked display
+                      // Drop set: DS badge + chips connected by arrows
                       if (st.technique === 'drop' && !isCheckboxOnly) {
                         const drops = (st.drops && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
+                        const chipColor = highlight ? UI.goldLight : UI.ink;
+                        const chipBorder = highlight ? UI.goldSoft : UI.hairStrong;
+                        const chipBg = highlight ? UI.goldFaint : 'transparent';
                         return (
-                          <div key={j} style={{ width: '100%', marginTop: j > 0 ? 2 : 0 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                          <div key={j} style={{ width: '100%', marginTop: j > 0 ? 6 : 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                               <span style={{
                                 fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
                                 color: highlight ? UI.gold : UI.inkFaint,
@@ -2513,16 +2516,27 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                               }}>DROP SET</span>
                               {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
                             </div>
-                            {drops.map((d, di) => (
-                              <div key={di} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0 2px 10px' }}>
-                                <span style={{ color: UI.inkGhost, fontSize: 10, flexShrink: 0, fontFamily: UI.fontUi }}>↓</span>
-                                <span className="num" style={{ fontSize: 12, color: di === 0 ? UI.ink : UI.inkSoft }}>
-                                  {d.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>
-                                  <span style={{ color: UI.inkFaint, margin: '0 2px' }}>×</span>
-                                  {d.reps ?? '—'}
-                                </span>
-                              </div>
-                            ))}
+                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                              {drops.map((d, di) => (
+                                <React.Fragment key={di}>
+                                  {di > 0 && (
+                                    <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>→</span>
+                                  )}
+                                  <span style={{
+                                    background: chipBg,
+                                    border: `1px solid ${chipBorder}`,
+                                    borderRadius: 4, padding: '3px 8px',
+                                    fontFamily: UI.fontNum, fontSize: 12,
+                                    color: chipColor,
+                                    opacity: di === 0 ? 1 : 0.75,
+                                  }}>
+                                    {d.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>
+                                    <span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>
+                                    {d.reps ?? '—'}
+                                  </span>
+                                </React.Fragment>
+                              ))}
+                            </div>
                           </div>
                         );
                       }
