@@ -262,15 +262,17 @@ async function importFromBackup(backup, userId) {
   const importSessions = backup.sessions?.filter(s => s.id) ?? [];
   await Promise.all([
     backup.user?.name && unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name })),
-    backup.exercises?.length && unwrap(_supabase.from('zane_exercises').upsert(
-      backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId }))
-    )),
+    backup.exercises?.length && (async () => {
+      const rows = backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId }));
+      for (let i = 0; i < rows.length; i += 500) await unwrap(_supabase.from('zane_exercises').upsert(rows.slice(i, i + 500)));
+    })(),
     backup.schedules?.length && unwrap(_supabase.from('zane_schedules').upsert(
       backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
     )),
-    importSessions.length && unwrap(_supabase.from('zane_sessions').upsert(
-      importSessions.map(s => sessionToRow(s, userId))
-    )),
+    importSessions.length && (async () => {
+      const rows = importSessions.map(s => sessionToRow(s, userId));
+      for (let i = 0; i < rows.length; i += 500) await unwrap(_supabase.from('zane_sessions').upsert(rows.slice(i, i + 500)));
+    })(),
     unwrap(_supabase.from('zane_user_settings').upsert({
       user_id: userId,
       active_schedule_id: backup.activeScheduleId ?? null,
@@ -886,11 +888,12 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
     }
   }
 
-  if (allEntries.length) {
-    await unwrap(_supabase.from('zane_session_entries').upsert(allEntries, { onConflict: 'id' }));
+  const CHUNK = 500;
+  for (let i = 0; i < allEntries.length; i += CHUNK) {
+    await unwrap(_supabase.from('zane_session_entries').upsert(allEntries.slice(i, i + CHUNK), { onConflict: 'id' }));
   }
-  if (allSets.length) {
-    await unwrap(_supabase.rpc('sync_sets_batch', { p_sets: allSets }));
+  for (let i = 0; i < allSets.length; i += CHUNK) {
+    await unwrap(_supabase.rpc('sync_sets_batch', { p_sets: allSets.slice(i, i + CHUNK) }));
   }
 }
 
