@@ -261,7 +261,12 @@ async function importFromBackup(backup, userId, onProgress) {
   const sett = backup.settings ?? {};
   const importSessions = backup.sessions?.filter(s => s.id) ?? [];
 
-  const exerciseRows = (backup.exercises || []).map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId }));
+  const idRemap = {};
+  const exerciseRows = (backup.exercises || []).map(e => {
+    const newId = uid();
+    idRemap[e.id] = newId;
+    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId };
+  });
   const sessionRows = importSessions.map(s => sessionToRow(s, userId));
   const settingsRow = {
     user_id: userId,
@@ -360,7 +365,10 @@ async function importFromBackup(backup, userId, onProgress) {
   // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
   if (importSessions.length) {
     try {
-      await _syncEntryRelational(importSessions, userId, null, (phase) => {
+      const sessionsForEntries = Object.keys(idRemap).length
+        ? importSessions.map(s => ({ ...s, entries: (s.entries || []).map(e => ({ ...e, exId: idRemap[e.exId] ?? e.exId })) }))
+        : importSessions;
+      await _syncEntryRelational(sessionsForEntries, userId, null, (phase) => {
         stepsDone++;
         prog(phase);
       });
