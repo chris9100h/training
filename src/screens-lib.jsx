@@ -2468,6 +2468,33 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 const prev = prevEntryMap[e.exId];
                 const exObj = store.exercises.find(ex => ex.id === e.exId);
                 const exName = exObj?.name ?? e.name;
+
+                // Cardio entry — show activity summary instead of sets
+                if (e.isCardio) {
+                  const cd = e.cardioData;
+                  const du = localStorage.getItem('logbook-cardio-dist-unit') || 'km';
+                  const parts = [];
+                  if (cd?.type) parts.push(cd.type.charAt(0).toUpperCase() + cd.type.slice(1));
+                  if (cd?.durationMinutes) parts.push(`${cd.durationMinutes} min`);
+                  if (cd?.distanceM != null) parts.push(du === 'mi' ? `${(cd.distanceM / 1609.344).toFixed(2)} mi` : `${(cd.distanceM / 1000).toFixed(1)} km`);
+                  return (
+                    <div key={i}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+                        <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{exName}</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        {e.cardioDone ? (
+                          <span style={{ border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 10px', fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.03em' }}>
+                            {parts.length > 0 ? parts.join(' · ') : '✓'}
+                          </span>
+                        ) : (
+                          <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint }}>—</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
                 const isCheckboxOnly = !!exObj?.no_weight_reps;
                 const filteredSets = e.sets.filter(st => !st.skipped && (showWarmup || !st.warmup));
                 // Compare working sets by position, warm-ups excluded on both sides.
@@ -2587,6 +2614,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   </span>
                                 </React.Fragment>
                               ))}
+                              {(() => { const t = drops.reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? <span style={{ color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, marginLeft: 4, alignSelf: 'center' }}>= {t}</span> : null; })()}
                             </div>
                           </div>
                         );

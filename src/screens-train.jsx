@@ -1220,6 +1220,41 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const myoDropsRef = useRefT([]);
   myoDropsRef.current = myoDrops;
   const [myoTarget, setMyoTarget] = useStateT(null);
+  // Persist intensity state so a background/resume on iOS doesn't wipe mid-set progress
+  useEffectT(() => {
+    if (dropSetIdx != null || myoSetIdx != null) {
+      try {
+        localStorage.setItem('logbook-intensity-state', JSON.stringify({
+          sessionId, exIdx,
+          dropSetIdx, dropDrops,
+          myoSetIdx, myoDrops, myoTechnique, myoTarget,
+        }));
+      } catch {}
+    } else {
+      localStorage.removeItem('logbook-intensity-state');
+    }
+  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, sessionId, exIdx]);
+  useEffectT(() => {
+    try {
+      const raw = localStorage.getItem('logbook-intensity-state');
+      if (!raw) return;
+      const st = JSON.parse(raw);
+      if (st.sessionId !== sessionId || st.exIdx !== exIdx) return;
+      const targetEntry = session?.entries[exIdx];
+      if (st.dropSetIdx != null && !targetEntry?.sets[st.dropSetIdx]?.done) {
+        setDropSetIdx(st.dropSetIdx);
+        const dd = st.dropDrops || [];
+        setDropDrops(dd); dropDropsRef.current = dd;
+      }
+      if (st.myoSetIdx != null && !targetEntry?.sets[st.myoSetIdx]?.done) {
+        setMyoSetIdx(st.myoSetIdx);
+        const md = st.myoDrops || [];
+        setMyoDrops(md); myoDropsRef.current = md;
+        setMyoTechnique(st.myoTechnique || null);
+        setMyoTarget(st.myoTarget ?? null);
+      }
+    } catch {}
+  }, [sessionId, exIdx]);
   const [notePicker, setNotePicker] = useStateT(false);
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
@@ -3007,6 +3042,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                         </div>
                       ))}
+                      {(() => { const t = (s.drops || []).reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? <div style={{ textAlign: 'right', padding: '2px 4px 2px', fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint }}>= {t} total</div> : null; })()}
                     </div>
                   )}
                   {i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) && <div className="knurl" />}
