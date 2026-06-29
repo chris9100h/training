@@ -2197,7 +2197,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         })}
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: `0 22px ${kbField ? 240 : 20}px`, display: 'flex', flexDirection: 'column', gap: 16 }}>
       {entry ? (<>
 
         {/* Exercise name */}
@@ -2501,103 +2501,108 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       <div className="knurl" style={{ marginBottom: 2 }} />
                     </>
                   )}
-                  <div data-kb-row={i} style={{
-                    display: 'grid',
-                    gridTemplateColumns: isNoWeightReps ? '28px 1fr 28px' : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px'),
-                    gap: 8, alignItems: 'center',
-                    padding: '10px 4px',
-                    opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
-                    animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
-                  }}>
-                    <div style={{
-                      width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-                      background: isCurrent ? UI.goldFaint : 'transparent',
-                      outline: `1px solid ${isCurrent ? UI.gold : s.done ? UI.goldDeep : isWarmupRow ? UI.hair : UI.hairStrong}`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontFamily: UI.fontNum, fontSize: isWarmupRow ? 8 : 10, fontWeight: 500,
-                      color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
-                    }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
-
-                    {isNoWeightReps ? <div /> : (
-                      s.technique === 'drop' && s.done
-                        ? <span style={{
-                            display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
-                            fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
-                            background: 'rgba(var(--accent-rgb),0.12)',
-                            border: '0.5px solid rgba(var(--accent-rgb),0.35)',
-                            borderRadius: 4, padding: '2px 6px',
-                          }}>DS</span>
-                        : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
-                            {isWarmupRow
-                              ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
-                              : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
-                            }
-                          </div>
-                    )}
-
-                    {!isNoWeightReps && <KgInput
-                      value={s.kg}
-                      done={s.done || s.skipped}
-                      style={setInputStyle(s.done || s.skipped, isCurrent)}
-                      onActivate={() => activateKb(i, 'kg')}
-                      kbRaw={kbRaw}
-                      isKbActive={kbField?.setIdx === i && kbField?.field === 'kg'}
-                      onChange={kg => updateSession(sess => ({
-                        ...sess,
-                        entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
-                          ...en,
-                          sets: en.sets.map((st, si) =>
-                            si === i ? { ...st, kg, done: false }
-                            : store.settings?.weightFillDown !== false && si > i && !st.done && !st.warmup ? { ...st, kg }
-                            : st
-                          ),
-                        }),
-                      }))}
-                    />}
-
-                    {!isNoWeightReps && (isUnilateral ? (
-                      <>
-                        <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
-                        <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
-                      </>
-                    ) : (
-                      <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
-                    ))}
-
-                    <button
-                      data-complete-btn
-                      onPointerDown={e => { _log(`row${i} pointerdown done=${s.done}`); e.stopPropagation(); }}
-                      onClick={() => {
-                        const now = Date.now();
-                        _log(`row${i} click done=${s.done} skipped=${s.skipped}`);
-                        if (s.skipped) { updateSet(i, { skipped: false }); return; }
-                        if (s.done) {
-                          const globalDelta = now - (lastCompleteRef.current || 0);
-                          const rowDelta = now - (recentCompleteRef.current[i] || 0);
-                          _log(`row${i} uncheck? globalΔ=${globalDelta}ms rowΔ=${rowDelta}ms`);
-                          if (globalDelta < 2000) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
-                          if (rowDelta < 3000) { _log(`row${i} BLOCKED by row guard (${rowDelta}ms)`); return; }
-                          _log(`row${i} UNCHECK → updateSet done:false`);
-                          updateSet(i, { done: false });
-                          return;
-                        }
-                        if (!isNoWeightReps && !isBodyweight && s.kg == null) return;
-                        _log(`row${i} → completeSet`);
-                        completeSet(i);
-                      }}
-                      disabled={!s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)))}
-                      style={{
-                        width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (!isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null))) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
-                        background: s.done ? UI.gold : 'transparent',
+                  {(() => {
+                    const isDropActive = dropSetIdx === i && !s.done;
+                    return (
+                    <div data-kb-row={i} style={{
+                      display: 'grid',
+                      gridTemplateColumns: isDropActive ? '28px 1fr' : (isNoWeightReps ? '28px 1fr 28px' : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px')),
+                      gap: 8, alignItems: 'center',
+                      padding: '10px 4px',
+                      opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
+                      animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
+                    }}>
+                      <div style={{
+                        width: 24, height: 24, borderRadius: 4, flexShrink: 0,
+                        background: isCurrent ? UI.goldFaint : 'transparent',
+                        outline: `1px solid ${isCurrent ? UI.gold : s.done ? UI.goldDeep : isWarmupRow ? UI.hair : UI.hairStrong}`,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: s.skipped ? 12 : 14, fontWeight: 700,
-                        color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
-                        opacity: !s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
-                        flexShrink: 0, justifySelf: 'center',
-                        WebkitTapHighlightColor: 'transparent',
-                      }}>{s.skipped ? '×' : '✓'}</button>
+                        fontFamily: UI.fontNum, fontSize: isWarmupRow ? 8 : 10, fontWeight: 500,
+                        color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
+                      }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
-                  </div>
+                      {isDropActive ? null : isNoWeightReps ? <div /> : (
+                        s.technique === 'drop' && s.done
+                          ? <span style={{
+                              display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
+                              fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
+                              background: 'rgba(var(--accent-rgb),0.12)',
+                              border: '0.5px solid rgba(var(--accent-rgb),0.35)',
+                              borderRadius: 4, padding: '2px 6px',
+                            }}>DS</span>
+                          : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
+                              {isWarmupRow
+                                ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
+                                : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
+                              }
+                            </div>
+                      )}
+
+                      {!isDropActive && !isNoWeightReps && <KgInput
+                        value={s.kg}
+                        done={s.done || s.skipped}
+                        style={setInputStyle(s.done || s.skipped, isCurrent)}
+                        onActivate={() => activateKb(i, 'kg')}
+                        kbRaw={kbRaw}
+                        isKbActive={kbField?.setIdx === i && kbField?.field === 'kg'}
+                        onChange={kg => updateSession(sess => ({
+                          ...sess,
+                          entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+                            ...en,
+                            sets: en.sets.map((st, si) =>
+                              si === i ? { ...st, kg, done: false }
+                              : store.settings?.weightFillDown !== false && si > i && !st.done && !st.warmup ? { ...st, kg }
+                              : st
+                            ),
+                          }),
+                        }))}
+                      />}
+
+                      {!isDropActive && !isNoWeightReps && (isUnilateral ? (
+                        <>
+                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                        </>
+                      ) : (
+                        <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                      ))}
+
+                      {!isDropActive && <button
+                        data-complete-btn
+                        onPointerDown={e => { _log(`row${i} pointerdown done=${s.done}`); e.stopPropagation(); }}
+                        onClick={() => {
+                          const now = Date.now();
+                          _log(`row${i} click done=${s.done} skipped=${s.skipped}`);
+                          if (s.skipped) { updateSet(i, { skipped: false }); return; }
+                          if (s.done) {
+                            const globalDelta = now - (lastCompleteRef.current || 0);
+                            const rowDelta = now - (recentCompleteRef.current[i] || 0);
+                            _log(`row${i} uncheck? globalΔ=${globalDelta}ms rowΔ=${rowDelta}ms`);
+                            if (globalDelta < 2000) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
+                            if (rowDelta < 3000) { _log(`row${i} BLOCKED by row guard (${rowDelta}ms)`); return; }
+                            _log(`row${i} UNCHECK → updateSet done:false`);
+                            updateSet(i, { done: false });
+                            return;
+                          }
+                          if (!isNoWeightReps && !isBodyweight && s.kg == null) return;
+                          _log(`row${i} → completeSet`);
+                          completeSet(i);
+                        }}
+                        disabled={!s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)))}
+                        style={{
+                          width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (!isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null))) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
+                          background: s.done ? UI.gold : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: s.skipped ? 12 : 14, fontWeight: 700,
+                          color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
+                          opacity: !s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
+                          flexShrink: 0, justifySelf: 'center',
+                          WebkitTapHighlightColor: 'transparent',
+                        }}>{s.skipped ? '×' : '✓'}</button>}
+
+                    </div>
+                    );
+                  })()}
                   {dropSetIdx === i && !s.done && (
                     <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
