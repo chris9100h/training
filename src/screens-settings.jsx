@@ -406,6 +406,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   });
   const [nowS, setNowS] = useStateSet(Date.now());
   const [importing, setImporting] = useStateSet(false);
+  const [importSheet, setImportSheet] = useStateSet(false);
   const [swVersion, setSwVersion] = useStateSet('');
   const [pushStatus, setPushStatus] = useStateSet(null);
   const [pushEnabled, setPushEnabled] = useStateSet(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
@@ -889,9 +890,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename || `zane-${LB.todayISO()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-  const importData = () => {
-    // input.click() must happen synchronously inside a user-gesture handler —
-    // any await before it would lose the gesture context on iOS Safari.
+  const runImport = () => {
+    // input.click() must be synchronous in the user-gesture handler (iOS Safari).
     const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
     input.onchange = async (e) => {
       const file = e.target.files?.[0]; if (!file) return;
@@ -900,15 +900,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       if (invalid) { await confirm(invalid, { title: 'Invalid backup', ok: 'OK' }); return; }
       const latestSession = [...(backup.sessions || [])].filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
       const backupDate = latestSession ? new Date(latestSession.ended).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }) : 'unknown date';
-      // Step 1: safety export first, before touching anything.
-      const ok1 = await confirm(`This backup contains data up to ${backupDate}. Your current data will be downloaded as a safety backup first.`, { title: 'Restore backup?', ok: 'Download & continue' });
-      if (!ok1) return;
-      try { await exportData(`zane-before-import-${LB.todayISO()}.json`); } catch (_) {}
-      // Step 2: separate confirm so iOS has a user-tap gap between the a.click()
-      // download and the import fetch requests — prevents Safari from aborting them.
-      const ok2 = await confirm('Backup saved to Downloads. Your current data will now be permanently replaced.', { title: 'Ready to import?', ok: 'Replace', danger: true });
-      if (!ok2) return;
-      setImporting(true);
+      const ok = await confirm(`This backup contains data up to ${backupDate}. Your current data will be permanently replaced.`, { title: 'Replace data?', ok: 'Replace', danger: true });
+      if (!ok) return;
+      setImporting(true); setImportSheet(false);
       try {
         await LB.importFromBackup(backup, userId); LB.clearLocal(userId); window.location.reload();
       }
@@ -1749,9 +1743,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
-            <Btn kind="ghost" onClick={importData} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
+            <Btn kind="ghost" onClick={() => setImportSheet(true)} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
           </div>
           <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Delete all data</Btn>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Import Sheet ══ */}
+      <SettingsSheet open={importSheet} onClose={() => setImportSheet(false)} title="Restore backup">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.55, fontSize: 13, color: UI.inkSoft }}>
+            <span style={{ color: UI.ink, fontWeight: 600 }}>Step 1:</span> Download a backup of your current data first.{' '}
+            <span style={{ color: UI.ink, fontWeight: 600 }}>Step 2:</span> Then pick the file you want to restore.
+          </div>
+          <Btn kind="ghost" onClick={() => exportData(`zane-before-import-${LB.todayISO()}.json`)}>1 · Backup current data</Btn>
+          <Btn kind="ghost" onClick={runImport} disabled={importing}>2 · Select file and import</Btn>
         </div>
       </SettingsSheet>
 
