@@ -2608,7 +2608,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                               }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
                               {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
                             </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 4 }}>
                               <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
                                 {drops.map((d, di) => (
                                   <React.Fragment key={di}>
@@ -2630,7 +2630,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                 ))}
                               </div>
                               {(() => { const t = drops.reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? (
-                                <div style={{ border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.03em', alignSelf: 'flex-start' }}>
+                                <div style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>
                                   Total {t}
                                 </div>
                               ) : null; })()}
