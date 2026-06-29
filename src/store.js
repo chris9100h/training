@@ -1824,29 +1824,30 @@ function nextDay(state) {
 //   entries — windowing must never wipe history already on the device.
 // When the server returns entries without technique/drops (race: flushSync hasn't
 // finished writing sets yet when a background loadFromSupabase runs), preserve the
-// richer local values. Matches sets by id; if server has null but local has a value,
-// the local value wins.
+// richer local values. Matches by position (entry index, set index) — sets have no
+// id in the store model. Also preserves in-memory-only cardio fields (isCardio,
+// cardioDone, cardioData) that are never stored in the DB.
 function mergeEntrySets(serverEntries, cachedEntries) {
   if (!(serverEntries || []).length || !(cachedEntries || []).length) return serverEntries;
-  const cachedSetMap = new Map();
-  for (const e of cachedEntries) {
-    for (const st of (e.sets || [])) {
-      if (st.id) cachedSetMap.set(st.id, st);
-    }
-  }
-  return serverEntries.map(e => ({
-    ...e,
-    sets: (e.sets || []).map(st => {
-      if (!st.id) return st;
-      const cached = cachedSetMap.get(st.id);
-      if (!cached) return st;
-      return {
-        ...st,
-        technique: st.technique ?? cached.technique ?? null,
-        drops: st.drops ?? cached.drops ?? null,
-      };
-    }),
-  }));
+  return serverEntries.map((e, ei) => {
+    const cachedEntry = cachedEntries[ei];
+    if (!cachedEntry) return e;
+    return {
+      ...e,
+      ...(cachedEntry.isCardio != null ? { isCardio: cachedEntry.isCardio } : {}),
+      ...(cachedEntry.cardioDone != null ? { cardioDone: cachedEntry.cardioDone } : {}),
+      ...(cachedEntry.cardioData !== undefined ? { cardioData: cachedEntry.cardioData } : {}),
+      sets: (e.sets || []).map((st, si) => {
+        const cached = (cachedEntry.sets || [])[si];
+        if (!cached) return st;
+        return {
+          ...st,
+          technique: st.technique ?? cached.technique ?? null,
+          drops: st.drops ?? cached.drops ?? null,
+        };
+      }),
+    };
+  });
 }
 
 function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {

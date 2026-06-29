@@ -2470,20 +2470,33 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 const exName = exObj?.name ?? e.name;
 
                 // Cardio entry — show activity summary instead of sets
-                if (e.isCardio) {
-                  const cd = e.cardioData;
+                // isCardio may be missing on entries loaded from DB (not a DB column),
+                // so derive it from the exercise's movement_type as fallback.
+                const isEntryCardio = !!e.isCardio || exObj?.movement_type === 'cardio';
+                if (isEntryCardio) {
+                  // cardioData is in-memory only; for historical sessions look up
+                  // from store.cardioLogs by session date + exercise name.
+                  let cd = e.cardioData;
+                  if (!cd) {
+                    const sessionDate = s.date?.slice(0, 10);
+                    const logs = sessionDate ? (store.cardioLogs || []).filter(cl => cl.date === sessionDate) : [];
+                    const exNameLower = (exObj?.name || e.name || '').toLowerCase();
+                    const match = logs.find(cl => cl.type?.toLowerCase() === exNameLower) || logs[0] || null;
+                    if (match) cd = { type: match.type, durationMinutes: match.durationMinutes, distanceM: match.distanceM ?? null };
+                  }
                   const du = localStorage.getItem('logbook-cardio-dist-unit') || 'km';
                   const parts = [];
                   if (cd?.type) parts.push(cd.type.charAt(0).toUpperCase() + cd.type.slice(1));
                   if (cd?.durationMinutes) parts.push(`${cd.durationMinutes} min`);
                   if (cd?.distanceM != null) parts.push(du === 'mi' ? `${(cd.distanceM / 1609.344).toFixed(2)} mi` : `${(cd.distanceM / 1000).toFixed(1)} km`);
+                  const done = e.cardioDone ?? !!cd;
                   return (
                     <div key={i}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
                         <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>{exName}</div>
                       </div>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                        {e.cardioDone ? (
+                        {done ? (
                           <span style={{ border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 10px', fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.03em' }}>
                             {parts.length > 0 ? parts.join(' · ') : '✓'}
                           </span>
@@ -2595,26 +2608,32 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                               }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
                               {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
                             </div>
-                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
-                              {drops.map((d, di) => (
-                                <React.Fragment key={di}>
-                                  {di > 0 && (
-                                    <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>↺</span>
-                                  )}
-                                  <span style={{
-                                    background: di === 0 ? chipBg : 'transparent',
-                                    border: `1px solid ${di === 0 ? chipBorder : UI.hair}`,
-                                    borderRadius: 4, padding: '3px 8px',
-                                    fontFamily: UI.fontNum, fontSize: 12,
-                                    color: di === 0 ? chipColor : UI.inkSoft,
-                                    opacity: di === 0 ? 1 : 0.7,
-                                  }}>
-                                    {di === 0 && <>{d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span></>}
-                                    {d.reps ?? '—'}
-                                  </span>
-                                </React.Fragment>
-                              ))}
-                              {(() => { const t = drops.reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? <span style={{ color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, marginLeft: 4, alignSelf: 'center' }}>= {t}</span> : null; })()}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                                {drops.map((d, di) => (
+                                  <React.Fragment key={di}>
+                                    {di > 0 && (
+                                      <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>↺</span>
+                                    )}
+                                    <span style={{
+                                      background: di === 0 ? chipBg : 'transparent',
+                                      border: `1px solid ${di === 0 ? chipBorder : UI.hair}`,
+                                      borderRadius: 4, padding: '3px 8px',
+                                      fontFamily: UI.fontNum, fontSize: 12,
+                                      color: di === 0 ? chipColor : UI.inkSoft,
+                                      opacity: di === 0 ? 1 : 0.7,
+                                    }}>
+                                      {di === 0 && <>{d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span></>}
+                                      {d.reps ?? '—'}
+                                    </span>
+                                  </React.Fragment>
+                                ))}
+                              </div>
+                              {(() => { const t = drops.reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? (
+                                <div style={{ border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', letterSpacing: '0.03em' }}>
+                                  Total {t}
+                                </div>
+                              ) : null; })()}
                             </div>
                           </div>
                         );
