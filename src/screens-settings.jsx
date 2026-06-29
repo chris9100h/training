@@ -408,6 +408,9 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [importing, setImporting] = useStateSet(false);
   const [importSheet, setImportSheet] = useStateSet(false);
   const [importProgress, setImportProgress] = useStateSet({ pct: 0, phase: '' });
+  const [importSourceUnit, _setImportSourceUnit] = useStateSet(store.settings?.unit || 'kg');
+  const importSourceUnitRef = useRefSet(store.settings?.unit || 'kg');
+  const setImportSourceUnit = v => { importSourceUnitRef.current = v; _setImportSourceUnit(v); };
   const [swVersion, setSwVersion] = useStateSet('');
   const [pushStatus, setPushStatus] = useStateSet(null);
   const [pushEnabled, setPushEnabled] = useStateSet(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
@@ -899,14 +902,26 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       let backup; try { backup = JSON.parse(await file.text()); } catch (_) { await confirm('The selected file is not valid JSON.', { title: 'Invalid file', ok: 'OK' }); return; }
       const invalid = LB.validateBackup(backup);
       if (invalid) { await confirm(invalid, { title: 'Invalid backup', ok: 'OK' }); return; }
+
+      // Auto-detect source unit from backup; update toggle + ref so the user sees it.
+      const detectedUnit = backup.settings?.unit;
+      if (detectedUnit === 'kg' || detectedUnit === 'lbs') setImportSourceUnit(detectedUnit);
+
       const latestSession = [...(backup.sessions || [])].filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
       const backupDate = latestSession ? new Date(latestSession.ended).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }) : 'unknown date';
-      const ok = await confirm(`This backup contains data up to ${backupDate}. Your current data will be permanently replaced.`, { title: 'Replace data?', ok: 'Replace', danger: true });
+      const userUnit = store.settings?.unit || 'kg';
+      const srcUnit = importSourceUnitRef.current;
+      const unitMismatch = srcUnit !== userUnit;
+      const unitNote = unitMismatch ? ` Weights will be converted from ${srcUnit.toUpperCase()} to ${userUnit.toUpperCase()}.` : '';
+      const ok = await confirm(`This backup contains data up to ${backupDate}. Your current data will be permanently replaced.${unitNote}`, { title: 'Replace data?', ok: 'Replace', danger: true });
       if (!ok) return;
+      const unitConvert = unitMismatch
+        ? { multiplier: srcUnit === 'kg' ? 2.20462 : 1 / 2.20462, targetUnit: userUnit }
+        : null;
       setImporting(true);
       setImportProgress({ pct: 0, phase: 'Starting…' });
       try {
-        await LB.importFromBackup(backup, userId, (pct, phase) => setImportProgress({ pct, phase }));
+        await LB.importFromBackup(backup, userId, (pct, phase) => setImportProgress({ pct, phase }), unitConvert);
         LB.clearLocal(userId); window.location.reload();
       }
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
@@ -1769,6 +1784,18 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <span style={{ color: UI.ink, fontWeight: 600 }}>Step 2:</span> Then pick the file you want to restore.
             </div>
             <Btn kind="ghost" onClick={() => exportData(`zane-before-import-${LB.todayISO()}.json`)}>1 · Backup current data</Btn>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px' }}>
+              <span style={{ fontSize: 12, color: UI.inkSoft }}>Source weight unit</span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {['kg', 'lbs'].map(u => (
+                  <button key={u} onClick={() => setImportSourceUnit(u)} style={{
+                    padding: '3px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                    background: importSourceUnit === u ? 'var(--accent)' : UI.bgInset,
+                    color: importSourceUnit === u ? '#fff' : UI.inkSoft,
+                  }}>{u.toUpperCase()}</button>
+                ))}
+              </div>
+            </div>
             <Btn kind="ghost" onClick={runImport}>2 · Select file and import</Btn>
           </div>
         )}

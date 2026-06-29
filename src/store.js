@@ -252,7 +252,8 @@ function validateBackup(b) {
 // so they inherit the same offline-resilient retry/cache path as sessions. UI
 // mutates store.skips via setStore; no imperative per-skip writes.
 
-async function importFromBackup(backup, userId, onProgress) {
+async function importFromBackup(backup, userId, onProgress, unitConvert = null) {
+  // unitConvert: { multiplier: number, targetUnit: 'kg'|'lbs' } | null
   // Validate before the destructive delete — never half-apply a bad file.
   const invalid = validateBackup(backup);
   if (invalid) throw new Error(invalid);
@@ -275,7 +276,7 @@ async function importFromBackup(backup, userId, onProgress) {
     week_plan_start_date: backup.weekPlanStartDate ?? null,
     last_advanced_date: backup.lastAdvancedDate ?? null,
     in_progress_session_id: backup.inProgress ?? null,
-    unit: sett.unit ?? null,
+    unit: unitConvert?.targetUnit ?? sett.unit ?? null,
     rest_default: sett.restDefault || 120,
     rest_big: sett.restBig || 180,
     rest_medium: sett.restMedium || 120,
@@ -364,9 +365,17 @@ async function importFromBackup(backup, userId, onProgress) {
   // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
   if (importSessions.length) {
     try {
-      const sessionsForEntries = Object.keys(idRemap).length
-        ? importSessions.map(s => ({ ...s, entries: (s.entries || []).map(e => ({ ...e, exId: idRemap[e.exId] ?? e.exId })) }))
-        : importSessions;
+      const convertKg = unitConvert
+        ? kg => kg != null ? Math.round(kg * unitConvert.multiplier * 100) / 100 : null
+        : kg => kg;
+      const sessionsForEntries = importSessions.map(s => ({
+        ...s,
+        entries: (s.entries || []).map(e => ({
+          ...e,
+          exId: idRemap[e.exId] ?? e.exId,
+          sets: unitConvert ? (e.sets || []).map(st => ({ ...st, kg: convertKg(st.kg) })) : e.sets,
+        })),
+      }));
       await _syncEntryRelational(sessionsForEntries, userId, null, (phase) => {
         stepsDone++;
         prog(phase);
