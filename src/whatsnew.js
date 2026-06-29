@@ -21,7 +21,7 @@ window.WHATS_NEW = [
     items: [
       '⚡ Intensity techniques are here. Tap the glowing INTENSITY button under any exercise during training to unlock three new ways to train past failure — no extra logging, no workarounds, just tap and go.',
       'Drop Set: strip the weight and keep pushing without ending the set. Log the full drop chain (e.g. 100kg×8 → 80kg×6 → 60kg×5) in one go. Every drop shows in your session summary.',
-      'Myo-Reps: one heavy activation set, then a run of short-rest mini sets while the muscle is still on fire. Time-efficient and brutal in the best way.',
+      'Myo-Reps: essentially rest-pause — one activation set, then a series of short-rest mini sets while the muscle is still loaded. Time-efficient and brutal in the best way.',
       'Myo-Rep Match: targets the exact total rep count from your preceding Myo-Rep set. A live progress bar fills and glows with every mini set — keep going until you match it. Go past failure, with precision.',
       'Several bug fixes and improvements.',
     ],
