@@ -673,6 +673,47 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
   };
 
+  const finishDropSet = (drops) => {
+    if (!drops.length || dropSetIdx == null) return;
+    const first = drops[0];
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+        ...en,
+        sets: en.sets.map((st, si) => si !== dropSetIdx ? st : {
+          ...st,
+          kg: first.kg,
+          reps: first.reps,
+          done: true,
+          technique: 'drop',
+          drops,
+        }),
+      }),
+    }));
+    setFlashSet(dropSetIdx);
+    setTimeout(() => setFlashSet(null), 1400);
+    setDropSetOpen(false);
+    // New best overlay using first drop's values
+    if (!entry.sets[dropSetIdx]?.warmup && first.kg != null && first.reps > 0) {
+      const cE1rm = LB.e1rm(first.kg, first.reps);
+      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id, session.dayId);
+      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
+      if (cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId]) {
+        newBestShownRef.current[entry.exId] = true;
+        setNewBestSet(true);
+        setTimeout(() => setNewBestSet(false), 2500);
+      }
+    }
+    // Rest timer + navigation (same logic as completeSet, no warmup path needed)
+    const updatedSets = entry.sets.map((st, k) => k === dropSetIdx ? { ...st, done: true } : st);
+    if (!entry.sets[dropSetIdx]?.warmup) {
+      persistRestStart(Date.now(), restDef);
+    }
+    if (updatedSets.every(st => st.done)) {
+      setTimeout(() => navigate(1), 600);
+    }
+  };
+
   const addSet = () => {
     const bwKg = exercise?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
     updateSession(sess => ({
@@ -1075,6 +1116,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [advanceCycle, setAdvanceCycle] = useStateT(false);
   const [cycleFromPickedDay, setCycleFromPickedDay] = useStateT(false);
   const [intensityOpen, setIntensityOpen] = useStateT(false);
+  const [dropSetOpen, setDropSetOpen] = useStateT(false);
+  const [dropSetIdx, setDropSetIdx] = useStateT(null);
+  const [dropDrops, setDropDrops] = useStateT([]);
   const [notePicker, setNotePicker] = useStateT(false);
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
@@ -2412,12 +2456,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
                     }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
-                    {isNoWeightReps ? <div /> : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
-                      {isWarmupRow
-                        ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
-                        : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
-                      }
-                    </div>}
+                    {isNoWeightReps ? <div /> : (
+                      s.technique === 'drop' && s.done
+                        ? <span style={{
+                            display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
+                            fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
+                            background: 'rgba(var(--accent-rgb),0.12)',
+                            border: '0.5px solid rgba(var(--accent-rgb),0.35)',
+                            borderRadius: 4, padding: '2px 6px',
+                          }}>DS</span>
+                        : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
+                            {isWarmupRow
+                              ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
+                              : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
+                            }
+                          </div>
+                    )}
 
                     {!isNoWeightReps && <KgInput
                       value={s.kg}
@@ -2482,6 +2536,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       }}>{s.skipped ? '×' : '✓'}</button>
 
                   </div>
+                  {s.technique === 'drop' && s.done && (s.drops || []).length > 1 && (
+                    <div style={{ paddingBottom: 6 }}>
+                      {(s.drops || []).slice(1).map((d, di) => (
+                        <div key={di} style={{
+                          display: 'flex', alignItems: 'center', gap: 5,
+                          paddingLeft: 40 + (di + 1) * 18, marginTop: 3,
+                        }}>
+                          <span style={{ fontSize: 8, color: UI.inkGhost, fontFamily: UI.fontUi }}>↓</span>
+                          <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
+                            {d.kg}{UI.unit()} × {d.reps}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) && <div className="knurl" />}
                 </React.Fragment>
               );
@@ -2759,14 +2828,105 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {/* intensity technique picker */}
-      <Sheet open={intensityOpen} onClose={() => setIntensityOpen(false)} title="Intensity technique">
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '32px 0 16px', gap: 12 }}>
-          <i className="fa fa-bolt" style={{ fontSize: 32, color: 'var(--accent)', filter: 'drop-shadow(0 0 10px rgba(var(--accent-rgb),0.7))' }} />
-          <div className="display" style={{ fontSize: 22, color: UI.ink }}>Coming soon</div>
-          <div style={{ fontSize: 13, color: UI.inkSoft, textAlign: 'center', lineHeight: 1.6 }}>
-            Drop sets, Myo-Reps and more{'\n'}are on their way.
-          </div>
+      <Sheet open={intensityOpen} onClose={() => setIntensityOpen(false)} title="Intensity">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {[
+            { key: 'drop', label: 'DROP SET', sub: 'Descend the weight, keep the reps coming', icon: 'fa-angles-down', active: true },
+            { key: 'rest_pause', label: 'REST-PAUSE', sub: 'Short rest, then squeeze out extra reps', icon: 'fa-pause', active: false },
+            { key: 'myorep', label: 'MYO-REPS', sub: 'Activation set + mini-sets to failure', icon: 'fa-rotate', active: false },
+          ].map(({ key, label, sub, icon, active }) => (
+            <button key={key} disabled={!active} onClick={() => {
+              if (key === 'drop') {
+                const target = currentSetIdx >= 0
+                  ? currentSetIdx
+                  : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
+                if (target < 0) return;
+                const s = entry.sets[target];
+                setDropDrops([{ kg: s?.kg ?? null, reps: s?.reps ?? null }]);
+                setDropSetIdx(target);
+                setIntensityOpen(false);
+                setDropSetOpen(true);
+              }
+            }} style={{
+              width: '100%', textAlign: 'left', cursor: active ? 'pointer' : 'default',
+              background: active ? 'rgba(var(--accent-rgb),0.07)' : UI.bgInset,
+              border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`,
+              borderRadius: 6, padding: '14px 16px',
+              display: 'flex', alignItems: 'center', gap: 14,
+              opacity: active ? 1 : 0.45,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <i className={`fa-solid ${icon}`} style={{ fontSize: 18, color: active ? 'var(--accent)' : UI.inkFaint, width: 20, textAlign: 'center', flexShrink: 0 }} />
+              <div>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: active ? 'var(--accent)' : UI.inkFaint }}>{label}</div>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>{sub}{!active && ' — coming soon'}</div>
+              </div>
+            </button>
+          ))}
         </div>
+      </Sheet>
+
+      {/* drop set modal */}
+      <Sheet open={dropSetOpen} onClose={() => setDropSetOpen(false)} title="Drop Set">
+        {(() => {
+          const updateDrop = (i, field, raw) => {
+            const val = field === 'kg' ? (parseFloat(String(raw).replace(',', '.')) || null) : (parseInt(raw, 10) || null);
+            setDropDrops(prev => prev.map((d, di) => di === i ? { ...d, [field]: isNaN(val) ? null : val } : d));
+          };
+          const addDrop = () => setDropDrops(prev => {
+            const last = prev[prev.length - 1];
+            return [...prev, { kg: last?.kg ?? null, reps: null }];
+          });
+          const removeDrop = (i) => setDropDrops(prev => prev.filter((_, di) => di !== i));
+          const canFinish = dropDrops.length >= 1 && dropDrops[0].kg != null && dropDrops[0].reps != null;
+          const inputSt = { background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '8px 10px', color: UI.ink, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {dropDrops.map((d, i) => (
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '20px 1fr 1fr auto', gap: 8, alignItems: 'center' }}>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.gold, textAlign: 'center', fontWeight: 700 }}>↓</span>
+                  <div>
+                    {i === 0 && <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{UI.unit().toUpperCase()}</div>}
+                    <input
+                      type="text" inputMode="decimal"
+                      value={d.kg != null ? String(d.kg).replace('.', ',') : ''}
+                      onChange={e => updateDrop(i, 'kg', e.target.value)}
+                      placeholder="kg"
+                      style={inputSt}
+                    />
+                  </div>
+                  <div>
+                    {i === 0 && <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>REPS</div>}
+                    <input
+                      type="text" inputMode="numeric"
+                      value={d.reps != null ? String(d.reps) : ''}
+                      onChange={e => updateDrop(i, 'reps', e.target.value)}
+                      placeholder="—"
+                      style={inputSt}
+                    />
+                  </div>
+                  <button onClick={() => removeDrop(i)} disabled={dropDrops.length <= 1} style={{
+                    width: 28, height: 28, borderRadius: 4, border: `1px solid ${UI.hair}`,
+                    background: 'transparent', color: UI.inkFaint, fontSize: 14, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    opacity: dropDrops.length <= 1 ? 0.2 : 1,
+                    marginTop: i === 0 ? 22 : 0,
+                  }}>×</button>
+                </div>
+              ))}
+              <button onClick={addDrop} style={{
+                width: '100%', padding: '9px 0',
+                background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+                borderRadius: 6, color: UI.inkSoft,
+                fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.1em',
+                cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              }}>↓ ADD DROP</button>
+              <Btn disabled={!canFinish} onClick={() => finishDropSet(dropDrops)} style={{ width: '100%', marginTop: 4, opacity: canFinish ? 1 : 0.4 }}>
+                Finish drop set
+              </Btn>
+            </div>
+          );
+        })()}
       </Sheet>
 
       {/* session note editor */}

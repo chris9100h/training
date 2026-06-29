@@ -450,6 +450,8 @@ function mapEntryRows(entryRows) {
         done: st.done,
         skipped: st.skipped,
         warmup: st.warmup,
+        technique: st.technique ?? null,
+        drops: st.drops ?? null,
       })),
   }));
 }
@@ -833,7 +835,8 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
   // Normalize set fields for comparison — guards against null vs undefined and missing
   // keys when comparing sets from an old (pre-migration) store format with new format.
   const normSet = s => [s.kg ?? null, s.reps ?? null, s.repsL ?? null, s.repsR ?? null,
-                        s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0].join('|');
+                        s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0,
+                        s.technique ?? '', JSON.stringify(s.drops ?? null)].join('|');
 
   for (const s of sessions) {
     const entries = s.entries || [];
@@ -874,6 +877,8 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
             done: set.done ?? false,
             skipped: set.skipped ?? false,
             warmup: set.warmup ?? false,
+            technique: set.technique ?? null,
+            drops: set.drops ?? null,
             updated_at: now,
           });
         }
