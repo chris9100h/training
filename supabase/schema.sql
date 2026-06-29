@@ -892,7 +892,7 @@ AS $function$
   INSERT INTO zane_sets (
     id, session_id, entry_id, user_id,
     set_idx, kg, reps, reps_l, reps_r,
-    done, skipped, warmup, updated_at
+    done, skipped, warmup, technique, drops, updated_at
   )
   SELECT
     s->>'id',
@@ -907,6 +907,8 @@ AS $function$
     COALESCE((s->>'done')::boolean,    false),
     COALESCE((s->>'skipped')::boolean, false),
     COALESCE((s->>'warmup')::boolean,  false),
+    NULLIF(s->>'technique', ''),
+    CASE WHEN s->'drops' IS NOT NULL AND s->'drops' != 'null'::jsonb THEN s->'drops' ELSE NULL END,
     (s->>'updated_at')::timestamptz
   FROM jsonb_array_elements(p_sets) AS s
   ON CONFLICT (id) DO UPDATE SET
@@ -917,6 +919,8 @@ AS $function$
     done       = EXCLUDED.done,
     skipped    = EXCLUDED.skipped,
     warmup     = EXCLUDED.warmup,
+    technique  = EXCLUDED.technique,
+    drops      = EXCLUDED.drops,
     updated_at = EXCLUDED.updated_at
   WHERE zane_sets.updated_at < EXCLUDED.updated_at;
 $function$;
