@@ -879,28 +879,35 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
   const [focus, setFocus] = React.useState(false);
   const inputRef = React.useRef(null);
   const savedSel = React.useRef(null);
+
+  // Uncontrolled pattern: React never overwrites the DOM value on re-render
+  // (which would fight iOS autocorrect). We sync externally-changed values
+  // ourselves and restore the cursor only after normal typing.
+  React.useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    // Programmatic reset / external value change — update DOM.
+    if (el.value !== value) el.value = value;
+    // Restore cursor after regular typing. Skipped for replacements (autocorrect,
+    // paste) so iOS can place the cursor naturally.
+    if (type !== 'password') {
+      const sel = savedSel.current;
+      savedSel.current = null;
+      if (sel && sel.start != null && document.activeElement === el) {
+        try { el.setSelectionRange(sel.start, sel.end); } catch (_) {}
+      }
+    }
+  });
+
   const handleChange = (e) => {
-    // Skip cursor-save for replacement inputs (autocorrect suggestions, paste) —
-    // calling setSelectionRange after iOS inserts a suggestion interrupts the
-    // autocorrect commit and reverts the change. Let the browser handle cursor
-    // placement for those input types.
     const inputType = e.nativeEvent?.inputType;
     const isReplacement = !inputType || inputType === 'insertReplacementText' || inputType === 'insertFromPaste' || inputType === 'insertFromDrop';
     if (type !== 'password' && !isReplacement) {
-      try { savedSel.current = { start: e.target.selectionStart, end: e.target.selectionEnd }; } catch(_) {}
-    } else {
-      savedSel.current = null;
+      try { savedSel.current = { start: e.target.selectionStart, end: e.target.selectionEnd }; } catch (_) {}
     }
     onChange(e.target.value);
   };
-  React.useLayoutEffect(() => {
-    if (type === 'password') return;
-    const sel = savedSel.current;
-    savedSel.current = null;
-    if (sel && sel.start != null && inputRef.current && document.activeElement === inputRef.current) {
-      try { inputRef.current.setSelectionRange(sel.start, sel.end); } catch(e) {}
-    }
-  });
+
   return (
     <div style={{
       borderBottom: `1px solid ${focus ? UI.gold : UI.hairStrong}`,
@@ -909,7 +916,8 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
     }}>
       <input
         ref={inputRef}
-        value={value} onChange={handleChange}
+        defaultValue={value}
+        onChange={handleChange}
         onCompositionEnd={(e) => onChange(e.target.value)}
         type={type} placeholder={placeholder} autoFocus={autoFocus}
         onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
