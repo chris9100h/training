@@ -879,17 +879,20 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
   const [focus, setFocus] = React.useState(false);
   const inputRef = React.useRef(null);
   const savedSel = React.useRef(null);
+  const onChangeRef = React.useRef(onChange);
+  const valueRef = React.useRef(value);
 
-  // Uncontrolled pattern: React never overwrites the DOM value on re-render
-  // (which would fight iOS autocorrect). We sync externally-changed values
-  // ourselves and restore the cursor only after normal typing.
+  // Keep refs current without re-running effects
+  React.useLayoutEffect(() => {
+    onChangeRef.current = onChange;
+    valueRef.current = value;
+  });
+
+  // Sync DOM only when unfocused (programmatic resets like clearing the field)
   React.useLayoutEffect(() => {
     const el = inputRef.current;
     if (!el) return;
-    // Programmatic reset / external value change — update DOM.
-    if (el.value !== value) el.value = value;
-    // Restore cursor after regular typing. Skipped for replacements (autocorrect,
-    // paste) so iOS can place the cursor naturally.
+    if (document.activeElement !== el && el.value !== value) el.value = value;
     if (type !== 'password') {
       const sel = savedSel.current;
       savedSel.current = null;
@@ -899,6 +902,23 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
     }
   });
 
+  // Native input listener + rAF: catches iOS autocorrect in WKWebView standalone
+  // mode, where iOS replaces text in the DOM without triggering React's synthetic
+  // onChange. Reading el.value in a rAF fires after iOS commits the replacement.
+  // For normal typing React's onChange fires synchronously, so valueRef is already
+  // updated before the rAF runs — the guard prevents a double call.
+  React.useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const handle = () => {
+      requestAnimationFrame(() => {
+        if (el.value !== valueRef.current) onChangeRef.current(el.value);
+      });
+    };
+    el.addEventListener('input', handle, { passive: true });
+    return () => el.removeEventListener('input', handle);
+  }, []);
+
   const handleChange = (e) => {
     const inputType = e.nativeEvent?.inputType;
     const isReplacement = !inputType || inputType === 'insertReplacementText' || inputType === 'insertFromPaste' || inputType === 'insertFromDrop';
@@ -906,6 +926,11 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
       try { savedSel.current = { start: e.target.selectionStart, end: e.target.selectionEnd }; } catch (_) {}
     }
     onChange(e.target.value);
+  };
+
+  const handleBlur = (e) => {
+    setFocus(false);
+    if (e.target.value !== value) onChange(e.target.value);
   };
 
   return (
@@ -920,7 +945,7 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
         onChange={handleChange}
         onCompositionEnd={(e) => onChange(e.target.value)}
         type={type} placeholder={placeholder} autoFocus={autoFocus}
-        onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
+        onFocus={() => setFocus(true)} onBlur={handleBlur}
         {...rest}
         style={{
           width: '100%', background: 'transparent', border: 'none', outline: 'none',
