@@ -2822,12 +2822,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   })()}
                   {dropSetIdx === i && !s.done && (
                     <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
-                        <span className="micro-gold">DROP SET</span>
-                        <button onClick={() => {
-                          setDropSetIdx(null); setDropDrops([]);
-                          kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
-                        }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                      <div style={{ position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 1, paddingBottom: 2 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
+                          <span className="micro-gold">DROP SET</span>
+                          <button onClick={() => {
+                            setDropSetIdx(null); setDropDrops([]);
+                            kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+                          }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                        </div>
                       </div>
                       {dropDrops.map((d, di) => {
                         const isKgA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'kg';
