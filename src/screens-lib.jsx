@@ -2501,21 +2501,21 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       // Drop set: DS badge + chips connected by arrows
                       if (st.technique === 'drop' && !isCheckboxOnly) {
                         const drops = (st.drops && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
-                        const chipColor = highlight ? UI.goldLight : UI.ink;
-                        const chipBorder = highlight ? UI.goldSoft : UI.hairStrong;
-                        const chipBg = highlight ? UI.goldFaint : 'transparent';
+                        const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
+                        const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
+                        const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
                         return (
                           <div key={j} style={{
                             width: '100%', marginTop: j > 0 ? 6 : 0,
-                            borderLeft: `2px solid ${highlight ? UI.goldSoft : 'rgba(var(--accent-rgb),0.35)'}`,
+                            borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`,
                             paddingLeft: 10,
                           }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                               <span style={{
                                 fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
-                                color: highlight ? UI.gold : UI.inkFaint,
-                                background: highlight ? UI.goldFaint : 'rgba(var(--accent-rgb),0.08)',
-                                border: `0.5px solid ${highlight ? UI.goldSoft : 'rgba(var(--accent-rgb),0.25)'}`,
+                                color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint,
+                                background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)',
+                                border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`,
                                 borderRadius: 4, padding: '2px 6px',
                               }}>DROP SET</span>
                               {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
