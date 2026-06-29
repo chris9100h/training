@@ -715,6 +715,39 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
   };
 
+  const cancelMyo = () => {
+    setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null);
+    kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+    setKbField(null); setKbRaw(''); setKbFresh(false);
+  };
+
+  const finishMyoSet = (drops, technique) => {
+    if (!drops.length || myoSetIdx == null) return;
+    const first = drops[0];
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+        ...en,
+        sets: en.sets.map((st, si) => si !== myoSetIdx ? st : {
+          ...st,
+          kg: first.kg,
+          reps: first.reps,
+          done: true,
+          technique,
+          drops,
+        }),
+      }),
+    }));
+    setFlashSet(myoSetIdx);
+    setTimeout(() => setFlashSet(null), 1400);
+    kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+    const targetIdx = myoSetIdx;
+    setMyoSetIdx(null); setMyoTechnique(null); setMyoDrops([]); setMyoTarget(null);
+    if (!entry.sets[targetIdx]?.warmup) persistRestStart(Date.now(), restDef);
+    const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
+    if (updatedSets.every(st => st.done)) setTimeout(() => navigate(1), 600);
+  };
+
   const addSet = () => {
     const bwKg = exercise?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
     updateSession(sess => ({
@@ -1121,6 +1154,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [dropDrops, setDropDrops] = useStateT([]);
   const dropDropsRef = useRefT([]);
   dropDropsRef.current = dropDrops;
+  const [myoSetIdx, setMyoSetIdx] = useStateT(null);
+  const [myoTechnique, setMyoTechnique] = useStateT(null);
+  const [myoDrops, setMyoDrops] = useStateT([]);
+  const myoDropsRef = useRefT([]);
+  myoDropsRef.current = myoDrops;
+  const [myoTarget, setMyoTarget] = useStateT(null);
   const [notePicker, setNotePicker] = useStateT(false);
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
@@ -1297,6 +1336,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbFresh(true);
   };
 
+  const activateMyo = (dropIdx, field) => {
+    const d = myoDropsRef.current[dropIdx];
+    const val = field === 'kg'
+      ? (d?.kg != null ? String(d.kg).replace('.', ',') : '')
+      : (d?.reps != null ? String(d.reps) : '');
+    kbFieldRef.current = { setIdx: 'myo', dropIdx, field };
+    kbRawRef.current = val;
+    kbFreshRef.current = true;
+    setKbField({ setIdx: 'myo', dropIdx, field });
+    setKbRaw(val);
+    setKbFresh(true);
+  };
+
   const kbApply = (newRaw, field, setIdx) => {
     if (setIdx === 'drop') {
       const dropIdx = kbFieldRef.current?.dropIdx;
@@ -1307,6 +1359,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       } else {
         const num = newRaw === '' ? null : parseInt(newRaw, 10);
         if (newRaw === '' || !isNaN(num)) setDropDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: num ?? null } : d));
+      }
+      return;
+    }
+    if (setIdx === 'myo') {
+      const dropIdx = kbFieldRef.current?.dropIdx;
+      if (typeof dropIdx !== 'number') return;
+      if (field === 'kg') {
+        const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
+        if (newRaw === '' || !isNaN(num)) setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: num ?? null } : d));
+      } else {
+        const num = newRaw === '' ? null : parseInt(newRaw, 10);
+        if (newRaw === '' || !isNaN(num)) setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: num ?? null } : d));
       }
       return;
     }
@@ -1379,6 +1443,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
       return;
     }
+    if (setIdx === 'myo') {
+      const { dropIdx } = kbFieldRef.current;
+      if (field === 'kg') {
+        const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
+        const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
+        const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+        const newRaw = String(next).replace('.', ',');
+        kbRawRef.current = newRaw;
+        setKbRaw(newRaw);
+        setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: next } : d));
+      } else {
+        const cur = parseInt(kbRawRef.current, 10) || 0;
+        const next = Math.max(0, cur + dir);
+        kbRawRef.current = String(next);
+        setKbRaw(String(next));
+        setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: next } : d));
+      }
+      return;
+    }
     if (field === 'kg') {
       const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
       const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
@@ -1418,6 +1501,26 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const drops = dropDropsRef.current;
         if (dropIdx + 1 < drops.length) {
           setTimeout(() => activateDropKb(dropIdx + 1, 'kg'), 50);
+        } else {
+          kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+          setKbField(null); setKbRaw(''); setKbFresh(false);
+          armKbShield();
+        }
+      }
+      return;
+    }
+    if (setIdx === 'myo') {
+      const { dropIdx } = kbFieldRef.current;
+      kbApply(kbRawRef.current, field, setIdx);
+      if (field === 'kg') {
+        activateMyo(dropIdx, 'reps');
+      } else {
+        if (dropIdx === 0) {
+          // Activation reps confirmed → auto-add first mini
+          const activKg = myoDropsRef.current[0]?.kg ?? null;
+          const newIdx = myoDropsRef.current.length;
+          setMyoDrops(prev => [...prev, { kg: activKg, reps: null }]);
+          setTimeout(() => activateMyo(newIdx, 'reps'), 80);
         } else {
           kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
           setKbField(null); setKbRaw(''); setKbFresh(false);
@@ -2504,10 +2607,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   )}
                   {(() => {
                     const isDropActive = dropSetIdx === i && !s.done;
+                    const isMyoActive = myoSetIdx === i && !s.done;
+                    const isIntensityActive = isDropActive || isMyoActive;
                     return (
                     <div data-kb-row={i} style={{
                       display: 'grid',
-                      gridTemplateColumns: isDropActive ? '28px 1fr' : (isNoWeightReps ? '28px 1fr 28px' : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px')),
+                      gridTemplateColumns: isIntensityActive ? '28px 1fr' : (isNoWeightReps ? '28px 1fr 28px' : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px')),
                       gap: 8, alignItems: 'center',
                       padding: '10px 4px',
                       opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
@@ -2522,15 +2627,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
                       }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
-                      {isDropActive ? null : isNoWeightReps ? <div /> : (
-                        s.technique === 'drop' && s.done
+                      {isIntensityActive ? null : isNoWeightReps ? <div /> : (
+                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match') && s.done
                           ? <span style={{
                               display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
                               fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
                               background: 'rgba(var(--accent-rgb),0.12)',
                               border: '0.5px solid rgba(var(--accent-rgb),0.35)',
                               borderRadius: 4, padding: '2px 6px',
-                            }}>DS</span>
+                            }}>{s.technique === 'drop' ? 'DS' : s.technique === 'myorep_match' ? 'MM' : 'MR'}</span>
                           : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                               {isWarmupRow
                                 ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
@@ -2539,7 +2644,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             </div>
                       )}
 
-                      {!isDropActive && !isNoWeightReps && <KgInput
+                      {!isIntensityActive && !isNoWeightReps && <KgInput
                         value={s.kg}
                         done={s.done || s.skipped}
                         style={setInputStyle(s.done || s.skipped, isCurrent)}
@@ -2559,7 +2664,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         }))}
                       />}
 
-                      {!isDropActive && !isNoWeightReps && (isUnilateral ? (
+                      {!isIntensityActive && !isNoWeightReps && (isUnilateral ? (
                         <>
                           <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                           <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
@@ -2568,7 +2673,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                       ))}
 
-                      {!isDropActive && <button
+                      {!isIntensityActive && <button
                         data-complete-btn
                         onPointerDown={e => { _log(`row${i} pointerdown done=${s.done}`); e.stopPropagation(); }}
                         onClick={() => {
@@ -2689,6 +2794,142 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: UI.goldSoft,
                           }}>↓</div>
                           <div />
+                          <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                          </div>
+                          <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.reps ?? '—'}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* Myo-Rep active inline rows */}
+                  {myoSetIdx === i && !s.done && (() => {
+                    const myoTotalReps = myoDrops.slice(1).reduce((acc, d) => acc + (d.reps || 0), 0);
+                    const myoProgress = myoTarget ? Math.min(1, myoTotalReps / myoTarget) : 0;
+                    const canFinish = myoDrops.length >= 2 && myoDrops[0]?.reps != null;
+                    const activationDone = myoDrops[0]?.reps != null;
+                    return (
+                      <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
+                          <span className="micro-gold">{myoTechnique === 'myorep_match' ? 'MYO REP MATCH' : 'MYO-REPS'}</span>
+                          <button onClick={cancelMyo} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                        </div>
+                        {/* Match progress counter */}
+                        {myoTechnique === 'myorep_match' && myoTarget != null && (
+                          <div style={{ padding: '6px 4px 4px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+                              <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.1em' }}>MATCH</span>
+                              <div>
+                                <span className="num" style={{ fontSize: 20, fontWeight: 700, color: myoProgress >= 1 ? UI.gold : UI.ink, transition: 'color 0.3s ease' }}>{myoTotalReps}</span>
+                                <span className="num" style={{ fontSize: 12, color: UI.inkGhost }}> / {myoTarget}</span>
+                              </div>
+                            </div>
+                            <div style={{ position: 'relative', height: 6, borderRadius: 999, background: 'rgba(var(--accent-rgb),0.12)', margin: '0 0 4px' }}>
+                              <div style={{
+                                position: 'absolute', left: 0, top: 0, height: '100%',
+                                width: `${Math.min(1, myoProgress) * 100}%`,
+                                minWidth: myoProgress > 0 ? 8 : 0,
+                                borderRadius: 999,
+                                background: myoProgress >= 1 ? 'var(--accent)' : 'rgba(var(--accent-rgb),0.75)',
+                                boxShadow: myoProgress > 0 ? `0 0 ${Math.round(4 + myoProgress * 10)}px ${Math.round(2 + myoProgress * 6)}px rgba(var(--accent-rgb),${(0.3 + myoProgress * 0.5).toFixed(2)})` : 'none',
+                                transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease',
+                              }} />
+                            </div>
+                          </div>
+                        )}
+                        {myoDrops.map((d, di) => {
+                          const isActiv = di === 0;
+                          const isKgA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'kg';
+                          const isRepsA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'reps';
+                          return (
+                            <div key={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
+                              <div style={{
+                                width: 24, height: 24, borderRadius: 4, flexShrink: 0,
+                                background: 'rgba(var(--accent-rgb),0.08)',
+                                outline: `1px solid rgba(var(--accent-rgb),0.3)`,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontFamily: UI.fontUi, fontSize: isActiv ? 9 : 10, fontWeight: 700, color: UI.gold,
+                              }}>{isActiv ? 'ACT' : '↺'}</div>
+                              <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>{isActiv ? 'activation' : `myo ${di}`}</div>
+                              {/* kg — editable for activation, read-only for minis */}
+                              {isActiv ? (
+                                <KbCell
+                                  text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
+                                  placeholder="—"
+                                  onActivate={() => activateMyo(di, 'kg')}
+                                  style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                                />
+                              ) : (
+                                <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <span className="num" style={{ fontSize: 15, color: UI.inkGhost }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                                </div>
+                              )}
+                              <KbCell
+                                text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
+                                placeholder="—"
+                                onActivate={() => activateMyo(di, 'reps')}
+                                style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                              />
+                              {isActiv ? (
+                                <div />
+                              ) : (
+                                <button onClick={() => myoDrops.length > 2 && setMyoDrops(prev => prev.filter((_, idx) => idx !== di))}
+                                  disabled={myoDrops.length <= 2}
+                                  style={{
+                                    width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
+                                    background: 'transparent', color: UI.inkFaint, fontSize: 14,
+                                    cursor: myoDrops.length <= 2 ? 'default' : 'pointer',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    opacity: myoDrops.length <= 2 ? 0.2 : 1, flexShrink: 0,
+                                    WebkitTapHighlightColor: 'transparent',
+                                  }}>×</button>
+                              )}
+                            </div>
+                          );
+                        })}
+                        <div style={{ display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
+                          {activationDone && (
+                            <button onClick={() => {
+                              const newIdx = myoDropsRef.current.length;
+                              const activKg = myoDropsRef.current[0]?.kg ?? null;
+                              setMyoDrops(prev => [...prev, { kg: activKg, reps: null }]);
+                              setTimeout(() => activateMyo(newIdx, 'reps'), 80);
+                            }} style={{
+                              flex: 1, padding: '8px 0', background: 'transparent',
+                              border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
+                              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
+                              letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                            }}>↺ ADD MYO</button>
+                          )}
+                          <button onClick={() => finishMyoSet(myoDropsRef.current, myoTechnique)}
+                            disabled={!canFinish}
+                            style={{
+                              flex: 2, padding: '8px 0',
+                              background: canFinish ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                              border: `1px solid ${canFinish ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                              borderRadius: 6, color: canFinish ? 'var(--accent)' : UI.inkGhost,
+                              fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                              cursor: canFinish ? 'pointer' : 'default',
+                              WebkitTapHighlightColor: 'transparent',
+                            }}>✓ FINISH</button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {/* Completed myo rows */}
+                  {(s.technique === 'myorep' || s.technique === 'myorep_match') && s.done && (s.drops || []).length > 1 && (
+                    <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8, borderLeft: `2px solid rgba(var(--accent-rgb),0.2)` }}>
+                      {(s.drops || []).slice(1).map((d, di) => (
+                        <div key={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px', gap: 8, alignItems: 'center', padding: '4px 4px', opacity: 0.5 }}>
+                          <div style={{
+                            width: 24, height: 24, borderRadius: 4,
+                            outline: `1px solid rgba(var(--accent-rgb),0.2)`,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: UI.goldSoft,
+                          }}>↺</div>
+                          <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>myo {di + 1}</div>
                           <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
                           </div>
@@ -2977,43 +3218,107 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* intensity technique picker */}
       <Sheet open={intensityOpen} onClose={() => setIntensityOpen(false)} title="Intensity">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {[
-            { key: 'drop', label: 'DROP SET', sub: 'Descend the weight, keep the reps coming', icon: 'fa-angles-down', active: true },
-            { key: 'rest_pause', label: 'REST-PAUSE', sub: 'Short rest, then squeeze out extra reps', icon: 'fa-pause', active: false },
-            { key: 'myorep', label: 'MYO-REPS', sub: 'Activation set + mini-sets to failure', icon: 'fa-rotate', active: false },
-          ].map(({ key, label, sub, icon, active }) => (
-            <button key={key} disabled={!active} onClick={() => {
-              if (key === 'drop') {
-                const target = currentSetIdx >= 0
-                  ? currentSetIdx
-                  : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
-                if (target < 0) return;
-                const s = entry.sets[target];
-                const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null }];
-                setDropDrops(initDrops);
-                dropDropsRef.current = initDrops;
-                setDropSetIdx(target);
-                setIntensityOpen(false);
-                setTimeout(() => activateDropKb(0, 'kg'), 150);
-              }
-            }} style={{
-              width: '100%', textAlign: 'left', cursor: active ? 'pointer' : 'default',
-              background: active ? 'rgba(var(--accent-rgb),0.07)' : UI.bgInset,
-              border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`,
-              borderRadius: 6, padding: '14px 16px',
-              display: 'flex', alignItems: 'center', gap: 14,
-              opacity: active ? 1 : 0.45,
-              WebkitTapHighlightColor: 'transparent',
-            }}>
-              <i className={`fa-solid ${icon}`} style={{ fontSize: 18, color: active ? 'var(--accent)' : UI.inkFaint, width: 20, textAlign: 'center', flexShrink: 0 }} />
-              <div>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: active ? 'var(--accent)' : UI.inkFaint }}>{label}</div>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>{sub}{!active && ' — coming soon'}</div>
+        {(() => {
+          const startDrop = () => {
+            const target = currentSetIdx >= 0
+              ? currentSetIdx
+              : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
+            if (target < 0) return;
+            const s = entry.sets[target];
+            const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null }];
+            setDropDrops(initDrops);
+            dropDropsRef.current = initDrops;
+            setDropSetIdx(target);
+            setIntensityOpen(false);
+            setTimeout(() => activateDropKb(0, 'kg'), 150);
+          };
+          const startMyo = (technique) => {
+            const target = currentSetIdx >= 0
+              ? currentSetIdx
+              : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
+            if (target < 0) return;
+            const s = entry.sets[target];
+            const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null }];
+            setMyoDrops(initDrops);
+            myoDropsRef.current = initDrops;
+            setMyoSetIdx(target);
+            setMyoTechnique(technique);
+            if (technique === 'myorep_match') {
+              const anchor = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
+              setMyoTarget(anchor ? anchor.drops[0].reps : null);
+            }
+            setIntensityOpen(false);
+            setTimeout(() => activateMyo(0, 'kg'), 150);
+          };
+          const myoMatchTarget = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
+          const btnBase = (active) => ({
+            width: '100%', textAlign: 'left', cursor: active ? 'pointer' : 'default',
+            background: active ? 'rgba(var(--accent-rgb),0.07)' : UI.bgInset,
+            border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`,
+            borderRadius: 6, padding: '14px 16px',
+            display: 'flex', alignItems: 'center', gap: 14,
+            opacity: active ? 1 : 0.45,
+            WebkitTapHighlightColor: 'transparent',
+          });
+          const Label = ({ active, children }) => (
+            <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: active ? 'var(--accent)' : UI.inkFaint }}>{children}</div>
+          );
+          const Sub = ({ children }) => (
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>{children}</div>
+          );
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {/* Drop Set */}
+              <button onClick={startDrop} style={btnBase(true)}>
+                <i className="fa-solid fa-angles-down" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                <div>
+                  <Label active={true}>DROP SET</Label>
+                  <Sub>Descend the weight, keep the reps coming</Sub>
+                </div>
+              </button>
+              {/* Rest-pause — coming soon */}
+              <button disabled style={btnBase(false)}>
+                <i className="fa-solid fa-pause" style={{ fontSize: 18, color: UI.inkFaint, width: 20, textAlign: 'center', flexShrink: 0 }} />
+                <div>
+                  <Label active={false}>REST-PAUSE</Label>
+                  <Sub>Short rest, then squeeze out extra reps — coming soon</Sub>
+                </div>
+              </button>
+              {/* Myo-Rep row: two side-by-side buttons */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <button onClick={() => startMyo('myorep')} style={{
+                  cursor: 'pointer', textAlign: 'left',
+                  background: 'rgba(var(--accent-rgb),0.07)',
+                  border: `1px solid rgba(var(--accent-rgb),0.35)`,
+                  borderRadius: 6, padding: '14px 16px',
+                  display: 'flex', flexDirection: 'column', gap: 4,
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <i className="fa-solid fa-rotate" style={{ fontSize: 16, color: 'var(--accent)', marginBottom: 2 }} />
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>MYO REP</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, lineHeight: 1.4 }}>Activation + mini-sets to failure</div>
+                </button>
+                <button onClick={() => startMyo('myorep_match')} disabled={!myoMatchTarget} style={{
+                  cursor: myoMatchTarget ? 'pointer' : 'default', textAlign: 'left',
+                  background: myoMatchTarget ? 'rgba(var(--accent-rgb),0.07)' : UI.bgInset,
+                  border: `1px solid ${myoMatchTarget ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`,
+                  borderRadius: 6, padding: '14px 16px',
+                  display: 'flex', flexDirection: 'column', gap: 4,
+                  opacity: myoMatchTarget ? 1 : 0.45,
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <i className="fa-solid fa-bullseye" style={{ fontSize: 16, color: myoMatchTarget ? 'var(--accent)' : UI.inkFaint, marginBottom: 2 }} />
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', color: myoMatchTarget ? 'var(--accent)' : UI.inkFaint }}>MYO MATCH</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, lineHeight: 1.4 }}>
+                    {myoMatchTarget
+                      ? `Match ${myoMatchTarget.drops[0].reps} reps`
+                      : 'Do a Myo Rep set first'}
+                  </div>
+                </button>
               </div>
-            </button>
-          ))}
-        </div>
+            </div>
+          );
+        })()}
       </Sheet>
 
       {/* session note editor */}

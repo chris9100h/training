@@ -2545,6 +2545,53 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         );
                       }
 
+                      // Myo-rep / myo-rep match: badge + activation chip + mini chips
+                      if ((st.technique === 'myorep' || st.technique === 'myorep_match') && !isCheckboxOnly) {
+                        const drops = (st.drops && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
+                        const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
+                        const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
+                        const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
+                        const isMatch = st.technique === 'myorep_match';
+                        return (
+                          <div key={j} style={{
+                            width: '100%', marginTop: j > 0 ? 6 : 0,
+                            borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`,
+                            paddingLeft: 10,
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                              <span style={{
+                                fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
+                                color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint,
+                                background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)',
+                                border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`,
+                                borderRadius: 4, padding: '2px 6px',
+                              }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                              {drops.map((d, di) => (
+                                <React.Fragment key={di}>
+                                  {di > 0 && (
+                                    <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>↺</span>
+                                  )}
+                                  <span style={{
+                                    background: di === 0 ? chipBg : 'transparent',
+                                    border: `1px solid ${di === 0 ? chipBorder : UI.hair}`,
+                                    borderRadius: 4, padding: '3px 8px',
+                                    fontFamily: UI.fontNum, fontSize: 12,
+                                    color: di === 0 ? chipColor : UI.inkSoft,
+                                    opacity: di === 0 ? 1 : 0.7,
+                                  }}>
+                                    {di === 0 && <>{d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span></>}
+                                    {d.reps ?? '—'}
+                                  </span>
+                                </React.Fragment>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      }
+
                       return (
                         <span key={j} style={{
                           opacity: (st.done || hasData) ? (isWarm ? 0.65 : 1) : 0.45,
