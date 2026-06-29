@@ -902,6 +902,7 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
       <input
         ref={inputRef}
         value={value} onChange={handleChange}
+        onCompositionEnd={(e) => onChange(e.target.value)}
         type={type} placeholder={placeholder} autoFocus={autoFocus}
         onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
         {...rest}
