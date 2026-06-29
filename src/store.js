@@ -216,7 +216,6 @@ async function deleteAllData(userId) {
     unwrap(_supabase.from('zane_exercises').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_schedules').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_user_settings').delete().eq('user_id', userId)),
-    unwrap(_supabase.from('zane_profiles').delete().eq('id', userId)),
     unwrap(_supabase.from('zane_skips').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_cardio_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_daily_logs').delete().eq('user_id', userId)),
