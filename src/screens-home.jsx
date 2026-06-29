@@ -1961,6 +1961,36 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (dy > 65 && dy > dx * 1.5) setQuickActionsOpen(true);
   };
   const onTouchCancel = () => { swipeRef.current = { y: null, x: null }; setPullDelta(0); };
+  // Pointer-event equivalents for mouse/trackpad (desktop + iPad with Magic Keyboard).
+  // Skip touch pointers — those are already handled by the Touch events above.
+  const onPointerDownPull = (e) => {
+    if (e.pointerType === 'touch' || quickActionsOpen) return;
+    swipeRef.current = { y: e.clientY, x: e.clientX };
+  };
+  const onPointerMovePull = (e) => {
+    if (e.pointerType === 'touch' || !e.buttons) return;
+    const start = swipeRef.current;
+    if (!start.y) return;
+    const dy = e.clientY - start.y;
+    const dx = Math.abs(e.clientX - start.x);
+    if (dy > 0 && dy > dx * 0.5) setPullDelta(dy);
+    else setPullDelta(0);
+  };
+  const onPointerUpPull = (e) => {
+    if (e.pointerType === 'touch') return;
+    const start = swipeRef.current;
+    if (!start.y) return;
+    const dy = e.clientY - start.y;
+    const dx = Math.abs(e.clientX - start.x);
+    swipeRef.current = { y: null, x: null };
+    setPullDelta(0);
+    if (dy > 65 && dy > dx * 1.5) setQuickActionsOpen(true);
+  };
+  const onPointerCancelPull = (e) => {
+    if (e.pointerType === 'touch') return;
+    swipeRef.current = { y: null, x: null };
+    setPullDelta(0);
+  };
 
   const handleSetStatus = async (mode, startDateStr = null) => {
     const current = store.statusMode ?? null;
@@ -2152,7 +2182,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
-      <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+      <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel} onPointerDown={onPointerDownPull} onPointerMove={onPointerMovePull} onPointerUp={onPointerUpPull} onPointerCancel={onPointerCancelPull} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
       {/* Background watermark — VIP image from store.settings.vipBackground or default ZANE logo */}
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
         <img src={trainBg} style={isCustomBg
