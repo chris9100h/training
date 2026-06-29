@@ -881,22 +881,30 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
   const savedSel = React.useRef(null);
   const onChangeRef = React.useRef(onChange);
   const valueRef = React.useRef(value);
+  // Tracks last value we reported to parent. If parent sends back something
+  // different (e.g. toUpperCase transform), that's intentional — sync DOM even
+  // while focused. If iOS autocorrect changed the DOM and parent echoes it back
+  // unchanged, lastReportedRef matches → skip DOM write (don't revert autocorrect).
+  const lastReportedRef = React.useRef(value);
 
-  // Keep refs current without re-running effects
   React.useLayoutEffect(() => {
     onChangeRef.current = onChange;
     valueRef.current = value;
   });
 
-  // Sync DOM only when unfocused (programmatic resets like clearing the field)
   React.useLayoutEffect(() => {
     const el = inputRef.current;
     if (!el) return;
-    if (document.activeElement !== el && el.value !== value) el.value = value;
+    const focused = document.activeElement === el;
+    const parentTransformed = value !== lastReportedRef.current;
+    if (el.value !== value && (!focused || parentTransformed)) {
+      el.value = value;
+      if (parentTransformed) lastReportedRef.current = value;
+    }
     if (type !== 'password') {
       const sel = savedSel.current;
       savedSel.current = null;
-      if (sel && sel.start != null && document.activeElement === el) {
+      if (sel && sel.start != null && focused) {
         try { el.setSelectionRange(sel.start, sel.end); } catch (_) {}
       }
     }
@@ -905,14 +913,18 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
   // Native input listener + rAF: catches iOS autocorrect in WKWebView standalone
   // mode, where iOS replaces text in the DOM without triggering React's synthetic
   // onChange. Reading el.value in a rAF fires after iOS commits the replacement.
-  // For normal typing React's onChange fires synchronously, so valueRef is already
-  // updated before the rAF runs — the guard prevents a double call.
+  // For normal typing React's onChange + useLayoutEffect run before the rAF, so
+  // valueRef is already updated — the guard prevents a double call.
   React.useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     const handle = () => {
       requestAnimationFrame(() => {
-        if (el.value !== valueRef.current) onChangeRef.current(el.value);
+        const v = el.value;
+        if (v !== valueRef.current) {
+          lastReportedRef.current = v;
+          onChangeRef.current(v);
+        }
       });
     };
     el.addEventListener('input', handle, { passive: true });
@@ -925,6 +937,7 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
     if (type !== 'password' && !isReplacement) {
       try { savedSel.current = { start: e.target.selectionStart, end: e.target.selectionEnd }; } catch (_) {}
     }
+    lastReportedRef.current = e.target.value;
     onChange(e.target.value);
   };
 
@@ -943,7 +956,7 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
         ref={inputRef}
         defaultValue={value}
         onChange={handleChange}
-        onCompositionEnd={(e) => onChange(e.target.value)}
+        onCompositionEnd={(e) => { lastReportedRef.current = e.target.value; onChange(e.target.value); }}
         type={type} placeholder={placeholder} autoFocus={autoFocus}
         onFocus={() => setFocus(true)} onBlur={handleBlur}
         {...rest}
