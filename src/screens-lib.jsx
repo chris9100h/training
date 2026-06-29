@@ -2505,7 +2505,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         const chipBorder = highlight ? UI.goldSoft : UI.hairStrong;
                         const chipBg = highlight ? UI.goldFaint : 'transparent';
                         return (
-                          <div key={j} style={{ width: '100%', marginTop: j > 0 ? 6 : 0 }}>
+                          <div key={j} style={{
+                            width: '100%', marginTop: j > 0 ? 6 : 0,
+                            borderLeft: `2px solid ${highlight ? UI.goldSoft : 'rgba(var(--accent-rgb),0.35)'}`,
+                            paddingLeft: 10,
+                          }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                               <span style={{
                                 fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
