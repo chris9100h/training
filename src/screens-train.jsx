@@ -2923,33 +2923,35 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     const activationDone = myoDrops[0]?.reps != null;
                     return (
                       <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
-                          <span className="micro-gold">{myoTechnique === 'myorep_match' ? 'MYO REP MATCH' : 'MYO-REPS'}</span>
-                          <button onClick={cancelMyo} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
-                        </div>
-                        {/* Match progress counter */}
-                        {myoTechnique === 'myorep_match' && myoTarget != null && (
-                          <div style={{ padding: '6px 4px 4px' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
-                              <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.1em' }}>MATCH</span>
-                              <div>
-                                <span className="num" style={{ fontSize: 20, fontWeight: 700, color: myoProgress >= 1 ? UI.gold : UI.ink, transition: 'color 0.3s ease' }}>{myoTotalReps}</span>
-                                <span className="num" style={{ fontSize: 12, color: UI.inkGhost }}> / {myoTarget}</span>
+                          <div style={{ position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 1, paddingBottom: 2 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
+                            <span className="micro-gold">{myoTechnique === 'myorep_match' ? 'MYO REP MATCH' : 'MYO-REPS'}</span>
+                            <button onClick={cancelMyo} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                          </div>
+                          {/* Match progress counter */}
+                          {myoTechnique === 'myorep_match' && myoTarget != null && (
+                            <div style={{ padding: '6px 4px 4px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+                                <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.1em' }}>MATCH</span>
+                                <div>
+                                  <span className="num" style={{ fontSize: 20, fontWeight: 700, color: myoProgress >= 1 ? UI.gold : UI.ink, transition: 'color 0.3s ease' }}>{myoTotalReps}</span>
+                                  <span className="num" style={{ fontSize: 12, color: UI.inkGhost }}> / {myoTarget}</span>
+                                </div>
+                              </div>
+                              <div style={{ position: 'relative', height: 6, borderRadius: 999, background: 'rgba(var(--accent-rgb),0.12)', margin: '0 0 4px' }}>
+                                <div style={{
+                                  position: 'absolute', left: 0, top: 0, height: '100%',
+                                  width: `${Math.min(1, myoProgress) * 100}%`,
+                                  minWidth: myoProgress > 0 ? 8 : 0,
+                                  borderRadius: 999,
+                                  background: myoProgress >= 1 ? 'var(--accent)' : 'rgba(var(--accent-rgb),0.75)',
+                                  boxShadow: myoProgress > 0 ? `0 0 ${Math.round(4 + myoProgress * 10)}px ${Math.round(2 + myoProgress * 6)}px rgba(var(--accent-rgb),${(0.3 + myoProgress * 0.5).toFixed(2)})` : 'none',
+                                  transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease',
+                                }} />
                               </div>
                             </div>
-                            <div style={{ position: 'relative', height: 6, borderRadius: 999, background: 'rgba(var(--accent-rgb),0.12)', margin: '0 0 4px' }}>
-                              <div style={{
-                                position: 'absolute', left: 0, top: 0, height: '100%',
-                                width: `${Math.min(1, myoProgress) * 100}%`,
-                                minWidth: myoProgress > 0 ? 8 : 0,
-                                borderRadius: 999,
-                                background: myoProgress >= 1 ? 'var(--accent)' : 'rgba(var(--accent-rgb),0.75)',
-                                boxShadow: myoProgress > 0 ? `0 0 ${Math.round(4 + myoProgress * 10)}px ${Math.round(2 + myoProgress * 6)}px rgba(var(--accent-rgb),${(0.3 + myoProgress * 0.5).toFixed(2)})` : 'none',
-                                transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease',
-                              }} />
-                            </div>
-                          </div>
-                        )}
+                          )}
+                        </div>
                         {myoDrops.map((d, di) => {
                           const isActiv = di === 0;
                           const isKgA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'kg';
