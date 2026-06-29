@@ -1436,6 +1436,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbField({ setIdx: 'drop', dropIdx, field });
     setKbRaw(val);
     setKbFresh(true);
+    setTimeout(() => {
+      const el = document.querySelector(`[data-drop-row="${dropIdx}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 80);
   };
 
   const activateMyo = (dropIdx, field) => {
@@ -1449,6 +1453,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbField({ setIdx: 'myo', dropIdx, field });
     setKbRaw(val);
     setKbFresh(true);
+    setTimeout(() => {
+      const el = document.querySelector(`[data-myo-row="${dropIdx}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 80);
   };
 
   const kbApply = (newRaw, field, setIdx) => {
@@ -2825,7 +2833,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         const isKgA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'kg';
                         const isRepsA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'reps';
                         return (
-                          <div key={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
+                          <div key={di} data-drop-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
                             <div style={{
                               width: 24, height: 24, borderRadius: 4, flexShrink: 0,
                               background: 'rgba(var(--accent-rgb),0.08)',
@@ -2947,7 +2955,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           const isKgA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'kg';
                           const isRepsA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'reps';
                           return (
-                            <div key={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
+                            <div key={di} data-myo-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
                               <div style={{
                                 width: 24, height: 24, borderRadius: 4, flexShrink: 0,
                                 background: 'rgba(var(--accent-rgb),0.08)',
