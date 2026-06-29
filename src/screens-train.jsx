@@ -434,7 +434,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return (st.kg < prevSet.kg && rA <= rB) || (st.kg === prevSet.kg && rA < rB);
   };
 
-  const completeSet = (setIdx, bypassOutlierCheck = false) => {
+  const completeSet = (setIdx, bypassOutlierCheck = false, afterSuccess = null) => {
     // Unlock AudioContext on this user gesture so the rest-timer beep works on iOS
     // even when the tempo feature is disabled (only other init path).
     try {
@@ -531,6 +531,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
     setKbField(null); setKbRaw(''); setKbFresh(false);
     armKbShield();
+    if (afterSuccess) afterSuccess();
     recentCompleteRef.current[setIdx] = Date.now();
     lastCompleteRef.current = Date.now();
     _log(`completeSet(${setIdx}) → lastCompleteRef stamped`);
@@ -846,10 +847,30 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (willBeAllDone) navigate(1);
   };
 
+  const jumpToNextSet = (completedIdx) => {
+    const nextIdx = entry.sets.findIndex((s, i) => i > completedIdx && !s.done && !s.skipped);
+    if (nextIdx !== -1) {
+      const field = isNoWeightReps ? (isUnilateral ? 'repsL' : 'reps') : 'kg';
+      setTimeout(() => activateKb(nextIdx, field), 400);
+    } else {
+      const nextEntry = session.entries[exIdx + 1];
+      if (nextEntry && !nextEntry.isCardio) {
+        const nextSetIdx = nextEntry.sets.findIndex(s => !s.done && !s.skipped);
+        if (nextSetIdx !== -1) {
+          const nextEx = store.exercises?.find(e => e.id === nextEntry.exId);
+          const nextIsNoWeight = !!nextEx?.no_weight_reps;
+          const nextIsUni = (nextEx?.movement_type ?? (nextEx?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
+          pendingFocusRef.current = { setIdx: nextSetIdx, field: nextIsNoWeight ? (nextIsUni ? 'repsL' : 'reps') : 'kg' };
+        }
+      }
+    }
+  };
+
   const checkSet = () => {
     const idx = entry.sets.findIndex(s => !s.done && !s.skipped);
     if (idx < 0) return;
-    completeSet(idx);
+    if (dropSetIdx === idx || myoSetIdx === idx) return;
+    completeSet(idx, false, () => jumpToNextSet(idx));
   };
 
   const logCardio = () => {
@@ -1239,6 +1260,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return result;
   }, [store.cardioLogs]);
   const pendingNavRef = useRefT(false);
+  const pendingFocusRef = useRefT(null);
   // Records when a set was last completed via the checkbox; used to ignore
   // iOS ghost-clicks that fire 200-400ms after completion and would otherwise
   // re-enter the onClick handler with s.done=true and undo the completion.
@@ -1249,6 +1271,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const lastCompleteRef = useRefT(0);
 
   useEffectT(() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); }, [exIdx, sessionId]);
+  useEffectT(() => {
+    const pf = pendingFocusRef.current;
+    if (!pf) return;
+    pendingFocusRef.current = null;
+    setTimeout(() => activateKb(pf.setIdx, pf.field), 150);
+  }, [exIdx]);
   useEffectT(() => {
     if (!entry?.isCardio) return;
     const du = localStorage.getItem(CARDIO_DIST_KEY_T) || 'km';
