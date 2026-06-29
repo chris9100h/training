@@ -2806,7 +2806,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   )}
                   {/* Myo-Rep active inline rows */}
                   {myoSetIdx === i && !s.done && (() => {
-                    const myoTotalReps = myoDrops.slice(1).reduce((acc, d) => acc + (d.reps || 0), 0);
+                    const myoTotalReps = myoDrops.reduce((acc, d) => acc + (d.reps || 0), 0);
                     const myoProgress = myoTarget ? Math.min(1, myoTotalReps / myoTarget) : 0;
                     const canFinish = myoDrops.length >= 2 && myoDrops[0]?.reps != null;
                     const activationDone = myoDrops[0]?.reps != null;
