@@ -1874,7 +1874,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       }
       const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, activeDay.id);
       const isUnilateral = ex?.unilateral || false;
-      const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps, undefined, seedRefs[it.exId]);
+      const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps, it.repsPerSet || null, seedRefs[it.exId]);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
       const seedSets = LB.buildSeedSets(it, last, suggestion, isUnilateral, !!store.settings?.smartProgression, bodyweightKg);
       return {
