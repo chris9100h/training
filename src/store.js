@@ -257,63 +257,80 @@ async function importFromBackup(backup, userId) {
   // Validate before the destructive delete — never half-apply a bad file.
   const invalid = validateBackup(backup);
   if (invalid) throw new Error(invalid);
-  await deleteAllData(userId);
+
+  try { await deleteAllData(userId); } catch(e) { throw new Error(`[delete] ${e?.message || e}`); }
+
   const sett = backup.settings ?? {};
   const importSessions = backup.sessions?.filter(s => s.id) ?? [];
+
+  const exerciseRows = (backup.exercises || []).map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId }));
+  const sessionRows = importSessions.map(s => sessionToRow(s, userId));
+  const settingsRow = {
+    user_id: userId,
+    active_schedule_id: backup.activeScheduleId ?? null,
+    cycle_index: backup.cycleIndex ?? 0,
+    cycle_start_date: backup.cycleStartDate ?? null,
+    week_plan_start_date: backup.weekPlanStartDate ?? null,
+    last_advanced_date: backup.lastAdvancedDate ?? null,
+    in_progress_session_id: backup.inProgress ?? null,
+    unit: sett.unit ?? null,
+    rest_default: sett.restDefault || 120,
+    rest_big: sett.restBig || 180,
+    rest_medium: sett.restMedium || 120,
+    rest_small: sett.restSmall || 90,
+    push_enabled: sett.pushEnabled ?? false,
+    pushover_user_key: sett.pushoverUserKey ?? null,
+    use_pushover: sett.usePushover ?? false,
+    cycle_week_view: sett.cycleWeekView ?? false,
+    accent_color: sett.accentColor ?? 'copper',
+    dark_mode: sett.darkMode ?? 'dark',
+    custom_day_types: backup.customDayTypes ?? [],
+    reminder_enabled: sett.reminderEnabled ?? false,
+    reminder_time: sett.reminderTime ?? '07:00',
+    tempo_enabled: sett.tempoEnabled ?? false,
+    tempo_eccentric: sett.tempoEccentric ?? null,
+    tempo_concentric: sett.tempoConcentric ?? null,
+    smart_progression: sett.smartProgression ?? false,
+    progression_range_top: sett.progressionRangeTop ?? null,
+    equipment_config: sett.equipmentConfig ?? null,
+    weight_fill_down: sett.weightFillDown ?? true,
+    net_carbs: sett.netCarbs ?? false,
+    show_warmup_in_summary: sett.showWarmupInSummary ?? false,
+    show_coaching_tab: sett.showCoachingTab ?? false,
+    be_your_own_coach: sett.beYourOwnCoach ?? false,
+    session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
+    macro_targets: sett.macroTargets ?? null,
+    show_health_tab: sett.showHealthTab ?? false,
+    onboarding_completed: sett.onboardingCompleted ?? false,
+  };
+
+  // Run profile + exercises + schedules + sessions + settings in parallel.
+  // Each phase wraps its own error with a label so the catch in importData
+  // can show which step failed (e.g. "[sessions chunk 1/2] Load failed").
+  const tag = (label, fn) => fn().catch(e => { throw new Error(`[${label}] ${e?.message || e}`); });
   await Promise.all([
-    backup.user?.name && unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name })),
-    backup.exercises?.length && (async () => {
-      const rows = backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId }));
-      for (let i = 0; i < rows.length; i += 500) await unwrap(_supabase.from('zane_exercises').upsert(rows.slice(i, i + 500)));
-    })(),
-    backup.schedules?.length && unwrap(_supabase.from('zane_schedules').upsert(
+    backup.user?.name && tag('profile', () => unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name }))),
+    exerciseRows.length && tag('exercises', async () => {
+      const CHUNK = 500;
+      for (let i = 0; i < exerciseRows.length; i += CHUNK)
+        await unwrap(_supabase.from('zane_exercises').upsert(exerciseRows.slice(i, i + CHUNK)));
+    }),
+    backup.schedules?.length && tag('schedules', () => unwrap(_supabase.from('zane_schedules').upsert(
       backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
-    )),
-    importSessions.length && (async () => {
-      const rows = importSessions.map(s => sessionToRow(s, userId));
-      for (let i = 0; i < rows.length; i += 500) await unwrap(_supabase.from('zane_sessions').upsert(rows.slice(i, i + 500)));
-    })(),
-    unwrap(_supabase.from('zane_user_settings').upsert({
-      user_id: userId,
-      active_schedule_id: backup.activeScheduleId ?? null,
-      cycle_index: backup.cycleIndex ?? 0,
-      cycle_start_date: backup.cycleStartDate ?? null,
-      week_plan_start_date: backup.weekPlanStartDate ?? null,
-      last_advanced_date: backup.lastAdvancedDate ?? null,
-      in_progress_session_id: backup.inProgress ?? null,
-      unit: sett.unit ?? null,
-      rest_default: sett.restDefault || 120,
-      rest_big: sett.restBig || 180,
-      rest_medium: sett.restMedium || 120,
-      rest_small: sett.restSmall || 90,
-      push_enabled: sett.pushEnabled ?? false,
-      pushover_user_key: sett.pushoverUserKey ?? null,
-      use_pushover: sett.usePushover ?? false,
-      cycle_week_view: sett.cycleWeekView ?? false,
-      accent_color: sett.accentColor ?? 'copper',
-      dark_mode: sett.darkMode ?? 'dark',
-      custom_day_types: backup.customDayTypes ?? [],
-      reminder_enabled: sett.reminderEnabled ?? false,
-      reminder_time: sett.reminderTime ?? '07:00',
-      tempo_enabled: sett.tempoEnabled ?? false,
-      tempo_eccentric: sett.tempoEccentric ?? null,
-      tempo_concentric: sett.tempoConcentric ?? null,
-      smart_progression: sett.smartProgression ?? false,
-      progression_range_top: sett.progressionRangeTop ?? null,
-      equipment_config: sett.equipmentConfig ?? null,
-      weight_fill_down: sett.weightFillDown ?? true,
-      net_carbs: sett.netCarbs ?? false,
-      show_warmup_in_summary: sett.showWarmupInSummary ?? false,
-      show_coaching_tab: sett.showCoachingTab ?? false,
-      be_your_own_coach: sett.beYourOwnCoach ?? false,
-      session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
-      macro_targets: sett.macroTargets ?? null,
-      show_health_tab: sett.showHealthTab ?? false,
-      onboarding_completed: sett.onboardingCompleted ?? false,
-    })),
+    ))),
+    sessionRows.length && tag('sessions', async () => {
+      const CHUNK = 500;
+      for (let i = 0; i < sessionRows.length; i += CHUNK)
+        await unwrap(_supabase.from('zane_sessions').upsert(sessionRows.slice(i, i + CHUNK)));
+    }),
+    tag('settings', () => unwrap(_supabase.from('zane_user_settings').upsert(settingsRow))),
   ].filter(Boolean));
+
   // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
-  if (importSessions.length) await _syncEntryRelational(importSessions, userId, null);
+  if (importSessions.length) {
+    try { await _syncEntryRelational(importSessions, userId, null); }
+    catch(e) { throw new Error(`[entries/sets] ${e?.message || e}`); }
+  }
   if (backup.skips?.length) {
     await unwrap(_supabase.from('zane_skips').upsert(
       backup.skips.map(s => ({
