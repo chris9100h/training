@@ -2129,6 +2129,7 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
       {creatingNew !== null && (
         <window.Screens.ExerciseCreator
           initialName={creatingNew}
+          initialTags={filterTags}
           store={store}
           setStore={setStore}
           onCreated={(id) => { onPick([id]); }}

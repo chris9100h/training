@@ -318,7 +318,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
         </div>
       )}
 
-      {creating && <ExerciseCreator onClose={() => setCreating(false)} store={store} setStore={setStore} />}
+      {creating && <ExerciseCreator onClose={() => setCreating(false)} store={store} setStore={setStore} initialTags={filterTags} />}
 
       {filtersOpen && (
         <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
@@ -480,10 +480,10 @@ function KnurlCanvas({ style }) {
   return <canvas data-knurl="1" style={{ display: 'block', width: '100%', height: 3, ...style }} />;
 }
 
-function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '' }) {
+function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '', initialTags = [] }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateL(initialName);
-  const [selectedTags, setSelectedTags] = useStateL([]);
+  const [selectedTags, setSelectedTags] = useStateL(initialTags);
   const [category, setCategory] = useStateL(null);
   const [movementType, setMovementType] = useStateL('bilateral');
   const [noWeightReps, setNoWeightReps] = useStateL(false);
