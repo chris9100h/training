@@ -1350,7 +1350,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setSwapOpen(true);
   };
 
-  const doSwap = (newExId) => {
+  const doSwap = (ids) => {
+    const newExId = Array.isArray(ids) ? ids[0] : ids;
     // resolve the name from fresh state — a just-created exercise isn't in the
     // closed-over `store` yet (its setStore hasn't re-rendered the screen)
     setStore(s => {
@@ -1366,7 +1367,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setSwapOpen(false);
   };
 
-  const doAdd = (newExId) => {
+  const doAdd = (ids) => {
+    const newExId = Array.isArray(ids) ? ids[0] : ids;
     setAddOpen(false);
     if (session.entries.length === 0) {
       // First exercise in an empty session — skip the superset prompt and insert directly.
@@ -2856,10 +2858,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {/* exercise swap picker */}
-      {swapOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSwapOpen(false)} onPick={doSwap} />}
+      {swapOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSwapOpen(false)} onPick={doSwap} singleSelect />}
 
       {/* exercise add picker */}
-      {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
+      {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} singleSelect />}
 
       {/* superset modal — step 1: ask yes/no; step 2: pick exercise to link */}
       {addSupersetData && (

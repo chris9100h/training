@@ -2060,7 +2060,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   );
 }
 
-function ExercisePicker({ store, setStore, onClose, onPick }) {
+function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false }) {
   const [q, setQ] = useStateS('');
   const [filterTags, setFilterTags] = useStateS([]);
   const [creatingNew, setCreatingNew] = useStateS(null);
@@ -2095,7 +2095,7 @@ function ExercisePicker({ store, setStore, onClose, onPick }) {
           const isSel = selected.includes(e.id);
           return (
             <React.Fragment key={e.id}>
-            <button onClick={() => toggleSelect(e.id)} style={{
+            <button onClick={() => singleSelect ? onPick([e.id]) : toggleSelect(e.id)} style={{
               background: isSel ? UI.goldFaint : 'transparent', border: 'none', textAlign: 'left',
               padding: '11px 8px', cursor: 'pointer', borderRadius: 4,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
