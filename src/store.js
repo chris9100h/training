@@ -892,8 +892,17 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
   for (let i = 0; i < allEntries.length; i += CHUNK) {
     await unwrap(_supabase.from('zane_session_entries').upsert(allEntries.slice(i, i + CHUNK), { onConflict: 'id' }));
   }
-  for (let i = 0; i < allSets.length; i += CHUNK) {
-    await unwrap(_supabase.rpc('sync_sets_batch', { p_sets: allSets.slice(i, i + CHUNK) }));
+  // Import path (prevSessions === null): direct table upsert — no updated_at guard needed
+  // for a fresh post-deleteAllData write and avoids the RPC overhead.
+  // Sync path (prevSessions array): use sync_sets_batch RPC for the updated_at guard.
+  if (prevSessions === null) {
+    for (let i = 0; i < allSets.length; i += CHUNK) {
+      await unwrap(_supabase.from('zane_sets').upsert(allSets.slice(i, i + CHUNK)));
+    }
+  } else {
+    for (let i = 0; i < allSets.length; i += CHUNK) {
+      await unwrap(_supabase.rpc('sync_sets_batch', { p_sets: allSets.slice(i, i + CHUNK) }));
+    }
   }
 }
 
