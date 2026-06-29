@@ -2209,6 +2209,17 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     }
     const avatarRect = (avatarEl && avatarEl.getBoundingClientRect().height) ? avatarEl.getBoundingClientRect() : null;
     const KNURL_GAP = 14;
+    // Limit chip containers that vertically overlap the avatar so they don't
+    // bleed into it. Same gap as knurl lines.
+    if (avatarRect) {
+      captureRef.current.querySelectorAll('[data-shot-chips]').forEach(el => {
+        const r = el.getBoundingClientRect();
+        if (r.bottom > avatarRect.top && r.top < avatarRect.bottom) {
+          const maxW = Math.round(avatarRect.left - r.left - KNURL_GAP);
+          if (maxW > 0 && maxW < r.width) el.style.maxWidth = maxW + 'px';
+        }
+      });
+    }
     captureRef.current.querySelectorAll('canvas[data-knurl]').forEach(c => {
       const pw = c.parentElement ? c.parentElement.offsetWidth : 320;
       let w = pw;
@@ -2560,7 +2571,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                               }}>DROP SET</span>
                               {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
                             </div>
-                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4, overflow: 'hidden' }}>
                               {drops.map((d, di) => (
                                 <React.Fragment key={di}>
                                   {di > 0 && (
@@ -2608,7 +2619,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                               }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
                               {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
                             </div>
-                            <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 4 }}>
+                            <div data-shot-chips="1" style={{ display: 'inline-flex', flexDirection: 'column', gap: 4, overflow: 'hidden' }}>
                               <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
                                 {drops.map((d, di) => (
                                   <React.Fragment key={di}>
