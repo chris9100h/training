@@ -2534,8 +2534,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                     color: chipColor,
                                     opacity: di === 0 ? 1 : 0.75,
                                   }}>
-                                    {d.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>
-                                    <span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>
+                                    {d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>
+                                    <span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>
                                     {d.reps ?? '—'}
                                   </span>
                                 </React.Fragment>
