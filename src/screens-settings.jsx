@@ -889,14 +889,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename || `zane-${LB.todayISO()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-  const importData = async () => {
-    // Step 1: safety export — fully finished before the file picker opens so
-    // the a.click() download never races with import fetch requests on iOS Safari.
-    const goAhead = await confirm('Your current data will be downloaded as a backup first, then you can choose a file to import.', { title: 'Import JSON', ok: 'Download backup & continue' });
-    if (!goAhead) return;
-    try { await exportData(`zane-before-import-${LB.todayISO()}.json`); } catch (_) {}
-
-    // Step 2: file picker — export is done, network is idle, safe to start.
+  const importData = () => {
+    // input.click() must happen synchronously inside a user-gesture handler —
+    // any await before it would lose the gesture context on iOS Safari.
     const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
     input.onchange = async (e) => {
       const file = e.target.files?.[0]; if (!file) return;
@@ -905,8 +900,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       if (invalid) { await confirm(invalid, { title: 'Invalid backup', ok: 'OK' }); return; }
       const latestSession = [...(backup.sessions || [])].filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
       const backupDate = latestSession ? new Date(latestSession.ended).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }) : 'unknown date';
-      const ok = await confirm(`This backup contains data up to ${backupDate}. This will permanently replace your current data.`, { title: 'Restore backup?', ok: 'Restore', danger: true });
-      if (!ok) return;
+      // Step 1: safety export first, before touching anything.
+      const ok1 = await confirm(`This backup contains data up to ${backupDate}. Your current data will be downloaded as a safety backup first.`, { title: 'Restore backup?', ok: 'Download & continue' });
+      if (!ok1) return;
+      try { await exportData(`zane-before-import-${LB.todayISO()}.json`); } catch (_) {}
+      // Step 2: separate confirm so iOS has a user-tap gap between the a.click()
+      // download and the import fetch requests — prevents Safari from aborting them.
+      const ok2 = await confirm('Backup saved to Downloads. Your current data will now be permanently replaced.', { title: 'Ready to import?', ok: 'Replace', danger: true });
+      if (!ok2) return;
       setImporting(true);
       try {
         await LB.importFromBackup(backup, userId); LB.clearLocal(userId); window.location.reload();
