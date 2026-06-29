@@ -2170,6 +2170,27 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l-.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             </button>}
           />
+          <div style={{
+            flexShrink: 0,
+            height: Math.min(pullDelta * 0.4, 28),
+            overflow: 'hidden',
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+            transition: pullDelta === 0 ? 'height 0.25s ease' : 'none',
+            pointerEvents: 'none',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 4,
+              opacity: Math.min(1, pullDelta / 50),
+              color: pullDelta >= 65 ? UI.gold : UI.inkFaint,
+              transition: pullDelta === 0 ? 'opacity 0.25s ease, color 0.15s ease' : 'color 0.1s ease',
+            }}>
+              <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.18em', fontWeight: 600 }}>
+                {pullDelta >= 65 ? 'RELEASE' : 'QUICK ACTIONS'}
+              </span>
+              <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
+          </div>
           <div style={{ padding: 22 }}>
             {hasPlans
               ? <Empty title="No active plan" sub="You have plans ready — just pick one to activate." action={<Btn onClick={() => go({ name: 'plan' })}>View plans</Btn>} icon={ICON_CALENDAR} />
@@ -2177,29 +2198,6 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           </div>
         </div>
       )}
-
-      {/* Pull-down indicator — always rendered so it shows in both plan and no-plan mode */}
-      <div style={{
-        flexShrink: 0,
-        height: Math.min(pullDelta * 0.4, 28),
-        overflow: 'hidden',
-        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-        transition: pullDelta === 0 ? 'height 0.25s ease' : 'none',
-        pointerEvents: 'none',
-      }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 4,
-          opacity: Math.min(1, pullDelta / 50),
-          color: pullDelta >= 65 ? UI.gold : UI.inkFaint,
-          transition: pullDelta === 0 ? 'opacity 0.25s ease, color 0.15s ease' : 'color 0.1s ease',
-        }}>
-          <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.18em', fontWeight: 600 }}>
-            {pullDelta >= 65 ? 'RELEASE' : 'QUICK ACTIONS'}
-          </span>
-          <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-        </div>
-      </div>
 
       {/* Plan content — header + body, only when a plan is active */}
       {sch && <>
@@ -2254,6 +2252,29 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           </div>
         </div>
         <div className="knurl" style={{ marginLeft: -22, marginRight: -22 }} />
+      </div>
+
+      {/* Pull-down indicator — right below plan header */}
+      <div style={{
+        flexShrink: 0,
+        height: Math.min(pullDelta * 0.4, 28),
+        overflow: 'hidden',
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        transition: pullDelta === 0 ? 'height 0.25s ease' : 'none',
+        pointerEvents: 'none',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 4,
+          opacity: Math.min(1, pullDelta / 50),
+          color: pullDelta >= 65 ? UI.gold : UI.inkFaint,
+          transition: pullDelta === 0 ? 'opacity 0.25s ease, color 0.15s ease' : 'color 0.1s ease',
+        }}>
+          <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.18em', fontWeight: 600 }}>
+            {pullDelta >= 65 ? 'RELEASE' : 'QUICK ACTIONS'}
+          </span>
+          <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </div>
       </div>
 
       {/* In-progress banner */}
