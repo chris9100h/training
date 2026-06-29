@@ -304,27 +304,24 @@ async function importFromBackup(backup, userId) {
     onboarding_completed: sett.onboardingCompleted ?? false,
   };
 
-  // Run profile + exercises + schedules + sessions + settings in parallel.
-  // Each phase wraps its own error with a label so the catch in importData
-  // can show which step failed (e.g. "[sessions chunk 1/2] Load failed").
+  // Sequential phases with small chunks — keeps each request tiny (~15 KB)
+  // so iOS Safari doesn't drop the connection, and one failure gives a clear label.
+  const CHUNK = 50;
   const tag = (label, fn) => fn().catch(e => { throw new Error(`[${label}] ${e?.message || e}`); });
-  await Promise.all([
-    backup.user?.name && tag('profile', () => unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name }))),
-    exerciseRows.length && tag('exercises', async () => {
-      const CHUNK = 500;
-      for (let i = 0; i < exerciseRows.length; i += CHUNK)
-        await unwrap(_supabase.from('zane_exercises').upsert(exerciseRows.slice(i, i + CHUNK)));
-    }),
-    backup.schedules?.length && tag('schedules', () => unwrap(_supabase.from('zane_schedules').upsert(
-      backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
-    ))),
-    sessionRows.length && tag('sessions', async () => {
-      const CHUNK = 500;
-      for (let i = 0; i < sessionRows.length; i += CHUNK)
-        await unwrap(_supabase.from('zane_sessions').upsert(sessionRows.slice(i, i + CHUNK)));
-    }),
-    tag('settings', () => unwrap(_supabase.from('zane_user_settings').upsert(settingsRow))),
-  ].filter(Boolean));
+
+  if (backup.user?.name)
+    await tag('profile', () => unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name })));
+
+  for (let i = 0; i < exerciseRows.length; i += CHUNK)
+    await tag(`exercises ${i/CHUNK+1}`, () => unwrap(_supabase.from('zane_exercises').upsert(exerciseRows.slice(i, i + CHUNK))));
+
+  if (backup.schedules?.length)
+    await tag('schedules', () => unwrap(_supabase.from('zane_schedules').upsert(backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId })))));
+
+  for (let i = 0; i < sessionRows.length; i += CHUNK)
+    await tag(`sessions ${i/CHUNK+1}`, () => unwrap(_supabase.from('zane_sessions').upsert(sessionRows.slice(i, i + CHUNK))));
+
+  await tag('settings', () => unwrap(_supabase.from('zane_user_settings').upsert(settingsRow)));
 
   // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
   if (importSessions.length) {
@@ -905,13 +902,12 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
     }
   }
 
-  const CHUNK = 500;
+  // Import path uses small chunks (50 rows) to stay well under iOS Safari's
+  // per-request payload limits; sync path keeps 500 rows for throughput.
+  const CHUNK = prevSessions === null ? 50 : 500;
   for (let i = 0; i < allEntries.length; i += CHUNK) {
     await unwrap(_supabase.from('zane_session_entries').upsert(allEntries.slice(i, i + CHUNK), { onConflict: 'id' }));
   }
-  // Import path (prevSessions === null): direct table upsert — no updated_at guard needed
-  // for a fresh post-deleteAllData write and avoids the RPC overhead.
-  // Sync path (prevSessions array): use sync_sets_batch RPC for the updated_at guard.
   if (prevSessions === null) {
     for (let i = 0; i < allSets.length; i += CHUNK) {
       await unwrap(_supabase.from('zane_sets').upsert(allSets.slice(i, i + CHUNK)));
