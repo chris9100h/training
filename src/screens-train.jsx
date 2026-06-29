@@ -1437,7 +1437,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbRaw(val);
     setKbFresh(true);
     setTimeout(() => {
-      const el = document.querySelector(`[data-drop-row="${dropIdx}"]`);
+      const el = document.querySelector('[data-drop-actions]');
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }, 80);
   };
@@ -1454,7 +1454,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbRaw(val);
     setKbFresh(true);
     setTimeout(() => {
-      const el = document.querySelector(`[data-myo-row="${dropIdx}"]`);
+      const el = document.querySelector('[data-myo-actions]');
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }, 80);
   };
@@ -2869,7 +2869,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                         );
                       })}
-                      <div style={{ display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
+                      <div data-drop-actions style={{ display: 'flex', gap: 8, padding: '4px 4px 10px', scrollMarginBottom: 260 }}>
                         <button onClick={() => {
                           const newIdx = dropDropsRef.current.length;
                           setDropDrops(prev => [...prev, { kg: null, reps: null }]);
@@ -3000,7 +3000,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             </div>
                           );
                         })}
-                        <div style={{ display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
+                        <div data-myo-actions style={{ display: 'flex', gap: 8, padding: '4px 4px 10px', scrollMarginBottom: 260 }}>
                           {activationDone && (
                             <button onClick={() => {
                               const newIdx = myoDropsRef.current.length;
