@@ -880,8 +880,16 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
   const inputRef = React.useRef(null);
   const savedSel = React.useRef(null);
   const handleChange = (e) => {
-    if (type !== 'password') {
+    // Skip cursor-save for replacement inputs (autocorrect suggestions, paste) —
+    // calling setSelectionRange after iOS inserts a suggestion interrupts the
+    // autocorrect commit and reverts the change. Let the browser handle cursor
+    // placement for those input types.
+    const inputType = e.nativeEvent?.inputType;
+    const isReplacement = !inputType || inputType === 'insertReplacementText' || inputType === 'insertFromPaste' || inputType === 'insertFromDrop';
+    if (type !== 'password' && !isReplacement) {
       try { savedSel.current = { start: e.target.selectionStart, end: e.target.selectionEnd }; } catch(_) {}
+    } else {
+      savedSel.current = null;
     }
     onChange(e.target.value);
   };
