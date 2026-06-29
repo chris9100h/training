@@ -889,7 +889,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename || `zane-${LB.todayISO()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-  const importData = () => {
+  const importData = async () => {
+    // Step 1: safety export — fully finished before the file picker opens so
+    // the a.click() download never races with import fetch requests on iOS Safari.
+    const goAhead = await confirm('Your current data will be downloaded as a backup first, then you can choose a file to import.', { title: 'Import JSON', ok: 'Download backup & continue' });
+    if (!goAhead) return;
+    try { await exportData(`zane-before-import-${LB.todayISO()}.json`); } catch (_) {}
+
+    // Step 2: file picker — export is done, network is idle, safe to start.
     const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
     input.onchange = async (e) => {
       const file = e.target.files?.[0]; if (!file) return;
@@ -898,7 +905,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       if (invalid) { await confirm(invalid, { title: 'Invalid backup', ok: 'OK' }); return; }
       const latestSession = [...(backup.sessions || [])].filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
       const backupDate = latestSession ? new Date(latestSession.ended).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }) : 'unknown date';
-      const ok = await confirm(`This backup contains data up to ${backupDate}. Your current data will be downloaded first, then replaced.`, { title: 'Restore backup?', ok: 'Restore', danger: true });
+      const ok = await confirm(`This backup contains data up to ${backupDate}. This will permanently replace your current data.`, { title: 'Restore backup?', ok: 'Restore', danger: true });
       if (!ok) return;
       setImporting(true);
       try {
