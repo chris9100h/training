@@ -407,6 +407,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [nowS, setNowS] = useStateSet(Date.now());
   const [importing, setImporting] = useStateSet(false);
   const [importSheet, setImportSheet] = useStateSet(false);
+  const [importProgress, setImportProgress] = useStateSet({ pct: 0, phase: '' });
   const [swVersion, setSwVersion] = useStateSet('');
   const [pushStatus, setPushStatus] = useStateSet(null);
   const [pushEnabled, setPushEnabled] = useStateSet(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
@@ -902,9 +903,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       const backupDate = latestSession ? new Date(latestSession.ended).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }) : 'unknown date';
       const ok = await confirm(`This backup contains data up to ${backupDate}. Your current data will be permanently replaced.`, { title: 'Replace data?', ok: 'Replace', danger: true });
       if (!ok) return;
-      setImporting(true); setImportSheet(false);
+      setImporting(true);
+      setImportProgress({ pct: 0, phase: 'Starting…' });
       try {
-        await LB.importFromBackup(backup, userId); LB.clearLocal(userId); window.location.reload();
+        await LB.importFromBackup(backup, userId, (pct, phase) => setImportProgress({ pct, phase }));
+        LB.clearLocal(userId); window.location.reload();
       }
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
     }; input.click();
@@ -1750,15 +1753,25 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       </SettingsSheet>
 
       {/* ══ Import Sheet ══ */}
-      <SettingsSheet open={importSheet} onClose={() => setImportSheet(false)} title="Restore backup">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.55, fontSize: 13, color: UI.inkSoft }}>
-            <span style={{ color: UI.ink, fontWeight: 600 }}>Step 1:</span> Download a backup of your current data first.{' '}
-            <span style={{ color: UI.ink, fontWeight: 600 }}>Step 2:</span> Then pick the file you want to restore.
+      <SettingsSheet open={importSheet} onClose={importing ? () => {} : () => setImportSheet(false)} title="Restore backup">
+        {importing ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 13, color: UI.inkSoft, minHeight: 20 }}>{importProgress.phase}</div>
+            <div style={{ background: UI.bgInset, borderRadius: 999, height: 6, overflow: 'hidden' }}>
+              <div style={{ height: '100%', borderRadius: 999, background: 'var(--accent)', width: `${importProgress.pct}%`, transition: 'width 0.4s ease' }} />
+            </div>
+            <div className="num" style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'right' }}>{importProgress.pct}%</div>
           </div>
-          <Btn kind="ghost" onClick={() => exportData(`zane-before-import-${LB.todayISO()}.json`)}>1 · Backup current data</Btn>
-          <Btn kind="ghost" onClick={runImport} disabled={importing}>2 · Select file and import</Btn>
-        </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.55, fontSize: 13, color: UI.inkSoft }}>
+              <span style={{ color: UI.ink, fontWeight: 600 }}>Step 1:</span> Download a backup of your current data first.{' '}
+              <span style={{ color: UI.ink, fontWeight: 600 }}>Step 2:</span> Then pick the file you want to restore.
+            </div>
+            <Btn kind="ghost" onClick={() => exportData(`zane-before-import-${LB.todayISO()}.json`)}>1 · Backup current data</Btn>
+            <Btn kind="ghost" onClick={runImport}>2 · Select file and import</Btn>
+          </div>
+        )}
       </SettingsSheet>
 
       {/* ══ How To Sheet ══ */}
