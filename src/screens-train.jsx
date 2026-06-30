@@ -3308,11 +3308,32 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <span className="num" style={{ color: UI.ink }}>{sessionTimeStr}</span>
             </div>
           </div>
-          {session.isFreestyle && (
-            <Btn kind="ghost" onClick={() => { setFinishOpen(false); setAddOpen(true); }} style={{ width: '100%', marginBottom: 8 }}>
-              + Add another exercise
-            </Btn>
-          )}
+          {session.isFreestyle && (() => {
+            const elapsedMin = Math.floor(sessionElapsed / 60);
+            const msg = elapsedMin < 10
+              ? "Really done already? The barbell's barely warm — how about one more exercise?"
+              : elapsedMin < 20
+              ? "A bit thin. One more exercise to round it out?"
+              : elapsedMin < 30
+              ? "Short session. Got time for one more?"
+              : elapsedMin < 45
+              ? "Getting there. Another exercise or calling it here?"
+              : elapsedMin < 60
+              ? "Solid session going. One more exercise or is this it?"
+              : elapsedMin < 75
+              ? "Good work. Ready to wrap it up?"
+              : elapsedMin < 90
+              ? "Nice session. Almost at the 90-minute mark — finish strong?"
+              : "Now THAT's a workout. You've earned this finish.";
+            return (
+              <>
+                <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 10 }}>{msg}</div>
+                <Btn kind="ghost" onClick={() => { setFinishOpen(false); setAddOpen(true); }} style={{ width: '100%', marginBottom: 8 }}>
+                  + Add another exercise
+                </Btn>
+              </>
+            );
+          })()}
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={() => setFinishOpen(false)} style={{ flex: 1 }}>Continue</Btn>
             <Btn onClick={tryFinish} style={{ flex: 2 }}>Finish ✓</Btn>
