@@ -787,6 +787,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (updatedSets.every(st => st.done)) setTimeout(() => navigate(1), 600);
   };
 
+  const setPartials = (setIdx, count) => {
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+        ...en,
+        sets: en.sets.map((st, si) => si !== setIdx ? st : {
+          ...st,
+          technique: count > 0 ? 'lengthened_partial' : (st.technique === 'lengthened_partial' ? null : st.technique),
+          drops: count > 0 ? { partials: count } : (st.technique === 'lengthened_partial' ? null : st.drops),
+          updatedAt: new Date().toISOString(),
+        }),
+      }),
+    }));
+  };
+
   const addSet = () => {
     const bwKg = exercise?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
     updateSession(sess => ({
@@ -1220,6 +1235,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const myoDropsRef = useRefT([]);
   myoDropsRef.current = myoDrops;
   const [myoTarget, setMyoTarget] = useStateT(null);
+  const [lpActiveByEx, setLpActiveByEx] = useStateT({});
   // Persist intensity state so a background/resume on iOS doesn't wipe mid-set progress
   useEffectT(() => {
     if (dropSetIdx != null || myoSetIdx != null) {
@@ -2738,14 +2754,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
                       {isIntensityActive ? null : isNoWeightReps ? <div /> : (
-                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match') && s.done
+                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match' || s.technique === 'lengthened_partial') && s.done
                           ? <span style={{
                               display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
                               fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
                               background: 'rgba(var(--accent-rgb),0.12)',
                               border: '0.5px solid rgba(var(--accent-rgb),0.35)',
                               borderRadius: 4, padding: '2px 6px',
-                            }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : 'MYO REP'}</span>
+                            }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : s.technique === 'lengthened_partial' ? 'PARTIALS' : 'MYO REP'}</span>
                           : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                               {isWarmupRow
                                 ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
@@ -3054,6 +3070,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         </div>
                       ))}
                       {(() => { const t = (s.drops || []).reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? <div style={{ marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>Total {t}</div> : null; })()}
+                    </div>
+                  )}
+                  {!!lpActiveByEx[exIdx] && s.done && !s.warmup && (
+                    <div style={{ marginLeft: 36, display: 'flex', alignItems: 'center', gap: 10, padding: '4px 4px 8px' }}>
+                      <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em' }}>PARTIALS</span>
+                      <button onClick={() => setPartials(i, Math.max(0, (s.drops?.partials || 0) - 1))} style={{ width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
+                      <span className="num" style={{ fontSize: 15, color: (s.drops?.partials || 0) > 0 ? UI.gold : UI.inkFaint, minWidth: 24, textAlign: 'center' }}>{s.drops?.partials || 0}</span>
+                      <button onClick={() => setPartials(i, (s.drops?.partials || 0) + 1)} style={{ width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>+</button>
                     </div>
                   )}
                   {i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) && <div className="knurl" />}
@@ -3387,6 +3411,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <div>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>DROP SET</div>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Descend the weight, keep the reps coming</div>
+                </div>
+              </button>
+              {/* Lengthened Partials */}
+              <button onClick={() => { setLpActiveByEx(prev => ({ ...prev, [exIdx]: true })); setIntensityOpen(false); }} style={btnBase(true)}>
+                <i className="fa-solid fa-arrow-down-long" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>LENGTHENED PARTIALS</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Full reps, then partials in the stretch</div>
                 </div>
               </button>
               {/* Myo-Rep row: two compact buttons matching DROP style */}
