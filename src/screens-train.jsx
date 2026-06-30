@@ -1438,22 +1438,31 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setMesoVolumeOpen(false);
     if (!mesoState || !mesoVolumeExIds.length) return;
 
-    // Volume delta per exercise of this muscle group in this session
-    const volumeDelta = volume === 'not_enough' ? 1
-                      : volume === 'pushed' ? -1
-                      : volume === 'too_much' ? -2
-                      : 0;
     // Pump: if low on "just right" volume, track for swap suggestion
     const pumpLow = pump === 'low' && volume === 'just_right';
 
     saveMesoState(m => {
       const newDeltas = { ...(m.deltas || {}) };
       const newPumpLow = { ...(m.pumpLowCounts || {}) };
-      mesoVolumeExIds.forEach(exId => {
-        const key = exId + '_' + session.dayId;
-        newDeltas[key] = ((m.deltas || {})[key] || 0) + volumeDelta;
-        if (pumpLow) newPumpLow[exId] = ((m.pumpLowCounts || {})[exId] || 0) + 1;
-      });
+
+      // "Not enough" → +1 on main lift (first exercise of the muscle group) only
+      // "Pushed my limits" → -1 on main lift only
+      // "Too much" → -1 on every exercise of the muscle group
+      const mainExId = mesoVolumeExIds[0];
+      if (volume === 'not_enough' && mainExId) {
+        const key = mainExId + '_' + session.dayId;
+        newDeltas[key] = ((m.deltas || {})[key] || 0) + 1;
+      } else if (volume === 'pushed' && mainExId) {
+        const key = mainExId + '_' + session.dayId;
+        newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
+      } else if (volume === 'too_much') {
+        mesoVolumeExIds.forEach(exId => {
+          const key = exId + '_' + session.dayId;
+          newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
+        });
+      }
+
+      if (pumpLow && mainExId) newPumpLow[mainExId] = ((m.pumpLowCounts || {})[mainExId] || 0) + 1;
       return { ...m, deltas: newDeltas, pumpLowCounts: newPumpLow };
     });
   };
@@ -4194,23 +4203,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </div>
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Volume</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
-          {[
-            { key: 'not_enough', label: 'Not enough', sub: '+1 set target next session' },
-            { key: 'just_right', label: 'Just right', sub: 'Keep it here' },
-            { key: 'pushed', label: 'Pushed my limits', sub: '−1 set target next session' },
-            { key: 'too_much', label: 'Too much', sub: '−2 set target next session' },
-          ].map(opt => (
-            <button key={opt.key} onClick={() => setMesoVolumeAnswer(opt.key)} style={{
-              width: '100%', padding: '10px 14px',
-              background: mesoVolumeAnswer === opt.key ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
-              border: `1px solid ${mesoVolumeAnswer === opt.key ? 'var(--accent)' : UI.hairStrong}`,
-              borderRadius: 6, cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              WebkitTapHighlightColor: 'transparent',
-            }}>
-              <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: mesoVolumeAnswer === opt.key ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
-              <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint }}>{opt.sub}</div>
-            </button>
-          ))}
+          {['not_enough', 'just_right', 'pushed', 'too_much'].map(key => {
+            const label = key === 'not_enough' ? 'Not enough' : key === 'just_right' ? 'Just right' : key === 'pushed' ? 'Pushed my limits' : 'Too much';
+            const sel = mesoVolumeAnswer === key;
+            return (
+              <button key={key} onClick={() => setMesoVolumeAnswer(key)} style={{
+                width: '100%', padding: '10px 14px',
+                background: sel ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
+                border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
+                borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{label}</div>
+              </button>
+            );
+          })}
         </div>
         <Btn
           disabled={!mesoPumpAnswer || !mesoVolumeAnswer}
