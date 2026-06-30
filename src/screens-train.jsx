@@ -1547,18 +1547,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
 
     // Weight boosts: joint fine + pump ok + volume ok + all reps hit
+    console.log('[meso] jointFine:', [...mesoJointFineRef.current], 'pumpOk:', [...mesoPumpOkRef.current], 'volOk:', [...mesoVolumeOkRef.current]);
     for (const e of session.entries) {
       if (e.isCardio) continue;
       const exId = e.exId;
       const ex = store.exercises?.find(x => x.id === exId);
       const muscle = primaryMuscleForExercise(ex);
 
-      if (!mesoJointFineRef.current.has(exId)) continue;
-      if (muscle && !mesoPumpOkRef.current.has(muscle)) continue;
-      if (muscle && !mesoVolumeOkRef.current.has(muscle)) continue;
+      if (!mesoJointFineRef.current.has(exId)) { console.log('[meso]', e.name, '→ skip: joint not fine'); continue; }
+      if (muscle && !mesoPumpOkRef.current.has(muscle)) { console.log('[meso]', e.name, '→ skip: pump not ok for', muscle); continue; }
+      if (muscle && !mesoVolumeOkRef.current.has(muscle)) { console.log('[meso]', e.name, '→ skip: volume not ok for', muscle); continue; }
 
       const workingSets = e.sets.filter(s => !s.warmup && !s.skipped);
-      if (!workingSets.length) continue;
+      if (!workingSets.length) { console.log('[meso]', e.name, '→ skip: no working sets'); continue; }
       const plannedReps = e.plannedReps ?? null;
       const allHit = workingSets.every(s => {
         if (!s.done) return false;
@@ -1566,7 +1567,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const reps = s.reps != null ? s.reps : Math.max(s.repsL ?? 0, s.repsR ?? 0);
         return reps >= plannedReps;
       });
-      if (!allHit) continue;
+      if (!allHit) { console.log('[meso]', e.name, '→ skip: reps not hit. plannedReps=', plannedReps, 'sets=', workingSets.map(s => ({ done: s.done, reps: s.reps }))); continue; }
 
       const key = exId + '_' + session.dayId;
       weightBoostMap[key] = increment;
