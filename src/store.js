@@ -591,7 +591,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, deltas, joint_flags, pump_low_counts, weight_boosts, completions').eq('user_id', userId),
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, deltas, joint_flags, pump_low_counts, weight_boosts, completions, pending_meso2').eq('user_id', userId),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -755,7 +755,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       startDate: m.start_date, startCycleIndex: m.start_cycle_index ?? 0,
       deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {},
       pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
-      completions: m.completions ?? 0,
+      completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
     })),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
     // and via the local cache also offline). bestE1rmForExercise combines this
@@ -1152,7 +1152,8 @@ async function syncStore(prev, next, userId) {
       start_date: m.startDate, start_cycle_index: m.startCycleIndex ?? 0,
       deltas: m.deltas ?? {}, joint_flags: m.jointFlags ?? {},
       pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
-      completions: m.completions ?? 0, updated_at: new Date().toISOString(),
+      completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
+      updated_at: new Date().toISOString(),
     }))));
     if (removed.length) ops.push(_supabase.from('zane_meso_states').delete().in('id', removed.map(m => m.id)));
   }

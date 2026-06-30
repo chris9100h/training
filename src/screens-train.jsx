@@ -1172,15 +1172,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       };
     });
     if (mesoState) {
-      const gains = computeMesoGains(); // also flushes final meso state to store
+      const isComplete = mesoWeek != null && mesoState?.weeks != null && mesoWeek >= mesoState.weeks;
+      const gains = computeMesoGains(isComplete); // also flushes final meso state to store
       if (gains.length > 0) {
         mesoGainNavRef.current = session.id;
         setMesoGainItems(gains);
+        mesoJustCompletedRef.current = isComplete;
         setMesoGainSheetOpen(true);
         return;
       }
-      // No gains to show, but still flush the accumulated feedback (deltas etc.) to DB
-      flushMesoStateToStore(mesoState);
+      if (isComplete) {
+        mesoJustCompletedRef.current = false;
+        handleMesoComplete();
+        return;
+      }
     }
     go({ name: 'session', sessionId: session.id, justFinished: true });
   };
@@ -1435,6 +1440,60 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [mesoGainSheetOpen, setMesoGainSheetOpen] = useStateT(false);
   const [mesoGainItems, setMesoGainItems] = useStateT([]);
   const mesoGainNavRef = useRefT(null);
+  const mesoJustCompletedRef = useRefT(false); // set when last meso week finished
+
+  const startMeso2ForSchedule = (scheduleId) => {
+    setStore(s => {
+      const existing = (s.mesoStates || []).find(m => m.scheduleId === scheduleId);
+      if (!existing) return s;
+      const newMeso = {
+        ...existing,
+        startDate: LB.todayISO(),
+        startCycleIndex: s.cycleIndex || 0,
+        deltas: {},
+        jointFlags: {},
+        pumpLowCounts: {},
+        pendingMeso2: false,
+        // weightBoosts carries over to meso 2
+      };
+      const others = (s.mesoStates || []).filter(m => m.scheduleId !== scheduleId);
+      return { ...s, mesoStates: [...others, newMeso] };
+    });
+  };
+
+  const deactivatePlanForMeso = (scheduleId) => {
+    setStore(s => ({
+      ...s,
+      activeScheduleId: null,
+      mesoStates: (s.mesoStates || []).map(m =>
+        m.scheduleId === scheduleId ? { ...m, pendingMeso2: false } : m
+      ),
+    }));
+  };
+
+  const handleMesoComplete = async () => {
+    const scheduleId = session.scheduleId;
+    const wantDeload = await confirm(
+      'You crushed it — that\'s one full mesocycle done! A deload now helps you recover and come back even stronger. Want to start one?',
+      { title: 'Mesocycle complete! 🎉', ok: 'Start deload', cancel: 'Skip deload', preventBackdropClose: true },
+    );
+    if (wantDeload) {
+      await LB.startDeload(userId, store, setStore);
+      // pendingMeso2 flag already set; home screen picks it up after deload ends.
+      go({ name: 'session', sessionId: session.id, justFinished: true });
+      return;
+    }
+    const wantMeso2 = await confirm(
+      'Start Meso 2 with the same plan? Your earned weight boosts carry over — set counts reset to baseline so week 1 feels fresh again.',
+      { title: 'Start Meso 2?', ok: 'Start Meso 2', cancel: 'Deactivate plan', preventBackdropClose: true },
+    );
+    if (wantMeso2) {
+      startMeso2ForSchedule(scheduleId);
+    } else {
+      deactivatePlanForMeso(scheduleId);
+    }
+    go({ name: 'session', sessionId: session.id, justFinished: true });
+  };
 
   // Per-session meso feedback tracking
   const [mesoSorenessOpen, setMesoSorenessOpen] = useStateT(false);
@@ -1585,7 +1644,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   // Compute per-exercise weight boosts earned this session and return gain items for
   // the post-session screen. Also merges set-gain info from mesoSessionSetGainsRef.
-  const computeMesoGains = () => {
+  const computeMesoGains = (isComplete = false) => {
     if (!mesoState) return [];
     const unit = store.settings?.unit || 'kg';
     const weightBoostMap = {};
@@ -1629,9 +1688,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     // Merge weight boosts into meso state and flush to store (DB sync).
     // mesoState here is the React state — already contains all feedback deltas from this session.
-    const finalMeso = weightBoostMap && Object.keys(weightBoostMap).length
+    const withBoosts = Object.keys(weightBoostMap).length
       ? { ...mesoState, weightBoosts: { ...(mesoState.weightBoosts || {}), ...weightBoostMap } }
       : mesoState;
+    // If the last meso week just finished: bump completions + set pendingMeso2 so the
+    // home screen can offer Meso 2 after a deload (or immediately).
+    const finalMeso = isComplete
+      ? { ...withBoosts, completions: (withBoosts.completions ?? 0) + 1, pendingMeso2: true }
+      : withBoosts;
     if (finalMeso) {
       setMesoStateLocal(finalMeso);
       saveMesoStateToStorage(finalMeso);
@@ -4437,7 +4501,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ))}
           <Btn onClick={() => {
             setMesoGainSheetOpen(false);
-            go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
+            if (mesoJustCompletedRef.current) {
+              mesoJustCompletedRef.current = false;
+              handleMesoComplete();
+            } else {
+              go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
+            }
           }} style={{ width: '100%', marginTop: 20 }}>Got it</Btn>
         </Sheet>
       )}

@@ -1373,6 +1373,7 @@ CREATE TABLE zane_meso_states (
   pump_low_counts    jsonb       NOT NULL DEFAULT '{}',
   weight_boosts      jsonb       NOT NULL DEFAULT '{}',
   completions        int         NOT NULL DEFAULT 0,
+  pending_meso2      boolean     NOT NULL DEFAULT false,
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now()
 );

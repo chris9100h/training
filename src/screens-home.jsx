@@ -1589,6 +1589,51 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     }
   }, [store?.statusMode, store?.statusModeSince, store?.sessions]);
 
+  // After a meso-triggered deload ends (or if pendingMeso2 is set without an active deload),
+  // offer to start Meso 2 or deactivate the plan.
+  const pendingMeso2Checked = useRef(false);
+  useEffect(() => {
+    if (store?.statusMode === 'deload') { pendingMeso2Checked.current = false; return; }
+    if (pendingMeso2Checked.current) return;
+    if (store?.inProgress) return;
+    if (!sch) return;
+    const mesoSt = (store?.mesoStates || []).find(m => m.scheduleId === sch.id);
+    if (!mesoSt?.pendingMeso2) return;
+    pendingMeso2Checked.current = true;
+    (async () => {
+      const wantMeso2 = await confirm(
+        'Your deload is done — nice recovery! Ready to kick off Meso 2? Your earned weight boosts carry over and set counts reset to baseline.',
+        { title: 'Start Meso 2?', ok: 'Start Meso 2', cancel: 'Deactivate plan', preventBackdropClose: true },
+      );
+      const scheduleId = sch.id;
+      if (wantMeso2) {
+        setStore(s => {
+          const existing = (s.mesoStates || []).find(m => m.scheduleId === scheduleId);
+          if (!existing) return s;
+          const newMeso = {
+            ...existing,
+            startDate: LB.todayISO(),
+            startCycleIndex: s.cycleIndex || 0,
+            deltas: {},
+            jointFlags: {},
+            pumpLowCounts: {},
+            pendingMeso2: false,
+          };
+          const others = (s.mesoStates || []).filter(m => m.scheduleId !== scheduleId);
+          return { ...s, mesoStates: [...others, newMeso] };
+        });
+      } else {
+        setStore(s => ({
+          ...s,
+          activeScheduleId: null,
+          mesoStates: (s.mesoStates || []).map(m =>
+            m.scheduleId === scheduleId ? { ...m, pendingMeso2: false } : m
+          ),
+        }));
+      }
+    })();
+  }, [store?.statusMode, store?.mesoStates, sch?.id, store?.inProgress]);
+
   // After every 8 completed cycles (cycle plans), 8 complete weeks (weekday plans),
   // or 8×sessions_per_week sessions (flex plans), congratulate the user and offer a
   // deload. Fires only when a non-deload session is completed on the last training
