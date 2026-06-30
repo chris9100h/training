@@ -2856,9 +2856,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {(store.statusMode === 'deload' || session.isDeload) && (
             <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 6px' }}>DELOAD · 50%</span>
           )}
-          {mesoState && mesoRirVal != null && (
+          {mesoState && mesoWeek != null && (
             <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '1px 6px' }}>
-              W{mesoWeek}/{mesoState.weeks} · {mesoRirVal} RIR
+              W{mesoWeek}/{mesoState.weeks}
             </span>
           )}
         </span>
@@ -3084,6 +3084,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </Frame>
         ) : heroSet && (
           <BracketFrame gold padding={0}>
+            {mesoState && mesoRirVal != null && !isCurrentWarmup && (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
+                <span className="display-it" style={{
+                  fontSize: 160, fontWeight: 900, lineHeight: 1, userSelect: 'none',
+                  color: mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold,
+                  opacity: mesoRirVal === 0 ? 0.11 : 0.07,
+                }}>{mesoRirVal}</span>
+              </div>
+            )}
             <div style={{ padding: '12px 6px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0 18px', marginBottom: 8 }}>
                 <span className="micro-gold">
