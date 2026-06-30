@@ -413,7 +413,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   useEffectT(() => {
     if (!_sch?.mesocycle_weeks || !session.scheduleId) return;
     const existing = getMesoState();
-    if (existing?.planId === session.scheduleId) return; // already have one
+    // Keep existing meso only if it's for this plan AND weeks match the current config.
+    // A mismatch means the user deactivated/reactivated or changed the week count —
+    // always start fresh so the new meso is self-contained.
+    if (existing?.planId === session.scheduleId && existing.weeks === _sch.mesocycle_weeks) return;
     const newMeso = {
       planId: session.scheduleId,
       weeks: _sch.mesocycle_weeks,

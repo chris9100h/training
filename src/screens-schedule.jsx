@@ -1066,6 +1066,18 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
     }
 
+    // If mesocycle_weeks changed (activated, deactivated, or weeks count changed),
+    // clear any stored meso state for this plan — it belongs to the old config.
+    if (original.mesocycle_weeks !== draft.mesocycle_weeks) {
+      try {
+        const mesoRaw = localStorage.getItem('logbook-meso-state');
+        if (mesoRaw) {
+          const mesoObj = JSON.parse(mesoRaw);
+          if (mesoObj?.planId === draft.id) localStorage.removeItem('logbook-meso-state');
+        }
+      } catch {}
+    }
+
     const asClient = store.coaching?.asClient;
     if (store.activeScheduleId === draft.id && asClient?.status === 'active') {
       try {
