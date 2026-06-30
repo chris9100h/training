@@ -841,9 +841,6 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
 
       {previewBackup && (() => {
         const previewDays = previewBackup.days || [];
-        const selDay = previewDays[previewDayIdx] || previewDays[0];
-        const selItems = selDay?.items || [];
-        const isRestDay = !selItems.length;
         const closePreview = () => { setPreviewBackup(null); setPreviewDayIdx(0); };
         return (
           <div style={{ position: 'fixed', inset: 0, zIndex: 350, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
@@ -889,53 +886,65 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
                 })}
               </div>
 
-              {/* Exercise list */}
+              {/* Exercise list — all days rendered in a CSS grid stack so the
+                  sheet height is anchored to the tallest day; non-active days
+                  are invisible but still occupy space, preventing resize on switch */}
               <div style={{ flex: 1, overflowY: 'auto', padding: '0 22px 12px' }}>
-                {isRestDay ? (
-                  <div style={{ textAlign: 'center', padding: '28px 0', color: UI.inkFaint }}>
-                    <div className="display-it" style={{ fontSize: 28, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, marginBottom: 4 }}>Recover.</div>
-                    <div style={{ fontSize: 12, color: UI.inkFaint }}>Rest day</div>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {selItems.map((it, k) => {
-                      const ex = LB.findExercise(store, it.exId);
-                      const label = it.repsPerSet && it.repsPerSet.length > 1
-                        ? it.repsPerSet.join('/')
-                        : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`;
-                      const nextIt = selItems[k + 1];
-                      const prevIt = selItems[k - 1];
-                      const linkedNext = it.supersetGroup && it.supersetGroup === nextIt?.supersetGroup;
-                      const linkedPrev = it.supersetGroup && it.supersetGroup === prevIt?.supersetGroup;
-                      const inGroup = linkedNext || linkedPrev;
-                      return (
-                        <div key={k} style={{
-                          display: 'flex', alignItems: 'center', gap: 10,
-                          padding: '9px 12px',
-                          borderRadius: linkedPrev && linkedNext ? 0 : linkedPrev ? '0 0 6px 6px' : linkedNext ? '6px 6px 0 0' : 6,
-                          border: `1px solid ${inGroup ? UI.goldSoft : UI.hairStrong}`,
-                          background: inGroup ? UI.goldFaint : UI.bgRaised,
-                          marginBottom: linkedNext ? 0 : 0,
-                        }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>{ex?.name || '—'}</div>
-                            {it.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 2, fontStyle: 'italic' }}>{it.note}</div>}
+                <div style={{ display: 'grid' }}>
+                  {previewDays.map((d, i) => {
+                    const items = d.items || [];
+                    const isRest = !items.length;
+                    const visible = i === previewDayIdx;
+                    return (
+                      <div key={d.id || i} style={{ gridArea: '1/1', visibility: visible ? 'visible' : 'hidden', pointerEvents: visible ? 'auto' : 'none' }}>
+                        {isRest ? (
+                          <div style={{ textAlign: 'center', padding: '28px 0' }}>
+                            <div className="display-it" style={{ fontSize: 28, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, marginBottom: 4 }}>Recover.</div>
+                            <div style={{ fontSize: 12, color: UI.inkFaint }}>Rest day</div>
                           </div>
-                          <span className="num" style={{
-                            fontSize: 12, color: UI.gold, background: UI.goldFaint,
-                            border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
-                            padding: '3px 8px', whiteSpace: 'nowrap', flexShrink: 0,
-                          }}>{label}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {items.map((it, k) => {
+                              const ex = LB.findExercise(store, it.exId);
+                              const label = it.repsPerSet && it.repsPerSet.length > 1
+                                ? it.repsPerSet.join('/')
+                                : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`;
+                              const nextIt = items[k + 1];
+                              const prevIt = items[k - 1];
+                              const linkedNext = it.supersetGroup && it.supersetGroup === nextIt?.supersetGroup;
+                              const linkedPrev = it.supersetGroup && it.supersetGroup === prevIt?.supersetGroup;
+                              const inGroup = linkedNext || linkedPrev;
+                              return (
+                                <div key={k} style={{
+                                  display: 'flex', alignItems: 'center', gap: 10,
+                                  padding: '9px 12px',
+                                  borderRadius: linkedPrev && linkedNext ? 0 : linkedPrev ? '0 0 6px 6px' : linkedNext ? '6px 6px 0 0' : 6,
+                                  border: `1px solid ${inGroup ? UI.goldSoft : UI.hairStrong}`,
+                                  background: inGroup ? UI.goldFaint : UI.bgRaised,
+                                }}>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>{ex?.name || '—'}</div>
+                                    {it.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 2, fontStyle: 'italic' }}>{it.note}</div>}
+                                  </div>
+                                  <span className="num" style={{
+                                    fontSize: 12, color: UI.gold, background: UI.goldFaint,
+                                    border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
+                                    padding: '3px 8px', whiteSpace: 'nowrap', flexShrink: 0,
+                                  }}>{label}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Restore button */}
               <div style={{ padding: '12px 22px calc(16px + env(safe-area-inset-bottom, 0px))', borderTop: `0.5px solid ${UI.hairStrong}`, flexShrink: 0 }}>
-                <Btn onClick={() => { closePreview(); restoreBackup(previewBackup); }}>Restore this backup</Btn>
+                <Btn onClick={() => { closePreview(); restoreBackup(previewBackup); }} style={{ width: '100%', textAlign: 'center', justifyContent: 'center' }}>Restore this backup</Btn>
               </div>
             </div>
           </div>
