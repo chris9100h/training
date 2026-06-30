@@ -1173,7 +1173,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     background: UI.bgInset, border: 'none',
     borderRadius: 4, padding: '10px 14px', color: UI.ink,
     fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
-    width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark', textAlign: 'center',
+    width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark', textAlign: 'center', WebkitAppearance: 'none',
   };
 
   const dayActionLabel = (day) => (day.name === 'REST' || !day.items.length) ? 'edit' : `${day.items.length} ex · edit`;
