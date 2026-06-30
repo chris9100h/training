@@ -1612,12 +1612,24 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           if (!existing) return s;
           const sc2 = s.schedules?.find(sc => sc.id === scheduleId);
           const isWd = sc2 ? LB.isWeekdayPlan(sc2) : false;
+          const isFlex2 = sc2 ? LB.isFlexPlan(sc2) : false;
           const daysLen2 = sc2?.days?.length || 1;
           const ci = s.cycleIndex || 0;
+          let startDate2, startCycleIndex2;
+          if (isWd) {
+            startDate2 = LB.nextMondayISO();
+            startCycleIndex2 = existing.startCycleIndex ?? 0;
+          } else if (isFlex2) {
+            startCycleIndex2 = ci % daysLen2 === 0 ? ci : Math.ceil(ci / daysLen2) * daysLen2;
+            startDate2 = LB.todayISO();
+          } else {
+            startDate2 = LB.nextCycleD1ISO(s.cycleStartDate, daysLen2);
+            startCycleIndex2 = 0;
+          }
           const newMeso = {
             ...existing,
-            startDate: isWd ? LB.nextMondayISO() : LB.todayISO(),
-            startCycleIndex: isWd ? (existing.startCycleIndex ?? 0) : Math.ceil(ci / daysLen2) * daysLen2,
+            startDate: startDate2,
+            startCycleIndex: startCycleIndex2,
             deltas: {},
             jointFlags: {},
             pumpLowCounts: {},

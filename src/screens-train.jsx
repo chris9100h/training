@@ -49,19 +49,23 @@ function saveMesoStateToStorage(s) {
 function mesoCurrentWeek(mesoState, store) {
   if (!mesoState?.startDate) return 1;
   const sch = store?.schedules?.find(s => s.id === (mesoState.scheduleId ?? mesoState.planId));
-  if (sch && sch.days?.length > 0 && !LB.isWeekdayPlan(sch)) {
+  // Flex plans only: rotation-based tracking via cycleIndex (action-advanced counter).
+  if (sch && sch.days?.length > 0 && LB.isFlexPlan(sch)) {
     const startIdx = mesoState.startCycleIndex ?? 0;
     const currentIdx = store.cycleIndex || 0;
     if (currentIdx < startIdx) return null; // pending — waiting for next rotation start
     const rotations = Math.floor((currentIdx - startIdx) / sch.days.length);
     return Math.min(Math.max(1, rotations + 1), mesoState.weeks);
   }
-  // Weekday plans: use calendar weeks; startDate is the Monday meso begins
+  // Weekday and date-based cycle plans: date arithmetic.
+  // Cycle plans: one meso "week" = one full rotation (daysLen days).
+  // Weekday plans: one meso "week" = 7 calendar days.
   const start = new Date(mesoState.startDate); start.setHours(12, 0, 0, 0);
   const today = new Date(); today.setHours(12, 0, 0, 0);
-  if (today < start) return null; // pending — waiting for next Monday
+  if (today < start) return null; // pending
   const days = Math.round((today - start) / 86400000);
-  return Math.min(Math.max(1, Math.floor(days / 7) + 1), mesoState.weeks);
+  const cycleLen = (sch && !LB.isWeekdayPlan(sch) && sch.days?.length > 0) ? sch.days.length : 7;
+  return Math.min(Math.max(1, Math.floor(days / cycleLen) + 1), mesoState.weeks);
 }
 function mesoRirForWeek(week, weeks) {
   if (!weeks || weeks <= 1) return 0;
@@ -433,13 +437,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // A mismatch (changed week count) always starts fresh.
     if (existing && existing.weeks === _sch.mesocycle_weeks) return;
     // Align meso start to a clean boundary so week 1 is always a full rotation/week.
-    // Cycle/flex: next D1 (next multiple of daysLength from current cycleIndex).
-    // Weekday: next Monday (or today if today is Monday).
+    // Weekday: next Monday (or today). Flex: next D1 via cycleIndex. Cycle: next D1 via date.
     const _isWeekday = LB.isWeekdayPlan(_sch);
+    const _isFlex = LB.isFlexPlan(_sch);
     const _daysLen = _sch.days.length || 1;
     const _ci = store.cycleIndex || 0;
-    const alignedStartIdx = _isWeekday ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
-    const alignedStartDate = _isWeekday ? LB.nextMondayISO() : LB.todayISO();
+    let alignedStartDate, alignedStartIdx;
+    if (_isWeekday) {
+      alignedStartDate = LB.nextMondayISO();
+      alignedStartIdx = _ci;
+    } else if (_isFlex) {
+      alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
+      alignedStartDate = LB.todayISO();
+    } else {
+      // Date-based cycle plan: cycleIndex is always 0, use cycleStartDate for position.
+      alignedStartDate = LB.nextCycleD1ISO(store.cycleStartDate, _daysLen);
+      alignedStartIdx = 0; // unused for date-based cycle tracking
+    }
     const newMeso = {
       id: userId + '_' + session.scheduleId,
       scheduleId: session.scheduleId,
@@ -1456,12 +1470,24 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (!existing) return s;
       const sch2 = s.schedules?.find(sc => sc.id === scheduleId);
       const isWd = sch2 ? LB.isWeekdayPlan(sch2) : false;
+      const isFlex2 = sch2 ? LB.isFlexPlan(sch2) : false;
       const daysLen2 = sch2?.days?.length || 1;
       const ci = s.cycleIndex || 0;
+      let startDate2, startCycleIndex2;
+      if (isWd) {
+        startDate2 = LB.nextMondayISO();
+        startCycleIndex2 = existing.startCycleIndex ?? 0;
+      } else if (isFlex2) {
+        startCycleIndex2 = ci % daysLen2 === 0 ? ci : Math.ceil(ci / daysLen2) * daysLen2;
+        startDate2 = LB.todayISO();
+      } else {
+        startDate2 = LB.nextCycleD1ISO(s.cycleStartDate, daysLen2);
+        startCycleIndex2 = 0;
+      }
       const newMeso = {
         ...existing,
-        startDate: isWd ? LB.nextMondayISO() : LB.todayISO(),
-        startCycleIndex: isWd ? (existing.startCycleIndex ?? 0) : Math.ceil(ci / daysLen2) * daysLen2,
+        startDate: startDate2,
+        startCycleIndex: startCycleIndex2,
         deltas: {},
         jointFlags: {},
         pumpLowCounts: {},

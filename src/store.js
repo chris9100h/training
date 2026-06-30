@@ -104,6 +104,19 @@ function nextMondayISO() {
   d.setDate(d.getDate() + daysUntil);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+// Returns the next D1 of a date-based cycle plan as YYYY-MM-DD.
+// Returns today if today is already D1; otherwise the start of the next full rotation.
+function nextCycleD1ISO(cycleStartDate, daysLen) {
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  if (!cycleStartDate || daysLen <= 0) return todayISO();
+  const start = parseDate(cycleStartDate);
+  const n = Math.max(0, Math.round((today - start) / 86400000));
+  const pos = n % daysLen;
+  const daysUntilD1 = pos === 0 ? 0 : daysLen - pos;
+  const d = new Date(today);
+  d.setDate(d.getDate() + daysUntilD1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 // ─── QUICK SWITCH ────────────────────────────────────────────────────────
 
@@ -3032,7 +3045,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, nextMondayISO, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
+  uid, todayISO, nextMondayISO, nextCycleD1ISO, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,
