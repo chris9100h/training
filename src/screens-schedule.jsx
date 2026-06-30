@@ -1574,16 +1574,35 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                     </div>
                   </div>
                 </div>
-                {hasMeso && (
-                  <div style={{ marginTop: 2 }}>
-                    <Stepper value={draft.mesocycle_weeks} step={1} min={4} max={8}
-                      suffix=" weeks"
-                      onChange={v => setDraft(d => ({ ...d, mesocycle_weeks: Math.min(8, Math.max(4, Math.round(v))) }))} />
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, textAlign: 'center', lineHeight: 1.5 }}>
-                      {'Week 1 = 3 RIR · Week ' + draft.mesocycle_weeks + ' = 0 RIR · then deload'}
+                {hasMeso && (() => {
+                  const mesoCompletions = store.mesoStates?.find(m => m.scheduleId === draft.id)?.completions ?? 0;
+                  return (
+                    <div style={{ marginTop: 2 }}>
+                      <Stepper value={draft.mesocycle_weeks} step={1} min={4} max={8}
+                        suffix=" weeks"
+                        onChange={v => setDraft(d => ({ ...d, mesocycle_weeks: Math.min(8, Math.max(4, Math.round(v))) }))} />
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, textAlign: 'center', lineHeight: 1.5 }}>
+                        {'Week 1 = 3 RIR · Week ' + draft.mesocycle_weeks + ' = 0 RIR · then deload'}
+                      </div>
+                      {mesoCompletions > 0 && (
+                        <button onClick={() => setStore(s => ({
+                          ...s,
+                          mesoStates: (s.mesoStates || []).map(m =>
+                            m.scheduleId === draft.id ? { ...m, completions: 0 } : m
+                          ),
+                        }))} style={{
+                          marginTop: 10, width: '100%', background: 'transparent',
+                          border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
+                          padding: '7px 12px', cursor: 'pointer', fontFamily: UI.fontUi,
+                          fontSize: 11, color: UI.inkSoft, textAlign: 'center',
+                          WebkitTapHighlightColor: 'transparent',
+                        }}>
+                          Reset meso history ({mesoCompletions}× completed)
+                        </button>
+                      )}
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             );
           })()}
