@@ -3092,14 +3092,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   )}
                   {!!lpActiveByEx[exIdx] && s.done && !s.warmup && (
                     <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '2px 4px 8px' }}>
-                      <div />
-                      <span style={{ display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, padding: '2px 6px', justifySelf: 'end' }}>PARTIALS</span>
-                      <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                      <span style={{ gridColumn: 'span 2', fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, padding: '4px 0', textAlign: 'center' }}>PARTIALS</span>
+                      <div style={{ gridColumn: 'span 3', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <button onClick={() => setPartials(i, Math.max(0, (s.drops?.partials || 0) - 1))} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
-                        <span className="num" style={{ fontSize: 18, color: (s.drops?.partials || 0) > 0 ? UI.gold : UI.inkFaint, minWidth: 28, textAlign: 'center' }}>{s.drops?.partials || 0}</span>
+                        <span className="num" style={{ fontSize: 18, color: (s.drops?.partials || 0) > 0 ? UI.gold : UI.inkFaint }}>{s.drops?.partials || 0}</span>
                         <button onClick={() => setPartials(i, (s.drops?.partials || 0) + 1)} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>+</button>
                       </div>
-                      <div />
                     </div>
                   )}
                   {i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) && <div className="knurl" />}
