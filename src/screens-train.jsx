@@ -412,6 +412,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       pumpLowCounts: {},
     };
     saveMesoStateToStorage(newMeso);
+    setMesoStateLocal(newMeso);
   }, []);
 
   const exIdx = session.currentExIdx || 0;
