@@ -21,11 +21,30 @@ function primaryMuscleForExercise(ex) {
   }
   return ex.tags[0] || null;
 }
-function getMesoState() {
-  try { const r = localStorage.getItem(MESO_KEY); return r ? JSON.parse(r) : null; } catch { return null; }
+// Read meso state: store (DB-loaded, cross-device) first, localStorage fallback for
+// in-session writes that haven't been flushed to store yet.
+function getMesoState(scheduleId, mesoStates) {
+  if (!scheduleId) return null;
+  if (mesoStates?.length) {
+    const found = mesoStates.find(m => m.scheduleId === scheduleId);
+    if (found) return found;
+  }
+  // localStorage fallback: in-session cache or old single-key migration path
+  try {
+    const r = localStorage.getItem(MESO_KEY + '-' + scheduleId)
+           || localStorage.getItem(MESO_KEY); // old single-key format
+    if (!r) return null;
+    const parsed = JSON.parse(r);
+    // Old single-key format check
+    if (parsed && !parsed.scheduleId && parsed.planId) parsed.scheduleId = parsed.planId;
+    return parsed?.scheduleId === scheduleId ? parsed : null;
+  } catch { return null; }
 }
+// Write meso state to per-plan localStorage key (in-session fast cache).
+// The store (DB) is updated via setStore at session end.
 function saveMesoStateToStorage(s) {
-  try { localStorage.setItem(MESO_KEY, JSON.stringify(s)); } catch {}
+  if (!s?.scheduleId) return;
+  try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(s)); } catch {}
 }
 function mesoCurrentWeek(mesoState, store) {
   if (!mesoState?.startDate) return 1;
@@ -51,19 +70,19 @@ function mesoRirForWeek(week, weeks) {
 }
 // Apply stored meso set-delta to a plan item before building seed sets.
 // Returns a shallow copy with adjusted .sets (min 1); no-ops if no meso or no delta.
-function applyMesoSetDelta(it, dayId, scheduleId) {
+function applyMesoSetDelta(it, dayId, scheduleId, mesoStates) {
   if (!dayId || !scheduleId) return it;
-  const m = getMesoState();
-  if (!m || m.planId !== scheduleId) return it;
+  const m = getMesoState(scheduleId, mesoStates);
+  if (!m) return it;
   const delta = (m.deltas || {})[it.exId + '_' + dayId];
   if (!delta) return it;
   return { ...it, sets: Math.max(1, (it.sets || 1) + delta) };
 }
 // Returns stored meso weight boosts map (exId_dayId → kg increment) for a schedule.
 // Called at session start; boosts are overwritten at next session end by computeMesoGains.
-function getMesoWeightBoosts(scheduleId) {
-  const m = getMesoState();
-  if (!m || m.planId !== scheduleId || !m.weightBoosts) return null;
+function getMesoWeightBoosts(scheduleId, mesoStates) {
+  const m = getMesoState(scheduleId, mesoStates);
+  if (!m || !m.weightBoosts) return null;
   return m.weightBoosts;
 }
 // ──────────────────────────────────────────────────────────────────────────────
@@ -409,22 +428,30 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // and there's no active meso for this plan yet.
   useEffectT(() => {
     if (!_sch?.mesocycle_weeks || !session.scheduleId) return;
-    const existing = getMesoState();
-    // Keep existing meso only if it's for this plan AND weeks match the current config.
-    // A mismatch means the user deactivated/reactivated or changed the week count —
-    // always start fresh so the new meso is self-contained.
-    if (existing?.planId === session.scheduleId && existing.weeks === _sch.mesocycle_weeks) return;
+    const existing = getMesoState(session.scheduleId, store.mesoStates);
+    // Keep existing meso only if weeks match the current config.
+    // A mismatch (changed week count) always starts fresh.
+    if (existing && existing.weeks === _sch.mesocycle_weeks) return;
     const newMeso = {
-      planId: session.scheduleId,
+      id: userId + '_' + session.scheduleId,
+      scheduleId: session.scheduleId,
       weeks: _sch.mesocycle_weeks,
       startDate: LB.todayISO(),
       startCycleIndex: store.cycleIndex || 0,
       deltas: {},
       jointFlags: {},
       pumpLowCounts: {},
+      weightBoosts: {},
+      completions: existing?.completions ?? 0,
     };
     saveMesoStateToStorage(newMeso);
     setMesoStateLocal(newMeso);
+    // Immediately flush new meso state to store so it's synced to DB without
+    // waiting for session end (covers the case where user exits without finishing).
+    setStore(s => {
+      const others = (s.mesoStates || []).filter(m => m.scheduleId !== newMeso.scheduleId);
+      return { ...s, mesoStates: [...others, newMeso] };
+    });
   }, []);
 
   const exIdx = session.currentExIdx || 0;
@@ -1145,13 +1172,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       };
     });
     if (mesoState) {
-      const gains = computeMesoGains();
+      const gains = computeMesoGains(); // also flushes final meso state to store
       if (gains.length > 0) {
         mesoGainNavRef.current = session.id;
         setMesoGainItems(gains);
         setMesoGainSheetOpen(true);
         return;
       }
+      // No gains to show, but still flush the accumulated feedback (deltas etc.) to DB
+      flushMesoStateToStore(mesoState);
     }
     go({ name: 'session', sessionId: session.id, justFinished: true });
   };
@@ -1375,16 +1404,31 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [outlierConfirm, setOutlierConfirm] = useStateT(null);
 
   // ── Mesocycle state ─────────────────────────────────────────────────────────
-  const [mesoState, setMesoStateLocal] = useStateT(() => {
-    const m = getMesoState();
-    return (m && m.planId === session.scheduleId) ? m : null;
-  });
+  // Init from store (DB-loaded, cross-device) with localStorage fallback for
+  // in-progress sessions. Old format (planId field) is handled by getMesoState.
+  const [mesoState, setMesoStateLocal] = useStateT(() =>
+    getMesoState(session.scheduleId, store.mesoStates)
+  );
+  // Write meso state: localStorage for instant in-session persistence, store sync
+  // happens at session end via flushMesoStateToStore().
   const saveMesoState = (updater) => {
     setMesoStateLocal(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       if (next) saveMesoStateToStorage(next);
       return next;
     });
+  };
+  // Flush final meso state to the store (triggers DB sync via syncStore).
+  // Called at session end so cross-device sync happens once per session, not per answer.
+  const flushMesoStateToStore = (finalState) => {
+    if (!finalState?.scheduleId) return;
+    setStore(s => {
+      const others = (s.mesoStates || []).filter(m => m.scheduleId !== finalState.scheduleId);
+      return { ...s, mesoStates: [...others, finalState] };
+    });
+    // Clean up old localStorage keys after successful flush
+    try { localStorage.removeItem(MESO_KEY + '-' + finalState.scheduleId); } catch {}
+    try { localStorage.removeItem(MESO_KEY); } catch {} // old single-key format
   };
   const mesoWeek = mesoState ? mesoCurrentWeek(mesoState, store) : null;
   const mesoRirVal = (mesoWeek != null && mesoState?.weeks != null) ? mesoRirForWeek(mesoWeek, mesoState.weeks) : null;
@@ -1583,9 +1627,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       gainMap[key].weightDelta = increment;
     }
 
-    if (Object.keys(weightBoostMap).length) {
-      const current = getMesoState();
-      if (current) saveMesoStateToStorage({ ...current, weightBoosts: { ...(current.weightBoosts || {}), ...weightBoostMap } });
+    // Merge weight boosts into meso state and flush to store (DB sync).
+    // mesoState here is the React state — already contains all feedback deltas from this session.
+    const finalMeso = weightBoostMap && Object.keys(weightBoostMap).length
+      ? { ...mesoState, weightBoosts: { ...(mesoState.weightBoosts || {}), ...weightBoostMap } }
+      : mesoState;
+    if (finalMeso) {
+      setMesoStateLocal(finalMeso);
+      saveMesoStateToStorage(finalMeso);
+      flushMesoStateToStore(finalMeso);
     }
 
     return Object.values(gainMap).filter(g => g.setDelta !== 0 || g.weightDelta !== 0);
