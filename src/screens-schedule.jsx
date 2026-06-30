@@ -136,6 +136,7 @@ function PlanScreen({ store, setStore, go, userId }) {
           return 0;
         }).map(s => {
           const isActive = s.id === store.activeScheduleId;
+          const mesoCompletions = s.mesocycle_weeks ? ((store.mesoStates || []).find(m => m.scheduleId === s.id)?.completions ?? 0) : 0;
           return isActive ? (
             <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', overflow: 'hidden' }}>
               {s.mesocycle_weeks && (
@@ -145,7 +146,14 @@ function PlanScreen({ store, setStore, go, userId }) {
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1 }}>{s.name}</div>
-                <Pill gold>active</Pill>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  {mesoCompletions > 0 && (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                      MESO {mesoCompletions + 1}
+                    </span>
+                  )}
+                  <Pill gold>active</Pill>
+                </div>
               </div>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>
                 {planDescriptor(s)}
@@ -171,7 +179,14 @@ function PlanScreen({ store, setStore, go, userId }) {
             </BracketFrame>
           ) : (
             <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px' }}>
-              <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1, marginBottom: 6 }}>{s.name}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1 }}>{s.name}</div>
+                {mesoCompletions > 0 && (
+                  <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkSoft, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em', flexShrink: 0, marginLeft: 8 }}>
+                    MESO {mesoCompletions + 1}
+                  </span>
+                )}
+              </div>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>
                 {planDescriptor(s)}
               </div>
