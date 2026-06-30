@@ -2276,26 +2276,16 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     <Screen>
       <ScreenHead
         ref_={LB.parseDate(s.date).toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
-        title={s.dayName}
+        title={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, lineHeight: 1 }}>
+            {s.dayName}
+            {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>BONUS</span>}
+            {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>DELOAD</span>}
+          </span>
+        }
         onBack={() => go(justFinished ? { name: 'home' } : (back || { name: 'hist' }))}
         right={
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            {s.isBonus && (
-              <span style={{
-                fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
-                color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)',
-                border: `0.5px solid rgba(var(--accent-rgb), 0.3)`,
-                borderRadius: 4, padding: '3px 6px',
-              }}>BONUS</span>
-            )}
-            {s.isDeload && (
-              <span style={{
-                fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
-                color: UI.inkSoft, background: UI.bgInset,
-                border: `0.5px solid ${UI.hairStrong}`,
-                borderRadius: 4, padding: '3px 6px',
-              }}>DELOAD</span>
-            )}
             <button onClick={takeScreenshot} disabled={capturing} style={{
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
@@ -2331,7 +2321,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 4 }}>
                   {LB.parseDate(s.date).toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
                 </div>
-                <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
+                  {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
+                  {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
+                </div>
               </div>
               <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
             </div>
