@@ -1676,9 +1676,13 @@ async function fetchSeedEntries(state, items, dayId, userId, window = 3) {
       if (!rows.length) return;
       const local = recentSessionsForExercise(state, exId, dayId, window)
         .map(r => ({ sessionId: r.session.id, ended: r.session.ended, sets: r.entry.sets || [] }));
+      // Deload sessions are excluded from local via recentSessionsForExercise, but
+      // the server RPC doesn't know about is_deload and may return them. Guard by
+      // checking server rows against locally-known deload session ids.
+      const deloadIds = new Set((state.sessions || []).filter(s => s.isDeload).map(s => s.id));
       const merged = [...local];
       for (const row of rows) {
-        if (!merged.some(m => m.sessionId === row.sessionId)) merged.push(row);
+        if (!merged.some(m => m.sessionId === row.sessionId) && !deloadIds.has(row.sessionId)) merged.push(row);
       }
       merged.sort((a, b) => (Date.parse(b.ended) || 0) - (Date.parse(a.ended) || 0));
       const ref = bestEntryFromSetLists(
