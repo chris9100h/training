@@ -978,6 +978,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const [applyFromDayIdx, setApplyFromDayIdx] = useStateS(0);
   const [editingDay, setEditingDay] = useStateS(null);
   const [mesoInfoOpen, setMesoInfoOpen] = useStateS(false);
+  const [modifiersOpen, setModifiersOpen] = useStateS(false);
 
   const reorderDays = (from, to) => {
     if (from === to) return;
@@ -1223,134 +1224,31 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           </div>
         </Field>
 
-        {!isWeekday && (
-          <Field label="Flexible schedule">
-            <button onClick={toggleFlex} style={{
-              display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-              background: UI.bgInset, border: `1px solid ${isFlex ? UI.goldSoft : UI.hairStrong}`,
-              borderRadius: 4, padding: '10px 12px', cursor: 'pointer', textAlign: 'left',
-            }}>
-              <div style={{
-                width: 44, height: 26, borderRadius: 13, flexShrink: 0, position: 'relative',
-                background: isFlex ? UI.gold : UI.hairStrong, transition: 'background 0.15s',
-              }}>
-                <div style={{
-                  position: 'absolute', top: 3, left: isFlex ? 21 : 3, width: 20, height: 20,
-                  borderRadius: '50%', background: '#fff', transition: 'left 0.15s',
-                }} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Advance only when I train</div>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
-                  No fixed days and no rest days — your next workout simply waits until you log it, whenever that is.
-                </div>
-              </div>
-            </button>
-          </Field>
-        )}
-
-        {isFlex && (() => {
-          const hasGoal = draft.sessions_per_week != null;
-          const toggle = () => setDraft(d => ({
-            ...d,
-            sessions_per_week: d.sessions_per_week != null ? null
-              : Math.min(7, Math.max(1, (d.days || []).filter(x => x.items?.length > 0).length || 3)),
-          }));
-          return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span className="label">Weekly goal</span>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-                background: UI.bgInset, border: `1px solid ${hasGoal ? UI.goldSoft : UI.hairStrong}`,
-                borderRadius: 4, padding: '10px 12px',
-              }}>
-                <button onClick={toggle} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                  <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasGoal ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
-                    <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
-                  </div>
-                </button>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>
-                    {hasGoal ? `${draft.sessions_per_week}× per week` : 'No target'}
-                  </div>
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
-                    {hasGoal
-                      ? 'Used for your weekly adherence score and deload timing.'
-                      : 'Just train whenever — adherence and deload timing won\'t apply.'}
-                  </div>
-                </div>
-              </div>
-              {hasGoal && (() => {
-                const spw = draft.sessions_per_week;
-                const hint = spw >= 50 ? '50 sessions. You win.' :
-                             spw > 30  ? 'At this point the gym should pay you.' :
-                             spw > 20  ? 'Dude. Really?' :
-                             spw > 14  ? '…okay, you\'re serious about this.' :
-                             spw > 10  ? 'Calm down, dude.' :
-                             spw > 7   ? 'Oh, an overachiever. We see you.' :
-                             spw >= 4  ? 'Solid.' :
-                             spw >= 2  ? 'That\'s a start.' :
-                                         'Better than nothing.';
-                return (
-                  <div style={{ marginTop: 10, width: '100%' }}>
-                    <Stepper value={spw} step={1} min={1} max={50}
-                      suffix="/ week"
-                      onChange={v => setDraft(d => ({ ...d, sessions_per_week: Math.min(50, Math.max(1, Math.round(v))) }))} />
-                    {hint && (
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, textAlign: 'center', lineHeight: 1.4 }}>{hint}</div>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-          );
-        })()}
-
-        {/* Mesocycle */}
+        {/* Options row — opens modifiers sheet */}
         {(() => {
-          const hasMeso = draft.mesocycle_weeks != null;
-          const toggleMeso = () => setDraft(d => ({ ...d, mesocycle_weeks: d.mesocycle_weeks != null ? null : 6 }));
+          const parts = [];
+          if (!isWeekday && isFlex) {
+            parts.push('Flex');
+            if (draft.sessions_per_week != null) parts.push(`${draft.sessions_per_week}×/wk`);
+          }
+          if (draft.mesocycle_weeks != null) parts.push(`${draft.mesocycle_weeks}wk meso`);
+          const summary = parts.join(' · ');
           return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span className="label" style={{ flex: 1 }}>Mesocycle</span>
-                <button onClick={() => setMesoInfoOpen(true)} style={{
-                  background: 'transparent', border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
-                  width: 22, height: 22, cursor: 'pointer', color: UI.inkFaint,
-                  fontFamily: UI.fontUi, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  padding: 0,
-                }}>ⓘ</button>
-              </div>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-                background: UI.bgInset, border: `1px solid ${hasMeso ? UI.goldSoft : UI.hairStrong}`,
-                borderRadius: 4, padding: '10px 12px',
+            <Field label="Options">
+              <button onClick={() => setModifiersOpen(true)} style={{
+                display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                background: UI.bgInset, border: `1px solid ${summary ? UI.goldSoft : UI.hairStrong}`,
+                borderRadius: 4, padding: '10px 14px', cursor: 'pointer', textAlign: 'left',
+                WebkitTapHighlightColor: 'transparent',
               }}>
-                <button onClick={toggleMeso} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                  <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasMeso ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
-                    <div style={{ position: 'absolute', top: 3, left: hasMeso ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
-                  </div>
-                </button>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>
-                    {hasMeso ? `${draft.mesocycle_weeks}-week mesocycle` : 'No mesocycle'}
-                  </div>
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
-                    {hasMeso ? 'RIR targets + auto-regulation feedback during training.' : 'Enable for RIR-based progressive overload.'}
-                  </div>
-                </div>
-              </div>
-              {hasMeso && (
-                <div style={{ marginTop: 2 }}>
-                  <Stepper value={draft.mesocycle_weeks} step={1} min={4} max={8}
-                    suffix=" weeks"
-                    onChange={v => setDraft(d => ({ ...d, mesocycle_weeks: Math.min(8, Math.max(4, Math.round(v))) }))} />
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, textAlign: 'center', lineHeight: 1.5 }}>
-                    {'Week 1 = 3 RIR · Week ' + draft.mesocycle_weeks + ' = 0 RIR · then deload'}
-                  </div>
-                </div>
-              )}
-            </div>
+                <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 12, color: summary ? UI.ink : UI.inkFaint }}>
+                  {summary || 'None active'}
+                </span>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 2l4 4-4 4"/>
+                </svg>
+              </button>
+            </Field>
           );
         })()}
 
@@ -1539,6 +1437,133 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           </div>
         </div>
       )}
+
+      <Sheet open={modifiersOpen} onClose={() => setModifiersOpen(false)} title="Options">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+
+          {!isWeekday && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span className="label">Flexible schedule</span>
+              <button onClick={toggleFlex} style={{
+                display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                background: UI.bgInset, border: `1px solid ${isFlex ? UI.goldSoft : UI.hairStrong}`,
+                borderRadius: 4, padding: '10px 12px', cursor: 'pointer', textAlign: 'left',
+              }}>
+                <div style={{ width: 44, height: 26, borderRadius: 13, flexShrink: 0, position: 'relative', background: isFlex ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
+                  <div style={{ position: 'absolute', top: 3, left: isFlex ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Advance only when I train</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
+                    No fixed days and no rest days — your next workout simply waits until you log it, whenever that is.
+                  </div>
+                </div>
+              </button>
+            </div>
+          )}
+
+          {isFlex && (() => {
+            const hasGoal = draft.sessions_per_week != null;
+            const toggle = () => setDraft(d => ({
+              ...d,
+              sessions_per_week: d.sessions_per_week != null ? null
+                : Math.min(7, Math.max(1, (d.days || []).filter(x => x.items?.length > 0).length || 3)),
+            }));
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <span className="label">Weekly goal</span>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                  background: UI.bgInset, border: `1px solid ${hasGoal ? UI.goldSoft : UI.hairStrong}`,
+                  borderRadius: 4, padding: '10px 12px',
+                }}>
+                  <button onClick={toggle} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                    <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasGoal ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
+                      <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                    </div>
+                  </button>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>
+                      {hasGoal ? `${draft.sessions_per_week}× per week` : 'No target'}
+                    </div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
+                      {hasGoal ? 'Used for your weekly adherence score and deload timing.' : 'Just train whenever — adherence and deload timing won\'t apply.'}
+                    </div>
+                  </div>
+                </div>
+                {hasGoal && (() => {
+                  const spw = draft.sessions_per_week;
+                  const hint = spw >= 50 ? '50 sessions. You win.' :
+                               spw > 30  ? 'At this point the gym should pay you.' :
+                               spw > 20  ? 'Dude. Really?' :
+                               spw > 14  ? '…okay, you\'re serious about this.' :
+                               spw > 10  ? 'Calm down, dude.' :
+                               spw > 7   ? 'Oh, an overachiever. We see you.' :
+                               spw >= 4  ? 'Solid.' :
+                               spw >= 2  ? 'That\'s a start.' :
+                                           'Better than nothing.';
+                  return (
+                    <div style={{ marginTop: 4 }}>
+                      <Stepper value={spw} step={1} min={1} max={50}
+                        suffix="/ week"
+                        onChange={v => setDraft(d => ({ ...d, sessions_per_week: Math.min(50, Math.max(1, Math.round(v))) }))} />
+                      {hint && <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, textAlign: 'center', lineHeight: 1.4 }}>{hint}</div>}
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })()}
+
+          {(() => {
+            const hasMeso = draft.mesocycle_weeks != null;
+            const toggleMeso = () => setDraft(d => ({ ...d, mesocycle_weeks: d.mesocycle_weeks != null ? null : 6 }));
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="label" style={{ flex: 1 }}>Mesocycle</span>
+                  <button onClick={() => setMesoInfoOpen(true)} style={{
+                    background: 'transparent', border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
+                    width: 22, height: 22, cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi,
+                    fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+                  }}>ⓘ</button>
+                </div>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                  background: UI.bgInset, border: `1px solid ${hasMeso ? UI.goldSoft : UI.hairStrong}`,
+                  borderRadius: 4, padding: '10px 12px',
+                }}>
+                  <button onClick={toggleMeso} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                    <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasMeso ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
+                      <div style={{ position: 'absolute', top: 3, left: hasMeso ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                    </div>
+                  </button>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>
+                      {hasMeso ? `${draft.mesocycle_weeks}-week mesocycle` : 'No mesocycle'}
+                    </div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
+                      {hasMeso ? 'RIR targets + auto-regulation feedback during training.' : 'Enable for RIR-based progressive overload.'}
+                    </div>
+                  </div>
+                </div>
+                {hasMeso && (
+                  <div style={{ marginTop: 2 }}>
+                    <Stepper value={draft.mesocycle_weeks} step={1} min={4} max={8}
+                      suffix=" weeks"
+                      onChange={v => setDraft(d => ({ ...d, mesocycle_weeks: Math.min(8, Math.max(4, Math.round(v))) }))} />
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, textAlign: 'center', lineHeight: 1.5 }}>
+                      {'Week 1 = 3 RIR · Week ' + draft.mesocycle_weeks + ' = 0 RIR · then deload'}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          <Btn onClick={() => setModifiersOpen(false)} style={{ width: '100%', textAlign: 'center', justifyContent: 'center' }}>Done</Btn>
+        </div>
+      </Sheet>
 
       <Sheet open={mesoInfoOpen} onClose={() => setMesoInfoOpen(false)} title="Mesocycle">
         <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 14 }}>
