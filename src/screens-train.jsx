@@ -2709,7 +2709,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {!!lpActiveByEx[exIdx] && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 8px' }}>
               <span className="micro-gold">LENGTHENED PARTIALS</span>
-              <button onClick={() => setLpActiveByEx(prev => ({ ...prev, [exIdx]: false }))} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+              <button onClick={() => {
+                updateSession(sess => ({
+                  ...sess,
+                  entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+                    ...en,
+                    sets: en.sets.map(st => st.technique === 'lengthened_partial'
+                      ? { ...st, technique: null, drops: null, updatedAt: new Date().toISOString() }
+                      : st),
+                  }),
+                }));
+                setLpActiveByEx(prev => ({ ...prev, [exIdx]: false }));
+              }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
             </div>
           )}
 
@@ -2761,14 +2772,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
                       {isIntensityActive ? null : isNoWeightReps ? <div /> : (
-                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match' || s.technique === 'lengthened_partial') && s.done
+                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match') && s.done
                           ? <span style={{
                               display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
                               fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
                               background: 'rgba(var(--accent-rgb),0.12)',
                               border: '0.5px solid rgba(var(--accent-rgb),0.35)',
                               borderRadius: 4, padding: '2px 6px',
-                            }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : s.technique === 'lengthened_partial' ? 'PARTIALS' : 'MYO REP'}</span>
+                            }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : 'MYO REP'}</span>
                           : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                               {isWarmupRow
                                 ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
@@ -3082,7 +3093,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {!!lpActiveByEx[exIdx] && s.done && !s.warmup && (
                     <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '2px 4px 8px' }}>
                       <div />
-                      <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', textAlign: 'right', paddingRight: 4 }}>PARTIALS</span>
+                      <span style={{ display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, padding: '2px 6px', justifySelf: 'end' }}>PARTIALS</span>
                       <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
                         <button onClick={() => setPartials(i, Math.max(0, (s.drops?.partials || 0) - 1))} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
                         <span className="num" style={{ fontSize: 18, color: (s.drops?.partials || 0) > 0 ? UI.gold : UI.inkFaint, minWidth: 28, textAlign: 'center' }}>{s.drops?.partials || 0}</span>
