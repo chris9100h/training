@@ -1170,7 +1170,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(original);
   const dateInputStyle = {
-    background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+    background: UI.bgInset, border: 'none',
     borderRadius: 4, padding: '10px 14px', color: UI.ink,
     fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
     width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark',
@@ -1296,7 +1296,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
 
         {isActive && !isWeekday && !isFlex && (
           <Field label="Cycle start date (Day 1)">
-            <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%' }}>
+            <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%', border: `1px solid ${UI.hairStrong}` }}>
               <input type="date" value={store.cycleStartDate || ''}
                 onChange={e => { if (e.target.value) setStore(s => ({ ...s, cycleStartDate: e.target.value })); }}
                 style={dateInputStyle} />
@@ -1311,7 +1311,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         )}
         {isActive && isWeekday && (
           <Field label="Week plan start date (Week 1)">
-            <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%' }}>
+            <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%', border: `1px solid ${UI.hairStrong}` }}>
               <input type="date" value={store.weekPlanStartDate || ''}
                 onChange={e => { if (e.target.value) setStore(s => ({ ...s, weekPlanStartDate: e.target.value })); }}
                 style={dateInputStyle} />
