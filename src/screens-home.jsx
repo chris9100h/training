@@ -1646,6 +1646,9 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         setStore(s => ({
           ...s,
           activeScheduleId: null,
+          schedules: s.schedules.map(sc =>
+            sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
+          ),
           mesoStates: (s.mesoStates || []).map(m =>
             m.scheduleId === scheduleId ? { ...m, pendingMeso2: false } : m
           ),
