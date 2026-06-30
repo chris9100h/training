@@ -117,6 +117,28 @@ function nextCycleD1ISO(cycleStartDate, daysLen) {
   d.setDate(d.getDate() + daysUntilD1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+// Version-aware wrapper: uses getCyclePosForDate when the plan has versions so
+// cycleOffset and version boundaries are respected (same logic as the date strip).
+// Falls back to cycleStartDate-based math for unversioned plans.
+function nextCycleD1ISOFromSchedule(schedule, cycleStartDate) {
+  const todayStr = todayISO();
+  if (schedule?.versions?.length) {
+    const pos = getCyclePosForDate(schedule, todayStr);
+    if (pos !== null) {
+      const vi = getActiveVersionIdx(schedule, todayStr);
+      const activeV = vi >= 0 ? schedule.versions[vi] : null;
+      const vDaysLen = (activeV?.days || schedule.days || []).length;
+      if (vDaysLen > 0) {
+        const today = new Date(); today.setHours(12, 0, 0, 0);
+        const daysUntilD1 = pos === 0 ? 0 : vDaysLen - pos;
+        const d = new Date(today);
+        d.setDate(d.getDate() + daysUntilD1);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      }
+    }
+  }
+  return nextCycleD1ISO(cycleStartDate, (schedule?.days || []).length);
+}
 
 // ─── QUICK SWITCH ────────────────────────────────────────────────────────
 
@@ -3045,7 +3067,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, nextMondayISO, nextCycleD1ISO, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
+  uid, todayISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,

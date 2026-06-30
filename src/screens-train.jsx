@@ -450,9 +450,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
       alignedStartDate = LB.todayISO();
     } else {
-      // Date-based cycle plan: cycleIndex is always 0, use cycleStartDate for position.
-      alignedStartDate = LB.nextCycleD1ISO(store.cycleStartDate, _daysLen);
-      alignedStartIdx = 0; // unused for date-based cycle tracking
+      // Date-based cycle plan: use version-aware D1 so the meso aligns with how
+      // the date strip renders (getCyclePosForDate respects version boundaries).
+      alignedStartDate = LB.nextCycleD1ISOFromSchedule(_sch, store.cycleStartDate);
+      alignedStartIdx = 0;
     }
     const newMeso = {
       id: userId + '_' + session.scheduleId,
@@ -1481,7 +1482,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         startCycleIndex2 = ci % daysLen2 === 0 ? ci : Math.ceil(ci / daysLen2) * daysLen2;
         startDate2 = LB.todayISO();
       } else {
-        startDate2 = LB.nextCycleD1ISO(s.cycleStartDate, daysLen2);
+        startDate2 = LB.nextCycleD1ISOFromSchedule(sch2, s.cycleStartDate);
         startCycleIndex2 = 0;
       }
       const newMeso = {

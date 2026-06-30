@@ -1623,7 +1623,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             startCycleIndex2 = ci % daysLen2 === 0 ? ci : Math.ceil(ci / daysLen2) * daysLen2;
             startDate2 = LB.todayISO();
           } else {
-            startDate2 = LB.nextCycleD1ISO(s.cycleStartDate, daysLen2);
+            startDate2 = LB.nextCycleD1ISOFromSchedule(sch2, s.cycleStartDate);
             startCycleIndex2 = 0;
           }
           const newMeso = {
