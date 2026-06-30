@@ -406,6 +406,11 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   });
   const [nowS, setNowS] = useStateSet(Date.now());
   const [importing, setImporting] = useStateSet(false);
+  const [importSheet, setImportSheet] = useStateSet(false);
+  const [importProgress, setImportProgress] = useStateSet({ pct: 0, phase: '' });
+  const [importSourceUnit, _setImportSourceUnit] = useStateSet(store.settings?.unit || 'kg');
+  const importSourceUnitRef = useRefSet(store.settings?.unit || 'kg');
+  const setImportSourceUnit = v => { importSourceUnitRef.current = v; _setImportSourceUnit(v); };
   const [swVersion, setSwVersion] = useStateSet('');
   const [pushStatus, setPushStatus] = useStateSet(null);
   const [pushEnabled, setPushEnabled] = useStateSet(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
@@ -889,19 +894,36 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename || `zane-${LB.todayISO()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-  const importData = () => {
+  const runImport = () => {
+    // input.click() must be synchronous in the user-gesture handler (iOS Safari).
     const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
     input.onchange = async (e) => {
       const file = e.target.files?.[0]; if (!file) return;
       let backup; try { backup = JSON.parse(await file.text()); } catch (_) { await confirm('The selected file is not valid JSON.', { title: 'Invalid file', ok: 'OK' }); return; }
       const invalid = LB.validateBackup(backup);
       if (invalid) { await confirm(invalid, { title: 'Invalid backup', ok: 'OK' }); return; }
+
+      // Auto-detect source unit from backup; update toggle + ref so the user sees it.
+      const detectedUnit = backup.settings?.unit;
+      if (detectedUnit === 'kg' || detectedUnit === 'lbs') setImportSourceUnit(detectedUnit);
+
       const latestSession = [...(backup.sessions || [])].filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
       const backupDate = latestSession ? new Date(latestSession.ended).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }) : 'unknown date';
-      const ok = await confirm(`This backup contains data up to ${backupDate}. Your current data will be downloaded first, then replaced.`, { title: 'Restore backup?', ok: 'Restore', danger: true });
+      const userUnit = store.settings?.unit || 'kg';
+      const srcUnit = importSourceUnitRef.current;
+      const unitMismatch = srcUnit !== userUnit;
+      const unitNote = unitMismatch ? ` Weights will be converted from ${srcUnit.toUpperCase()} to ${userUnit.toUpperCase()}.` : '';
+      const ok = await confirm(`This backup contains data up to ${backupDate}. Your current data will be permanently replaced.${unitNote}`, { title: 'Replace data?', ok: 'Replace', danger: true });
       if (!ok) return;
-      await exportData(`zane-before-import-${LB.todayISO()}.json`); setImporting(true);
-      try { await LB.importFromBackup(backup, userId); LB.clearLocal(userId); window.location.reload(); }
+      const unitConvert = unitMismatch
+        ? { multiplier: srcUnit === 'kg' ? 2.20462 : 1 / 2.20462, targetUnit: userUnit }
+        : null;
+      setImporting(true);
+      setImportProgress({ pct: 0, phase: 'Starting…' });
+      try {
+        await LB.importFromBackup(backup, userId, (pct, phase) => setImportProgress({ pct, phase }), unitConvert);
+        LB.clearLocal(userId); window.location.reload();
+      }
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
     }; input.click();
   };
@@ -1739,10 +1761,44 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
-            <Btn kind="ghost" onClick={importData} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
+            <Btn kind="ghost" onClick={() => setImportSheet(true)} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
           </div>
           <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Delete all data</Btn>
         </div>
+      </SettingsSheet>
+
+      {/* ══ Import Sheet ══ */}
+      <SettingsSheet open={importSheet} onClose={importing ? () => {} : () => setImportSheet(false)} title="Restore backup">
+        {importing ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 13, color: UI.inkSoft, minHeight: 20 }}>{importProgress.phase}</div>
+            <div style={{ background: UI.bgInset, borderRadius: 999, height: 6, overflow: 'hidden' }}>
+              <div style={{ height: '100%', borderRadius: 999, background: 'var(--accent)', width: `${importProgress.pct}%`, transition: 'width 0.4s ease' }} />
+            </div>
+            <div className="num" style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'right' }}>{importProgress.pct}%</div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.55, fontSize: 13, color: UI.inkSoft }}>
+              <span style={{ color: UI.ink, fontWeight: 600 }}>Step 1:</span> Download a backup of your current data first.{' '}
+              <span style={{ color: UI.ink, fontWeight: 600 }}>Step 2:</span> Then pick the file you want to restore.
+            </div>
+            <Btn kind="ghost" onClick={() => exportData(`zane-before-import-${LB.todayISO()}.json`)}>1 · Backup current data</Btn>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px' }}>
+              <span style={{ fontSize: 12, color: UI.inkSoft }}>Source weight unit</span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {['kg', 'lbs'].map(u => (
+                  <button key={u} onClick={() => setImportSourceUnit(u)} style={{
+                    padding: '3px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                    background: importSourceUnit === u ? 'var(--accent)' : UI.bgInset,
+                    color: importSourceUnit === u ? '#fff' : UI.inkSoft,
+                  }}>{u.toUpperCase()}</button>
+                ))}
+              </div>
+            </div>
+            <Btn kind="ghost" onClick={runImport}>2 · Select file and import</Btn>
+          </div>
+        )}
       </SettingsSheet>
 
       {/* ══ How To Sheet ══ */}

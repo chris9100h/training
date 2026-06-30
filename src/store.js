@@ -216,7 +216,6 @@ async function deleteAllData(userId) {
     unwrap(_supabase.from('zane_exercises').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_schedules').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_user_settings').delete().eq('user_id', userId)),
-    unwrap(_supabase.from('zane_profiles').delete().eq('id', userId)),
     unwrap(_supabase.from('zane_skips').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_cardio_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_daily_logs').delete().eq('user_id', userId)),
@@ -253,74 +252,149 @@ function validateBackup(b) {
 // so they inherit the same offline-resilient retry/cache path as sessions. UI
 // mutates store.skips via setStore; no imperative per-skip writes.
 
-async function importFromBackup(backup, userId) {
+async function importFromBackup(backup, userId, onProgress, unitConvert = null) {
+  // unitConvert: { multiplier: number, targetUnit: 'kg'|'lbs' } | null
   // Validate before the destructive delete — never half-apply a bad file.
   const invalid = validateBackup(backup);
   if (invalid) throw new Error(invalid);
-  await deleteAllData(userId);
+
   const sett = backup.settings ?? {};
   const importSessions = backup.sessions?.filter(s => s.id) ?? [];
-  await Promise.all([
-    backup.user?.name && unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name })),
-    backup.exercises?.length && unwrap(_supabase.from('zane_exercises').upsert(
-      backup.exercises.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId }))
-    )),
-    backup.schedules?.length && unwrap(_supabase.from('zane_schedules').upsert(
-      backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId }))
-    )),
-    importSessions.length && unwrap(_supabase.from('zane_sessions').upsert(
-      importSessions.map(s => sessionToRow(s, userId))
-    )),
-    unwrap(_supabase.from('zane_user_settings').upsert({
-      user_id: userId,
-      active_schedule_id: backup.activeScheduleId ?? null,
-      cycle_index: backup.cycleIndex ?? 0,
-      cycle_start_date: backup.cycleStartDate ?? null,
-      week_plan_start_date: backup.weekPlanStartDate ?? null,
-      last_advanced_date: backup.lastAdvancedDate ?? null,
-      in_progress_session_id: backup.inProgress ?? null,
-      unit: sett.unit ?? null,
-      rest_default: sett.restDefault || 120,
-      rest_big: sett.restBig || 180,
-      rest_medium: sett.restMedium || 120,
-      rest_small: sett.restSmall || 90,
-      push_enabled: sett.pushEnabled ?? false,
-      pushover_user_key: sett.pushoverUserKey ?? null,
-      use_pushover: sett.usePushover ?? false,
-      cycle_week_view: sett.cycleWeekView ?? false,
-      accent_color: sett.accentColor ?? 'copper',
-      dark_mode: sett.darkMode ?? 'dark',
-      custom_day_types: backup.customDayTypes ?? [],
-      reminder_enabled: sett.reminderEnabled ?? false,
-      reminder_time: sett.reminderTime ?? '07:00',
-      tempo_enabled: sett.tempoEnabled ?? false,
-      tempo_eccentric: sett.tempoEccentric ?? null,
-      tempo_concentric: sett.tempoConcentric ?? null,
-      smart_progression: sett.smartProgression ?? false,
-      progression_range_top: sett.progressionRangeTop ?? null,
-      equipment_config: sett.equipmentConfig ?? null,
-      weight_fill_down: sett.weightFillDown ?? true,
-      net_carbs: sett.netCarbs ?? false,
-      show_warmup_in_summary: sett.showWarmupInSummary ?? false,
-      show_coaching_tab: sett.showCoachingTab ?? false,
-      be_your_own_coach: sett.beYourOwnCoach ?? false,
-      session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
-      macro_targets: sett.macroTargets ?? null,
-      show_health_tab: sett.showHealthTab ?? false,
-      onboarding_completed: sett.onboardingCompleted ?? false,
-    })),
-  ].filter(Boolean));
+
+  const idRemap = {};
+  const exerciseRows = (backup.exercises || []).map(e => {
+    const newId = uid();
+    idRemap[e.id] = newId;
+    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId };
+  });
+  const sessionRows = importSessions.map(s => sessionToRow(s, userId));
+  const settingsRow = {
+    user_id: userId,
+    active_schedule_id: backup.activeScheduleId ?? null,
+    cycle_index: backup.cycleIndex ?? 0,
+    cycle_start_date: backup.cycleStartDate ?? null,
+    week_plan_start_date: backup.weekPlanStartDate ?? null,
+    last_advanced_date: backup.lastAdvancedDate ?? null,
+    in_progress_session_id: backup.inProgress ?? null,
+    unit: unitConvert?.targetUnit ?? sett.unit ?? null,
+    rest_default: sett.restDefault || 120,
+    rest_big: sett.restBig || 180,
+    rest_medium: sett.restMedium || 120,
+    rest_small: sett.restSmall || 90,
+    push_enabled: sett.pushEnabled ?? false,
+    pushover_user_key: sett.pushoverUserKey ?? null,
+    use_pushover: sett.usePushover ?? false,
+    cycle_week_view: sett.cycleWeekView ?? false,
+    accent_color: sett.accentColor ?? 'copper',
+    dark_mode: sett.darkMode ?? 'dark',
+    custom_day_types: backup.customDayTypes ?? [],
+    reminder_enabled: sett.reminderEnabled ?? false,
+    reminder_time: sett.reminderTime ?? '07:00',
+    tempo_enabled: sett.tempoEnabled ?? false,
+    tempo_eccentric: sett.tempoEccentric ?? null,
+    tempo_concentric: sett.tempoConcentric ?? null,
+    smart_progression: sett.smartProgression ?? false,
+    progression_range_top: sett.progressionRangeTop ?? null,
+    equipment_config: sett.equipmentConfig ?? null,
+    weight_fill_down: sett.weightFillDown ?? true,
+    net_carbs: sett.netCarbs ?? false,
+    show_warmup_in_summary: sett.showWarmupInSummary ?? false,
+    show_coaching_tab: sett.showCoachingTab ?? false,
+    be_your_own_coach: sett.beYourOwnCoach ?? false,
+    session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
+    macro_targets: sett.macroTargets ?? null,
+    show_health_tab: sett.showHealthTab ?? false,
+    onboarding_completed: sett.onboardingCompleted ?? false,
+  };
+
+  // Pre-count chunks upfront so the UI can show accurate progress.
+  const CHUNK = 50;
+  const exChunks = exerciseRows.length ? Math.ceil(exerciseRows.length / CHUNK) : 0;
+  const sessChunks = sessionRows.length ? Math.ceil(sessionRows.length / CHUNK) : 0;
+  const totalEntries = importSessions.reduce((n, s) => n + (s.entries?.length || 0), 0);
+  const totalSets = importSessions.reduce((n, s) => n + (s.entries || []).reduce((m, e) => m + (e.sets?.length || 0), 0), 0);
+  const entryChunks = totalEntries ? Math.ceil(totalEntries / CHUNK) : 0;
+  const setChunks = totalSets ? Math.ceil(totalSets / CHUNK) : 0;
+  const totalSteps = 1 // delete
+    + (backup.user?.name ? 1 : 0)
+    + exChunks
+    + (backup.schedules?.length ? 1 : 0)
+    + sessChunks
+    + 1 // settings
+    + entryChunks + setChunks
+    + (backup.skips?.length ? 1 : 0)
+    + (backup.cardioLogs?.length ? 1 : 0)
+    + (backup.dailyLogs?.length ? 1 : 0)
+    + (backup.workoutTemplates?.length ? 1 : 0);
+  let stepsDone = 0;
+  const prog = (phase) => onProgress?.(Math.min(99, Math.round(stepsDone / Math.max(1, totalSteps) * 100)), phase);
+  const tag = (label, fn) => fn().catch(e => { throw new Error(`[${label}] ${e?.message || e}`); });
+
+  prog('Clearing old data…');
+  try { await deleteAllData(userId); } catch(e) { throw new Error(`[delete] ${e?.message || e}`); }
+  stepsDone++;
+
+  if (backup.user?.name) {
+    prog('Restoring profile…');
+    await tag('profile', () => unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name: backup.user.name })));
+    stepsDone++;
+  }
+
+  for (let i = 0; i < exerciseRows.length; i += CHUNK) {
+    prog(`Uploading exercises (${i/CHUNK+1}/${exChunks})…`);
+    await tag(`exercises ${i/CHUNK+1}`, () => unwrap(_supabase.from('zane_exercises').upsert(exerciseRows.slice(i, i + CHUNK))));
+    stepsDone++;
+  }
+
+  if (backup.schedules?.length) {
+    prog('Uploading plans…');
+    await tag('schedules', () => unwrap(_supabase.from('zane_schedules').upsert(backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId })))));
+    stepsDone++;
+  }
+
+  for (let i = 0; i < sessionRows.length; i += CHUNK) {
+    prog(`Uploading sessions (${i/CHUNK+1}/${sessChunks})…`);
+    await tag(`sessions ${i/CHUNK+1}`, () => unwrap(_supabase.from('zane_sessions').upsert(sessionRows.slice(i, i + CHUNK))));
+    stepsDone++;
+  }
+
+  prog('Uploading settings…');
+  await tag('settings', () => unwrap(_supabase.from('zane_user_settings').upsert(settingsRow)));
+  stepsDone++;
+
   // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
-  if (importSessions.length) await _syncEntryRelational(importSessions, userId, null);
+  if (importSessions.length) {
+    try {
+      const convertKg = unitConvert
+        ? kg => kg != null ? Math.round(kg * unitConvert.multiplier * 100) / 100 : null
+        : kg => kg;
+      const sessionsForEntries = importSessions.map(s => ({
+        ...s,
+        entries: (s.entries || []).map(e => ({
+          ...e,
+          exId: idRemap[e.exId] ?? e.exId,
+          sets: unitConvert ? (e.sets || []).map(st => ({ ...st, kg: convertKg(st.kg) })) : e.sets,
+        })),
+      }));
+      await _syncEntryRelational(sessionsForEntries, userId, null, (phase) => {
+        stepsDone++;
+        prog(phase);
+      });
+    }
+    catch(e) { throw new Error(`[entries/sets] ${e?.message || e}`); }
+  }
   if (backup.skips?.length) {
+    prog('Uploading skips…');
     await unwrap(_supabase.from('zane_skips').upsert(
       backup.skips.map(s => ({
         id: s.id, user_id: userId, date: s.date, day_id: s.dayId,
         day_name: s.dayName, skip_reason: s.skipReason, skipped_at: s.skippedAt ?? null,
       }))
     ));
+    stepsDone++;
   }
   if (backup.cardioLogs?.length) {
+    prog('Uploading cardio logs…');
     await unwrap(_supabase.from('zane_cardio_logs').upsert(
       backup.cardioLogs.map(l => ({
         id: l.id, user_id: userId, date: l.date, type: l.type ?? null,
@@ -329,8 +403,10 @@ async function importFromBackup(backup, userId) {
         note: l.note ?? null, session_id: l.sessionId ?? null,
       }))
     ));
+    stepsDone++;
   }
   if (backup.dailyLogs?.length) {
+    prog('Uploading daily logs…');
     await unwrap(_supabase.from('zane_daily_logs').upsert(
       backup.dailyLogs.map(l => ({
         id: l.id, user_id: userId, date: l.date,
@@ -343,14 +419,18 @@ async function importFromBackup(backup, userId) {
         daily_coach_fields: l.coachFields ?? null,
       }))
     ));
+    stepsDone++;
   }
   if (backup.workoutTemplates?.length) {
+    prog('Uploading workout templates…');
     await unwrap(_supabase.from('zane_workout_templates').upsert(
       backup.workoutTemplates.map(t => ({
         id: t.id, user_id: userId, name: t.name, exercises: t.exercises || [],
       }))
     ));
+    stepsDone++;
   }
+  onProgress?.(100, 'Done!');
 }
 
 // Builds a complete export object for backup. Fetches ALL session entries and
@@ -827,7 +907,7 @@ async function autoArchiveMissedDays(userId, state) {
 
 // Dual-write entries then sets sequentially (sets FK-depend on entries existing first).
 // prevSessions: pass prev store sessions to skip unchanged sets; pass null to write all.
-async function _syncEntryRelational(sessions, userId, prevSessions) {
+async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
   const now = new Date().toISOString();
   const allEntries = [];
   const allSets = [];
@@ -886,11 +966,25 @@ async function _syncEntryRelational(sessions, userId, prevSessions) {
     }
   }
 
-  if (allEntries.length) {
-    await unwrap(_supabase.from('zane_session_entries').upsert(allEntries, { onConflict: 'id' }));
+  // Import path uses small chunks (50 rows) to stay well under iOS Safari's
+  // per-request payload limits; sync path keeps 500 rows for throughput.
+  const CHUNK = prevSessions === null ? 50 : 500;
+  const entryTotal = allEntries.length ? Math.ceil(allEntries.length / CHUNK) : 0;
+  const setTotal = allSets.length ? Math.ceil(allSets.length / CHUNK) : 0;
+  for (let i = 0; i < allEntries.length; i += CHUNK) {
+    await unwrap(_supabase.from('zane_session_entries').upsert(allEntries.slice(i, i + CHUNK), { onConflict: 'id' }));
+    onStep?.(`Uploading entries (${i/CHUNK+1}/${entryTotal})…`);
   }
-  if (allSets.length) {
-    await unwrap(_supabase.rpc('sync_sets_batch', { p_sets: allSets }));
+  if (prevSessions === null) {
+    for (let i = 0; i < allSets.length; i += CHUNK) {
+      await unwrap(_supabase.from('zane_sets').upsert(allSets.slice(i, i + CHUNK)));
+      onStep?.(`Uploading sets (${i/CHUNK+1}/${setTotal})…`);
+    }
+  } else {
+    for (let i = 0; i < allSets.length; i += CHUNK) {
+      await unwrap(_supabase.rpc('sync_sets_batch', { p_sets: allSets.slice(i, i + CHUNK) }));
+      onStep?.(`Syncing sets (${i/CHUNK+1}/${setTotal})…`);
+    }
   }
 }
 
