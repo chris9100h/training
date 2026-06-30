@@ -133,7 +133,12 @@ function PlanScreen({ store, setStore, go, userId }) {
         {store.schedules.filter(s => !s.archived).map(s => {
           const isActive = s.id === store.activeScheduleId;
           return isActive ? (
-            <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer' }}>
+            <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', overflow: 'hidden' }}>
+              {s.mesocycle_weeks && (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
+                  <span className="display-it" style={{ fontSize: 52, fontWeight: 900, letterSpacing: '0.18em', color: UI.gold, opacity: 0.07, transform: 'rotate(-22deg)', whiteSpace: 'nowrap', userSelect: 'none' }}>MESOCYCLE</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1 }}>{s.name}</div>
                 <Pill gold>active</Pill>
