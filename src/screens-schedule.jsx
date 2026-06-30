@@ -130,7 +130,11 @@ function PlanScreen({ store, setStore, go, userId }) {
             action={<Btn data-tour="plan-new-btn" onClick={() => go({ name: 'schedule-new' })}>Create plan</Btn>}
             icon={ICON_CALENDAR} />
         )}
-        {store.schedules.filter(s => !s.archived).map(s => {
+        {[...store.schedules.filter(s => !s.archived)].sort((a, b) => {
+          if (a.id === store.activeScheduleId) return -1;
+          if (b.id === store.activeScheduleId) return 1;
+          return 0;
+        }).map(s => {
           const isActive = s.id === store.activeScheduleId;
           return isActive ? (
             <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', overflow: 'hidden' }}>
