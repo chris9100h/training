@@ -66,9 +66,6 @@ function getMesoWeightBoosts(scheduleId) {
   if (!m || m.planId !== scheduleId || !m.weightBoosts) return null;
   return m.weightBoosts;
 }
-function mesoWeightIncrement(unit) {
-  return unit === 'lbs' ? 5 : 2.5;
-}
 // ──────────────────────────────────────────────────────────────────────────────
 
 // ── Debug log (disabled) ──────────────────────────────────────────────────────
@@ -1536,7 +1533,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const computeMesoGains = () => {
     if (!mesoState) return [];
     const unit = store.settings?.unit || 'kg';
-    const increment = mesoWeightIncrement(unit);
     const weightBoostMap = {};
     const gainMap = {}; // key → { name, setDelta, weightDelta }
 
@@ -1547,19 +1543,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
 
     // Weight boosts: joint fine + pump ok + volume ok + all reps hit
-    console.log('[meso] jointFine:', [...mesoJointFineRef.current], 'pumpOk:', [...mesoPumpOkRef.current], 'volOk:', [...mesoVolumeOkRef.current]);
     for (const e of session.entries) {
       if (e.isCardio) continue;
       const exId = e.exId;
       const ex = store.exercises?.find(x => x.id === exId);
       const muscle = primaryMuscleForExercise(ex);
 
-      if (!mesoJointFineRef.current.has(exId)) { console.log('[meso]', e.name, '→ skip: joint not fine'); continue; }
-      if (muscle && !mesoPumpOkRef.current.has(muscle)) { console.log('[meso]', e.name, '→ skip: pump not ok for', muscle); continue; }
-      if (muscle && !mesoVolumeOkRef.current.has(muscle)) { console.log('[meso]', e.name, '→ skip: volume not ok for', muscle); continue; }
+      if (!mesoJointFineRef.current.has(exId)) continue;
+      if (muscle && !mesoPumpOkRef.current.has(muscle)) continue;
+      if (muscle && !mesoVolumeOkRef.current.has(muscle)) continue;
 
       const workingSets = e.sets.filter(s => !s.warmup && !s.skipped);
-      if (!workingSets.length) { console.log('[meso]', e.name, '→ skip: no working sets'); continue; }
+      if (!workingSets.length) continue;
       const plannedReps = e.plannedReps ?? null;
       const allHit = workingSets.every(s => {
         if (!s.done) return false;
@@ -1567,8 +1562,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const reps = s.reps != null ? s.reps : Math.max(s.repsL ?? 0, s.repsR ?? 0);
         return reps >= plannedReps;
       });
-      if (!allHit) { console.log('[meso]', e.name, '→ skip: reps not hit. plannedReps=', plannedReps, 'sets=', workingSets.map(s => ({ done: s.done, reps: s.reps }))); continue; }
+      if (!allHit) continue;
 
+      const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
+      const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
       const key = exId + '_' + session.dayId;
       weightBoostMap[key] = increment;
       if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0 };
