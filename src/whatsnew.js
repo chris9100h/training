@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.438',
+    title: 'Freestyle, for Humans',
+    items: [
+      'The finish screen now has a big "Add another exercise" button — because apparently "add exercises during a workout" was not obvious enough. We have made it very obvious. You\'re welcome.',
+      'The button also changes personality based on how long you\'ve been training. Under 20 minutes? It glows and begs you to stay. 20–45 minutes? A gentle nudge. Over 45 minutes? It respects your life choices.',
+      'A time-based message in the finish dialog sets the scene — anywhere from "the barbell\'s barely warm" to "now THAT\'s a workout." Honest feedback, no hurt feelings.',
+    ],
+  },
+  {
     id: 'v2.437',
     title: 'Lengthened Partials',
     items: [

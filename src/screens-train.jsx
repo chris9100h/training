@@ -3339,9 +3339,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               : "Now THAT's a workout. You've earned this finish.";
             return <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 10 }}>{msg}</div>;
           })()}
-          <Btn kind="ghost" onClick={() => { addAndJumpRef.current = true; setFinishOpen(false); setAddOpen(true); }} style={{ width: '100%', marginBottom: 8 }}>
-            + Add another exercise
-          </Btn>
+          {(() => {
+            const onAddEx = () => { addAndJumpRef.current = true; setFinishOpen(false); setAddOpen(true); };
+            if (session.isFreestyle) {
+              const elapsedMin = Math.floor(sessionElapsed / 60);
+              if (elapsedMin < 20) {
+                return <Btn className="intensity-glow" onClick={onAddEx} style={{ width: '100%', marginBottom: 8 }}>+ Add another exercise</Btn>;
+              } else if (elapsedMin < 45) {
+                return <Btn kind="ghost" onClick={onAddEx} style={{ width: '100%', marginBottom: 8, border: '1px solid rgba(var(--accent-rgb),0.6)', background: 'rgba(var(--accent-rgb),0.07)' }}>+ Add another exercise</Btn>;
+              }
+            }
+            return <Btn kind="ghost" onClick={onAddEx} style={{ width: '100%', marginBottom: 8 }}>+ Add another exercise</Btn>;
+          })()}
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={() => setFinishOpen(false)} style={{ flex: 1 }}>Continue</Btn>
             <Btn onClick={tryFinish} style={{ flex: 2 }}>Finish ✓</Btn>
