@@ -1819,6 +1819,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                         >
                           {s.dayName}
                           {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
+                          {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
                           {hasCharts && <i className="fa-solid fa-chart-line" style={{ fontSize: 10, color: UI.gold }} />}
                         </div>
                       );
@@ -2287,6 +2288,14 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 borderRadius: 4, padding: '3px 6px',
               }}>BONUS</span>
             )}
+            {s.isDeload && (
+              <span style={{
+                fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
+                color: UI.inkSoft, background: UI.bgInset,
+                border: `0.5px solid ${UI.hairStrong}`,
+                borderRadius: 4, padding: '3px 6px',
+              }}>DELOAD</span>
+            )}
             <button onClick={takeScreenshot} disabled={capturing} style={{
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
@@ -2424,7 +2433,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         )}
 
         {/* Volume delta vs previous same-day session */}
-        {volDelta != null && (
+        {volDelta != null && !s.isDeload && (
           <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
             {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} · vs last {s.dayName}
           </div>
