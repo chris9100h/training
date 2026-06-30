@@ -1868,6 +1868,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // the server first (fetchSeedEntries resolves instantly when the local
     // window suffices, and never rejects — offline falls back to local data).
     const seedRefs = await LB.fetchSeedEntries(store, activeDay.items, activeDay.id, userId);
+    const mesoBoosts = (typeof getMesoWeightBoosts === 'function') ? getMesoWeightBoosts(sch.id) : null;
     const entries = activeDay.items.map(it => {
       const ex = LB.findExercise(store, it.exId);
       if (ex?.movement_type === 'cardio') {
@@ -1878,7 +1879,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps, it.repsPerSet || null, seedRefs[it.exId]);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
       const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, activeDay.id, sch.id) : it;
-      const seedSets = LB.buildSeedSets(itAdj, last, suggestion, isUnilateral, !!store.settings?.smartProgression, bodyweightKg);
+      const weightBoost = mesoBoosts?.[it.exId + '_' + activeDay.id] ?? null;
+      let suggestionFinal = suggestion;
+      if (weightBoost != null && !suggestionFinal && last) {
+        const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
+        if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
+      }
+      const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUnilateral, !!store.settings?.smartProgression, bodyweightKg);
       return {
         exId: it.exId, name: ex?.name || '?',
         plannedSets: itAdj.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null,
@@ -2087,6 +2094,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     setWorkoutSubOpen(false);
     setQuickActionsOpen(false);
     const seedRefs = await LB.fetchSeedEntries(store, day.items, day.id, userId);
+    const mesoBoosts = (typeof getMesoWeightBoosts === 'function') ? getMesoWeightBoosts(sch?.id) : null;
     const entries = (day.items || []).map(it => {
       const ex = LB.findExercise(store, it.exId);
       if (ex?.movement_type === 'cardio') {
@@ -2097,7 +2105,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet, seedRefs[it.exId]);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
       const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, day.id, sch?.id) : it;
-      const seedSets = LB.buildSeedSets(itAdj, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
+      const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
+      let suggestionFinal = suggestion;
+      if (weightBoost != null && !suggestionFinal && last) {
+        const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
+        if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
+      }
+      const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression, bodyweightKg);
       return { exId: it.exId, name: ex?.name || '?', plannedSets: itAdj.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
     });
     // Treat as normal (cycle advances) only when this is today's scheduled day
@@ -2125,6 +2139,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     setBacklogPickerOpen(false);
     const { dayData, dayId, dayName, date } = missed;
     const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
+    const mesoBoosts = (typeof getMesoWeightBoosts === 'function') ? getMesoWeightBoosts(sch?.id) : null;
     const entries = (dayData?.items || []).map(it => {
       const ex = LB.findExercise(store, it.exId);
       if (ex?.movement_type === 'cardio') {
@@ -2135,7 +2150,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
       const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, dayId, sch?.id) : it;
-      const seedSets = LB.buildSeedSets(itAdj, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
+      const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
+      let suggestionFinal = suggestion;
+      if (weightBoost != null && !suggestionFinal && last) {
+        const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
+        if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
+      }
+      const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression, bodyweightKg);
       return { exId: it.exId, name: ex?.name || '?', plannedSets: itAdj.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
     });
     const session = { id: LB.uid(), scheduleId: sch?.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
@@ -2793,6 +2814,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               setNotLoggedModalOpen(false);
               const { dayData, dayId, dayName, date } = recentBannerDay;
               const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
+              const mesoBoosts = (typeof getMesoWeightBoosts === 'function') ? getMesoWeightBoosts(sch.id) : null;
               const entries = (dayData?.items || []).map(it => {
                 const ex = LB.findExercise(store, it.exId);
                 if (ex?.movement_type === 'cardio') {
@@ -2803,7 +2825,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
                 const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
                 const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, dayId, sch.id) : it;
-                const seedSets = LB.buildSeedSets(itAdj, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
+                const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
+                let suggestionFinal = suggestion;
+                if (weightBoost != null && !suggestionFinal && last) {
+                  const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
+                  if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
+                }
+                const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression, bodyweightKg);
                 return { exId: it.exId, name: ex?.name || '?', plannedSets: itAdj.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
               });
               const session = { id: LB.uid(), scheduleId: sch.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };

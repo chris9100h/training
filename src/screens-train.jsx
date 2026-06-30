@@ -30,14 +30,16 @@ function saveMesoStateToStorage(s) {
 function mesoCurrentWeek(mesoState, store) {
   if (!mesoState?.startDate) return 1;
   const sch = store?.schedules?.find(s => s.id === mesoState.planId);
-  if (sch && mesoState.startCycleIndex != null && sch.days?.length > 0) {
-    if (!LB.isWeekdayPlan(sch)) {
-      const rotations = Math.floor(
-        Math.max(0, (store.cycleIndex || 0) - mesoState.startCycleIndex) / sch.days.length
-      );
-      return Math.min(Math.max(1, rotations + 1), mesoState.weeks);
-    }
+  if (sch && sch.days?.length > 0 && !LB.isWeekdayPlan(sch)) {
+    // Use rotation count for flex/cycle plans. startCycleIndex may be absent on old
+    // meso states (created before the fix); fall back to 0 — always better than calendar.
+    const startIdx = mesoState.startCycleIndex ?? 0;
+    const rotations = Math.floor(
+      Math.max(0, (store.cycleIndex || 0) - startIdx) / sch.days.length
+    );
+    return Math.min(Math.max(1, rotations + 1), mesoState.weeks);
   }
+  // Weekday plans: use calendar weeks
   const start = new Date(mesoState.startDate); start.setHours(12, 0, 0, 0);
   const today = new Date(); today.setHours(12, 0, 0, 0);
   const days = Math.round((today - start) / 86400000);
@@ -56,6 +58,16 @@ function applyMesoSetDelta(it, dayId, scheduleId) {
   const delta = (m.deltas || {})[it.exId + '_' + dayId];
   if (!delta) return it;
   return { ...it, sets: Math.max(1, (it.sets || 1) + delta) };
+}
+// Returns stored meso weight boosts map (exId_dayId → kg increment) for a schedule.
+// Called at session start; boosts are overwritten at next session end by computeMesoGains.
+function getMesoWeightBoosts(scheduleId) {
+  const m = getMesoState();
+  if (!m || m.planId !== scheduleId || !m.weightBoosts) return null;
+  return m.weightBoosts;
+}
+function mesoWeightIncrement(unit) {
+  return unit === 'lbs' ? 5 : 2.5;
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -1132,6 +1144,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
       };
     });
+    if (mesoState) {
+      const gains = computeMesoGains();
+      if (gains.length > 0) {
+        mesoGainNavRef.current = session.id;
+        setMesoGainItems(gains);
+        setMesoGainSheetOpen(true);
+        return;
+      }
+    }
     go({ name: 'session', sessionId: session.id, justFinished: true });
   };
 
@@ -1367,6 +1388,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
   const mesoWeek = mesoState ? mesoCurrentWeek(mesoState, store) : null;
   const mesoRirVal = (mesoWeek != null && mesoState?.weeks != null) ? mesoRirForWeek(mesoWeek, mesoState.weeks) : null;
+  const [mesoGainSheetOpen, setMesoGainSheetOpen] = useStateT(false);
+  const [mesoGainItems, setMesoGainItems] = useStateT([]);
+  const mesoGainNavRef = useRefT(null);
 
   // Per-session meso feedback tracking
   const [mesoSorenessOpen, setMesoSorenessOpen] = useStateT(false);
@@ -1385,6 +1409,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const askedSorenessRef = useRefT(new Set());
   const askedJointRef = useRefT(new Set());
   const askedVolumeRef = useRefT(new Set());
+  // Per-session quality tracking for weight progression
+  const mesoJointFineRef = useRefT(new Set());    // exIds where joint was 'fine'
+  const mesoPumpOkRef = useRefT(new Set());        // muscles where pump was moderate/amazing
+  const mesoVolumeOkRef = useRefT(new Set());      // muscles where volume was just_right/not_enough
+  const mesoSessionSetGainsRef = useRefT({});      // key → { exId, name } for set +1s this session
   // ────────────────────────────────────────────────────────────────────────────
 
   // ── Meso feedback handlers ─────────────────────────────────────────────────
@@ -1420,6 +1449,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const exId = mesoJointExId;
     const muscle = mesoJointMuscle;
     if (!mesoState || !exId) return;
+
+    if (answer === 'fine') mesoJointFineRef.current.add(exId);
 
     // Apply delta for joint pain
     if (answer === 'noticeable' || answer === 'sharp') {
@@ -1458,6 +1489,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const handleVolumeAnswer = (pump, volume) => {
     setMesoVolumeOpen(false);
     if (!mesoState || !mesoVolumeExIds.length) return;
+    // Track quality signals for weight progression
+    if (pump === 'moderate' || pump === 'amazing') mesoPumpOkRef.current.add(mesoVolumeMusc);
+    if (volume === 'just_right' || volume === 'not_enough') mesoVolumeOkRef.current.add(mesoVolumeMusc);
+    // Track set gain for gain screen
+    if (volume === 'not_enough' && mesoVolumeExIds[0]) {
+      const key = mesoVolumeExIds[0] + '_' + session.dayId;
+      const exName = session.entries.find(e => e.exId === mesoVolumeExIds[0])?.name || '';
+      mesoSessionSetGainsRef.current[key] = { exId: mesoVolumeExIds[0], name: exName };
+    }
 
     // Pump: if low on "just right" volume, track for swap suggestion
     const pumpLow = pump === 'low' && volume === 'just_right';
@@ -1486,6 +1526,57 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (pumpLow && mainExId) newPumpLow[mainExId] = ((m.pumpLowCounts || {})[mainExId] || 0) + 1;
       return { ...m, deltas: newDeltas, pumpLowCounts: newPumpLow };
     });
+  };
+
+  // Compute per-exercise weight boosts earned this session and return gain items for
+  // the post-session screen. Also merges set-gain info from mesoSessionSetGainsRef.
+  const computeMesoGains = () => {
+    if (!mesoState) return [];
+    const unit = store.settings?.unit || 'kg';
+    const increment = mesoWeightIncrement(unit);
+    const weightBoostMap = {};
+    const gainMap = {}; // key → { name, setDelta, weightDelta }
+
+    // Set gains recorded during volume feedback
+    for (const [key, { exId, name }] of Object.entries(mesoSessionSetGainsRef.current)) {
+      if (!gainMap[key]) gainMap[key] = { name, setDelta: 0, weightDelta: 0 };
+      gainMap[key].setDelta += 1;
+    }
+
+    // Weight boosts: joint fine + pump ok + volume ok + all reps hit
+    for (const e of session.entries) {
+      if (e.isCardio) continue;
+      const exId = e.exId;
+      const ex = store.exercises?.find(x => x.id === exId);
+      const muscle = primaryMuscleForExercise(ex);
+
+      if (!mesoJointFineRef.current.has(exId)) continue;
+      if (muscle && !mesoPumpOkRef.current.has(muscle)) continue;
+      if (muscle && !mesoVolumeOkRef.current.has(muscle)) continue;
+
+      const workingSets = e.sets.filter(s => !s.warmup && !s.skipped);
+      if (!workingSets.length) continue;
+      const plannedReps = e.plannedReps ?? null;
+      const allHit = workingSets.every(s => {
+        if (!s.done) return false;
+        if (plannedReps == null) return true;
+        const reps = s.reps != null ? s.reps : Math.max(s.repsL ?? 0, s.repsR ?? 0);
+        return reps >= plannedReps;
+      });
+      if (!allHit) continue;
+
+      const key = exId + '_' + session.dayId;
+      weightBoostMap[key] = increment;
+      if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0 };
+      gainMap[key].weightDelta = increment;
+    }
+
+    if (Object.keys(weightBoostMap).length) {
+      const current = getMesoState();
+      if (current) saveMesoStateToStorage({ ...current, weightBoosts: { ...(current.weightBoosts || {}), ...weightBoostMap } });
+    }
+
+    return Object.values(gainMap).filter(g => g.setDelta > 0 || g.weightDelta > 0);
   };
   // ──────────────────────────────────────────────────────────────────────────
 
@@ -4249,6 +4340,39 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           Save feedback
         </Btn>
       </Sheet>
+
+      {/* Meso gains — post-session weight/set boost summary */}
+      {mesoGainSheetOpen && (
+        <Sheet open={mesoGainSheetOpen} onClose={() => {
+          setMesoGainSheetOpen(false);
+          go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
+        }} title="Next session boost">
+          <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, marginBottom: 20, lineHeight: 1.5 }}>
+            You crushed it — here's what goes up next time:
+          </div>
+          {mesoGainItems.map((item, i) => (
+            <div key={i} style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '10px 0',
+              borderBottom: i < mesoGainItems.length - 1 ? `1px solid ${UI.hair}` : 'none',
+            }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: UI.ink }}>{item.name}</span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {item.setDelta > 0 && (
+                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: 'var(--accent)', fontWeight: 700 }}>+{item.setDelta} set</span>
+                )}
+                {item.weightDelta > 0 && (
+                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: 'var(--accent)', fontWeight: 700 }}>+{item.weightDelta} {UI.unit()}</span>
+                )}
+              </div>
+            </div>
+          ))}
+          <Btn onClick={() => {
+            setMesoGainSheetOpen(false);
+            go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
+          }} style={{ width: '100%', marginTop: 20 }}>Got it</Btn>
+        </Sheet>
+      )}
 
       {/* ─────────────────────────────────────────────────────────────────────── */}
 
