@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.437',
+    title: 'Lengthened Partials',
+    items: [
+      'New intensity technique: finish your full reps, then keep pumping out partials at the bottom of the movement — the stretched position where the muscle is under the most tension. Your muscle fibres will hate you. In a good way.',
+      'Tap INTENSITY during any exercise and choose Lengthened Partials. After you check off the set, a stepper appears so you can log how many partials you got.',
+      'Partials show up in your session summary and history — so you always know exactly how much extra work went into a set.',
+      'Various bug fixes and improvements.',
+    ],
+  },
+  {
     id: 'v2.422',
     title: '⚡ Drop Sets, Myo-Reps & Myo-Rep Match',
     items: [
