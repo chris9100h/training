@@ -2745,7 +2745,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                               background: 'rgba(var(--accent-rgb),0.12)',
                               border: '0.5px solid rgba(var(--accent-rgb),0.35)',
                               borderRadius: 4, padding: '2px 6px',
-                            }}>{s.technique === 'drop' ? 'DS' : s.technique === 'myorep_match' ? 'MM' : 'MYO REP'}</span>
+                            }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : 'MYO REP'}</span>
                           : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                               {isWarmupRow
                                 ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
