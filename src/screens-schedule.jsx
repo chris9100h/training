@@ -1283,7 +1283,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 <circle cx="15" cy="12" r="2.5" fill={summary ? UI.gold : UI.inkSoft} stroke="none"/>
                 <circle cx="9" cy="18" r="2.5" fill={summary ? UI.gold : UI.inkSoft} stroke="none"/>
               </svg>
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, textAlign: 'center' }}>
                 <div style={{ fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: summary ? UI.gold : UI.inkSoft, fontWeight: 600, marginBottom: summary ? 3 : 0 }}>Options</div>
                 {summary && <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink }}>{summary}</div>}
               </div>
