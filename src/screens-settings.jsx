@@ -1310,12 +1310,20 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={activeUsersSheet} onClose={() => setActiveUsersSheet(false)} title="Active users">
         {(() => {
           const dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
+          const hiddenCount = activeSessions.filter(s => s.is_finished && dismissed.includes(s.session_id)).length;
           const visibleSessions = activeSessions.filter(s => !s.is_finished || !dismissed.includes(s.session_id));
           const sortedSessions = [...visibleSessions].sort((a, b) =>
             new Date(b.ended ?? b.started_at) - new Date(a.ended ?? a.started_at)
           );
           return (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {hiddenCount > 0 && (
+                <button onClick={() => { localStorage.removeItem('logbook-dismissed-sessions'); setActiveSessions(s => [...s]); }} style={{
+                  alignSelf: 'flex-end', background: 'none', border: 'none', cursor: 'pointer',
+                  color: UI.gold, fontFamily: UI.fontUi, fontSize: 10,
+                  letterSpacing: '0.1em', textTransform: 'uppercase', padding: '0 0 10px',
+                }}>Show all ({hiddenCount} hidden)</button>
+              )}
               {sortedSessions.length === 0
                 ? <div className="micro" style={{ color: UI.inkFaint, padding: '4px 0' }}>Nobody training right now.</div>
                 : sortedSessions.map((s, i) => {
