@@ -2210,12 +2210,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       });
     });
 
-    // Set count changes for matched exercises
+    // Set count changes for matched exercises.
+    // Compare against plannedSets (meso-adjusted at session start) not item.sets (raw plan),
+    // so meso-induced deltas never appear as user-driven changes in this diff.
     planItems.forEach(({ item, originalIdx }, i) => {
       if (!matched[i]) return;
-      const newSets = matched[i].sets.filter(s => !s.warmup).length;
-      if (newSets !== item.sets) {
-        diffs.push({ type: 'sets', idx: originalIdx, exName: matched[i].name, oldSets: item.sets, newSets });
+      const entry = matched[i];
+      const newSets = entry.sets.filter(s => !s.warmup).length;
+      const mesoAdjustedPlan = entry.plannedSets ?? item.sets;
+      if (newSets !== mesoAdjustedPlan) {
+        diffs.push({ type: 'sets', idx: originalIdx, exName: entry.name, oldSets: item.sets, newSets });
       }
     });
 
