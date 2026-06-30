@@ -1455,6 +1455,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Apply delta for joint pain
     if (answer === 'noticeable' || answer === 'sharp') {
       const key = exId + '_' + session.dayId;
+      mesoSessionSetGainsRef.current[key] = { exId, name: mesoJointExName, delta: -1 };
       saveMesoState(m => ({
         ...m,
         deltas: { ...(m.deltas || {}), [key]: ((m.deltas || {})[key] || 0) - 1 },
@@ -1492,11 +1493,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Track quality signals for weight progression
     if (pump === 'moderate' || pump === 'amazing') mesoPumpOkRef.current.add(mesoVolumeMusc);
     if (volume === 'just_right' || volume === 'not_enough') mesoVolumeOkRef.current.add(mesoVolumeMusc);
-    // Track set gain for gain screen
+    // Track set delta for summary screen
     if (volume === 'not_enough' && mesoVolumeExIds[0]) {
       const key = mesoVolumeExIds[0] + '_' + session.dayId;
       const exName = session.entries.find(e => e.exId === mesoVolumeExIds[0])?.name || '';
-      mesoSessionSetGainsRef.current[key] = { exId: mesoVolumeExIds[0], name: exName };
+      mesoSessionSetGainsRef.current[key] = { exId: mesoVolumeExIds[0], name: exName, delta: 1 };
+    } else if (volume === 'pushed' && mesoVolumeExIds[0]) {
+      const key = mesoVolumeExIds[0] + '_' + session.dayId;
+      const exName = session.entries.find(e => e.exId === mesoVolumeExIds[0])?.name || '';
+      mesoSessionSetGainsRef.current[key] = { exId: mesoVolumeExIds[0], name: exName, delta: -1 };
+    } else if (volume === 'too_much') {
+      mesoVolumeExIds.forEach(exId => {
+        const key = exId + '_' + session.dayId;
+        const exName = session.entries.find(e => e.exId === exId)?.name || '';
+        mesoSessionSetGainsRef.current[key] = { exId, name: exName, delta: -1 };
+      });
     }
 
     // Pump: if low on "just right" volume, track for swap suggestion
@@ -1536,10 +1547,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const weightBoostMap = {};
     const gainMap = {}; // key → { name, setDelta, weightDelta }
 
-    // Set gains recorded during volume feedback
-    for (const [key, { exId, name }] of Object.entries(mesoSessionSetGainsRef.current)) {
+    // Set changes recorded during feedback (positive = gain, negative = reduction)
+    for (const [key, { name, delta }] of Object.entries(mesoSessionSetGainsRef.current)) {
       if (!gainMap[key]) gainMap[key] = { name, setDelta: 0, weightDelta: 0 };
-      gainMap[key].setDelta += 1;
+      gainMap[key].setDelta += (delta ?? 1);
     }
 
     // Weight boosts: joint fine + pump ok + volume ok + all reps hit
@@ -1577,7 +1588,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (current) saveMesoStateToStorage({ ...current, weightBoosts: { ...(current.weightBoosts || {}), ...weightBoostMap } });
     }
 
-    return Object.values(gainMap).filter(g => g.setDelta > 0 || g.weightDelta > 0);
+    return Object.values(gainMap).filter(g => g.setDelta !== 0 || g.weightDelta !== 0);
   };
   // ──────────────────────────────────────────────────────────────────────────
 
@@ -4346,14 +4357,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </Btn>
       </Sheet>
 
-      {/* Meso gains — post-session weight/set boost summary */}
+      {/* Meso changes — post-session set/weight adjustment summary */}
       {mesoGainSheetOpen && (
         <Sheet open={mesoGainSheetOpen} onClose={() => {
           setMesoGainSheetOpen(false);
           go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
-        }} title="Next session boost">
+        }} title="Next session">
           <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, marginBottom: 20, lineHeight: 1.5 }}>
-            You crushed it — here's what goes up next time:
+            Based on your feedback, here's what changes next time:
           </div>
           {mesoGainItems.map((item, i) => (
             <div key={i} style={{
@@ -4363,8 +4374,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             }}>
               <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: UI.ink }}>{item.name}</span>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                {item.setDelta > 0 && (
-                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: 'var(--accent)', fontWeight: 700 }}>+{item.setDelta} set</span>
+                {item.setDelta !== 0 && (
+                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.setDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb,220,53,69),0.9)' }}>
+                    {item.setDelta > 0 ? '+' : ''}{item.setDelta} set
+                  </span>
                 )}
                 {item.weightDelta > 0 && (
                   <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: 'var(--accent)', fontWeight: 700 }}>+{item.weightDelta} {UI.unit()}</span>
