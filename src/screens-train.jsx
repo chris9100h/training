@@ -30,21 +30,12 @@ function saveMesoStateToStorage(s) {
 function mesoCurrentWeek(mesoState, store) {
   if (!mesoState?.startDate) return 1;
   const sch = store?.schedules?.find(s => s.id === mesoState.planId);
-  if (sch) {
-    const isFlex = LB.isFlexPlan(sch);
-    const isWd = LB.isWeekdayPlan(sch);
-    const startMs = new Date(mesoState.startDate).getTime();
-    const done = (store.sessions || []).filter(s =>
-      s.scheduleId === mesoState.planId && s.ended && new Date(s.date).getTime() >= startMs
-    ).length;
-    if (isFlex && sch.sessions_per_week) {
-      return Math.min(Math.max(1, Math.floor(done / sch.sessions_per_week) + 1), mesoState.weeks);
-    }
-    if (!isWd) {
-      const sessionsPerCycle = (sch.days || []).filter(d => (d.items || []).some(i => i.exId)).length;
-      if (sessionsPerCycle > 0) {
-        return Math.min(Math.max(1, Math.floor(done / sessionsPerCycle) + 1), mesoState.weeks);
-      }
+  if (sch && mesoState.startCycleIndex != null && sch.days?.length > 0) {
+    if (!LB.isWeekdayPlan(sch)) {
+      const rotations = Math.floor(
+        Math.max(0, (store.cycleIndex || 0) - mesoState.startCycleIndex) / sch.days.length
+      );
+      return Math.min(Math.max(1, rotations + 1), mesoState.weeks);
     }
   }
   const start = new Date(mesoState.startDate); start.setHours(12, 0, 0, 0);
@@ -415,6 +406,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       planId: session.scheduleId,
       weeks: _sch.mesocycle_weeks,
       startDate: LB.todayISO(),
+      startCycleIndex: store.cycleIndex || 0,
       deltas: {},
       jointFlags: {},
       pumpLowCounts: {},
