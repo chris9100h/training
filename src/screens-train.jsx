@@ -1235,7 +1235,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const myoDropsRef = useRefT([]);
   myoDropsRef.current = myoDrops;
   const [myoTarget, setMyoTarget] = useStateT(null);
-  const [lpActiveByEx, setLpActiveByEx] = useStateT({});
+  const [lpTarget, setLpTarget] = useStateT(null); // { exIdx, setIdx } | null
   // Persist intensity state so a background/resume on iOS doesn't wipe mid-set progress
   useEffectT(() => {
     if (dropSetIdx != null || myoSetIdx != null) {
@@ -2706,20 +2706,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           )}
           <div className="knurl" style={{ marginBottom: 2 }} />
 
-          {!!lpActiveByEx[exIdx] && (
+          {lpTarget?.exIdx === exIdx && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 8px' }}>
               <span className="micro-gold">LENGTHENED PARTIALS</span>
               <button onClick={() => {
+                const si = lpTarget.setIdx;
                 updateSession(sess => ({
                   ...sess,
                   entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
                     ...en,
-                    sets: en.sets.map(st => st.technique === 'lengthened_partial'
+                    sets: en.sets.map((st, k) => k === si && st.technique === 'lengthened_partial'
                       ? { ...st, technique: null, drops: null, updatedAt: new Date().toISOString() }
                       : st),
                   }),
                 }));
-                setLpActiveByEx(prev => ({ ...prev, [exIdx]: false }));
+                setLpTarget(null);
               }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
             </div>
           )}
@@ -3090,7 +3091,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       {(() => { const t = (s.drops || []).reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? <div style={{ marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>Total {t}</div> : null; })()}
                     </div>
                   )}
-                  {!!lpActiveByEx[exIdx] && s.done && !s.warmup && (
+                  {lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && s.done && !s.warmup && (
                     <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '2px 4px 8px' }}>
                       <span style={{ gridColumn: 'span 2', fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, padding: '4px 0', textAlign: 'center' }}>PARTIALS</span>
                       <div style={{ gridColumn: 'span 3', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -3434,7 +3435,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 </div>
               </button>
               {/* Lengthened Partials */}
-              <button onClick={() => { setLpActiveByEx(prev => ({ ...prev, [exIdx]: true })); setIntensityOpen(false); }} style={btnBase(true)}>
+              <button onClick={() => {
+                const target = currentSetIdx >= 0
+                  ? currentSetIdx
+                  : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
+                if (target < 0) return;
+                setLpTarget({ exIdx, setIdx: target });
+                setIntensityOpen(false);
+              }} style={btnBase(true)}>
                 <i className="fa-solid fa-arrow-down-long" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
                 <div>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>LENGTHENED PARTIALS</div>
