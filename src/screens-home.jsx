@@ -2468,9 +2468,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           <div style={{ flex: 1, textAlign: 'center' }}>
             {sch.mesocycle_weeks ? (() => {
               const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
-              const hasProgress = !!m;
               const weeks = sch.mesocycle_weeks;
-              const week = hasProgress ? mesoCurrentWeek(m, store) : 1;
+              const week = m ? mesoCurrentWeek(m, store) : null;
+              if (week == null) {
+                // Pending — meso hasn't started yet; show start date if known
+                const startLabel = m?.startDate
+                  ? (() => { const d = new Date(m.startDate + 'T12:00:00'); return `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`; })()
+                  : 'D1';
+                return (
+                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                    MESO · starts {startLabel}
+                  </span>
+                );
+              }
               const rir = (typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks) : Math.max(0, Math.round(3 - (week - 1) * 3 / (weeks - 1)));
               const unit = weekdayMode ? 'W' : 'C';
               return (

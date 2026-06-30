@@ -136,18 +136,29 @@ function PlanScreen({ store, setStore, go, userId }) {
           return 0;
         }).map(s => {
           const isActive = s.id === store.activeScheduleId;
-          const mesoCompletions = s.mesocycle_weeks ? ((store.mesoStates || []).find(m => m.scheduleId === s.id)?.completions ?? 0) : 0;
+          const mesoSt = s.mesocycle_weeks ? (store.mesoStates || []).find(m => m.scheduleId === s.id) : null;
+          const mesoCompletions = mesoSt?.completions ?? 0;
+          const mesoPending = mesoSt?.startDate && new Date(mesoSt.startDate + 'T12:00:00') > new Date();
           return isActive ? (
             <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', overflow: 'hidden' }}>
               {s.mesocycle_weeks && (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
-                  <span className="display-it" style={{ fontSize: 52, fontWeight: 900, letterSpacing: '0.18em', color: UI.gold, opacity: 0.07, transform: 'rotate(-22deg)', whiteSpace: 'nowrap', userSelect: 'none' }}>MESOCYCLE</span>
+                  <span className="display-it" style={{ fontSize: 52, fontWeight: 900, letterSpacing: '0.18em', color: UI.gold, opacity: mesoPending ? 0.04 : 0.07, transform: 'rotate(-22deg)', whiteSpace: 'nowrap', userSelect: 'none' }}>MESOCYCLE</span>
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1 }}>{s.name}</div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  {mesoCompletions > 0 && (
+                  {s.mesocycle_weeks && mesoPending && (() => {
+                    const d = new Date(mesoSt.startDate + 'T12:00:00');
+                    const startLabel = `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`;
+                    return (
+                      <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkFaint, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                        MESO · {startLabel}
+                      </span>
+                    );
+                  })()}
+                  {!mesoPending && mesoCompletions > 0 && (
                     <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       MESO {mesoCompletions + 1}
                     </span>
