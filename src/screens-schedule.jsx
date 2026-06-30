@@ -19,14 +19,15 @@ const daysArr = s => Array.isArray(s?.days) ? s.days : [];
 // One-line plan summary shown in the plan list and viewer header.
 function planDescriptor(s) {
   const trainingDays = daysArr(s).filter(d => d.items.length).length;
+  const mesoSuffix = s.mesocycle_weeks ? ` · ${s.mesocycle_weeks}wk meso` : '';
   if (LB.isFlexPlan(s)) {
     const goal = s.sessions_per_week;
-    return `Flexible · ${trainingDays} ${trainingDays === 1 ? 'workout' : 'workouts'}${goal ? ` · ${goal}×/week` : ''}`;
+    return `Flexible · ${trainingDays} ${trainingDays === 1 ? 'workout' : 'workouts'}${goal ? ` · ${goal}×/week` : ''}${mesoSuffix}`;
   }
   if (LB.isWeekdayPlan(s)) {
-    return `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`;
+    return `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}${mesoSuffix}`;
   }
-  return `${s.days.length}-day cycle · ${trainingDays} training days`;
+  return `${s.days.length}-day cycle · ${trainingDays} training days${mesoSuffix}`;
 }
 
 // ─── PlanScreen ────────────────────────────────────────────────────

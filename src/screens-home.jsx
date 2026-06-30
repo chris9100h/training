@@ -2281,19 +2281,6 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             </button>
           </div>
         </div>
-        {(() => {
-          const m = (typeof getMesoState === 'function') ? getMesoState() : null;
-          if (!m || m.planId !== sch.id) return null;
-          const week = mesoCurrentWeek(m);
-          const rir = mesoRirForWeek(week, m.weeks);
-          return (
-            <div style={{ paddingBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 7px' }}>
-                MESO W{week}/{m.weeks} · {rir} RIR
-              </span>
-            </div>
-          );
-        })()}
         <div className="knurl" style={{ marginLeft: -22, marginRight: -22 }} />
       </div>
 
@@ -2390,6 +2377,22 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             </button>
           )}
         </div>
+
+        {/* Meso progress chip — shown when plan has a mesocycle configured */}
+        {sch.mesocycle_weeks && (() => {
+          const m = (typeof getMesoState === 'function') ? getMesoState() : null;
+          const hasProgress = m && m.planId === sch.id;
+          const weeks = sch.mesocycle_weeks;
+          const week = hasProgress ? mesoCurrentWeek(m) : 1;
+          const rir = (typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks) : Math.max(0, Math.round(3 - (week - 1) * 3 / (weeks - 1)));
+          return (
+            <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', marginTop: -4 }}>
+              <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                MESO W{week}/{weeks} · {rir} RIR
+              </span>
+            </div>
+          );
+        })()}
 
         {/* day strip */}
         <div style={{ flexShrink: 0, display: 'flex', gap: 4 }}>

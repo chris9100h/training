@@ -1462,6 +1462,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Soreness trigger: fires when exIdx changes to first exercise of a new muscle group
   useEffectT(() => {
     if (!mesoState || !entry || isCardio) return;
+    if (mesoWeek === 1) return; // week 1: no previous meso session to be sore from
     const ex = entry ? store.exercises?.find(e => e.id === entry.exId) : null;
     const pm = primaryMuscleForExercise(ex);
     if (!pm || askedSorenessRef.current.has(pm)) return;
