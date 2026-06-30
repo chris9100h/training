@@ -3087,10 +3087,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             {mesoState && mesoRirVal != null && !isCurrentWarmup && (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
                 <span className="display-it" style={{
-                  fontSize: 160, fontWeight: 900, lineHeight: 1, userSelect: 'none',
+                  fontSize: 72, fontWeight: 900, letterSpacing: '0.18em', whiteSpace: 'nowrap', userSelect: 'none',
                   color: mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold,
-                  opacity: mesoRirVal === 0 ? 0.11 : 0.07,
-                }}>{mesoRirVal}</span>
+                  opacity: mesoRirVal === 0 ? 0.13 : 0.09,
+                  transform: 'rotate(-22deg)',
+                }}>{mesoRirVal} RIR</span>
               </div>
             )}
             <div style={{ padding: '12px 6px' }}>
