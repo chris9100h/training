@@ -282,6 +282,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
   const [restoreFromDate, setRestoreFromDate] = useStateS('');
   const [restoreFromDayIdx, setRestoreFromDayIdx] = useStateS(0);
   const [pendingBackup, setPendingBackup] = useStateS(null);
+  const [previewBackup, setPreviewBackup] = useStateS(null);
+  const [previewDayIdx, setPreviewDayIdx] = useStateS(0);
 
   const openBackupSheet = async () => {
     setBackupSheet(true);
@@ -828,7 +830,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
                         {date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · {(b.days || []).length} days · {dayCount} training
                       </div>
                     </div>
-                    <Btn kind="ghost" onClick={() => restoreBackup(b)} style={{ fontSize: 11, flexShrink: 0 }}>Restore</Btn>
+                    <Btn kind="ghost" onClick={() => { setPreviewBackup(b); setPreviewDayIdx(0); }} style={{ fontSize: 11, flexShrink: 0 }}>Preview</Btn>
                   </div>
                 );
               })}
@@ -836,6 +838,109 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
           </div>
         </div>
       )}
+
+      {previewBackup && (() => {
+        const previewDays = previewBackup.days || [];
+        const selDay = previewDays[previewDayIdx] || previewDays[0];
+        const selItems = selDay?.items || [];
+        const isRestDay = !selItems.length;
+        const closePreview = () => { setPreviewBackup(null); setPreviewDayIdx(0); };
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 350, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
+            onClick={closePreview}>
+            <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
+              onClick={e => e.stopPropagation()}>
+
+              {/* Header */}
+              <div style={{ padding: '18px 22px 0', flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                  <div>
+                    <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>BACKUP PREVIEW</div>
+                    <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>
+                      {new Date(previewBackup.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                    </div>
+                    <div className="micro" style={{ color: UI.inkFaint, marginTop: 3, letterSpacing: '0.06em' }}>
+                      {new Date(previewBackup.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                      {' · '}{previewDays.length} days · {previewDays.filter(d => (d.items || []).length).length} training
+                    </div>
+                  </div>
+                  <button onClick={closePreview} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontSize: 20, lineHeight: 1, padding: '2px 0', flexShrink: 0 }}>×</button>
+                </div>
+              </div>
+
+              {/* Day chips */}
+              <div style={{ display: 'flex', gap: 6, overflowX: 'auto', padding: '14px 22px 12px', flexShrink: 0, scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+                {previewDays.map((d, i) => {
+                  const active = previewDayIdx === i;
+                  const hasItems = (d.items || []).length > 0;
+                  return (
+                    <button key={d.id || i} onClick={() => setPreviewDayIdx(i)} style={{
+                      flexShrink: 0, padding: '5px 12px', borderRadius: 4, cursor: 'pointer',
+                      border: `1px solid ${active ? UI.goldSoft : UI.hairStrong}`,
+                      background: active ? UI.goldFaint : 'transparent',
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, color: active ? UI.gold : UI.inkSoft }}>{d.name}</div>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 8, color: active ? UI.gold : UI.inkFaint, letterSpacing: '0.06em', marginTop: 1 }}>
+                        {hasItems ? `${(d.items || []).length} ex` : 'REST'}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Exercise list */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '0 22px 12px' }}>
+                {isRestDay ? (
+                  <div style={{ textAlign: 'center', padding: '28px 0', color: UI.inkFaint }}>
+                    <div className="display-it" style={{ fontSize: 28, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, marginBottom: 4 }}>Recover.</div>
+                    <div style={{ fontSize: 12, color: UI.inkFaint }}>Rest day</div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {selItems.map((it, k) => {
+                      const ex = LB.findExercise(store, it.exId);
+                      const label = it.repsPerSet && it.repsPerSet.length > 1
+                        ? it.repsPerSet.join('/')
+                        : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`;
+                      const nextIt = selItems[k + 1];
+                      const prevIt = selItems[k - 1];
+                      const linkedNext = it.supersetGroup && it.supersetGroup === nextIt?.supersetGroup;
+                      const linkedPrev = it.supersetGroup && it.supersetGroup === prevIt?.supersetGroup;
+                      const inGroup = linkedNext || linkedPrev;
+                      return (
+                        <div key={k} style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '9px 12px',
+                          borderRadius: linkedPrev && linkedNext ? 0 : linkedPrev ? '0 0 6px 6px' : linkedNext ? '6px 6px 0 0' : 6,
+                          border: `1px solid ${inGroup ? UI.goldSoft : UI.hairStrong}`,
+                          background: inGroup ? UI.goldFaint : UI.bgRaised,
+                          marginBottom: linkedNext ? 0 : 0,
+                        }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>{ex?.name || '—'}</div>
+                            {it.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 2, fontStyle: 'italic' }}>{it.note}</div>}
+                          </div>
+                          <span className="num" style={{
+                            fontSize: 12, color: UI.gold, background: UI.goldFaint,
+                            border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
+                            padding: '3px 8px', whiteSpace: 'nowrap', flexShrink: 0,
+                          }}>{label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Restore button */}
+              <div style={{ padding: '12px 22px calc(16px + env(safe-area-inset-bottom, 0px))', borderTop: `0.5px solid ${UI.hairStrong}`, flexShrink: 0 }}>
+                <Btn onClick={() => { closePreview(); restoreBackup(previewBackup); }}>Restore this backup</Btn>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </Screen>
   );
 }
