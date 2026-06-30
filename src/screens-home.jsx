@@ -2362,7 +2362,21 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             </button>
           )}
           <div style={{ flex: 1, textAlign: 'center' }}>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft, textTransform: 'uppercase' }}>{periodLabel}</span>
+            {sch.mesocycle_weeks ? (() => {
+              const m = (typeof getMesoState === 'function') ? getMesoState() : null;
+              const hasProgress = m && m.planId === sch.id;
+              const weeks = sch.mesocycle_weeks;
+              const week = hasProgress ? mesoCurrentWeek(m) : 1;
+              const rir = (typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks) : Math.max(0, Math.round(3 - (week - 1) * 3 / (weeks - 1)));
+              const unit = weekdayMode ? 'W' : 'C';
+              return (
+                <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                  MESO {unit}{week}/{weeks} · {rir} RIR
+                </span>
+              );
+            })() : (
+              <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft, textTransform: 'uppercase' }}>{periodLabel}</span>
+            )}
           </div>
           {!isFlex && (
             <button onClick={goForward} disabled={weekOffset === 0} style={{
@@ -2377,22 +2391,6 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             </button>
           )}
         </div>
-
-        {/* Meso progress chip — shown when plan has a mesocycle configured */}
-        {sch.mesocycle_weeks && (() => {
-          const m = (typeof getMesoState === 'function') ? getMesoState() : null;
-          const hasProgress = m && m.planId === sch.id;
-          const weeks = sch.mesocycle_weeks;
-          const week = hasProgress ? mesoCurrentWeek(m) : 1;
-          const rir = (typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks) : Math.max(0, Math.round(3 - (week - 1) * 3 / (weeks - 1)));
-          return (
-            <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', marginTop: -4 }}>
-              <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
-                MESO W{week}/{weeks} · {rir} RIR
-              </span>
-            </div>
-          );
-        })()}
 
         {/* day strip */}
         <div style={{ flexShrink: 0, display: 'flex', gap: 4 }}>
