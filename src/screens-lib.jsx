@@ -2653,6 +2653,29 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         );
                       }
 
+                      // Lengthened Partials: badge + main chip + partials count
+                      if (st.technique === 'lengthened_partial' && !isCheckboxOnly) {
+                        const partials = st.drops?.partials || 0;
+                        const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
+                        const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
+                        const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
+                        return (
+                          <div key={j} style={{ width: '100%', marginTop: j > 0 ? 6 : 0, borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`, paddingLeft: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                              <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint, background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                              <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
+                                {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                              </span>
+                              {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
+                              {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}<span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>}
+                            </div>
+                          </div>
+                        );
+                      }
+
                       return (
                         <span key={j} style={{
                           opacity: (st.done || hasData) ? (isWarm ? 0.65 : 1) : 0.45,

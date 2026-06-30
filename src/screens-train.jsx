@@ -2706,6 +2706,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           )}
           <div className="knurl" style={{ marginBottom: 2 }} />
 
+          {!!lpActiveByEx[exIdx] && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 8px' }}>
+              <span className="micro-gold">LENGTHENED PARTIALS</span>
+              <button onClick={() => setLpActiveByEx(prev => ({ ...prev, [exIdx]: false }))} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+            </div>
+          )}
+
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {entry.sets.map((s, i) => {
               const isWarmupRow = !!s.warmup;
@@ -3073,11 +3080,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </div>
                   )}
                   {!!lpActiveByEx[exIdx] && s.done && !s.warmup && (
-                    <div style={{ marginLeft: 36, display: 'flex', alignItems: 'center', gap: 10, padding: '4px 4px 8px' }}>
-                      <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em' }}>PARTIALS</span>
-                      <button onClick={() => setPartials(i, Math.max(0, (s.drops?.partials || 0) - 1))} style={{ width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
-                      <span className="num" style={{ fontSize: 15, color: (s.drops?.partials || 0) > 0 ? UI.gold : UI.inkFaint, minWidth: 24, textAlign: 'center' }}>{s.drops?.partials || 0}</span>
-                      <button onClick={() => setPartials(i, (s.drops?.partials || 0) + 1)} style={{ width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>+</button>
+                    <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '2px 4px 8px' }}>
+                      <div />
+                      <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', textAlign: 'right', paddingRight: 4 }}>PARTIALS</span>
+                      <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                        <button onClick={() => setPartials(i, Math.max(0, (s.drops?.partials || 0) - 1))} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
+                        <span className="num" style={{ fontSize: 18, color: (s.drops?.partials || 0) > 0 ? UI.gold : UI.inkFaint, minWidth: 28, textAlign: 'center' }}>{s.drops?.partials || 0}</span>
+                        <button onClick={() => setPartials(i, (s.drops?.partials || 0) + 1)} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>+</button>
+                      </div>
+                      <div />
                     </div>
                   )}
                   {i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) && <div className="knurl" />}
