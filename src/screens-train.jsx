@@ -1450,7 +1450,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const muscle = mesoJointMuscle;
     if (!mesoState || !exId) return;
 
-    if (answer === 'fine') mesoJointFineRef.current.add(exId);
+    if (answer === 'none') mesoJointFineRef.current.add(exId);
 
     // Apply delta for joint pain
     if (answer === 'noticeable' || answer === 'sharp') {
