@@ -50,17 +50,16 @@ function mesoCurrentWeek(mesoState, store) {
   if (!mesoState?.startDate) return 1;
   const sch = store?.schedules?.find(s => s.id === (mesoState.scheduleId ?? mesoState.planId));
   if (sch && sch.days?.length > 0 && !LB.isWeekdayPlan(sch)) {
-    // Use rotation count for flex/cycle plans. startCycleIndex may be absent on old
-    // meso states (created before the fix); fall back to 0 — always better than calendar.
     const startIdx = mesoState.startCycleIndex ?? 0;
-    const rotations = Math.floor(
-      Math.max(0, (store.cycleIndex || 0) - startIdx) / sch.days.length
-    );
+    const currentIdx = store.cycleIndex || 0;
+    if (currentIdx < startIdx) return null; // pending — waiting for next rotation start
+    const rotations = Math.floor((currentIdx - startIdx) / sch.days.length);
     return Math.min(Math.max(1, rotations + 1), mesoState.weeks);
   }
-  // Weekday plans: use calendar weeks
+  // Weekday plans: use calendar weeks; startDate is the Monday meso begins
   const start = new Date(mesoState.startDate); start.setHours(12, 0, 0, 0);
   const today = new Date(); today.setHours(12, 0, 0, 0);
+  if (today < start) return null; // pending — waiting for next Monday
   const days = Math.round((today - start) / 86400000);
   return Math.min(Math.max(1, Math.floor(days / 7) + 1), mesoState.weeks);
 }
@@ -85,6 +84,7 @@ function getMesoWeightBoosts(scheduleId, mesoStates) {
   if (!m || !m.weightBoosts) return null;
   return m.weightBoosts;
 }
+
 // ──────────────────────────────────────────────────────────────────────────────
 
 // ── Debug log (disabled) ──────────────────────────────────────────────────────
@@ -432,12 +432,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Keep existing meso only if weeks match the current config.
     // A mismatch (changed week count) always starts fresh.
     if (existing && existing.weeks === _sch.mesocycle_weeks) return;
+    // Align meso start to a clean boundary so week 1 is always a full rotation/week.
+    // Cycle/flex: next D1 (next multiple of daysLength from current cycleIndex).
+    // Weekday: next Monday (or today if today is Monday).
+    const _isWeekday = LB.isWeekdayPlan(_sch);
+    const _daysLen = _sch.days.length || 1;
+    const _ci = store.cycleIndex || 0;
+    const alignedStartIdx = _isWeekday ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
+    const alignedStartDate = _isWeekday ? LB.nextMondayISO() : LB.todayISO();
     const newMeso = {
       id: userId + '_' + session.scheduleId,
       scheduleId: session.scheduleId,
       weeks: _sch.mesocycle_weeks,
-      startDate: LB.todayISO(),
-      startCycleIndex: store.cycleIndex || 0,
+      startDate: alignedStartDate,
+      startCycleIndex: alignedStartIdx,
       deltas: {},
       jointFlags: {},
       pumpLowCounts: {},
@@ -1446,10 +1454,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setStore(s => {
       const existing = (s.mesoStates || []).find(m => m.scheduleId === scheduleId);
       if (!existing) return s;
+      const sch2 = s.schedules?.find(sc => sc.id === scheduleId);
+      const isWd = sch2 ? LB.isWeekdayPlan(sch2) : false;
+      const daysLen2 = sch2?.days?.length || 1;
+      const ci = s.cycleIndex || 0;
       const newMeso = {
         ...existing,
-        startDate: LB.todayISO(),
-        startCycleIndex: s.cycleIndex || 0,
+        startDate: isWd ? LB.nextMondayISO() : LB.todayISO(),
+        startCycleIndex: isWd ? (existing.startCycleIndex ?? 0) : Math.ceil(ci / daysLen2) * daysLen2,
         deltas: {},
         jointFlags: {},
         pumpLowCounts: {},
@@ -1459,6 +1471,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const others = (s.mesoStates || []).filter(m => m.scheduleId !== scheduleId);
       return { ...s, mesoStates: [...others, newMeso] };
     });
+  };
+
+  const continueAsCycle = (scheduleId) => {
+    setStore(s => ({
+      ...s,
+      schedules: s.schedules.map(sc =>
+        sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
+      ),
+      mesoStates: (s.mesoStates || []).map(m =>
+        m.scheduleId === scheduleId ? { ...m, pendingMeso2: false } : m
+      ),
+    }));
   };
 
   const deactivatePlanForMeso = (scheduleId) => {
@@ -1485,10 +1509,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
     const wantMeso2 = await confirm(
       'Start Meso 2 with the same plan? Your earned weight boosts carry over — set counts reset to baseline so week 1 feels fresh again.',
-      { title: 'Start Meso 2?', ok: 'Start Meso 2', cancel: 'Deactivate plan', preventBackdropClose: true },
+      { title: 'Start Meso 2?', ok: 'Start Meso 2', cancel: 'Skip', preventBackdropClose: true },
     );
     if (wantMeso2) {
       startMeso2ForSchedule(scheduleId);
+      go({ name: 'session', sessionId: session.id, justFinished: true });
+      return;
+    }
+    const keepActive = await confirm(
+      'Keep the plan active as a regular cycle (no meso), or deactivate it?',
+      { title: 'What\'s next?', ok: 'Continue as cycle', cancel: 'Deactivate plan', preventBackdropClose: true },
+    );
+    if (keepActive) {
+      continueAsCycle(scheduleId);
     } else {
       deactivatePlanForMeso(scheduleId);
     }
@@ -1709,6 +1742,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Soreness trigger: fires when exIdx changes to first exercise of a new muscle group
   useEffectT(() => {
     if (!mesoState || !entry || isCardio) return;
+    if (mesoWeek == null) return; // pending period — meso not yet started
     if (mesoWeek === 1) return; // week 1: no previous meso session to be sore from
     const ex = entry ? store.exercises?.find(e => e.id === entry.exId) : null;
     const pm = primaryMuscleForExercise(ex);
@@ -1727,6 +1761,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // ask joint feedback. Fires whenever the current entry's sets change.
   useEffectT(() => {
     if (!mesoState || !entry || isCardio) return;
+    if (mesoWeek == null) return; // pending period — meso not yet started
     const exId = entry.exId;
     if (askedJointRef.current.has(exId)) return;
     const workingSets = entry.sets.filter(s => !s.warmup);

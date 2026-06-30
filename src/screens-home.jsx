@@ -1590,7 +1590,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   }, [store?.statusMode, store?.statusModeSince, store?.sessions]);
 
   // After a meso-triggered deload ends (or if pendingMeso2 is set without an active deload),
-  // offer to start Meso 2 or deactivate the plan.
+  // offer to start Meso 2, continue as a regular cycle, or deactivate the plan.
   const pendingMeso2Checked = useRef(false);
   useEffect(() => {
     if (store?.statusMode === 'deload') { pendingMeso2Checked.current = false; return; }
@@ -1601,19 +1601,23 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (!mesoSt?.pendingMeso2) return;
     pendingMeso2Checked.current = true;
     (async () => {
+      const scheduleId = sch.id;
       const wantMeso2 = await confirm(
         'Your deload is done — nice recovery! Ready to kick off Meso 2? Your earned weight boosts carry over and set counts reset to baseline.',
-        { title: 'Start Meso 2?', ok: 'Start Meso 2', cancel: 'Deactivate plan', preventBackdropClose: true },
+        { title: 'Start Meso 2?', ok: 'Start Meso 2', cancel: 'Skip', preventBackdropClose: true },
       );
-      const scheduleId = sch.id;
       if (wantMeso2) {
         setStore(s => {
           const existing = (s.mesoStates || []).find(m => m.scheduleId === scheduleId);
           if (!existing) return s;
+          const sc2 = s.schedules?.find(sc => sc.id === scheduleId);
+          const isWd = sc2 ? LB.isWeekdayPlan(sc2) : false;
+          const daysLen2 = sc2?.days?.length || 1;
+          const ci = s.cycleIndex || 0;
           const newMeso = {
             ...existing,
-            startDate: LB.todayISO(),
-            startCycleIndex: s.cycleIndex || 0,
+            startDate: isWd ? LB.nextMondayISO() : LB.todayISO(),
+            startCycleIndex: isWd ? (existing.startCycleIndex ?? 0) : Math.ceil(ci / daysLen2) * daysLen2,
             deltas: {},
             jointFlags: {},
             pumpLowCounts: {},
@@ -1622,6 +1626,22 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           const others = (s.mesoStates || []).filter(m => m.scheduleId !== scheduleId);
           return { ...s, mesoStates: [...others, newMeso] };
         });
+        return;
+      }
+      const keepActive = await confirm(
+        'Keep the plan active as a regular cycle (no meso), or deactivate it?',
+        { title: 'What\'s next?', ok: 'Continue as cycle', cancel: 'Deactivate plan', preventBackdropClose: true },
+      );
+      if (keepActive) {
+        setStore(s => ({
+          ...s,
+          schedules: s.schedules.map(sc =>
+            sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
+          ),
+          mesoStates: (s.mesoStates || []).map(m =>
+            m.scheduleId === scheduleId ? { ...m, pendingMeso2: false } : m
+          ),
+        }));
       } else {
         setStore(s => ({
           ...s,
