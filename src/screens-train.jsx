@@ -1280,6 +1280,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [swapOpen, setSwapOpen] = useStateT(false);
   const [addOpen, setAddOpen] = useStateT(() => !!(session.isFreestyle && session.entries.length === 0));
   const [addSupersetData, setAddSupersetData] = useStateT(null); // { newIdx } | null
+  const addAndJumpRef = useRefT(false); // set to true when adding via the finish-dialog button
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
   const [outlierConfirm, setOutlierConfirm] = useStateT(null);
@@ -1713,14 +1714,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const doAdd = (ids) => {
     const newExId = Array.isArray(ids) ? ids[0] : ids;
+    const jump = addAndJumpRef.current;
     setAddOpen(false);
     if (session.entries.length === 0) {
       // First exercise in an empty session — skip the superset prompt and insert directly.
+      let isNewCardio = false;
       setStore(s => {
         const sess = s.sessions.find(x => x.id === session.id);
         if (!sess) return s;
         const newEx = LB.findExercise(s, newExId);
-        const isNewCardio = newEx?.movement_type === 'cardio';
+        isNewCardio = newEx?.movement_type === 'cardio';
         let newEntry;
         if (isNewCardio) {
           newEntry = { exId: newExId, name: newEx?.name || newExId, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: null, addedDuringSession: true };
@@ -1741,6 +1744,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           }),
         };
       });
+      if (jump && !isNewCardio) {
+        addAndJumpRef.current = false;
+        setTimeout(() => activateKb(0, 'kg'), 200);
+      }
     } else {
       // Defer insertion until the user picks a superset (or solo) —
       // that choice determines where the new exercise is placed.
@@ -1752,6 +1759,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // targetIdx = i → link with entry i and insert right after it.
   const confirmAdd = (targetIdx) => {
     const { newExId } = addSupersetData;
+    const jump = addAndJumpRef.current;
+    if (jump) addAndJumpRef.current = false;
     setAddSupersetData(null);
     setStore(s => {
       const sess = s.sessions.find(x => x.id === session.id);
@@ -1785,8 +1794,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const finalEntries = targetIdx !== null
         ? withNew.map((e, i) => i === targetIdx ? { ...e, supersetGroup: group } : e)
         : withNew;
-      // Keep the user on the same exercise — only adjust index if insertion shifts it
-      const newCurrentIdx = insertIdx <= currentIdx ? currentIdx + 1 : currentIdx;
+      // Jump: go to the new exercise; otherwise keep the user on the same exercise
+      const newCurrentIdx = jump ? insertIdx : (insertIdx <= currentIdx ? currentIdx + 1 : currentIdx);
       return {
         ...s,
         sessions: s.sessions.map(x => x.id !== session.id ? x : {
@@ -1796,6 +1805,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         }),
       };
     });
+    if (jump && store.exercises?.find(e => e.id === newExId)?.movement_type !== 'cardio') {
+      setTimeout(() => activateKb(0, 'kg'), 200);
+    }
   };
 
   const removeExercise = async () => {
@@ -3325,15 +3337,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               : elapsedMin < 90
               ? "Nice session. Almost at the 90-minute mark — finish strong?"
               : "Now THAT's a workout. You've earned this finish.";
-            return (
-              <>
-                <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 10 }}>{msg}</div>
-                <Btn kind="ghost" onClick={() => { setFinishOpen(false); setAddOpen(true); }} style={{ width: '100%', marginBottom: 8 }}>
-                  + Add another exercise
-                </Btn>
-              </>
-            );
+            return <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 10 }}>{msg}</div>;
           })()}
+          <Btn kind="ghost" onClick={() => { addAndJumpRef.current = true; setFinishOpen(false); setAddOpen(true); }} style={{ width: '100%', marginBottom: 8 }}>
+            + Add another exercise
+          </Btn>
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={() => setFinishOpen(false)} style={{ flex: 1 }}>Continue</Btn>
             <Btn onClick={tryFinish} style={{ flex: 2 }}>Finish ✓</Btn>
