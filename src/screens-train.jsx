@@ -3308,6 +3308,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <span className="num" style={{ color: UI.ink }}>{sessionTimeStr}</span>
             </div>
           </div>
+          {session.isFreestyle && (
+            <Btn kind="ghost" onClick={() => { setFinishOpen(false); setAddOpen(true); }} style={{ width: '100%', marginBottom: 8 }}>
+              + Add another exercise
+            </Btn>
+          )}
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={() => setFinishOpen(false)} style={{ flex: 1 }}>Continue</Btn>
             <Btn onClick={tryFinish} style={{ flex: 2 }}>Finish ✓</Btn>
