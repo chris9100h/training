@@ -1576,6 +1576,45 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     })();
   }, [store?.statusMode, store?.sessions, store?.cardioLogs]);
 
+  // Eagerly create the meso state as soon as a plan with mesocycle_weeks is
+  // detected but has no corresponding state yet. This ensures the pending chip
+  // appears immediately after enabling meso — not only after the first training
+  // session opens. The useEffectT in screens-train still handles the live
+  // training case and re-creates if the week count changes.
+  useEffect(() => {
+    if (!sch?.mesocycle_weeks || !sch?.id || !userId) return;
+    const existing = (store?.mesoStates || []).find(m => m.scheduleId === sch.id);
+    if (existing) return;
+    const _daysLen = sch.days.length || 1;
+    const _isWeekday = LB.isWeekdayPlan(sch);
+    const _isFlex = LB.isFlexPlan(sch);
+    const _ci = store.cycleIndex || 0;
+    let alignedStartDate, alignedStartIdx;
+    if (_isWeekday) {
+      alignedStartDate = LB.nextMondayISO();
+      alignedStartIdx = _ci;
+    } else if (_isFlex) {
+      alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
+      alignedStartDate = LB.todayISO();
+    } else {
+      alignedStartDate = LB.nextCycleD1ISOFromSchedule(sch, store.cycleStartDate);
+      alignedStartIdx = 0;
+    }
+    const newMeso = {
+      id: userId + '_' + sch.id,
+      scheduleId: sch.id,
+      weeks: sch.mesocycle_weeks,
+      startDate: alignedStartDate,
+      startCycleIndex: alignedStartIdx,
+      deltas: {}, jointFlags: {}, pumpLowCounts: {}, weightBoosts: {},
+      completions: 0,
+    };
+    setStore(s => {
+      const others = (s.mesoStates || []).filter(m => m.scheduleId !== newMeso.scheduleId);
+      return { ...s, mesoStates: [...others, newMeso] };
+    });
+  }, [sch?.id, sch?.mesocycle_weeks, store?.mesoStates, userId]); // eslint-disable-line
+
   // Auto-end a deload once it has run its course (one cycle / week elapsed, or
   // the flex session goal of deload sessions logged). Runs on mount and when the
   // relevant inputs change; endDeload no-ops if already off.
