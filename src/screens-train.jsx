@@ -1369,28 +1369,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // ── Meso feedback handlers ─────────────────────────────────────────────────
   const handleSorenessAnswer = (answer, muscle) => {
     setMesoSorenessOpen(false);
-    if (answer !== 'still_sore' || !mesoState) return;
-    // Retroactive -1 on main lift of most recent session with this muscle group
-    const currentMeso = mesoState;
-    if (!currentMeso) return;
-    // Find last session for this muscle group in current meso
-    const mesoStart = currentMeso.startDate;
+    if ((answer !== 'still_sore' && answer !== 'very_sore') || !mesoState) return;
+    const mesoStart = mesoState.startDate;
     const matchSessions = (store.sessions || [])
       .filter(s => s.ended && s.date >= mesoStart && s.scheduleId === session.scheduleId && s.id !== session.id)
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     for (const prev of matchSessions) {
-      const mainLift = (prev.entries || []).find(e => {
+      const muscleEntries = (prev.entries || []).filter(e => {
         const ex2 = store.exercises?.find(x => x.id === e.exId);
         return primaryMuscleForExercise(ex2) === muscle;
       });
-      if (mainLift) {
-        const key = mainLift.exId + '_' + prev.dayId;
-        saveMesoState(m => ({
-          ...m,
-          deltas: { ...(m.deltas || {}), [key]: ((m.deltas || {})[key] || 0) - 1 },
-        }));
-        break;
-      }
+      if (!muscleEntries.length) continue;
+      // still_sore → only main lift; very_sore → all exercises of the group
+      const targets = answer === 'very_sore' ? muscleEntries : [muscleEntries[0]];
+      saveMesoState(m => {
+        const newDeltas = { ...(m.deltas || {}) };
+        targets.forEach(e => {
+          const key = e.exId + '_' + prev.dayId;
+          newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
+        });
+        return { ...m, deltas: newDeltas };
+      });
+      break;
     }
   };
 
