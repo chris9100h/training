@@ -1026,7 +1026,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(s);
     });
     const removed = prev.schedules.filter(s => !next.schedules.find(x => x.id === s.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_schedules').upsert(upsert.map(({ mode, ...s }) => ({ ...s, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_schedules').upsert(upsert.map(({ mode, mesocycle_weeks, ...s }) => ({ ...s, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_schedules').delete().in('id', removed.map(s => s.id)));
     // Fire-and-forget backup whenever days changes to a valid non-empty array.
     // Never blocks the main sync; failures are silently ignored.

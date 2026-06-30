@@ -977,6 +977,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const [applyFromDate, setApplyFromDate] = useStateS('');
   const [applyFromDayIdx, setApplyFromDayIdx] = useStateS(0);
   const [editingDay, setEditingDay] = useStateS(null);
+  const [mesoInfoOpen, setMesoInfoOpen] = useStateS(false);
 
   const reorderDays = (from, to) => {
     if (from === to) return;
@@ -1305,6 +1306,54 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           );
         })()}
 
+        {/* Mesocycle */}
+        {(() => {
+          const hasMeso = draft.mesocycle_weeks != null;
+          const toggleMeso = () => setDraft(d => ({ ...d, mesocycle_weeks: d.mesocycle_weeks != null ? null : 6 }));
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span className="label" style={{ flex: 1 }}>Mesocycle</span>
+                <button onClick={() => setMesoInfoOpen(true)} style={{
+                  background: 'transparent', border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
+                  width: 22, height: 22, cursor: 'pointer', color: UI.inkFaint,
+                  fontFamily: UI.fontUi, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: 0,
+                }}>ⓘ</button>
+              </div>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                background: UI.bgInset, border: `1px solid ${hasMeso ? UI.goldSoft : UI.hairStrong}`,
+                borderRadius: 4, padding: '10px 12px',
+              }}>
+                <button onClick={toggleMeso} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                  <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasMeso ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
+                    <div style={{ position: 'absolute', top: 3, left: hasMeso ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                  </div>
+                </button>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>
+                    {hasMeso ? `${draft.mesocycle_weeks}-week mesocycle` : 'No mesocycle'}
+                  </div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
+                    {hasMeso ? 'RIR targets + auto-regulation feedback during training.' : 'Enable for RIR-based progressive overload.'}
+                  </div>
+                </div>
+              </div>
+              {hasMeso && (
+                <div style={{ marginTop: 2 }}>
+                  <Stepper value={draft.mesocycle_weeks} step={1} min={4} max={8}
+                    suffix=" weeks"
+                    onChange={v => setDraft(d => ({ ...d, mesocycle_weeks: Math.min(8, Math.max(4, Math.round(v))) }))} />
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, textAlign: 'center', lineHeight: 1.5 }}>
+                    {'Week 1 = 3 RIR · Week ' + draft.mesocycle_weeks + ' = 0 RIR · then deload'}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {isActive && !isWeekday && !isFlex && (
           <Field label="Cycle start date (Day 1)">
             <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%' }}>
@@ -1490,6 +1539,30 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           </div>
         </div>
       )}
+
+      <Sheet open={mesoInfoOpen} onClose={() => setMesoInfoOpen(false)} title="Mesocycle">
+        <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <p style={{ margin: 0 }}>A <strong style={{ color: UI.ink }}>mesocycle</strong> is a structured training block (4–8 weeks) where effort progressively increases each week, measured by <strong style={{ color: UI.ink }}>Reps in Reserve (RIR)</strong> — how many reps you could still do before failure.</p>
+          <p style={{ margin: 0 }}>Week 1 starts easy (3 RIR) and ramps up to all-out effort (0 RIR) by the final week. Then you deload.</p>
+          <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', border: `1px solid ${UI.hairStrong}` }}>
+            <div className="label" style={{ marginBottom: 10 }}>What Zane asks during training</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {[
+                ['Before first set of a muscle group', 'Soreness carryover from last session?'],
+                ['After last set of each exercise', 'Any joint discomfort?'],
+                ['After last exercise of a muscle group', 'Pump quality + volume feel?'],
+              ].map(([when, what]) => (
+                <div key={when} style={{ fontSize: 12 }}>
+                  <div style={{ color: UI.gold, fontWeight: 600, marginBottom: 2 }}>{when}</div>
+                  <div style={{ color: UI.ink }}>{what}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <p style={{ margin: 0 }}>Your answers auto-adjust set targets for the next time you run that session — more sets when you need more stimulus, fewer when recovery is lagging.</p>
+        </div>
+        <Btn onClick={() => setMesoInfoOpen(false)} style={{ width: '100%', marginTop: 20 }}>Got it</Btn>
+      </Sheet>
     </Screen>
   );
 }

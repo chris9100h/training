@@ -10,6 +10,36 @@ const MI_TO_M_T = 1609.344;
 function mToDisplayT(m, unit) { return m == null ? '' : unit === 'mi' ? (m / MI_TO_M_T).toFixed(2) : (m / 1000).toFixed(2); }
 function distToMT(val, unit) { const n = parseFloat(val); return isNaN(n) ? null : unit === 'mi' ? Math.round(n * MI_TO_M_T) : Math.round(n * 1000); }
 
+// ─── Mesocycle helpers ─────────────────────────────────────────────────────────
+const MESO_KEY = 'logbook-meso-state';
+const MESO_MUSCLE_PRIORITY = ['Back','Quads','Chest','Glutes','Hamstrings','Shoulders','Calves','Abs','Triceps','Biceps','Forearms'];
+
+function primaryMuscleForExercise(ex) {
+  if (!ex?.tags?.length) return null;
+  for (const m of MESO_MUSCLE_PRIORITY) {
+    if (ex.tags.includes(m)) return m;
+  }
+  return ex.tags[0] || null;
+}
+function getMesoState() {
+  try { const r = localStorage.getItem(MESO_KEY); return r ? JSON.parse(r) : null; } catch { return null; }
+}
+function saveMesoStateToStorage(s) {
+  try { localStorage.setItem(MESO_KEY, JSON.stringify(s)); } catch {}
+}
+function mesoCurrentWeek(mesoState) {
+  if (!mesoState?.startDate) return 1;
+  const start = new Date(mesoState.startDate); start.setHours(12, 0, 0, 0);
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const days = Math.round((today - start) / 86400000);
+  return Math.min(Math.max(1, Math.floor(days / 7) + 1), mesoState.weeks);
+}
+function mesoRirForWeek(week, weeks) {
+  if (!weeks || weeks <= 1) return 0;
+  return Math.max(0, Math.round(3 - (week - 1) * 3 / (weeks - 1)));
+}
+// ──────────────────────────────────────────────────────────────────────────────
+
 // ── Debug log (disabled) ──────────────────────────────────────────────────────
 // NOTE: a previous debugging session monkey-patched window.fetch, window.WebSocket
 // and console here. The WebSocket wrapper dropped the static WebSocket.OPEN/
@@ -346,6 +376,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const _sch = store.schedules?.find(s => s.id === session.scheduleId);
   const isWeekdayMode = _sch ? LB.isWeekdayPlan(_sch) : false;
+
+  // Auto-start a mesocycle when the session's plan has mesocycle_weeks set
+  // and there's no active meso for this plan yet.
+  useEffectT(() => {
+    if (!_sch?.mesocycle_weeks || !session.scheduleId) return;
+    const existing = getMesoState();
+    if (existing?.planId === session.scheduleId) return; // already have one
+    const newMeso = {
+      planId: session.scheduleId,
+      weeks: _sch.mesocycle_weeks,
+      startDate: LB.todayISO(),
+      deltas: {},
+      jointFlags: {},
+      pumpLowCounts: {},
+    };
+    saveMesoStateToStorage(newMeso);
+  }, []);
 
   const exIdx = session.currentExIdx || 0;
   const entry = session.entries[exIdx];
@@ -1284,6 +1331,169 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
   const [outlierConfirm, setOutlierConfirm] = useStateT(null);
+
+  // ── Mesocycle state ─────────────────────────────────────────────────────────
+  const [mesoState, setMesoStateLocal] = useStateT(() => {
+    const m = getMesoState();
+    return (m && m.planId === session.scheduleId) ? m : null;
+  });
+  const saveMesoState = (updater) => {
+    setMesoStateLocal(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      if (next) saveMesoStateToStorage(next);
+      return next;
+    });
+  };
+  const mesoWeek = mesoState ? mesoCurrentWeek(mesoState) : null;
+  const mesoRirVal = (mesoWeek != null && mesoState?.weeks != null) ? mesoRirForWeek(mesoWeek, mesoState.weeks) : null;
+
+  // Per-session meso feedback tracking
+  const [mesoSorenessOpen, setMesoSorenessOpen] = useStateT(false);
+  const [mesoSorenessMusc, setMesoSorenessMusc] = useStateT(null); // muscle group being asked
+  const [mesoJointOpen, setMesoJointOpen] = useStateT(false);
+  const [mesoJointExId, setMesoJointExId] = useStateT(null);
+  const [mesoJointExName, setMesoJointExName] = useStateT(null);
+  const [mesoJointPendingNav, setMesoJointPendingNav] = useStateT(false);
+  const [mesoJointMuscle, setMesoJointMuscle] = useStateT(null);
+  const mesoJointExIdxRef = useRefT(null);
+  const [mesoVolumeOpen, setMesoVolumeOpen] = useStateT(false);
+  const [mesoVolumeMusc, setMesoVolumeMusc] = useStateT(null);
+  const [mesoVolumeExIds, setMesoVolumeExIds] = useStateT([]); // exId+dayId pairs for delta
+  const [mesoPumpAnswer, setMesoPumpAnswer] = useStateT(null);
+  const [mesoVolumeAnswer, setMesoVolumeAnswer] = useStateT(null);
+  const askedSorenessRef = useRefT(new Set());
+  const askedJointRef = useRefT(new Set());
+  const askedVolumeRef = useRefT(new Set());
+  // ────────────────────────────────────────────────────────────────────────────
+
+  // ── Meso feedback handlers ─────────────────────────────────────────────────
+  const handleSorenessAnswer = (answer, muscle) => {
+    setMesoSorenessOpen(false);
+    if (answer !== 'still_sore' || !mesoState) return;
+    // Retroactive -1 on main lift of most recent session with this muscle group
+    const currentMeso = mesoState;
+    if (!currentMeso) return;
+    // Find last session for this muscle group in current meso
+    const mesoStart = currentMeso.startDate;
+    const matchSessions = (store.sessions || [])
+      .filter(s => s.ended && s.date >= mesoStart && s.scheduleId === session.scheduleId && s.id !== session.id)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    for (const prev of matchSessions) {
+      const mainLift = (prev.entries || []).find(e => {
+        const ex2 = store.exercises?.find(x => x.id === e.exId);
+        return primaryMuscleForExercise(ex2) === muscle;
+      });
+      if (mainLift) {
+        const key = mainLift.exId + '_' + prev.dayId;
+        saveMesoState(m => ({
+          ...m,
+          deltas: { ...(m.deltas || {}), [key]: ((m.deltas || {})[key] || 0) - 1 },
+        }));
+        break;
+      }
+    }
+  };
+
+  const handleJointAnswer = (answer) => {
+    setMesoJointOpen(false);
+    const exId = mesoJointExId;
+    const muscle = mesoJointMuscle;
+    if (!mesoState || !exId) return;
+
+    // Apply delta for joint pain
+    if (answer === 'noticeable' || answer === 'sharp') {
+      const key = exId + '_' + session.dayId;
+      saveMesoState(m => ({
+        ...m,
+        deltas: { ...(m.deltas || {}), [key]: ((m.deltas || {})[key] || 0) - 1 },
+        ...(answer === 'sharp' ? { jointFlags: { ...(m.jointFlags || {}), [exId]: true } } : {}),
+      }));
+    }
+
+    // Check if this was the last exercise for this muscle group → open pump/volume
+    if (!muscle || askedVolumeRef.current.has(muscle)) return;
+    const currentIdx = mesoJointExIdxRef.current ?? exIdx;
+    const isLastOfMuscle = !session.entries.slice(currentIdx + 1).some(e => {
+      const ex2 = store.exercises?.find(x => x.id === e.exId);
+      return primaryMuscleForExercise(ex2) === muscle;
+    });
+    if (!isLastOfMuscle) return;
+    askedVolumeRef.current.add(muscle);
+    // Collect all exIds for this muscle group in this session
+    const muscleExIds = session.entries
+      .slice(0, currentIdx + 1)
+      .filter(e => {
+        const ex2 = store.exercises?.find(x => x.id === e.exId);
+        return primaryMuscleForExercise(ex2) === muscle;
+      })
+      .map(e => e.exId);
+    setMesoVolumeMusc(muscle);
+    setMesoVolumeExIds(muscleExIds);
+    setMesoPumpAnswer(null);
+    setMesoVolumeAnswer(null);
+    setMesoVolumeOpen(true);
+  };
+
+  const handleVolumeAnswer = (pump, volume) => {
+    setMesoVolumeOpen(false);
+    if (!mesoState || !mesoVolumeExIds.length) return;
+
+    // Volume delta per exercise of this muscle group in this session
+    const volumeDelta = volume === 'not_enough' ? 1
+                      : volume === 'pushed' ? -1
+                      : volume === 'too_much' ? -2
+                      : 0;
+    // Pump: if low on "just right" volume, track for swap suggestion
+    const pumpLow = pump === 'low' && volume === 'just_right';
+
+    saveMesoState(m => {
+      const newDeltas = { ...(m.deltas || {}) };
+      const newPumpLow = { ...(m.pumpLowCounts || {}) };
+      mesoVolumeExIds.forEach(exId => {
+        const key = exId + '_' + session.dayId;
+        newDeltas[key] = ((m.deltas || {})[key] || 0) + volumeDelta;
+        if (pumpLow) newPumpLow[exId] = ((m.pumpLowCounts || {})[exId] || 0) + 1;
+      });
+      return { ...m, deltas: newDeltas, pumpLowCounts: newPumpLow };
+    });
+  };
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // Soreness trigger: fires when exIdx changes to first exercise of a new muscle group
+  useEffectT(() => {
+    if (!mesoState || !entry || isCardio) return;
+    const ex = entry ? store.exercises?.find(e => e.id === entry.exId) : null;
+    const pm = primaryMuscleForExercise(ex);
+    if (!pm || askedSorenessRef.current.has(pm)) return;
+    const isFirst = !session.entries.slice(0, exIdx).some(e => {
+      const ex2 = store.exercises?.find(x => x.id === e.exId);
+      return primaryMuscleForExercise(ex2) === pm;
+    });
+    if (!isFirst) return;
+    askedSorenessRef.current.add(pm);
+    setMesoSorenessMusc(pm);
+    setMesoSorenessOpen(true);
+  }, [exIdx, !!mesoState]);
+
+  // Joint + pump/volume trigger: when all working sets of an exercise are done,
+  // ask joint feedback. Fires whenever the current entry's sets change.
+  useEffectT(() => {
+    if (!mesoState || !entry || isCardio) return;
+    const exId = entry.exId;
+    if (askedJointRef.current.has(exId)) return;
+    const workingSets = entry.sets.filter(s => !s.warmup);
+    if (workingSets.length === 0) return;
+    if (!workingSets.every(s => s.done || s.skipped)) return;
+    const ex = store.exercises?.find(e => e.id === exId);
+    const pm = primaryMuscleForExercise(ex);
+    askedJointRef.current.add(exId);
+    mesoJointExIdxRef.current = exIdx;
+    setMesoJointExId(exId);
+    setMesoJointExName(entry.name);
+    setMesoJointMuscle(pm);
+    setMesoJointOpen(true);
+  }, [entry?.sets?.map(s => s.done ? 1 : 0).join(','), !!mesoState]);
+
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
@@ -2394,6 +2604,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {(store.statusMode === 'deload' || session.isDeload) && (
             <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 6px' }}>DELOAD · 50%</span>
           )}
+          {mesoState && mesoRirVal != null && (
+            <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '1px 6px' }}>
+              W{mesoWeek}/{mesoState.weeks} · {mesoRirVal} RIR
+            </span>
+          )}
         </span>
         <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
           {String(exIdx + 1).padStart(2, '0')} <span style={{ color: UI.hair }}>/</span> {String(session.entries.length).padStart(2, '0')}
@@ -2473,6 +2688,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {(exercise?.tags || []).map(t => <Pill key={t}>{t}</Pill>)}
             </div>
           )}
+          {/* Meso swap suggestions */}
+          {mesoState && exercise && (() => {
+            const flags = [];
+            if (mesoState.jointFlags?.[exercise.id]) {
+              flags.push({ icon: '⚠️', msg: 'Caused sharp joint pain last session — consider swapping this exercise.' });
+            }
+            const pumpLow = mesoState.pumpLowCounts?.[exercise.id] || 0;
+            if (pumpLow >= 3) {
+              flags.push({ icon: '💡', msg: `Low pump ${pumpLow} sessions in a row — a different variation might work better for you.` });
+            }
+            if (!flags.length) return null;
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+                {flags.map((f, i) => (
+                  <div key={i} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 12px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <span style={{ fontSize: 13 }}>{f.icon}</span>
+                    <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{f.msg}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
 
         {/* HERO CURRENT SET — or CARDIO FORM */}
@@ -3885,6 +4122,105 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ? (store.settings?.equipmentConfig?.plateInventoryLbs ?? PLATES_LBS)
           : (store.settings?.equipmentConfig?.plateInventoryKg ?? PLATES_KG)}
       />
+
+      {/* ── Meso feedback sheets ─────────────────────────────────────────────── */}
+
+      {/* Soreness */}
+      <Sheet open={mesoSorenessOpen} onClose={() => {}} title="Soreness check">
+        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 20, lineHeight: 1.5 }}>
+          Any soreness carryover from your last <strong style={{ color: UI.ink }}>{mesoSorenessMusc}</strong> workout?
+        </div>
+        {[
+          { key: 'never', label: 'Never sore', sub: 'No soreness from previous sessions' },
+          { key: 'healed_long', label: 'Healed a while ago', sub: 'Fully recovered well before this session' },
+          { key: 'healed_just', label: 'Healed just in time', sub: 'Recovered right around this session' },
+          { key: 'still_sore', label: 'Still sore', sub: 'Still feeling last session in this muscle' },
+        ].map(opt => (
+          <button key={opt.key} onClick={() => handleSorenessAnswer(opt.key, mesoSorenessMusc)} style={{
+            width: '100%', marginBottom: 8, padding: '12px 14px',
+            background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600 }}>{opt.label}</div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+          </button>
+        ))}
+      </Sheet>
+
+      {/* Joint discomfort */}
+      <Sheet open={mesoJointOpen} onClose={() => {}} title="Joint check">
+        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 20, lineHeight: 1.5 }}>
+          Any joint discomfort during <strong style={{ color: UI.ink }}>{mesoJointExName}</strong>?
+        </div>
+        {[
+          { key: 'none', label: 'None', sub: 'All good — joints felt fine' },
+          { key: 'noticeable', label: 'Noticeable', sub: 'Some discomfort but manageable' },
+          { key: 'sharp', label: 'Sharp pain', sub: 'Clear pain — this exercise gets flagged' },
+        ].map(opt => (
+          <button key={opt.key} onClick={() => handleJointAnswer(opt.key)} style={{
+            width: '100%', marginBottom: 8, padding: '12px 14px',
+            background: UI.bgInset, border: `1px solid ${opt.key === 'sharp' ? 'rgba(var(--danger-rgb, 220,53,69),0.4)' : UI.hairStrong}`,
+            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: opt.key === 'sharp' ? UI.danger : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+          </button>
+        ))}
+      </Sheet>
+
+      {/* Pump + Volume */}
+      <Sheet open={mesoVolumeOpen} onClose={() => {}} title={mesoVolumeMusc ? `${mesoVolumeMusc} feedback` : 'Session feedback'}>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Pump</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+          {[
+            { key: 'low', label: 'Low', sub: 'Barely felt it' },
+            { key: 'moderate', label: 'Moderate', sub: 'Decent pump' },
+            { key: 'amazing', label: 'Amazing', sub: 'Skin-splitting' },
+          ].map(opt => (
+            <button key={opt.key} onClick={() => setMesoPumpAnswer(opt.key)} style={{
+              flex: 1, padding: '10px 8px',
+              background: mesoPumpAnswer === opt.key ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
+              border: `1px solid ${mesoPumpAnswer === opt.key ? 'var(--accent)' : UI.hairStrong}`,
+              borderRadius: 6, cursor: 'pointer', textAlign: 'center',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: mesoPumpAnswer === opt.key ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+            </button>
+          ))}
+        </div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Volume</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+          {[
+            { key: 'not_enough', label: 'Not enough', sub: '+1 set target next session' },
+            { key: 'just_right', label: 'Just right', sub: 'Keep it here' },
+            { key: 'pushed', label: 'Pushed my limits', sub: '−1 set target next session' },
+            { key: 'too_much', label: 'Too much', sub: '−2 set target next session' },
+          ].map(opt => (
+            <button key={opt.key} onClick={() => setMesoVolumeAnswer(opt.key)} style={{
+              width: '100%', padding: '10px 14px',
+              background: mesoVolumeAnswer === opt.key ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
+              border: `1px solid ${mesoVolumeAnswer === opt.key ? 'var(--accent)' : UI.hairStrong}`,
+              borderRadius: 6, cursor: 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: mesoVolumeAnswer === opt.key ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint }}>{opt.sub}</div>
+            </button>
+          ))}
+        </div>
+        <Btn
+          disabled={!mesoPumpAnswer || !mesoVolumeAnswer}
+          onClick={() => handleVolumeAnswer(mesoPumpAnswer, mesoVolumeAnswer)}
+          style={{ width: '100%' }}
+        >
+          Save feedback
+        </Btn>
+      </Sheet>
+
+      {/* ─────────────────────────────────────────────────────────────────────── */}
 
     </Screen>
   );

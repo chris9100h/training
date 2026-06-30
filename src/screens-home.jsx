@@ -2281,6 +2281,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             </button>
           </div>
         </div>
+        {(() => {
+          const m = (typeof getMesoState === 'function') ? getMesoState() : null;
+          if (!m || m.planId !== sch.id) return null;
+          const week = mesoCurrentWeek(m);
+          const rir = mesoRirForWeek(week, m.weeks);
+          return (
+            <div style={{ paddingBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 7px' }}>
+                MESO W{week}/{m.weeks} · {rir} RIR
+              </span>
+            </div>
+          );
+        })()}
         <div className="knurl" style={{ marginLeft: -22, marginRight: -22 }} />
       </div>
 
