@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.439',
+    title: 'Mesocycles',
+    items: [
+      'Turn any plan into a mesocycle (4–8 weeks). Target RIR counts down from 3 → 0 as the block progresses — the big glowing number in the training hero is your weekly cue, so you always know exactly how hard to push.',
+      'After each exercise, a quick check-in on soreness, joints, pump and volume lets the app auto-tune your set count week over week. Hit all your planned reps with positive feedback? You earn a weight boost for next session — stacks on top of Smart Progression, which keeps doing its job in the background.',
+      'When the meso wraps up, you\'re offered a deload (50% loads handled automatically), then Meso 2. Set counts reset to baseline so week 1 stays sane — your earned weight boosts compound forward across blocks.',
+      'Your meso state — week counter, set deltas, weight boosts, everything — syncs to your account and picks up seamlessly on any device.',
+    ],
+  },
+  {
     id: 'v2.438',
     title: 'Freestyle, for Humans',
     items: [
