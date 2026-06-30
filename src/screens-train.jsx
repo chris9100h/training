@@ -27,8 +27,26 @@ function getMesoState() {
 function saveMesoStateToStorage(s) {
   try { localStorage.setItem(MESO_KEY, JSON.stringify(s)); } catch {}
 }
-function mesoCurrentWeek(mesoState) {
+function mesoCurrentWeek(mesoState, store) {
   if (!mesoState?.startDate) return 1;
+  const sch = store?.schedules?.find(s => s.id === mesoState.planId);
+  if (sch) {
+    const isFlex = LB.isFlexPlan(sch);
+    const isWd = LB.isWeekdayPlan(sch);
+    const startMs = new Date(mesoState.startDate).getTime();
+    const done = (store.sessions || []).filter(s =>
+      s.scheduleId === mesoState.planId && s.ended && new Date(s.date).getTime() >= startMs
+    ).length;
+    if (isFlex && sch.sessions_per_week) {
+      return Math.min(Math.max(1, Math.floor(done / sch.sessions_per_week) + 1), mesoState.weeks);
+    }
+    if (!isWd) {
+      const sessionsPerCycle = (sch.days || []).filter(d => (d.items || []).some(i => i.exId)).length;
+      if (sessionsPerCycle > 0) {
+        return Math.min(Math.max(1, Math.floor(done / sessionsPerCycle) + 1), mesoState.weeks);
+      }
+    }
+  }
   const start = new Date(mesoState.startDate); start.setHours(12, 0, 0, 0);
   const today = new Date(); today.setHours(12, 0, 0, 0);
   const days = Math.round((today - start) / 86400000);
@@ -37,6 +55,16 @@ function mesoCurrentWeek(mesoState) {
 function mesoRirForWeek(week, weeks) {
   if (!weeks || weeks <= 1) return 0;
   return Math.max(0, Math.round(3 - (week - 1) * 3 / (weeks - 1)));
+}
+// Apply stored meso set-delta to a plan item before building seed sets.
+// Returns a shallow copy with adjusted .sets (min 1); no-ops if no meso or no delta.
+function applyMesoSetDelta(it, dayId, scheduleId) {
+  if (!dayId || !scheduleId) return it;
+  const m = getMesoState();
+  if (!m || m.planId !== scheduleId) return it;
+  const delta = (m.deltas || {})[it.exId + '_' + dayId];
+  if (!delta) return it;
+  return { ...it, sets: Math.max(1, (it.sets || 1) + delta) };
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -1344,7 +1372,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       return next;
     });
   };
-  const mesoWeek = mesoState ? mesoCurrentWeek(mesoState) : null;
+  const mesoWeek = mesoState ? mesoCurrentWeek(mesoState, store) : null;
   const mesoRirVal = (mesoWeek != null && mesoState?.weeks != null) ? mesoRirForWeek(mesoWeek, mesoState.weeks) : null;
 
   // Per-session meso feedback tracking

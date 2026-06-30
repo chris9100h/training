@@ -2369,7 +2369,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               const m = (typeof getMesoState === 'function') ? getMesoState() : null;
               const hasProgress = m && m.planId === sch.id;
               const weeks = sch.mesocycle_weeks;
-              const week = hasProgress ? mesoCurrentWeek(m) : 1;
+              const week = hasProgress ? mesoCurrentWeek(m, store) : 1;
               const rir = (typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks) : Math.max(0, Math.round(3 - (week - 1) * 3 / (weeks - 1)));
               const unit = weekdayMode ? 'W' : 'C';
               return (
