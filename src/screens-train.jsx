@@ -48,7 +48,7 @@ function saveMesoStateToStorage(s) {
 }
 function mesoCurrentWeek(mesoState, store) {
   if (!mesoState?.startDate) return 1;
-  const sch = store?.schedules?.find(s => s.id === mesoState.planId);
+  const sch = store?.schedules?.find(s => s.id === (mesoState.scheduleId ?? mesoState.planId));
   if (sch && sch.days?.length > 0 && !LB.isWeekdayPlan(sch)) {
     // Use rotation count for flex/cycle plans. startCycleIndex may be absent on old
     // meso states (created before the fix); fall back to 0 — always better than calendar.
