@@ -1901,7 +1901,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <div className="micro" style={{ marginBottom: 8 }}>REP RANGE TOP (+reps above target)</div>
                 <Stepper value={store.settings?.progressionRangeTop ?? 4} step={1} min={1} max={10} suffix=" reps" onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, progressionRangeTop: v } }))} />
               </div>
-              <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>If target is 8 reps and range top is +4, weight increases only when all sets reach 12 reps.</div>
+              <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>If target is 8 reps and range top is +4, weight increases only when all sets reach 12 reps. Works the same with per-set rep targets — each set uses its own threshold.</div>
             </>
           )}
           <Btn onClick={() => setProgressionSheet(false)}>Done</Btn>
@@ -1916,7 +1916,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <span className="micro" style={{ textAlign: 'center' }}>Increment</span>
             <span className="micro" style={{ textAlign: 'center' }}>Max {UI.unit()}</span>
           </div>
-          {(window.EQUIPMENT_TYPES || []).map(({ key, label }) => {
+          {(window.EQUIPMENT_TYPES || []).filter(({ key }) => key !== 'no_equipment' && key !== 'bodyweight').map(({ key, label }) => {
             const cfg = store.settings?.equipmentConfig?.[key] ?? {};
             const setField = (field, val) => setStore(s => ({ ...s, settings: { ...s.settings, equipmentConfig: { ...s.settings?.equipmentConfig, [key]: { ...(s.settings?.equipmentConfig?.[key] ?? {}), [field]: val } } } }));
             return (
@@ -2009,7 +2009,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6 }}>The reps shown in your sets are <span style={{ color: UI.gold }}>minimum reps</span> — the floor the algorithm needs to track progression.</div>
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>Always train past that number. Push to failure or near-failure on each set. The algo only bumps weight when <em>all</em> sets hit the top of the range — so getting extra reps is how you earn the next weight.</div>
         </div>
-        <Btn onClick={() => setProgDisclaimer(false)}>Got it</Btn>
+        <Btn style={{ width: '100%', justifyContent: 'center' }} onClick={() => { setProgDisclaimer(false); setProgressionSheet(true); }}>Got it</Btn>
       </SettingsSheet>
 
       {/* ══ Admin sheet ══ */}
