@@ -2858,7 +2858,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           )}
           {mesoState && mesoWeek != null && (
             <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '1px 6px' }}>
-              W{mesoWeek}/{mesoState.weeks}
+              {isWeekdayMode ? 'W' : 'C'}{mesoWeek}/{mesoState.weeks}
             </span>
           )}
         </span>
