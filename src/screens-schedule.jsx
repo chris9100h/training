@@ -1244,21 +1244,27 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           if (draft.mesocycle_weeks != null) parts.push(`${draft.mesocycle_weeks}wk meso`);
           const summary = parts.join(' · ');
           return (
-            <Field label="Options">
-              <button onClick={() => setModifiersOpen(true)} style={{
-                display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                background: UI.bgInset, border: `1px solid ${summary ? UI.goldSoft : UI.hairStrong}`,
-                borderRadius: 4, padding: '10px 14px', cursor: 'pointer', textAlign: 'left',
-                WebkitTapHighlightColor: 'transparent',
-              }}>
-                <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 12, color: summary ? UI.ink : UI.inkFaint }}>
-                  {summary || 'None active'}
-                </span>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M4 2l4 4-4 4"/>
-                </svg>
-              </button>
-            </Field>
+            <button onClick={() => setModifiersOpen(true)} style={{
+              display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+              background: summary ? `rgba(var(--accent-rgb),0.06)` : UI.bgRaised,
+              border: `1px solid ${summary ? UI.goldSoft : UI.hairStrong}`,
+              borderRadius: 6, padding: '13px 16px', cursor: 'pointer', textAlign: 'left',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={summary ? UI.gold : UI.inkSoft} strokeWidth="1.8" strokeLinecap="round">
+                <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>
+                <circle cx="9" cy="6" r="2.5" fill={summary ? UI.gold : UI.inkSoft} stroke="none"/>
+                <circle cx="15" cy="12" r="2.5" fill={summary ? UI.gold : UI.inkSoft} stroke="none"/>
+                <circle cx="9" cy="18" r="2.5" fill={summary ? UI.gold : UI.inkSoft} stroke="none"/>
+              </svg>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: summary ? UI.gold : UI.inkSoft, fontWeight: 600, marginBottom: summary ? 3 : 0 }}>Options</div>
+                {summary && <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink }}>{summary}</div>}
+              </div>
+              <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 2l5 5-5 5"/>
+              </svg>
+            </button>
           );
         })()}
 
