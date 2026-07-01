@@ -4353,6 +4353,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           });
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {/* Superset / Giant Set — structural (links this exercise with
+                  another), not a set-completion technique like the three
+                  below, so it's only offered before the whole current group
+                  has started. Listed first: the most recognized technique. */}
+              {supersetEligible && (
+                <button onClick={() => {
+                  setIntensityOpen(false);
+                  if (supersetCandidates.length === 0) setSupersetNewPickerOpen(true);
+                  else setSupersetLinkData({});
+                }} style={btnBase(true)}>
+                  <i className="fa-solid fa-link" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>{supersetMode === 'giant' ? 'GIANT SET' : 'SUPERSET'}</div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>{supersetMode === 'giant' ? 'Add a third exercise to the rotation, no rest between' : 'Pair with another exercise, no rest between'}</div>
+                  </div>
+                </button>
+              )}
               {/* Drop Set */}
               <button onClick={startDrop} style={btnBase(true)}>
                 <i className="fa-solid fa-angles-down" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
@@ -4399,23 +4416,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   </div>
                 </button>
               </div>
-              {/* Superset / Giant Set — structural (links this exercise with
-                  another), not a set-completion technique like the three
-                  above, so it's only offered before the whole current group
-                  has started. */}
-              {supersetEligible && (
-                <button onClick={() => {
-                  setIntensityOpen(false);
-                  if (supersetCandidates.length === 0) setSupersetNewPickerOpen(true);
-                  else setSupersetLinkData({});
-                }} style={btnBase(true)}>
-                  <i className="fa-solid fa-link" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
-                  <div>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>{supersetMode === 'giant' ? 'GIANT SET' : 'SUPERSET'}</div>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>{supersetMode === 'giant' ? 'Add a third exercise to the rotation, no rest between' : 'Pair with another exercise, no rest between'}</div>
-                  </div>
-                </button>
-              )}
             </div>
           );
         })()}
