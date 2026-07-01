@@ -97,7 +97,7 @@ function AutoCloseBanner({ notify, onDismiss }) {
           Session auto-ended
         </div>
         <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
-          Your <strong style={{ color: UI.ink }}>{dayName}</strong> session{dateLabel ? ` on ${dateLabel}` : ''} was automatically ended — <strong style={{ color: UI.ink }}>{durationMinutes} min</strong> recorded.
+          Your <strong style={{ color: UI.ink }}>{dayName}</strong> session{dateLabel ? ` on ${dateLabel}` : ''} was automatically ended{durationMinutes != null ? <> — <strong style={{ color: UI.ink }}>{durationMinutes} min</strong> recorded</> : ''}.
         </div>
         <button onClick={onDismiss} style={{
           marginTop: 10, width: '100%', padding: '14px 0',
@@ -356,6 +356,21 @@ function App() {
     }
   }, [store?.settings?.darkMode]);
 
+  // Report the active SW cache version to Supabase (so an admin can spot a
+  // user stuck on a stale cache without asking them to check Settings).
+  // Re-checked at boot, on every foreground and right when the cache
+  // actually rotates (controllerchange) — a single boot-time check isn't
+  // enough since most users leave the PWA open for days without reloading.
+  const reportSwVersion = useCallbackA(() => {
+    if (!('caches' in window)) return;
+    caches.keys().then(keys => {
+      const name = keys.find(k => k.startsWith('zane-'));
+      if (!name) return;
+      const version = name.replace('zane-', '');
+      setStore(s => (s && s.settings?.swVersion !== version) ? { ...s, settings: { ...s.settings, swVersion: version } } : s);
+    }).catch(() => {});
+  }, [setStore]);
+
   useEffectA(() => {
     const THRESHOLD      = 30 * 60 * 1000; // full reload after 30 min
     const SOFT_THRESHOLD = 30 * 1000; // data-only refresh after 30 s
@@ -394,6 +409,7 @@ function App() {
       if (elapsed > THRESHOLD) { window.location.reload(); return; }
       if (elapsed > SOFT_THRESHOLD) softRefresh();
       swReg.current?.update().catch(() => {});
+      reportSwVersion();
     };
     // visibilitychange as additional fallback
     const onVisibility = () => {
@@ -406,6 +422,7 @@ function App() {
         if (elapsed > THRESHOLD) { window.location.reload(); return; }
         if (elapsed > SOFT_THRESHOLD) softRefresh();
         swReg.current?.update().catch(() => {});
+        reportSwVersion();
       }
     };
 
@@ -443,6 +460,7 @@ function App() {
     navigator.serviceWorker.ready.then(reg => {
       swReg.current = reg;
       reg.update().catch(() => {});
+      reportSwVersion();
       const trackWorker = (worker) => {
         if (!worker) return;
         worker.addEventListener('statechange', () => {
@@ -458,8 +476,12 @@ function App() {
       }
       reg.addEventListener('updatefound', () => trackWorker(reg.installing));
     });
-    // Only reload when the user explicitly clicked "Update now"
+    // Only reload when the user explicitly clicked "Update now" — but every
+    // tab (not just the one that triggered it) gets this event the instant
+    // the new SW takes control and rotates the cache, so it's the most
+    // precise moment to re-check the version even for tabs that don't reload.
     const onControllerChange = () => {
+      reportSwVersion();
       if (intentionalUpdate.current) window.location.reload(true);
     };
     navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
@@ -579,6 +601,16 @@ function App() {
             const serverCardioIds = new Set((fresh.cardioLogs || []).map(l => l.id));
             const baseCardioIds = base ? new Set((base.cardioLogs || []).map(l => l.id)) : null;
             const localOnlyCardioLogs = (cur.cardioLogs || []).filter(x => !serverCardioIds.has(x.id) && !baseCardioIds?.has(x.id));
+            // Templates and cardio plans need the same resurrection guard as
+            // exercises/schedules — previously missing here entirely, so a
+            // template saved (or a cardio plan created) offline before the
+            // first sync completed was silently discarded on the next merge.
+            const serverTplIds = new Set((fresh.workoutTemplates || []).map(t => t.id));
+            const baseTplIds = base ? new Set((base.workoutTemplates || []).map(t => t.id)) : null;
+            const localOnlyTemplates = (cur.workoutTemplates || []).filter(x => !serverTplIds.has(x.id) && !baseTplIds?.has(x.id));
+            const serverCardioPlanIds = new Set((fresh.cardioPlans || []).map(p => p.id));
+            const baseCardioPlanIds = base ? new Set((base.cardioPlans || []).map(p => p.id)) : null;
+            const localOnlyCardioPlans = (cur.cardioPlans || []).filter(x => !serverCardioPlanIds.has(x.id) && !baseCardioPlanIds?.has(x.id));
             // Locally-deleted items (in base but not in cur): exclude from fresh
             // so they aren't resurrected while syncStore deletion is in flight.
             const curExIdSet = new Set((cur.exercises || []).map(e => e.id));
@@ -591,6 +623,31 @@ function App() {
             const delDailyIds = baseDailyIds ? new Set([...baseDailyIds].filter(id => !curDailyIdSet.has(id))) : null;
             const curCardioIdSet = new Set((cur.cardioLogs || []).map(l => l.id));
             const delCardioIds = baseCardioIds ? new Set([...baseCardioIds].filter(id => !curCardioIdSet.has(id))) : null;
+            const curTplIdSet = new Set((cur.workoutTemplates || []).map(t => t.id));
+            const delTplIds = baseTplIds ? new Set([...baseTplIds].filter(id => !curTplIdSet.has(id))) : null;
+            const curCardioPlanIdSet = new Set((cur.cardioPlans || []).map(p => p.id));
+            const delCardioPlanIds = baseCardioPlanIds ? new Set([...baseCardioPlanIds].filter(id => !curCardioPlanIdSet.has(id))) : null;
+            // Meso states are a mutable per-plan row (not an append/delete list),
+            // so for ids present on both sides we compare updatedAt and keep
+            // whichever is newer — this protects an in-flight local session's
+            // not-yet-synced feedback deltas from being clobbered by a boot
+            // refresh that raced ahead. Ids present on only one side still
+            // need the same base-membership resurrection guard as every
+            // sibling collection: a row the user deleted locally (e.g. turned
+            // mesocycle off for a plan) whose deletion hasn't synced yet must
+            // not be resurrected from the stale server copy.
+            const freshMesoMap = new Map((fresh.mesoStates || []).map(m => [m.id, m]));
+            const curMesoMap = new Map((cur.mesoStates || []).map(m => [m.id, m]));
+            const baseMesoIds = base ? new Set((base.mesoStates || []).map(m => m.id)) : null;
+            const mesoStates = [...new Set([...freshMesoMap.keys(), ...curMesoMap.keys()])].map(id => {
+              const f = freshMesoMap.get(id);
+              const c = curMesoMap.get(id);
+              if (!f) return baseMesoIds?.has(id) ? null : c; // local-only: keep only if never confirmed synced
+              if (!c) return baseMesoIds?.has(id) ? null : f; // server-only: resurrect only if genuinely new elsewhere
+              const fT = f.updatedAt ? new Date(f.updatedAt).getTime() : 0;
+              const cT = c.updatedAt ? new Date(c.updatedAt).getTime() : 0;
+              return cT >= fT ? c : f;
+            }).filter(Boolean);
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
@@ -613,6 +670,9 @@ function App() {
               skips: [...localOnlySkips, ...(fresh.skips || []).filter(s => !delSkipIds?.has(s.id))],
               dailyLogs: [...localOnlyDailyLogs, ...(fresh.dailyLogs || []).filter(l => !delDailyIds?.has(l.id))],
               cardioLogs: [...localOnlyCardioLogs, ...(fresh.cardioLogs || []).filter(l => !delCardioIds?.has(l.id))],
+              workoutTemplates: [...localOnlyTemplates, ...(fresh.workoutTemplates || []).filter(t => !delTplIds?.has(t.id))],
+              cardioPlans: [...localOnlyCardioPlans, ...(fresh.cardioPlans || []).filter(p => !delCardioPlanIds?.has(p.id))],
+              mesoStates,
             };
           }
           if (!fresh.user.approved) { setPhase('pending'); return; }

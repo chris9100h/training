@@ -147,14 +147,14 @@ function PlanScreen({ store, setStore, go, userId }) {
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1 }}>{s.name}</div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0, marginLeft: 8 }}>
                   {s.mesocycle_weeks && mesoPending && (() => {
                     const d = new Date(mesoSt.startDate + 'T12:00:00');
                     const startLabel = `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`;
                     return (
                       <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkFaint, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
-                        MESO · {startLabel}
+                        MESO · starts {startLabel}
                       </span>
                     );
                   })()}
@@ -191,8 +191,8 @@ function PlanScreen({ store, setStore, go, userId }) {
           ) : (
             <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1 }}>{s.name}</div>
-                {mesoCompletions > 0 && (
+                <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
+                {!mesoPending && mesoCompletions > 0 && (
                   <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkSoft, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em', flexShrink: 0, marginLeft: 8 }}>
                     MESO {mesoCompletions + 1}
                   </span>
@@ -387,6 +387,25 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
     row.scrollTo({ left: chip.offsetLeft - row.offsetWidth / 2 + chip.offsetWidth / 2, behavior: 'smooth' });
   }, [selectedDayId]);
 
+  // Computed here (before the early returns below) purely so the seedRefs
+  // hooks that depend on it always run — every other hook in this component
+  // is declared before those returns too; a hook declared after them would
+  // violate React's rules of hooks the moment `sch`/`displayDays` changes
+  // across renders of this same (unkeyed, long-lived) instance.
+  const dayForSeed = displayDays.find(d => d.id === selectedDayId) || displayDays[0] || null;
+  // Merge in server history for exercises whose local window is thin (fresh
+  // device/reinstall) — same call the real session-start flow awaits, so the
+  // weight/progression preview here doesn't disagree with what actually gets
+  // seeded once the session starts. Resolves instantly when the local window
+  // already suffices; never rejects (falls back silently offline).
+  const [seedRefs, setSeedRefs] = useStateS({});
+  React.useEffect(() => {
+    let cancelled = false;
+    if (!dayForSeed?.items?.length) { setSeedRefs({}); return; }
+    LB.fetchSeedEntries(store, dayForSeed.items, dayForSeed.id, userId).then(refs => { if (!cancelled) setSeedRefs(refs || {}); });
+    return () => { cancelled = true; };
+  }, [dayForSeed?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!sch) {
     return (
       <Screen>
@@ -416,7 +435,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
     );
   }
 
-  const day = displayDays.find(d => d.id === selectedDayId) || displayDays[0];
+  const day = dayForSeed;
   const dayIdx = displayDays.findIndex(d => d.id === day.id);
   const isRest = !day.items.length;
   const isTodaySel = day.id === todayDayId;
@@ -532,6 +551,14 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
     </div>
   );
 
+  // Cross-device meso set/weight adjustments — must pass store.mesoStates
+  // (the DB-synced source of truth) same as every other call site, otherwise
+  // this preview silently falls back to a per-device localStorage cache that
+  // may not exist here, showing the un-adjusted baseline plan. Resolved once
+  // (it internally reads localStorage) rather than once per item below.
+  const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch?.id, store.mesoStates) : null;
+  const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
+
   const exerciseList = isRest ? (
     <BracketFrame style={{ textAlign: 'center', padding: 36 }}>
       <div className="display-it" style={{ fontSize: 38, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, marginBottom: 6 }}>Recover.</div>
@@ -539,16 +566,32 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
     </BracketFrame>
   ) : (
     <>
-      {day.items.map((it, k) => {
+      {day.items.flatMap((it, k) => {
         const ex = LB.findExercise(store, it.exId);
         const isUni = !!ex?.unilateral;
-        const last = LB.bestRecentEntry(store, it.exId, day.id);
-        const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps);
+        // Prefer server-merged history (seedRefs) over the local-only window,
+        // same as the real session-start flow, so this preview doesn't
+        // disagree with what actually gets seeded on a fresh device/reinstall.
+        const seedRef = seedRefs[it.exId];
+        const last = seedRef ?? LB.bestRecentEntry(store, it.exId, day.id);
+        const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet || null, seedRef);
         const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-        const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, day.id, sch?.id) : it;
-        const seedSets = LB.buildSeedSets(itAdj, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
-        return (
-          <Frame key={k} style={{ padding: '12px 16px' }}>
+        const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
+        const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
+        let suggestionFinal = suggestion;
+        if (weightBoost != null && !suggestionFinal && last) {
+          const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
+          if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
+        }
+        const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression, bodyweightKg);
+        const nextIt = day.items[k + 1];
+        const linkedToNext = it.supersetGroup && it.supersetGroup === nextIt?.supersetGroup;
+        const isGiant = it.supersetGroup && day.items.filter(x => x.supersetGroup === it.supersetGroup).length >= 3;
+        const frame = (
+          <Frame key={k} style={{ padding: '12px 16px', borderColor: it.supersetGroup ? UI.goldSoft : UI.hairStrong }}>
+            {it.supersetGroup && (
+              <div className="micro" style={{ color: UI.gold, marginBottom: 6, letterSpacing: '0.12em' }}>{isGiant ? 'GIANT SET' : 'SUPERSET'}</div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
               <span style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, paddingTop: 1 }}>
                 {ex?.name || '—'}
@@ -557,13 +600,17 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
                 {seedSets.map((st, si) => {
                   const kg = st.kg != null ? `${st.kg}${UI.unit()}` : '—';
+                  // A null seeded rep count means the training screen would
+                  // actually show a blank input for that set — falling back
+                  // to the flat plan-level reps here would show a concrete
+                  // number that won't actually be pre-filled.
                   const reps = isUni
-                    ? `L${st.repsL ?? it.reps}/R${st.repsR ?? it.reps}`
-                    : `${st.reps ?? it.reps}`;
+                    ? `L${st.repsL ?? '—'}/R${st.repsR ?? '—'}`
+                    : (st.reps != null ? String(st.reps) : '—');
                   return (
-                    <span key={si} className="num" style={{ fontSize: 13, color: suggestion ? UI.gold : UI.inkSoft }}>
+                    <span key={si} className="num" style={{ fontSize: 13, color: suggestionFinal ? UI.gold : UI.inkSoft }}>
                       {kg} · {reps}
-                      {suggestion && si === 0 && <i className="fa-solid fa-arrow-up" style={{ fontSize: 9, marginLeft: 4, color: UI.gold }} />}
+                      {suggestionFinal && si === 0 && <i className="fa-solid fa-arrow-up" style={{ fontSize: 9, marginLeft: 4, color: UI.gold }} />}
                     </span>
                   );
                 })}
@@ -571,6 +618,10 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
             </div>
           </Frame>
         );
+        if (linkedToNext) {
+          return [frame, <div key={`ss-${k}`} style={{ display: 'flex', justifyContent: 'center', margin: '-6px 0', position: 'relative', zIndex: 1 }}><span style={{ fontSize: 12, color: UI.goldSoft, background: 'var(--bg-body)', padding: '0 8px' }}>⟷</span></div>];
+        }
+        return [frame];
       })}
       <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 2, textAlign: 'center' }}>
         {store.settings?.smartProgression
@@ -1576,7 +1627,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span className="label" style={{ flex: 1 }}>Mesocycle</span>
                   <button onClick={() => setMesoInfoOpen(true)} style={{
-                    background: 'transparent', border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
+                    background: 'transparent', border: `1px solid ${UI.hairStrong}`, borderRadius: '50%',
                     width: 22, height: 22, cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi,
                     fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
                   }}>ⓘ</button>
@@ -1614,7 +1665,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                         <button onClick={() => setStore(s => ({
                           ...s,
                           mesoStates: (s.mesoStates || []).map(m =>
-                            m.scheduleId === draft.id ? { ...m, completions: 0 } : m
+                            m.scheduleId === draft.id ? { ...m, completions: 0, updatedAt: new Date().toISOString() } : m
                           ),
                         }))} style={{
                           marginTop: 10, width: '100%', background: 'transparent',
@@ -1819,9 +1870,9 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
   // Templates whose exercises still exist — mapped to a copyable plan day.
   const templates = (store.workoutTemplates || []).filter(t => (t.exercises || []).some(it => LB.findExercise(store, it.exId)));
   const importTemplate = (t) => {
-    const items = (t.exercises || [])
+    const items = normalizeSupersets((t.exercises || [])
       .filter(it => LB.findExercise(store, it.exId))
-      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) }));
+      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
     const day = { id: LB.uid(), name: t.name, items };
     if (multiSelect) onCopy([{ day, migrateId: undefined }]);
     else onCopy(day, undefined);
@@ -2124,6 +2175,22 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, onClose, onSave }) {
   );
 }
 
+// A superset group is only meaningful as a contiguous run of >= 2 adjacent
+// items. After a move/remove/import, drop the group id from any item no
+// longer next to a same-group partner so distant rows can't stay silently
+// coupled. Shared between DayEditor (local edits) and DayCopyPicker
+// (template import), which previously copied supersetGroup ids verbatim
+// with no normalization — a template exercise deleted from the library since
+// the template was saved could leave its former partner tagged with a stale,
+// orphaned group id in the freshly-imported day.
+function normalizeSupersets(items) {
+  return items.map((it, i) => {
+    if (!it.supersetGroup) return it;
+    const linked = items[i - 1]?.supersetGroup === it.supersetGroup || items[i + 1]?.supersetGroup === it.supersetGroup;
+    return linked ? it : { ...it, supersetGroup: null };
+  });
+}
+
 function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const [draft, setDraft] = useStateS(day);
   const [addingEx, setAddingEx] = useStateS(false);
@@ -2133,14 +2200,6 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const [confirmEl, confirm] = useConfirm();
   const initialDay = React.useRef(JSON.stringify(day));
 
-  // A superset group is only meaningful as a contiguous run of >= 2 adjacent
-  // items. After a move/remove, drop the group id from any item no longer next
-  // to a same-group partner so distant rows can't stay silently coupled.
-  const normalizeSupersets = (items) => items.map((it, i) => {
-    if (!it.supersetGroup) return it;
-    const linked = items[i - 1]?.supersetGroup === it.supersetGroup || items[i + 1]?.supersetGroup === it.supersetGroup;
-    return linked ? it : { ...it, supersetGroup: null };
-  });
   const reorderItems = (from, to) => {
     if (from === to) return;
     setDraft(d => {
@@ -2205,12 +2264,48 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
       const a = items[idx], b = items[idx + 1];
       if (!b) return d;
       if (a.supersetGroup && a.supersetGroup === b.supersetGroup) {
+        // Unlink just this seam, not the whole run: the part from here
+        // backward keeps the original group id, the part from b onward gets
+        // a fresh one so it stays linked to itself instead of losing its own
+        // pairing — normalizeSupersets then drops the id from either side
+        // that ends up without an adjacent same-group neighbor (a lone
+        // remaining member). Previously this cleared the id on every item
+        // sharing the group, dissolving an entire 3+ member giant set over
+        // one click meant to detach a single pair.
         const gid = a.supersetGroup;
-        return { ...d, items: items.map(it => it.supersetGroup === gid ? { ...it, supersetGroup: null } : it) };
+        const newGid = LB.uid();
+        const split = items.map((it, i) => (i > idx && it.supersetGroup === gid) ? { ...it, supersetGroup: newGid } : it);
+        return { ...d, items: normalizeSupersets(split) };
       }
+
+      const exA = LB.findExercise(store, a.exId);
+      const exB = LB.findExercise(store, b.exId);
+      const canMatchSets = exA?.movement_type !== 'cardio' && exB?.movement_type !== 'cardio';
+
+      if (a.supersetGroup && b.supersetGroup) {
+        // Merging two distinct existing groups into one.
+        const bGid = b.supersetGroup;
+        return { ...d, items: items.map(it => it.supersetGroup === bGid ? { ...it, supersetGroup: a.supersetGroup } : it) };
+      }
+      if (a.supersetGroup) {
+        // Extend a's existing group to include b (the new joiner) — reusing
+        // a's id instead of always minting a fresh one, otherwise linking a
+        // third item next to an existing pair silently orphans the pair's
+        // other member.
+        items[idx + 1] = { ...b, supersetGroup: a.supersetGroup, ...(canMatchSets ? { sets: a.sets } : {}) };
+        return { ...d, items };
+      }
+      if (b.supersetGroup) {
+        // Symmetric case: extend b's existing group backward to include a.
+        items[idx] = { ...a, supersetGroup: b.supersetGroup, ...(canMatchSets ? { sets: b.sets } : {}) };
+        return { ...d, items };
+      }
+      // Brand-new pair. Never copy the set count across a cardio/strength
+      // pairing — a cardio item's `sets` (always 0) would silently zero out
+      // the strength exercise's planned working sets.
       const gid = LB.uid();
       items[idx] = { ...a, supersetGroup: gid };
-      items[idx + 1] = { ...b, supersetGroup: gid, sets: a.sets };
+      items[idx + 1] = { ...b, supersetGroup: gid, ...(canMatchSets ? { sets: a.sets } : {}) };
       return { ...d, items };
     });
   };
@@ -2403,7 +2498,11 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
           Add {selected.length} exercise{selected.length !== 1 ? 's' : ''} →
         </Btn>
       )}
-      {q && !list.find(e => e.name.toUpperCase() === q.toUpperCase()) && (
+      {/* Check against every exercise, not just the tag-filtered `list` — an
+          existing exercise hidden by an active muscle-tag pill must still
+          suppress "+ Create", or picking it creates a duplicate that splits
+          its history/progression across two library entries. */}
+      {q && !store.exercises.find(e => e.name.toUpperCase() === q.toUpperCase()) && (
         <button onClick={() => setCreatingNew(q)} style={{
           background: UI.goldFaint, border: `1px dashed ${UI.goldSoft}`,
           padding: '12px 14px', borderRadius: 4, cursor: 'pointer',

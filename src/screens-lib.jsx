@@ -2130,17 +2130,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     go({ name: 'hist' });
   };
 
+  // Deload sessions are deliberately light — comparing against one as "last
+  // time" would show every set as a fabricated "improvement" purely because
+  // it beats the artificially-reduced deload weights. store.js already
+  // excludes deload from lastSessionForExercise/recentSessionsForExercise;
+  // this mirrors that exclusion for the same reason.
   const prevEntryMap = {};
   s.entries.forEach(e => {
     const prev = store.sessions
-      .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId)
+      .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
       .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
       .find(x => x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null)));
     prevEntryMap[e.exId] = prev?.entries.find(en => en.exId === e.exId) ?? null;
   });
 
   const prevSameDay = store.sessions
-    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId)
+    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
   const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay) : null;
 
@@ -2152,27 +2157,34 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     ? (st.repsL != null && st.repsR != null)
     : st.reps != null;
 
+  // e1RM-based comparison (not raw kg-then-reps) so e.g. 100kg×5 correctly
+  // loses to a prior 90kg×10 — matches the PR logic used everywhere else
+  // (store.js bestE1rmForExercise). Deload sessions are excluded as a PR
+  // baseline for the same reason as prevEntryMap above. The `x.ended < s.ended`
+  // cutoff is deliberately kept (instead of reusing bestE1rmForExercise, which
+  // has no such cutoff) so a session's PR status reflects only what was known
+  // at the time it happened, not later sessions bleeding backward into it.
   const prMap = {};
-  store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended).forEach(sess =>
+  store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload).forEach(sess =>
     sess.entries.forEach(e => e.sets.filter(st => st.done && st.kg != null && prRepsValid(st, e.exId)).forEach(st => {
-      const cur = prMap[e.exId];
-      const reps = prReps(st, e.exId);
-      if (!cur || st.kg > cur.kg || (st.kg === cur.kg && reps > cur.reps)) prMap[e.exId] = { kg: st.kg, reps };
+      const val = LB.e1rm(st.kg, prReps(st, e.exId));
+      if (!(val > (prMap[e.exId] ?? -Infinity))) return;
+      prMap[e.exId] = val;
     }))
   );
   const sessionBestMap = {};
   s.entries.forEach(e => e.sets.filter(st => st.done && st.kg != null && prRepsValid(st, e.exId)).forEach(st => {
-    const cur = sessionBestMap[e.exId];
-    const reps = prReps(st, e.exId);
-    if (!cur || st.kg > cur.kg || (st.kg === cur.kg && reps > cur.reps)) sessionBestMap[e.exId] = { kg: st.kg, reps };
+    const val = LB.e1rm(st.kg, prReps(st, e.exId));
+    if (!(val > (sessionBestMap[e.exId] ?? -Infinity))) return;
+    sessionBestMap[e.exId] = val;
   }));
   const isPR = (st, exId) => {
     if (!st.done || st.kg == null || !prRepsValid(st, exId)) return false;
-    const reps = prReps(st, exId);
+    const val = LB.e1rm(st.kg, prReps(st, exId));
     const sessionBest = sessionBestMap[exId];
-    if (!sessionBest || st.kg !== sessionBest.kg || reps !== sessionBest.reps) return false;
+    if (sessionBest == null || val !== sessionBest) return false;
     const best = prMap[exId];
-    return !best || st.kg > best.kg || (st.kg === best.kg && reps > best.reps);
+    return best == null || val > best;
   };
 
   const muscleGroups = [...new Set(
@@ -2542,7 +2554,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       {exName}{canHistory && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <div data-shot-chips="1" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {filteredSets.map((st, j) => {
                       const isWarm = !!st.warmup;
                       const prevSet = prevWorkingFor(j);
@@ -2707,7 +2719,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 <div key={gi}>
                   {g.type === 'superset' ? (
                     <div style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 12 }}>
-                      <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>SUPERSET</div>
+                      <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{g.members.length >= 3 ? 'GIANT SET' : 'SUPERSET'}</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                         {g.members.map(({ entry: e, idx: i }) => renderEntry(e, i))}
                       </div>
@@ -2910,7 +2922,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px 22px' }}>
         {entries.map((entry, ei) => {
-          const lastEntry = lastEntries.find(e => e.name === entry.name);
+          const lastEntry = lastEntries.find(e => e.exId === entry.exId);
           const sets      = (entry.sets || []).filter(s => !s.warmup);
           const lastSets  = (lastEntry?.sets || []).filter(s => !s.warmup);
           const maxLen    = Math.max(sets.length, lastSets.length);
@@ -2925,6 +2937,11 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
               const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
               const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
               return `${chain} (${total})`;
+            }
+            if (s.technique === 'lengthened_partial') {
+              const partials = s.drops?.partials || 0;
+              const main = `${s.kg != null ? s.kg + unit : '—'} × ${s.reps ?? '—'}`;
+              return partials > 0 ? `${main} +${partials} partials` : main;
             }
             const repsStr = (s.repsL != null || s.repsR != null)
               ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
@@ -3170,6 +3187,11 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>
               EXERCISE {exIdx + 1} OF {entries.length}
             </div>
+            {entry.supersetGroup && (
+              <div className="micro" style={{ color: UI.gold, letterSpacing: '0.12em', marginBottom: 4 }}>
+                {entries.filter(e => e.supersetGroup === entry.supersetGroup).length >= 3 ? 'GIANT SET' : 'SUPERSET'}
+              </div>
+            )}
             <div className="display" style={{ fontSize: 28, color: UI.ink, fontWeight: 400 }}>{entry.name}</div>
             <div className="micro" style={{ marginTop: 4, color: UI.inkSoft }}>
               {entry.plannedSets} SETS · {entry.plannedReps} REPS PLANNED
@@ -3252,6 +3274,31 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 );
               }
 
+              // Lengthened partials
+              if (s.technique === 'lengthened_partial') {
+                const partials = s.drops?.partials || 0;
+                return (
+                  <React.Fragment key={i}>
+                  <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
+                      <div style={{ marginLeft: 'auto' }}>
+                        {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
+                               : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                      <span className="num" style={{ fontSize: 13, color: UI.ink }}>{s.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {s.reps ?? '—'}</span>
+                      {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
+                      {partials > 0 && <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{partials}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>}
+                    </div>
+                  </div>
+                  {i < entry.sets.length - 1 && <div className="knurl" />}
+                  </React.Fragment>
+                );
+              }
+
               // Normal set
               return (
                 <React.Fragment key={i}>
@@ -3302,7 +3349,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
 
           {/* Last time card */}
           {(() => {
-            const lastEntry = (session.last_session_entries || []).find(e => e.name === entry.name);
+            const lastEntry = (session.last_session_entries || []).find(e => e.exId === entry.exId);
             if (!lastEntry?.sets?.length) return null;
             const lastSets = lastEntry.sets.filter(s => !s.warmup);
             const currWorkingSets = (entry.sets || []).filter(s => !s.warmup);
@@ -3498,6 +3545,12 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
   const maxSets = Math.max(...allSessions.map(s => s.sets.length), 1);
 
   const getValue = (st) => {
+    // Sessions of the same exercise don't all have the same working-set
+    // count (a set added/removed on some day) — the per-set chart line
+    // below reads sess.sets[si] up to the longest session's count, so a
+    // shorter session's slot at that index is undefined, not a set with
+    // null values.
+    if (!st) return null;
     if (metric === 'reps') return isUni
       ? (st.repsL != null ? Math.min(st.repsL ?? 0, st.repsR ?? 0) : (st.reps ?? null))
       : (st.reps ?? null);

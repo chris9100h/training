@@ -21,24 +21,32 @@ function primaryMuscleForExercise(ex) {
   }
   return ex.tags[0] || null;
 }
-// Read meso state: store (DB-loaded, cross-device) first, localStorage fallback for
-// in-session writes that haven't been flushed to store yet.
+// Read meso state: compares the store (DB-loaded, cross-device) copy against
+// the per-plan localStorage cache (in-session writes that haven't been
+// flushed to the store yet — see saveMesoState) and returns whichever is
+// actually newer by updatedAt. A store entry can be stale relative to
+// localStorage right after an app reload/crash mid-session, before the
+// session's feedback answers were ever flushed — always trusting the store
+// would silently discard those answers.
 function getMesoState(scheduleId, mesoStates) {
   if (!scheduleId) return null;
-  if (mesoStates?.length) {
-    const found = mesoStates.find(m => m.scheduleId === scheduleId);
-    if (found) return found;
-  }
-  // localStorage fallback: in-session cache or old single-key migration path
+  const fromStore = mesoStates?.length ? (mesoStates.find(m => m.scheduleId === scheduleId) || null) : null;
+  let fromStorage = null;
   try {
     const r = localStorage.getItem(MESO_KEY + '-' + scheduleId)
            || localStorage.getItem(MESO_KEY); // old single-key format
-    if (!r) return null;
-    const parsed = JSON.parse(r);
-    // Old single-key format check
-    if (parsed && !parsed.scheduleId && parsed.planId) parsed.scheduleId = parsed.planId;
-    return parsed?.scheduleId === scheduleId ? parsed : null;
-  } catch { return null; }
+    if (r) {
+      const parsed = JSON.parse(r);
+      // Old single-key format check
+      if (parsed && !parsed.scheduleId && parsed.planId) parsed.scheduleId = parsed.planId;
+      if (parsed?.scheduleId === scheduleId) fromStorage = parsed;
+    }
+  } catch {}
+  if (!fromStore) return fromStorage;
+  if (!fromStorage) return fromStore;
+  const storeT = fromStore.updatedAt ? new Date(fromStore.updatedAt).getTime() : 0;
+  const storageT = fromStorage.updatedAt ? new Date(fromStorage.updatedAt).getTime() : 0;
+  return storageT > storeT ? fromStorage : fromStore;
 }
 // Write meso state to per-plan localStorage key (in-session fast cache).
 // The store (DB) is updated via setStore at session end.
@@ -46,15 +54,55 @@ function saveMesoStateToStorage(s) {
   if (!s?.scheduleId) return;
   try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(s)); } catch {}
 }
+// Which soreness/joint/volume prompts have already been answered THIS
+// session, keyed by session id so a resumed session (app reload/crash mid-
+// session) doesn't re-ask a question that was already answered — the
+// in-memory Set trackers reset on every component mount, but a resumed
+// session reuses the same session.id. Also carries the session's gain
+// summary (mesoSessionSetGainsRef) so the post-session "Next session" sheet
+// still reflects feedback given before a reload, even though the underlying
+// mesoState.deltas were already safe via getMesoState/saveMesoState.
+const MESO_ASKED_KEY = 'logbook-meso-asked-';
+function loadMesoAskedSets(sessionId) {
+  const empty = { soreness: new Set(), joint: new Set(), volume: new Set(), gains: {} };
+  if (!sessionId) return empty;
+  try {
+    const r = localStorage.getItem(MESO_ASKED_KEY + sessionId);
+    if (!r) return empty;
+    const p = JSON.parse(r);
+    return {
+      soreness: new Set(p.soreness || []),
+      joint: new Set(p.joint || []),
+      volume: new Set(p.volume || []),
+      gains: p.gains || {},
+    };
+  } catch { return empty; }
+}
+function saveMesoAskedSets(sessionId, asked) {
+  if (!sessionId) return;
+  try {
+    localStorage.setItem(MESO_ASKED_KEY + sessionId, JSON.stringify({
+      soreness: [...asked.soreness], joint: [...asked.joint], volume: [...asked.volume],
+      gains: asked.gains || {},
+    }));
+  } catch {}
+}
 function mesoCurrentWeek(mesoState, store) {
   if (!mesoState?.startDate) return 1;
   const sch = store?.schedules?.find(s => s.id === (mesoState.scheduleId ?? mesoState.planId));
-  // Flex plans only: rotation-based tracking via cycleIndex (action-advanced counter).
+  // Flex plans: "which rotation slot are we on" still uses cycleIndex (it also
+  // advances on a skip, which is correct for plan position). But the meso
+  // week/RIR target represents accumulated training fatigue, so it must only
+  // advance on actually-trained sessions — counting raw cycleIndex deltas
+  // would let a run of skips fast-forward the RIR target with zero training.
   if (sch && sch.days?.length > 0 && LB.isFlexPlan(sch)) {
     const startIdx = mesoState.startCycleIndex ?? 0;
     const currentIdx = store.cycleIndex || 0;
     if (currentIdx < startIdx) return null; // pending — waiting for next rotation start
-    const rotations = Math.floor((currentIdx - startIdx) / sch.days.length);
+    const trainedCount = (store?.sessions || []).filter(s =>
+      s.ended && !s.isDeload && s.scheduleId === mesoState.scheduleId && (s.date || '') >= mesoState.startDate
+    ).length;
+    const rotations = Math.floor(trainedCount / sch.days.length);
     return Math.min(Math.max(1, rotations + 1), mesoState.weeks);
   }
   // Weekday and date-based cycle plans: date arithmetic.
@@ -71,15 +119,23 @@ function mesoRirForWeek(week, weeks) {
   if (!weeks || weeks <= 1) return 0;
   return Math.max(0, Math.round(3 - (week - 1) * 3 / (weeks - 1)));
 }
-// Apply stored meso set-delta to a plan item before building seed sets.
-// Returns a shallow copy with adjusted .sets (min 1); no-ops if no meso or no delta.
+// Apply an already-resolved meso state's set-delta to a plan item before
+// building seed sets. Returns a shallow copy with adjusted .sets, clamped to
+// [1, baseline+4] so repeated "not enough volume" answers across a mesocycle
+// can't balloon a lift's set count without bound; no-ops if no meso or no
+// delta. Split out from applyMesoSetDelta so callers resolving meso state for
+// every item in a plan (session start, plan viewer) can call getMesoState
+// once instead of once per item (each call touches localStorage).
+function applyMesoSetDeltaFromState(it, dayId, mesoState) {
+  if (!dayId || !mesoState) return it;
+  const delta = (mesoState.deltas || {})[it.exId + '_' + dayId];
+  if (!delta) return it;
+  const base = it.sets || 1;
+  return { ...it, sets: Math.min(base + 4, Math.max(1, base + delta)) };
+}
 function applyMesoSetDelta(it, dayId, scheduleId, mesoStates) {
   if (!dayId || !scheduleId) return it;
-  const m = getMesoState(scheduleId, mesoStates);
-  if (!m) return it;
-  const delta = (m.deltas || {})[it.exId + '_' + dayId];
-  if (!delta) return it;
-  return { ...it, sets: Math.max(1, (it.sets || 1) + delta) };
+  return applyMesoSetDeltaFromState(it, dayId, getMesoState(scheduleId, mesoStates));
 }
 // Returns stored meso weight boosts map (exId_dayId → kg increment) for a schedule.
 // Called at session start; boosts are overwritten at next session end by computeMesoGains.
@@ -343,7 +399,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   const isKg = field === 'kg';
   const H = 40;
   const base = {
-    background: 'var(--bg-raised)', border: `0.5px solid var(--hair)`, borderRadius: 8,
+    background: 'var(--bg-raised)', border: `0.5px solid var(--hair)`, borderRadius: 6,
     color: 'var(--ink)', fontFamily: '"JetBrains Mono", monospace', fontSize: 18, fontWeight: 500,
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
     WebkitTapHighlightColor: 'transparent', userSelect: 'none', padding: 0,
@@ -380,6 +436,39 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
       </div>
     </div>
   );
+}
+
+// Moves the entry at `from` to sit at post-removal index `to` (Array.splice
+// semantics: `to` is interpreted against the array with `from` already
+// removed) and re-maps currentExIdx so the view stays on the same entry.
+// Shared by the chip drag-reorder and the mid-session superset-link flow.
+function reorderSessionEntries(entries, currentIdx, from, to) {
+  const next = [...entries];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  let idx = currentIdx;
+  if (idx === from) idx = to;
+  else if (from < to && idx > from && idx <= to) idx--;
+  else if (from > to && idx >= to && idx < from) idx++;
+  return { entries: next, currentExIdx: idx };
+}
+
+// A superset/giant-set's members must stay array-adjacent — the "⟷"
+// connector and finishSetNavigation's round-matching both assume it. Used to
+// reject a chip drag that would split an existing group apart (linking a NEW
+// group, e.g. linkExistingSuperset, calls reorderSessionEntries directly and
+// is exempt — it's establishing the very grouping this checks for).
+function groupsContiguous(entries) {
+  const seen = new Set();
+  let i = 0;
+  while (i < entries.length) {
+    const g = entries[i].supersetGroup;
+    if (!g) { i++; continue; }
+    if (seen.has(g)) return false;
+    seen.add(g);
+    while (i < entries.length && entries[i].supersetGroup === g) i++;
+  }
+  return true;
 }
 
 function TrainingScreen(props) {
@@ -466,6 +555,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       pumpLowCounts: {},
       weightBoosts: {},
       completions: existing?.completions ?? 0,
+      updatedAt: new Date().toISOString(),
     };
     saveMesoStateToStorage(newMeso);
     setMesoStateLocal(newMeso);
@@ -482,14 +572,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const exercise = entry ? LB.findExercise(store, entry.exId) : null;
 
   // "Last time" reference + remote best e1RM for this day type.
+  // Matches LB.bestRecentEntry (best set at the current working weight across
+  // the last 3 sessions, not merely the single most recent one) — the same
+  // reference buildSeedSets/progressionSuggestion use to seed this session's
+  // targets at start, so the live outlier check and "Last time" display never
+  // disagree with what was actually seeded.
   // The local window covers recently trained exercises; when an exercise has
   // no local history (last logged before the boot window), fetch its recent
-  // sessions from the server once. limit=20 covers both the "last session"
-  // (for improve/regress) and a broad enough window for the day-specific
-  // best-e1RM comparison (for NEW BEST).
+  // sessions from the server once. limit=20 covers both the windowed "last
+  // time" reference and a broad enough window for the day-specific best-e1RM
+  // comparison (for NEW BEST).
   const [remoteLast, setRemoteLast] = useStateT({});
   const remoteBestE1rmRef = useRefT({}); // exId → best day-specific e1RM from server
-  const localLast = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayId) : null;
+  const localLast = entry ? LB.bestRecentEntry(store, entry.exId, session.dayId) : null;
   useEffectT(() => {
     const exId = entry?.exId;
     if (!exId || remoteLast[exId] !== undefined) return;
@@ -508,8 +603,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           }
         }
         remoteBestE1rmRef.current[exId] = best;
-        const row = filtered[0];
-        setRemoteLast(m => ({ ...m, [exId]: row ? { entry: { sets: row.sets } } : null }));
+        // Keep skipped sets in place (only warm-ups stripped) so working-set
+        // position stays aligned across sessions — see bestRecentEntry.
+        const ref = LB.bestEntryFromSetLists(filtered.slice(0, 3).map(r => (r.sets || []).filter(s => !s.warmup)));
+        setRemoteLast(m => ({ ...m, [exId]: ref }));
       })
       .catch(() => { if (on) setRemoteLast(m => ({ ...m, [exId]: null })); });
     return () => { on = false; };
@@ -521,6 +618,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const isBodyweight = !isCardio && exercise?.equipment === 'bodyweight';
   const progressionTargetForSet = (workingSetIdx) => {
     if (!store.settings?.smartProgression) return null;
+    // Progression itself is suppressed during deload (see completeSet's
+    // isDeloadSession guard) — showing the "≥X reps · next weight" hint
+    // anyway would promise an unlock that can never actually fire.
+    if (store.statusMode === 'deload' || session.isDeload) return null;
     const perSet = entry?.plannedRepsPerSet;
     const perSetVal = perSet && perSet.length > 1
       ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
@@ -545,7 +646,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
-        ? { ...e, sets: e.sets.map((st, k) => k === setIdx ? { ...st, ...patch } : st) }
+        ? { ...e, sets: e.sets.map((st, k) => {
+            if (k !== setIdx) return st;
+            // Unchecking (or editing a value on) a set that was completed via
+            // an intensity technique (drop-set/myo-rep/lengthened partials)
+            // reopens it for editing — clear the stale technique/drops so a
+            // later plain re-check doesn't carry forward data that no longer
+            // matches what's actually on the set.
+            const clearsTechnique = patch.done === false && st.technique && !('technique' in patch);
+            return { ...st, ...patch, ...(clearsTechnique ? { technique: null, drops: null } : {}) };
+          }) }
         : e),
     }));
   };
@@ -564,7 +674,108 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return (st.kg < prevSet.kg && rA <= rB) || (st.kg === prevSet.kg && rA < rB);
   };
 
-  const completeSet = (setIdx, bypassOutlierCheck = false, afterSuccess = null) => {
+  // First undone/unskipped WORKING set of a (typically different) entry, with
+  // the field its exercise type wants focused first. Warmups never match here:
+  // they're seeded onto at most one exercise for the whole session, unrelated
+  // to superset rounds, so a cross-exercise focus jump should skip straight to
+  // real working sets.
+  const firstOpenWorkingFocus = (e) => {
+    if (!e || e.isCardio) return null;
+    const idx = (e.sets || []).findIndex(s => !s.warmup && !s.done && !s.skipped);
+    if (idx < 0) return null;
+    const ex = store.exercises?.find(x => x.id === e.exId);
+    const noWeight = !!ex?.no_weight_reps;
+    const uni = (ex?.movement_type ?? (ex?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
+    return { setIdx: idx, field: noWeight ? (uni ? 'repsL' : 'reps') : 'kg' };
+  };
+  // Next undone/unskipped set of THIS SAME exercise (any type, including a
+  // following warmup) — used when navigation stays put, so the field type
+  // mirrors this entry's own kg/reps shape rather than re-deriving it.
+  const nextOwnFocus = (setsArr, afterIdx) => {
+    const idx = setsArr.findIndex((s, i) => i > afterIdx && !s.done && !s.skipped);
+    if (idx < 0) return null;
+    return { setIdx: idx, field: isNoWeightReps ? (isUnilateral ? 'repsL' : 'reps') : 'kg' };
+  };
+
+  // Single source of truth for "where does the screen go, and where does the
+  // keyboard focus land next" after ANY set is marked done — checkbox,
+  // keyboard confirm, drop-set, myo-rep or lengthened partial all funnel
+  // through this. Previously drop-set/myo-rep had no superset awareness at
+  // all (a bare navigate(1) once their own sets were done, never a mid-round
+  // partner jump), and the checkbox/keyboard paths each carried their own
+  // separate, non-superset-aware "next field" guess computed eagerly — which
+  // could fire (via its own timer) after this function had already moved the
+  // screen to a different exercise, focusing the wrong row there instead.
+  // Routing every completion through here and only computing the focus
+  // target for whichever entry THIS function actually navigates to closes
+  // that race for good.
+  const finishSetNavigation = (setIdx, updatedSets, overlayHoldMs, advanceFocus) => {
+    const group = entry.supersetGroup;
+    // A skipped set is resolved (nothing left to log there) just like a done
+    // one — only "not done and not skipped" is still pending. Checking
+    // `.done === false` alone would treat a partner's skipped set as still
+    // pending, jumping to it mid-round for no reason and blocking the
+    // round/group from ever reading as complete.
+    const resolved = (s) => !!s && (s.done || s.skipped);
+    if (group && !entry.sets[setIdx]?.warmup) {
+      const workingIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
+      const partnerWorkingSets = (e) => (e.sets || []).filter(s => !s.warmup);
+      const partners = session.entries.map((e, i) => ({ e, i })).filter(({ e, i }) => e.supersetGroup === group && i !== exIdx);
+      const nextPartner = partners.find(({ e }) => !resolved(partnerWorkingSets(e)[workingIdx]));
+      if (nextPartner) {
+        // Mid-round: jump to partner, no rest
+        if (advanceFocus) pendingFocusRef.current = firstOpenWorkingFocus(nextPartner.e);
+        setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), 300);
+      } else {
+        // Round complete: start rest
+        persistRestStart(Date.now(), restDef);
+        const allGroupDone = updatedSets.every(resolved) && partners.every(({ e }) => partnerWorkingSets(e).every(resolved));
+        if (allGroupDone) {
+          const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
+          const nextAfterGroup = lastGroupIdx + 1 < session.entries.length ? session.entries[lastGroupIdx + 1] : null;
+          if (advanceFocus && nextAfterGroup) pendingFocusRef.current = firstOpenWorkingFocus(nextAfterGroup);
+          setTimeout(() => {
+            if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
+            else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
+          }, Math.max(600, overlayHoldMs));
+        } else {
+          const allGroup = session.entries.map((e, i) => ({ e, i })).filter(({ e }) => e.supersetGroup === group);
+          const firstIncomplete = allGroup.find(({ e, i }) =>
+            i === exIdx ? !updatedSets.every(resolved) : partnerWorkingSets(e).some(s => !resolved(s))
+          );
+          if (firstIncomplete) {
+            if (advanceFocus) pendingFocusRef.current = firstOpenWorkingFocus(firstIncomplete.i === exIdx ? { ...entry, sets: updatedSets } : firstIncomplete.e);
+            setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: firstIncomplete.i })), 600);
+          }
+        }
+      }
+    } else {
+      if (!entry.sets[setIdx]?.warmup) {
+        persistRestStart(Date.now(), restDef);
+      }
+      if (updatedSets.every(resolved)) {
+        const nextEntry = session.entries[exIdx + 1];
+        if (advanceFocus && nextEntry) pendingFocusRef.current = firstOpenWorkingFocus(nextEntry);
+        setTimeout(() => navigate(1), Math.max(600, overlayHoldMs));
+      } else if (advanceFocus) {
+        const focus = nextOwnFocus(updatedSets, setIdx);
+        if (focus) setTimeout(() => activateKb(focus.setIdx, focus.field), 400);
+      }
+    }
+  };
+
+  const completeSet = (setIdx, bypassOutlierCheck = false, advanceFocus = false, extraPatch = null) => {
+    // Lengthened partials only ever completes via finishLengthenedPartial,
+    // which supplies extraPatch with the chosen partials count — every other
+    // entry point (checkbox is hidden for this row, "Check set", keyboard
+    // confirm, bulk check-all) is guarded to redirect or skip this set
+    // instead of reaching here bare, but this is the backstop.
+    if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx && !extraPatch) return;
+    // Drop-set/myo-rep only ever complete via finishDropSet/finishMyoSet
+    // (which build the whole patch themselves and never call completeSet) —
+    // a bare completeSet on their target set would mark it done with none of
+    // that data, so refuse outright rather than silently corrupting it.
+    if (dropSetIdx === setIdx || myoSetIdx === setIdx) return;
     // Unlock AudioContext on this user gesture so the rest-timer beep works on iOS
     // even when the tempo feature is disabled (only other init path).
     try {
@@ -661,9 +872,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
     setKbField(null); setKbRaw(''); setKbFresh(false);
     armKbShield();
-    if (afterSuccess) afterSuccess();
     recentCompleteRef.current[setIdx] = Date.now();
     lastCompleteRef.current = Date.now();
+    if (extraPatch) { setLpTarget(null); setLpCount(0); }
     _log(`completeSet(${setIdx}) → lastCompleteRef stamped`);
 
     // Build the done patch inside the functional updater so we can read the
@@ -672,7 +883,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     updateSession(sess => {
       const currSet = sess.entries[exIdx]?.sets[setIdx];
       if (!currSet) return sess;
-      const patch = { done: true };
+      const patch = { done: true, ...extraPatch };
       if (kb && kb.setIdx === setIdx && kb.field !== 'kg') {
         const fromRef = parseInt(rawRef, 10);
         const fromSess = currSet[kb.field] || 0;
@@ -714,25 +925,48 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const increment = catCfg.increment ?? null;
       if (!increment) return null;
       const range = store.settings?.progressionRangeTop ?? 4;
-      const doneSets = updatedSets.filter(s => s.done && !s.skipped && !s.warmup && s.kg != null);
-      if (!doneSets.length) return null;
-      const allHitTop = doneSets.every((s, i) => {
+      // Index by true working-set position (warm-ups stripped, nothing else)
+      // so progressionTargetForSet(i) lines up correctly — filtering skipped/
+      // no-kg sets out before indexing (as this used to) shifts every later
+      // set's target one slot whenever an earlier set was skipped, mirroring
+      // the same bug store.js's progressionSuggestion had.
+      const workingSets = updatedSets.filter(s => !s.warmup);
+      if (!workingSets.some(s => !s.skipped && s.kg != null)) return null;
+      const allHitTop = workingSets.every((s, i) => {
+        if (s.skipped || s.kg == null) return true; // no data at this position — neither confirms nor blocks progression
         const reps = s.repsL != null ? Math.min(s.repsL ?? 0, s.repsR ?? 0) : (s.reps ?? 0);
         return reps >= (progressionTargetForSet(i) ?? 0);
       });
       if (!allHitTop) return null;
-      const refKg = doneSets[0].kg;
+      const refKg = workingSets.find(s => !s.skipped && s.kg != null)?.kg;
+      if (refKg == null) return null;
       const newKg = Math.round((refKg + increment) * 100) / 100;
       const nextKg = catCfg.maxKg ? Math.min(newKg, catCfg.maxKg) : newKg;
       return nextKg > refKg ? { exName: entry.name, currentKg: refKg, nextKg } : null;
     })();
 
-    // Overlay precedence (one per completed set): PROGRESSION UNLOCKED (handled
-    // below) > NEW BEST > IMPROVEMENT > REGRESSION. NEW BEST fires when the set
-    // beats the all-time e1RM record for this exercise — independent of smart
+    // Overlay precedence (one per completed set): PROGRESSION UNLOCKED > NEW
+    // BEST > IMPROVEMENT > REGRESSION. NEW BEST fires when the set beats the
+    // all-time e1RM record for this exercise — independent of smart
     // progression, max once per exercise. A first-ever set (no record yet) and
     // bodyweight sets (no kg) never count as a new best.
-    if (!entry.sets[setIdx]?.warmup && !progressionResult && !isDeloadSession) {
+    // overlayHoldMs stretches the auto-advance delay below to match whichever
+    // of these toasts is showing, so navigating to the next exercise doesn't
+    // cut its display short. Every overlay (including progression) now only
+    // ever schedules its own show/hide timers here — the actual navigation
+    // decision happens exactly once, further down, in the superset-aware
+    // code shared by every completion. Previously PROGRESSION UNLOCKED ran an
+    // entirely separate, non-superset-aware navigate(1) on its own 4.8s
+    // timer, which could fire well after (and override) wherever the
+    // superset flow had already correctly moved the user on to.
+    let overlayHoldMs = 0;
+    if (progressionResult) {
+      overlayHoldMs = 4800; // 800ms delay + 4000ms display, matching the toast's own timing below
+      setTimeout(() => {
+        setProgressionUnlocked(progressionResult);
+        setTimeout(() => setProgressionUnlocked(null), 4000);
+      }, 800);
+    } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
       const cE1rm = (completed?.kg != null && cReps != null && cReps > 0) ? LB.e1rm(completed.kg, cReps) : 0;
@@ -742,62 +976,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
         setNewBestSet(true);
+        overlayHoldMs = 2500;
         setTimeout(() => setNewBestSet(false), 2500);
       } else if (isImprovement(completed, prevSet)) {
         setImprovedSet(true);
+        overlayHoldMs = 2500;
         setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, prevWorkingSetFor(k)));
         if (!anyImprovementBefore && isDecline(completed, prevSet) && store.settings?.showRegression !== false) {
           setRegressionSet(true);
+          overlayHoldMs = 2500;
           setTimeout(() => setRegressionSet(false), 2500);
         }
       }
     }
-
-    if (progressionResult) {
-      pendingNavRef.current = true;
-      setTimeout(() => {
-        setProgressionUnlocked(progressionResult);
-        setTimeout(() => {
-          setProgressionUnlocked(null);
-          if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); }
-        }, 4000);
-      }, 800);
-    }
-    const group = entry.supersetGroup;
-    if (group) {
-      const partners = session.entries.map((e, i) => ({ e, i })).filter(({ e, i }) => e.supersetGroup === group && i !== exIdx);
-      const nextPartner = partners.find(({ e }) => e.sets[setIdx]?.done === false);
-      if (nextPartner) {
-        // Mid-round: jump to partner, no rest
-        setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), 300);
-      } else {
-        // Round complete: start rest
-        persistRestStart(Date.now(), restDef);
-        const allGroupDone = updatedSets.every(s => s.done) && partners.every(({ e }) => e.sets.every(s => s.done));
-        if (allGroupDone) {
-          const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
-          setTimeout(() => {
-            if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
-            else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
-          }, 600);
-        } else {
-          const allGroup = session.entries.map((e, i) => ({ e, i })).filter(({ e }) => e.supersetGroup === group);
-          const firstIncomplete = allGroup.find(({ e, i }) =>
-            i === exIdx ? !updatedSets.every(s => s.done) : e.sets.some(s => !s.done)
-          );
-          if (firstIncomplete) setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: firstIncomplete.i })), 600);
-        }
-      }
-    } else {
-      if (!entry.sets[setIdx]?.warmup) {
-        persistRestStart(Date.now(), restDef);
-      }
-      if (updatedSets.every(st => st.done)) {
-        if (!progressionResult) setTimeout(() => navigate(1), 600);
-      }
-    }
+    finishSetNavigation(setIdx, updatedSets, overlayHoldMs, advanceFocus);
     // Last warmup set done → start 3-min rest, workout timer begins when rest expires
     if (isLastWarmupSet && !session.startedAt) {
       persistRestStart(Date.now(), 180);
@@ -824,10 +1018,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setFlashSet(dropSetIdx);
     setTimeout(() => setFlashSet(null), 1400);
     kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+    // Stamp the same ghost-click guards completeSet uses — without these, an
+    // iOS ghost-click landing 200-400ms after this drop-set finished would
+    // read as an intentional uncheck (no recent-completion timestamp to
+    // block it against) and undo the set.
+    armKbShield();
+    recentCompleteRef.current[dropSetIdx] = Date.now();
+    lastCompleteRef.current = Date.now();
     const targetIdx = dropSetIdx;
     setDropSetIdx(null);
     // Improvement / regression / new best overlays (same logic as completeSet)
     const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+    let overlayHoldMs = 0;
     if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && first.kg != null && first.reps > 0) {
       const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
       const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
@@ -838,9 +1040,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
-        setNewBestSet(true); setTimeout(() => setNewBestSet(false), 2500);
+        setNewBestSet(true); overlayHoldMs = 2500; setTimeout(() => setNewBestSet(false), 2500);
       } else if (isImprovement(first, prevSet)) {
-        setImprovedSet(true); setTimeout(() => setImprovedSet(false), 2500);
+        setImprovedSet(true); overlayHoldMs = 2500; setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
           if (s.warmup) return false;
@@ -848,14 +1050,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
         });
         if (!anyImpBefore && isDecline(first, prevSet) && store.settings?.showRegression !== false) {
-          setRegressionSet(true); setTimeout(() => setRegressionSet(false), 2500);
+          setRegressionSet(true); overlayHoldMs = 2500; setTimeout(() => setRegressionSet(false), 2500);
         }
       }
     }
-    // Rest timer + navigation
+    // Rest timer + navigation — same superset-aware logic as completeSet, so
+    // a drop-set finishing a round correctly jumps to the partner instead of
+    // the plain navigate(1) this used to do regardless of grouping.
     const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
-    if (!entry.sets[targetIdx]?.warmup) persistRestStart(Date.now(), restDef);
-    if (updatedSets.every(st => st.done)) setTimeout(() => navigate(1), 600);
+    finishSetNavigation(targetIdx, updatedSets, overlayHoldMs, true);
   };
 
   const cancelMyo = () => {
@@ -884,10 +1087,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setFlashSet(myoSetIdx);
     setTimeout(() => setFlashSet(null), 1400);
     kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+    // Stamp the same ghost-click guards completeSet uses (see finishDropSet).
+    armKbShield();
+    recentCompleteRef.current[myoSetIdx] = Date.now();
+    lastCompleteRef.current = Date.now();
     const targetIdx = myoSetIdx;
     setMyoSetIdx(null); setMyoTechnique(null); setMyoDrops([]); setMyoTarget(null);
     // Improvement / regression / new best overlays
     const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+    let overlayHoldMs = 0;
     if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && first.kg != null && first.reps > 0) {
       const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
       const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
@@ -898,9 +1106,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
-        setNewBestSet(true); setTimeout(() => setNewBestSet(false), 2500);
+        setNewBestSet(true); overlayHoldMs = 2500; setTimeout(() => setNewBestSet(false), 2500);
       } else if (isImprovement(first, prevSet)) {
-        setImprovedSet(true); setTimeout(() => setImprovedSet(false), 2500);
+        setImprovedSet(true); overlayHoldMs = 2500; setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
           if (s.warmup) return false;
@@ -908,43 +1116,46 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
         });
         if (!anyImpBefore && isDecline(first, prevSet) && store.settings?.showRegression !== false) {
-          setRegressionSet(true); setTimeout(() => setRegressionSet(false), 2500);
+          setRegressionSet(true); overlayHoldMs = 2500; setTimeout(() => setRegressionSet(false), 2500);
         }
       }
     }
-    if (!entry.sets[targetIdx]?.warmup) persistRestStart(Date.now(), restDef);
+    // Same superset-aware navigation as completeSet/finishDropSet — a myo-rep
+    // finishing a round jumps to the partner instead of a plain navigate(1).
     const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
-    if (updatedSets.every(st => st.done)) setTimeout(() => navigate(1), 600);
+    finishSetNavigation(targetIdx, updatedSets, overlayHoldMs, true);
   };
 
-  const setPartials = (setIdx, count) => {
-    updateSession(sess => ({
-      ...sess,
-      entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
-        ...en,
-        sets: en.sets.map((st, si) => si !== setIdx ? st : {
-          ...st,
-          technique: count > 0 ? 'lengthened_partial' : (st.technique === 'lengthened_partial' ? null : st.technique),
-          drops: count > 0 ? { partials: count } : (st.technique === 'lengthened_partial' ? null : st.drops),
-          updatedAt: new Date().toISOString(),
-        }),
-      }),
-    }));
+  // Commits the set exactly like completeSet, plus the technique/partials
+  // count chosen via the stepper — both land in the same session update, so
+  // there's no window (crash, background, navigation) where the set is done
+  // but the chosen partials count wasn't recorded yet.
+  const finishLengthenedPartial = (setIdx) => {
+    completeSet(setIdx, false, true, { technique: 'lengthened_partial', drops: { partials: lpCount } });
   };
 
   const addSet = () => {
-    const bwKg = exercise?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-    updateSession(sess => ({
-      ...sess,
-      entries: sess.entries.map((e, i) => {
-        if (i !== exIdx) return e;
-        const last = e.sets[e.sets.length - 1];
-        const newSet = isUnilateral
-          ? { kg: last?.kg ?? bwKg ?? null, repsL: last?.repsL ?? null, repsR: last?.repsR ?? null, done: false }
-          : { kg: last?.kg ?? bwKg ?? null, reps: last?.reps ?? null, done: false };
-        return { ...e, sets: [...e.sets, newSet] };
-      }),
-    }));
+    updateSession(sess => {
+      const group = sess.entries[exIdx]?.supersetGroup;
+      return {
+        ...sess,
+        // Superset/giant-set partners must keep matching working-set counts
+        // — finishSetNavigation's round-matching indexes every member's
+        // working sets by position — so add to every member, not just the
+        // one the user is looking at.
+        entries: sess.entries.map((e, i) => {
+          if (i !== exIdx && !(group && e.supersetGroup === group)) return e;
+          const ex = LB.findExercise(store, e.exId);
+          const uni = (ex?.movement_type ?? (ex?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
+          const bwKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+          const last = e.sets[e.sets.length - 1];
+          const newSet = uni
+            ? { kg: last?.kg ?? bwKg ?? null, repsL: last?.repsL ?? null, repsR: last?.repsR ?? null, done: false }
+            : { kg: last?.kg ?? bwKg ?? null, reps: last?.reps ?? null, done: false };
+          return { ...e, sets: [...e.sets, newSet] };
+        }),
+      };
+    });
   };
 
   const removeSet = async (setIdx) => {
@@ -960,14 +1171,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const removeLastSet = async () => {
     const workingSets = entry.sets.map((s, i) => ({ s, i })).filter(({ s }) => !s.warmup);
     if (workingSets.length <= 1) return;
-    const last = workingSets[workingSets.length - 1];
+    const group = entry.supersetGroup;
+    const members = group ? session.entries.filter(e => e.supersetGroup === group) : [entry];
+    // Superset/giant-set partners must keep matching working-set counts (see
+    // addSet) — refuse if any member is already down to its last working
+    // set, rather than let counts diverge.
+    if (members.some(e => e.sets.filter(s => !s.warmup).length <= 1)) return;
     if (!await confirm(`Remove set ${workingSets.length}?`, { ok: 'Remove', danger: true })) return;
-    updateSession(sess => ({
-      ...sess,
-      entries: sess.entries.map((e, i) => i === exIdx
-        ? { ...e, sets: e.sets.filter((_, k) => k !== last.i) }
-        : e),
-    }));
+    updateSession(sess => {
+      const grp = sess.entries[exIdx]?.supersetGroup;
+      return {
+        ...sess,
+        entries: sess.entries.map((e, i) => {
+          if (i !== exIdx && !(grp && e.supersetGroup === grp)) return e;
+          const eWorkingSets = e.sets.map((s, k) => ({ s, k })).filter(({ s }) => !s.warmup);
+          const lastWorking = eWorkingSets[eWorkingSets.length - 1];
+          return lastWorking ? { ...e, sets: e.sets.filter((_, k) => k !== lastWorking.k) } : e;
+        }),
+      };
+    });
   };
 
   const setNote = (note) => {
@@ -992,23 +1214,31 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (willBeAllDone) navigate(1);
   };
 
-  const jumpToNextSet = (completedIdx) => {
-    const nextIdx = entry.sets.findIndex((s, i) => i > completedIdx && !s.done && !s.skipped);
-    if (nextIdx !== -1) {
-      const field = isNoWeightReps ? (isUnilateral ? 'repsL' : 'reps') : 'kg';
-      setTimeout(() => activateKb(nextIdx, field), 400);
-    } else {
-      const nextEntry = session.entries[exIdx + 1];
-      if (nextEntry && !nextEntry.isCardio) {
-        const nextSetIdx = nextEntry.sets.findIndex(s => !s.done && !s.skipped);
-        if (nextSetIdx !== -1) {
-          const nextEx = store.exercises?.find(e => e.id === nextEntry.exId);
-          const nextIsNoWeight = !!nextEx?.no_weight_reps;
-          const nextIsUni = (nextEx?.movement_type ?? (nextEx?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
-          pendingFocusRef.current = { setIdx: nextSetIdx, field: nextIsNoWeight ? (nextIsUni ? 'repsL' : 'reps') : 'kg' };
-        }
-      }
+  // Shared by cardio (log/skip) and "Check all sets" — both complete an
+  // entire entry in one shot rather than set-by-set like completeSet/
+  // finishSetNavigation, so there's no per-round index to match against a
+  // superset/giant-set partner. Jump to whichever partner still has open
+  // work instead of blindly advancing past the whole group (schedule-defined
+  // supersets can include cardio — only mid-session linking excludes it).
+  // Returns false (does nothing) when the entry isn't grouped, so callers
+  // keep their own standalone navigation/rest timing.
+  const advanceIntoGroupOrPartner = (jumpDelayMs) => {
+    const group = entry.supersetGroup;
+    if (!group) return false;
+    const isDone = (e) => e.isCardio ? e.cardioDone : (e.sets || []).filter(s => !s.warmup).every(s => s.done || s.skipped);
+    const partners = session.entries.map((e, i) => ({ e, i })).filter(({ e, i }) => e.supersetGroup === group && i !== exIdx);
+    const nextPartner = partners.find(({ e }) => !isDone(e));
+    if (nextPartner) {
+      setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), jumpDelayMs);
+      return true;
     }
+    persistRestStart(Date.now(), restDef);
+    const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
+    setTimeout(() => {
+      if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
+      else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
+    }, 600);
+    return true;
   };
 
   const checkSet = () => {
@@ -1016,7 +1246,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (idx < 0) return;
     if (dropSetIdx === idx) { finishDropSet(dropDropsRef.current); return; }
     if (myoSetIdx === idx) { finishMyoSet(myoDropsRef.current, myoTechnique); return; }
-    completeSet(idx, false, () => jumpToNextSet(idx));
+    if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === idx) { finishLengthenedPartial(idx); return; }
+    completeSet(idx, false, true);
   };
 
   const logCardio = () => {
@@ -1028,7 +1259,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx ? { ...e, cardioDone: true, cardioData: data } : e),
     }));
-    setTimeout(() => navigate(1), 300);
+    // cardioLogs rows are only materialized at session finish (see `finish`),
+    // but PRs read the same shape early so the flash fires the moment the
+    // activity is actually logged, matching the home-tab quick-log/finish-flow
+    // cardio PR overlay instead of never checking at all.
+    const pr = LB.detectCardioPRs({ id: '__pending__', date: session.date, ...data }, store.cardioLogs);
+    if (pr) setCardioPR(pr);
+    if (!advanceIntoGroupOrPartner(300)) setTimeout(() => navigate(1), 300);
   };
 
   const skipCardio = () => {
@@ -1036,7 +1273,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx ? { ...e, cardioDone: true, cardioData: null } : e),
     }));
-    navigate(1);
+    if (!advanceIntoGroupOrPartner(300)) navigate(1);
   };
 
   const skipExercise = () => {
@@ -1087,9 +1324,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setTempoActive(true);
     const eccSecs = store.settings?.tempoEccentric ?? 4;
     const conSecs = store.settings?.tempoConcentric ?? 1;
-    if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    // Unlike playBeep's own try/catch, construction here was unguarded — a
+    // browser without AudioContext support (or one that throws on resume)
+    // would leave tempoActive stuck true with no audio/visual cadence ever
+    // starting.
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
+    } catch (_) {
+      setTempoActive(false);
+      return;
+    }
     const ctx = audioCtxRef.current;
-    if (ctx.state === 'suspended') ctx.resume();
     const runPhase = (phase, phaseStart) => {
       const phaseDur = phase === 'ecc' ? eccSecs : conSecs;
       const n = Math.max(1, Math.floor(phaseDur));
@@ -1216,6 +1462,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const abandon = async () => {
     if (!await confirm('All inputs will be lost.', { title: 'Cancel session?', ok: 'Cancel', cancel: 'Keep training', danger: true })) return;
     cancelPushover();
+    try { localStorage.removeItem(MESO_ASKED_KEY + session.id); } catch {}
     setStore(s => ({
       ...s,
       sessions: s.sessions.filter(x => x.id !== session.id),
@@ -1229,7 +1476,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   useEffectT(() => {
     const row = chipRowRef.current;
     if (!row) return;
-    const chip = row.querySelector(`[data-reorder-item]:nth-child(${exIdx + 1})`);
+    // Superset connectors ("⟷") are interspersed as siblings between grouped
+    // chips, so :nth-child(exIdx+1) drifted from the real chip position as
+    // soon as any connector rendered before it — data-ex-idx addresses the
+    // chip directly regardless of how many connectors sit in between.
+    const chip = row.querySelector(`[data-ex-idx="${exIdx}"]`);
     if (!chip) return;
     const target = chip.offsetLeft - row.offsetWidth / 2 + chip.offsetWidth / 2;
     row.scrollLeft = target;
@@ -1239,14 +1490,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const chipDragReorderRef = UI.useDragReorderH({ longPressMs: 600,
     onReorder: (from, to) => {
       updateSession(sess => {
-        const entries = [...sess.entries];
-        const [moved] = entries.splice(from, 1);
-        entries.splice(to, 0, moved);
-        let idx = sess.currentExIdx || 0;
-        if (idx === from) idx = to;
-        else if (from < to && idx > from && idx <= to) idx--;
-        else if (from > to && idx >= to && idx < from) idx++;
-        return { ...sess, entries, currentExIdx: idx };
+        const result = reorderSessionEntries(sess.entries, sess.currentExIdx || 0, from, to);
+        // Reject rather than silently corrupt: a drag that would split an
+        // existing superset/giant-set apart is simply ignored.
+        if (!groupsContiguous(result.entries)) return sess;
+        return { ...sess, ...result };
       });
     },
   });
@@ -1267,7 +1515,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (val !== null) {
       if (store.settings?.pushEnabled) {
         const def = newDur ?? restDef;
-        const delaySeconds = Math.round(Math.max(0, val + def * 1000 - Date.now()) / 1000);
+        // Both push edge functions clamp delaySeconds to 3600 (MAX_DELAY)
+        // server-side — matching it here so a very long rest (repeated +30s
+        // extensions can add up) doesn't fire early against the server's
+        // silent truncation while the client still thinks the full delay
+        // was scheduled.
+        const delaySeconds = Math.min(3600, Math.round(Math.max(0, val + def * 1000 - Date.now()) / 1000));
         const nonce = String(val);
         if (store.settings?.pushoverUserKey && store.settings?.usePushover) {
           LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds, nonce, priority: 1 });
@@ -1355,6 +1608,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [regressionSet, setRegressionSet] = useStateT(false);
   const [newBestSet, setNewBestSet] = useStateT(false);
   const newBestShownRef = useRefT({}); // exId → true once a NEW BEST flashed (max once per exercise per session)
+  const [cardioPR, setCardioPR] = useStateT(null);
   const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
   const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(() => {
@@ -1381,21 +1635,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const myoDropsRef = useRefT([]);
   myoDropsRef.current = myoDrops;
   const [myoTarget, setMyoTarget] = useStateT(null);
-  const [lpTarget, setLpTarget] = useStateT(null); // { exIdx, setIdx } | null
+  const [lpTarget, setLpTarget] = useStateT(null); // { exIdx, setIdx } | null — set is NOT done yet, replaces its checkbox with a stepper + FINISH button
+  const [lpCount, setLpCount] = useStateT(0); // in-progress partials count for lpTarget, committed to the set only on Finish
   // Persist intensity state so a background/resume on iOS doesn't wipe mid-set progress
   useEffectT(() => {
-    if (dropSetIdx != null || myoSetIdx != null) {
+    if (dropSetIdx != null || myoSetIdx != null || lpTarget != null) {
       try {
         localStorage.setItem('logbook-intensity-state', JSON.stringify({
           sessionId, exIdx,
           dropSetIdx, dropDrops,
           myoSetIdx, myoDrops, myoTechnique, myoTarget,
+          lpSetIdx: lpTarget?.setIdx ?? null, lpCount,
         }));
       } catch {}
     } else {
       localStorage.removeItem('logbook-intensity-state');
     }
-  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, sessionId, exIdx]);
+  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, lpTarget, lpCount, sessionId, exIdx]);
   useEffectT(() => {
     try {
       const raw = localStorage.getItem('logbook-intensity-state');
@@ -1415,6 +1671,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setMyoTechnique(st.myoTechnique || null);
         setMyoTarget(st.myoTarget ?? null);
       }
+      // The set only ever gets marked done via the dedicated FINISH button
+      // (which commits technique+drops in the same update), so — like
+      // drop/myo — there is nothing left to resume once the set is done.
+      if (st.lpSetIdx != null && !targetEntry?.sets[st.lpSetIdx]?.done) {
+        setLpTarget({ exIdx, setIdx: st.lpSetIdx });
+        setLpCount(st.lpCount || 0);
+      }
     } catch {}
   }, [sessionId, exIdx]);
   const [notePicker, setNotePicker] = useStateT(false);
@@ -1427,6 +1690,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [addOpen, setAddOpen] = useStateT(() => !!(session.isFreestyle && session.entries.length === 0));
   const [addSupersetData, setAddSupersetData] = useStateT(null); // { newIdx } | null
   const addAndJumpRef = useRefT(false); // set to true when adding via the finish-dialog button
+  const [supersetLinkData, setSupersetLinkData] = useStateT(null); // null | {} | { picking: true } — mirrors addSupersetData's shape
+  const [supersetNewPickerOpen, setSupersetNewPickerOpen] = useStateT(false);
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
   const [outlierConfirm, setOutlierConfirm] = useStateT(null);
@@ -1441,7 +1706,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // happens at session end via flushMesoStateToStore().
   const saveMesoState = (updater) => {
     setMesoStateLocal(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
+      const applied = typeof updater === 'function' ? updater(prev) : updater;
+      // Stamp updatedAt on every in-session write — getMesoState's "pick the
+      // newer of store vs localStorage" comparison (and the sync RPC's
+      // staleness guard) only works if the localStorage copy's updatedAt
+      // actually advances past whatever it inherited at session start.
+      const next = applied ? { ...applied, updatedAt: new Date().toISOString() } : applied;
       if (next) saveMesoStateToStorage(next);
       return next;
     });
@@ -1450,13 +1720,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Called at session end so cross-device sync happens once per session, not per answer.
   const flushMesoStateToStore = (finalState) => {
     if (!finalState?.scheduleId) return;
+    const stamped = { ...finalState, updatedAt: new Date().toISOString() };
     setStore(s => {
-      const others = (s.mesoStates || []).filter(m => m.scheduleId !== finalState.scheduleId);
-      return { ...s, mesoStates: [...others, finalState] };
+      const others = (s.mesoStates || []).filter(m => m.scheduleId !== stamped.scheduleId);
+      return { ...s, mesoStates: [...others, stamped] };
     });
     // Clean up old localStorage keys after successful flush
     try { localStorage.removeItem(MESO_KEY + '-' + finalState.scheduleId); } catch {}
     try { localStorage.removeItem(MESO_KEY); } catch {} // old single-key format
+    try { localStorage.removeItem(MESO_ASKED_KEY + session.id); } catch {}
   };
   const mesoWeek = mesoState ? mesoCurrentWeek(mesoState, store) : null;
   const mesoRirVal = (mesoWeek != null && mesoState?.weeks != null) ? mesoRirForWeek(mesoWeek, mesoState.weeks) : null;
@@ -1494,6 +1766,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         pumpLowCounts: {},
         pendingMeso2: false,
         // weightBoosts carries over to meso 2
+        updatedAt: new Date().toISOString(),
       };
       const others = (s.mesoStates || []).filter(m => m.scheduleId !== scheduleId);
       return { ...s, mesoStates: [...others, newMeso] };
@@ -1507,7 +1780,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
       ),
       mesoStates: (s.mesoStates || []).map(m =>
-        m.scheduleId === scheduleId ? { ...m, pendingMeso2: false } : m
+        m.scheduleId === scheduleId ? { ...m, pendingMeso2: false, updatedAt: new Date().toISOString() } : m
       ),
     }));
   };
@@ -1520,7 +1793,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
       ),
       mesoStates: (s.mesoStates || []).map(m =>
-        m.scheduleId === scheduleId ? { ...m, pendingMeso2: false } : m
+        m.scheduleId === scheduleId ? { ...m, pendingMeso2: false, updatedAt: new Date().toISOString() } : m
       ),
     }));
   };
@@ -1572,14 +1845,26 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [mesoVolumeExIds, setMesoVolumeExIds] = useStateT([]); // exId+dayId pairs for delta
   const [mesoPumpAnswer, setMesoPumpAnswer] = useStateT(null);
   const [mesoVolumeAnswer, setMesoVolumeAnswer] = useStateT(null);
-  const askedSorenessRef = useRefT(new Set());
-  const askedJointRef = useRefT(new Set());
-  const askedVolumeRef = useRefT(new Set());
+  const mesoAskedInitRef = useRefT(null);
+  if (mesoAskedInitRef.current === null) mesoAskedInitRef.current = loadMesoAskedSets(session.id);
+  const askedSorenessRef = useRefT(mesoAskedInitRef.current.soreness);
+  const askedJointRef = useRefT(mesoAskedInitRef.current.joint);
+  const askedVolumeRef = useRefT(mesoAskedInitRef.current.volume);
+  const persistMesoAsked = () => saveMesoAskedSets(session.id, {
+    soreness: askedSorenessRef.current, joint: askedJointRef.current, volume: askedVolumeRef.current,
+    gains: mesoSessionSetGainsRef.current,
+  });
   // Per-session quality tracking for weight progression
   const mesoJointFineRef = useRefT(new Set());    // exIds where joint was 'fine'
   const mesoPumpOkRef = useRefT(new Set());        // muscles where pump was moderate/amazing
   const mesoVolumeOkRef = useRefT(new Set());      // muscles where volume was just_right/not_enough
-  const mesoSessionSetGainsRef = useRefT({});      // key → { exId, name } for set +1s this session
+  const mesoSessionSetGainsRef = useRefT(mesoAskedInitRef.current.gains); // key → { exId, name, delta } for set changes this session
+  // exId_dayId keys already hit by a negative set-delta this session (from
+  // soreness, joint pain, or volume feedback) — shared across all three
+  // handlers so two independent negative signals never stack a -2 onto the
+  // same exercise in one session.
+  const mesoNegativeDeltaKeysRef = useRefT(new Set());
+  const isMesoDeloadSession = store.statusMode === 'deload' || session.isDeload;
   // ────────────────────────────────────────────────────────────────────────────
 
   // ── Meso feedback handlers ─────────────────────────────────────────────────
@@ -1598,14 +1883,32 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (!muscleEntries.length) continue;
       // still_sore → only main lift; very_sore → all exercises of the group
       const targets = answer === 'very_sore' ? muscleEntries : [muscleEntries[0]];
-      saveMesoState(m => {
-        const newDeltas = { ...(m.deltas || {}) };
-        targets.forEach(e => {
-          const key = e.exId + '_' + prev.dayId;
-          newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
-        });
-        return { ...m, deltas: newDeltas };
+      // Resolve, ONCE, which of these keys haven't already taken a negative
+      // delta this session from another signal (joint/volume) — computed up
+      // front so the display bookkeeping and the actual deltas mutation stay
+      // in lockstep (mutating the ref between the two would make the second
+      // check always pass).
+      const keysToApply = targets
+        .map(e => ({ e, key: e.exId + '_' + prev.dayId }))
+        .filter(({ key }) => !mesoNegativeDeltaKeysRef.current.has(key));
+      keysToApply.forEach(({ key }) => mesoNegativeDeltaKeysRef.current.add(key));
+      // Surface the change in the post-session "Next session" summary, same
+      // as joint/volume feedback — otherwise a soreness-only session silently
+      // changes next session's plan with no indication anywhere.
+      keysToApply.forEach(({ e, key }) => {
+        const prevGain = mesoSessionSetGainsRef.current[key];
+        mesoSessionSetGainsRef.current[key] = { exId: e.exId, name: e.name, delta: (prevGain?.delta ?? 0) - 1 };
       });
+      if (keysToApply.length) {
+        saveMesoState(m => {
+          const newDeltas = { ...(m.deltas || {}) };
+          keysToApply.forEach(({ key }) => {
+            newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
+          });
+          return { ...m, deltas: newDeltas };
+        });
+        persistMesoAsked();
+      }
       break;
     }
   };
@@ -1618,15 +1921,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     if (answer === 'none') mesoJointFineRef.current.add(exId);
 
-    // Apply delta for joint pain
+    // Apply delta for joint pain — skip if soreness already penalized this
+    // exact exercise/day this session, so two independent negative signals
+    // don't stack to -2. jointFlags is a separate signal (a persistent
+    // "this exercise causes joint pain" marker) and is always recorded
+    // regardless of whether the delta was skipped.
     if (answer === 'noticeable' || answer === 'sharp') {
       const key = exId + '_' + session.dayId;
-      mesoSessionSetGainsRef.current[key] = { exId, name: mesoJointExName, delta: -1 };
+      const alreadyPenalized = mesoNegativeDeltaKeysRef.current.has(key);
+      if (!alreadyPenalized) {
+        mesoNegativeDeltaKeysRef.current.add(key);
+        const prevGain = mesoSessionSetGainsRef.current[key];
+        mesoSessionSetGainsRef.current[key] = { exId, name: mesoJointExName, delta: (prevGain?.delta ?? 0) - 1 };
+      }
       saveMesoState(m => ({
         ...m,
-        deltas: { ...(m.deltas || {}), [key]: ((m.deltas || {})[key] || 0) - 1 },
+        ...(alreadyPenalized ? {} : { deltas: { ...(m.deltas || {}), [key]: ((m.deltas || {})[key] || 0) - 1 } }),
         ...(answer === 'sharp' ? { jointFlags: { ...(m.jointFlags || {}), [exId]: true } } : {}),
       }));
+      if (!alreadyPenalized) persistMesoAsked();
     }
 
     // Check if this was the last exercise for this muscle group → open pump/volume
@@ -1638,6 +1951,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     });
     if (!isLastOfMuscle) return;
     askedVolumeRef.current.add(muscle);
+    persistMesoAsked();
     // Collect all exIds for this muscle group in this session
     const muscleExIds = session.entries
       .slice(0, currentIdx + 1)
@@ -1659,20 +1973,36 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Track quality signals for weight progression
     if (pump === 'moderate' || pump === 'amazing') mesoPumpOkRef.current.add(mesoVolumeMusc);
     if (volume === 'just_right' || volume === 'not_enough') mesoVolumeOkRef.current.add(mesoVolumeMusc);
+
+    // "Not enough" → +1 on main lift (first exercise of the muscle group) only
+    // "Pushed my limits" → -1 on main lift only
+    // "Too much" → -1 on every exercise of the muscle group
+    const mainExId = mesoVolumeExIds[0];
+    // Which exId/dayId keys this answer wants to apply a NEGATIVE delta to —
+    // resolved once, up front, against mesoNegativeDeltaKeysRef so a prior
+    // soreness/joint penalty on the same key isn't stacked with a second
+    // negative signal (positive deltas like "not enough" are never guarded —
+    // they're an independent, opposite-direction signal, not a double
+    // penalty).
+    const negativeTargets = volume === 'pushed' && mainExId ? [mainExId]
+      : volume === 'too_much' ? mesoVolumeExIds
+      : [];
+    const negKeysToApply = negativeTargets
+      .map(exId => ({ exId, key: exId + '_' + session.dayId }))
+      .filter(({ key }) => !mesoNegativeDeltaKeysRef.current.has(key));
+    negKeysToApply.forEach(({ key }) => mesoNegativeDeltaKeysRef.current.add(key));
+
     // Track set delta for summary screen
-    if (volume === 'not_enough' && mesoVolumeExIds[0]) {
-      const key = mesoVolumeExIds[0] + '_' + session.dayId;
-      const exName = session.entries.find(e => e.exId === mesoVolumeExIds[0])?.name || '';
-      mesoSessionSetGainsRef.current[key] = { exId: mesoVolumeExIds[0], name: exName, delta: 1 };
-    } else if (volume === 'pushed' && mesoVolumeExIds[0]) {
-      const key = mesoVolumeExIds[0] + '_' + session.dayId;
-      const exName = session.entries.find(e => e.exId === mesoVolumeExIds[0])?.name || '';
-      mesoSessionSetGainsRef.current[key] = { exId: mesoVolumeExIds[0], name: exName, delta: -1 };
-    } else if (volume === 'too_much') {
-      mesoVolumeExIds.forEach(exId => {
-        const key = exId + '_' + session.dayId;
+    if (volume === 'not_enough' && mainExId) {
+      const key = mainExId + '_' + session.dayId;
+      const exName = session.entries.find(e => e.exId === mainExId)?.name || '';
+      const prevGain = mesoSessionSetGainsRef.current[key];
+      mesoSessionSetGainsRef.current[key] = { exId: mainExId, name: exName, delta: (prevGain?.delta ?? 0) + 1 };
+    } else {
+      negKeysToApply.forEach(({ exId, key }) => {
         const exName = session.entries.find(e => e.exId === exId)?.name || '';
-        mesoSessionSetGainsRef.current[key] = { exId, name: exName, delta: -1 };
+        const prevGain = mesoSessionSetGainsRef.current[key];
+        mesoSessionSetGainsRef.current[key] = { exId, name: exName, delta: (prevGain?.delta ?? 0) - 1 };
       });
     }
 
@@ -1683,19 +2013,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const newDeltas = { ...(m.deltas || {}) };
       const newPumpLow = { ...(m.pumpLowCounts || {}) };
 
-      // "Not enough" → +1 on main lift (first exercise of the muscle group) only
-      // "Pushed my limits" → -1 on main lift only
-      // "Too much" → -1 on every exercise of the muscle group
-      const mainExId = mesoVolumeExIds[0];
       if (volume === 'not_enough' && mainExId) {
         const key = mainExId + '_' + session.dayId;
         newDeltas[key] = ((m.deltas || {})[key] || 0) + 1;
-      } else if (volume === 'pushed' && mainExId) {
-        const key = mainExId + '_' + session.dayId;
-        newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
-      } else if (volume === 'too_much') {
-        mesoVolumeExIds.forEach(exId => {
-          const key = exId + '_' + session.dayId;
+      } else {
+        negKeysToApply.forEach(({ key }) => {
           newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
         });
       }
@@ -1703,6 +2025,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (pumpLow && mainExId) newPumpLow[mainExId] = ((m.pumpLowCounts || {})[mainExId] || 0) + 1;
       return { ...m, deltas: newDeltas, pumpLowCounts: newPumpLow };
     });
+    persistMesoAsked();
   };
 
   // Compute per-exercise weight boosts earned this session and return gain items for
@@ -1771,7 +2094,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   // Soreness trigger: fires when exIdx changes to first exercise of a new muscle group
   useEffectT(() => {
-    if (!mesoState || !entry || isCardio) return;
+    if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
     if (mesoWeek == null) return; // pending period — meso not yet started
     if (mesoWeek === 1) return; // week 1: no previous meso session to be sore from
     const ex = entry ? store.exercises?.find(e => e.id === entry.exId) : null;
@@ -1783,6 +2106,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     });
     if (!isFirst) return;
     askedSorenessRef.current.add(pm);
+    persistMesoAsked();
     setMesoSorenessMusc(pm);
     setMesoSorenessOpen(true);
   }, [exIdx, !!mesoState]);
@@ -1790,7 +2114,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Joint + pump/volume trigger: when all working sets of an exercise are done,
   // ask joint feedback. Fires whenever the current entry's sets change.
   useEffectT(() => {
-    if (!mesoState || !entry || isCardio) return;
+    if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
     if (mesoWeek == null) return; // pending period — meso not yet started
     const exId = entry.exId;
     if (askedJointRef.current.has(exId)) return;
@@ -1800,6 +2124,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const ex = store.exercises?.find(e => e.id === exId);
     const pm = primaryMuscleForExercise(ex);
     askedJointRef.current.add(exId);
+    persistMesoAsked();
     mesoJointExIdxRef.current = exIdx;
     setMesoJointExId(exId);
     setMesoJointExName(entry.name);
@@ -1835,7 +2160,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
     return result;
   }, [store.cardioLogs]);
-  const pendingNavRef = useRefT(false);
   const pendingFocusRef = useRefT(null);
   // Records when a set was last completed via the checkbox; used to ignore
   // iOS ghost-clicks that fire 200-400ms after completion and would otherwise
@@ -1859,6 +2183,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const cd = entry.cardioData;
     setCardioForm(cd ? { type: cd.type || '', duration: cd.durationMinutes ? String(cd.durationMinutes) : '', distance: cd.distanceM != null ? mToDisplayT(cd.distanceM, du) : '', paceFeeling: cd.paceFeeling ?? null, effort: cd.effort ?? null, distUnit: du } : { type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: du });
   }, [exIdx, sessionId]);
+  // Intentionally NOT keyed on exIdx/entry — Paceguard (tempo) is meant to
+  // keep running across exercise navigation once started, stopping only on
+  // an explicit "Stop" tap or when the whole training screen unmounts
+  // (session finished/abandoned). Do not add exIdx to these deps; that would
+  // silently stop the metronome on every exercise change, which is the
+  // opposite of what this feature is for.
   useEffectT(() => () => stopTempo(), []);
 
   // Log ALL document pointer/click events — captures ghost-clicks and shows where they land.
@@ -2032,8 +2362,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ...sess,
           entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
             ...en,
+            // Editing the weight of an already-committed intensity-technique
+            // set (drop-set/myo-rep/lengthened partials) reopens it for
+            // editing — clear the stale technique/drops so it doesn't carry
+            // forward data that no longer matches what's being typed.
             sets: en.sets.map((st, si) =>
-              si === setIdx ? { ...st, kg: num ?? null, done: false }
+              si === setIdx ? { ...st, kg: num ?? null, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
               : store.settings?.weightFillDown !== false && si > setIdx && !st.done ? { ...st, kg: num ?? null }
               : st
             ),
@@ -2124,7 +2458,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
           ...en,
           sets: en.sets.map((st, si) =>
-            si === setIdx ? { ...st, kg: next, done: false }
+            si === setIdx ? { ...st, kg: next, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
             : si > setIdx && !st.done ? { ...st, kg: next }
             : st
           ),
@@ -2190,9 +2524,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     } else {
       _log(`kbConfirm: ${field}→completeSet(${setIdx})`);
       if (dropSetIdx === setIdx || myoSetIdx === setIdx) return;
-      completeSet(setIdx);
-      const nextIdx = entry.sets.findIndex((s, i) => i > setIdx && !s.done);
-      if (nextIdx !== -1) setTimeout(() => activateKb(nextIdx, isUnilateral ? 'repsL' : 'reps'), 350);
+      if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx) return;
+      completeSet(setIdx, false, true);
     }
   };
 
@@ -2269,8 +2602,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       });
       if (jump && !isNewCardio) {
         addAndJumpRef.current = false;
-        setTimeout(() => activateKb(0, 'kg'), 200);
+        setTimeout(() => activateKb(0, firstFieldForExercise(LB.findExercise(store, newExId))), 200);
       }
+    } else if (addSupersetCandidates.length === 0) {
+      // Nothing eligible to pair with — skip the superset prompt entirely
+      // rather than show an empty picker.
+      if (jump) addAndJumpRef.current = false;
+      linkNewExercise(null, newExId, jump);
     } else {
       // Defer insertion until the user picks a superset (or solo) —
       // that choice determines where the new exercise is placed.
@@ -2278,13 +2616,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
   };
 
-  // Called from the superset modal: targetIdx = null → solo (insert after current),
-  // targetIdx = i → link with entry i and insert right after it.
-  const confirmAdd = (targetIdx) => {
-    const { newExId } = addSupersetData;
-    const jump = addAndJumpRef.current;
-    if (jump) addAndJumpRef.current = false;
-    setAddSupersetData(null);
+  // First field to jump the keyboard to for a freshly-added exercise — 'kg'
+  // unless the exercise has no weight field at all (no_weight_reps), in
+  // which case it's whichever reps cell is actually rendered first.
+  const firstFieldForExercise = (ex) => {
+    if (!ex?.no_weight_reps) return 'kg';
+    return ex?.movement_type === 'unilateral' ? 'repsL' : 'reps';
+  };
+
+  // targetIdx = null → solo (insert after current), targetIdx = i → link with
+  // entry i and insert right after it. Shared by the add-exercise superset
+  // modal (confirmAdd below) and the Intensity-sheet "Superset → new
+  // exercise" flow (doLinkNewExerciseSuperset), which always links to the
+  // currently open exercise.
+  const linkNewExercise = (targetIdx, newExId, jump) => {
     setStore(s => {
       const sess = s.sessions.find(x => x.id === session.id);
       if (!sess) return s;
@@ -2328,16 +2673,86 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         }),
       };
     });
-    if (jump && store.exercises?.find(e => e.id === newExId)?.movement_type !== 'cardio') {
-      setTimeout(() => activateKb(0, 'kg'), 200);
+    if (jump) {
+      const newEx = store.exercises?.find(e => e.id === newExId);
+      if (newEx?.movement_type !== 'cardio') setTimeout(() => activateKb(0, firstFieldForExercise(newEx)), 200);
     }
+  };
+
+  // Called from the superset modal opened by the "Add exercise" button.
+  const confirmAdd = (targetIdx) => {
+    const { newExId } = addSupersetData;
+    const jump = addAndJumpRef.current;
+    if (jump) addAndJumpRef.current = false;
+    setAddSupersetData(null);
+    linkNewExercise(targetIdx, newExId, jump);
+  };
+
+  // Intensity sheet → Superset → "New exercise": always links the freshly
+  // picked/created exercise to the currently open one, no solo/link question
+  // (unlike confirmAdd, whose caller doesn't yet know which entry is "mother").
+  const doLinkNewExerciseSuperset = (ids) => {
+    const newExId = Array.isArray(ids) ? ids[0] : ids;
+    setSupersetNewPickerOpen(false);
+    linkNewExercise(exIdx, newExId, false);
+  };
+
+  // Intensity sheet → Superset → "Existing exercise": links the current
+  // exercise with an already-in-session entry (only offered when that entry
+  // has no completed/skipped working sets yet, see supersetCandidates) by
+  // moving it to sit right after the current exercise and giving both the
+  // same supersetGroup. Reuses reorderSessionEntries (the chip drag-reorder's
+  // splice+currentExIdx math) since this is the same "move an existing entry"
+  // operation, just triggered from the Intensity sheet instead of a drag.
+  const linkExistingSuperset = (targetIdx) => {
+    setSupersetLinkData(null);
+    updateSession(sess => {
+      const motherIdx = sess.currentExIdx || 0;
+      const mother = sess.entries[motherIdx];
+      const target = sess.entries[targetIdx];
+      if (!mother || !target || targetIdx === motherIdx) return sess;
+      const group = mother.supersetGroup || LB.uid();
+      // Match the target's working-set count to the mother's — trim from the
+      // end (working sets are always seeded after any warmups) or pad by
+      // cloning the last working set as a starting suggestion.
+      const motherWorkingCount = mother.sets.filter(s => !s.warmup).length;
+      const targetWorking = target.sets.filter(s => !s.warmup);
+      let sets = target.sets;
+      if (targetWorking.length > motherWorkingCount) {
+        sets = target.sets.slice(0, target.sets.length - (targetWorking.length - motherWorkingCount));
+      } else if (targetWorking.length < motherWorkingCount) {
+        const templateSet = targetWorking[targetWorking.length - 1] || { kg: null, reps: null };
+        const extra = Array.from({ length: motherWorkingCount - targetWorking.length }, () => ({
+          ...templateSet, done: false, skipped: false, technique: null, drops: null,
+        }));
+        sets = [...target.sets, ...extra];
+      }
+      const linkedEntries = sess.entries.map((e, i) => {
+        if (i === targetIdx) return { ...target, supersetGroup: group, sets, plannedSets: sets.filter(s => !s.warmup).length };
+        if (i === motherIdx) return e.supersetGroup === group ? e : { ...e, supersetGroup: group };
+        return e;
+      });
+      const to = targetIdx < motherIdx ? motherIdx : motherIdx + 1;
+      const { entries, currentExIdx } = reorderSessionEntries(linkedEntries, motherIdx, targetIdx, to);
+      return { ...sess, entries, currentExIdx };
+    });
   };
 
   const removeExercise = async () => {
     if (session.entries.length <= 1) return;
     if (!await confirm(`Remove "${entry.name}" from this session?`, { ok: 'Remove', danger: true })) return;
     updateSession(sess => {
-      const newEntries = sess.entries.filter((_, i) => i !== exIdx);
+      const removedGroup = sess.entries[exIdx]?.supersetGroup || null;
+      let newEntries = sess.entries.filter((_, i) => i !== exIdx);
+      // Removing one member can drop a superset/giant-set down to a single
+      // remaining exercise — a "group" of one is meaningless, so clear it
+      // rather than leave a stale supersetGroup nothing else shares.
+      if (removedGroup) {
+        const stillGrouped = newEntries.filter(e => e.supersetGroup === removedGroup);
+        if (stillGrouped.length === 1) {
+          newEntries = newEntries.map(e => e.supersetGroup === removedGroup ? { ...e, supersetGroup: null } : e);
+        }
+      }
       const newIdx = exIdx >= newEntries.length ? newEntries.length - 1 : exIdx;
       return { ...sess, entries: newEntries, currentExIdx: Math.max(0, newIdx) };
     });
@@ -2409,6 +2824,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (newSets !== mesoAdjustedPlan) {
         diffs.push({ type: 'sets', idx: originalIdx, exName: entry.name, oldSets: item.sets, newSets });
       }
+    });
+
+    // Superset link/unlink on matched (already-in-plan) exercises. Needed as
+    // its own diff type because linking two exercises that were already
+    // plan-adjacent produces no swap/sets/reorder diff by itself — without
+    // this, computePlanDiff() would return [] and confirmWithFeel's
+    // `diffs.length > 0` check would skip the "Update plan?" step entirely,
+    // silently dropping the new supersetGroup (the session's own entries
+    // keep it, but the plan the NEXT session seeds from would not).
+    planItems.forEach(({ item, originalIdx }, i) => {
+      if (!matched[i]) return;
+      const entry = matched[i];
+      const planGroup = item.supersetGroup || null;
+      const entryGroup = entry.supersetGroup || null;
+      if (planGroup === entryGroup) return;
+      const partner = entryGroup ? session.entries.find(e => e !== entry && e.supersetGroup === entryGroup) : null;
+      diffs.push({ type: 'superset', idx: originalIdx, exName: entry.name, partnerName: partner?.name || null, linked: !!entryGroup });
     });
 
     // Swaps: pair each unmatched plan item with the unmatched session entry at the same relative position
@@ -2614,6 +3046,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     ? entry.sets.findIndex(s => !s.warmup)
     : currentSetIdx;
   const heroSet = bgSetIdx >= 0 ? entry.sets[bgSetIdx] : null;
+  // Warmups are seeded only onto whichever entry the session-start builder
+  // picked (screens-home.jsx), normally entries[0] — but mid-session superset
+  // linking can now move that entry away from position 0, so the WARMUP
+  // COMPLETE screen below looks it up by content instead of assuming index 0.
+  const warmupEntry = session.entries.find(e => (e.sets || []).some(s => s.warmup)) || session.entries[0];
   // For warmup sets there's no meaningful "last session" comparison
   const prevHeroSet = isCurrentWarmup ? null : (last?.entry?.sets || []).filter(s => !s.warmup)[bgSetIdx >= 0 ? bgSetIdx - warmupCount : 0];
   const progressionTarget = progressionTargetForSet(Math.max(0, bgSetIdx - warmupCount));
@@ -2622,17 +3059,65 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
   const anyMissingData = !isNoWeightReps && workingSetsArr.some(st => !st.done && !st.skipped && ((!isBodyweight && st.kg == null) || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
 
+  // Superset linking (Intensity sheet) is only offered before any working set
+  // in the CURRENT group has started — retroactively linking a partially-run
+  // superset would insert the new exercise's round 0 after rounds the
+  // existing pair already logged, confusing the round-index matching. Not
+  // ungrouped entries: [entry] itself (linking makes a first pair). Two
+  // members: 'giant' (add a third — either mother or the 1st daughter can
+  // initiate, both see this since the check is symmetric). Three members:
+  // capped, button hidden entirely.
+  const supersetGroupMembers = entry.supersetGroup
+    ? session.entries.filter(e => e.supersetGroup === entry.supersetGroup)
+    : [entry];
+  const supersetGroupNotStarted = supersetGroupMembers.every(e => (e.sets || []).filter(s => !s.warmup).every(s => !s.done && !s.skipped));
+  const supersetMode = supersetGroupMembers.length >= 3 ? null : supersetGroupMembers.length === 2 ? 'giant' : 'pair';
+  const supersetEligible = supersetMode != null && supersetGroupNotStarted;
+  const supersetCandidates = session.entries
+    .map((e, i) => ({ e, i }))
+    .filter(({ e, i }) => i !== exIdx && !e.isCardio && !e.supersetGroup
+      && (e.sets || []).filter(s => !s.warmup).every(s => !s.done && !s.skipped));
+
+  // "Add exercise" flow's link-target list: entries eligible to accept the
+  // brand-new exercise as a groupmate. Unlike supersetCandidates above
+  // (which only offers ungrouped entries — growing the CURRENT entry's own
+  // group is handled separately there), a target here may already be paired,
+  // since picking one of an existing pair's members is the only way this
+  // flow can grow it into a giant set. Still excludes cardio, an
+  // already-full (3-member) group, and any group where a member has already
+  // started (retroactively linking would insert the new exercise's round 0
+  // after rounds already logged).
+  const addSupersetCandidates = session.entries
+    .map((e, i) => ({ e, i }))
+    .filter(({ e }) => {
+      if (e.isCardio) return false;
+      const groupMembers = e.supersetGroup ? session.entries.filter(x => x.supersetGroup === e.supersetGroup) : [e];
+      if (groupMembers.length >= 3) return false;
+      return groupMembers.every(m => (m.sets || []).filter(s => !s.warmup).every(s => !s.done && !s.skipped));
+    });
+
   const checkAllSets = async () => {
     if (allWorkingDone || anyMissingData) return;
     if (!await confirm(`Check off all ${workingSetsArr.length} sets and continue?`, { ok: 'Check all' })) return;
+    // Every intensity technique (drop-set, myo-rep, lengthened partials) only
+    // ever completes via its own dedicated FINISH button, which commits data
+    // bulk-check has no way to supply (drop weights, myo minis, partials
+    // count) — leave that one set for the user to finish individually rather
+    // than silently marking it done with none of that data recorded.
+    const skipIdx = lpTarget?.exIdx === exIdx ? lpTarget.setIdx : (dropSetIdx ?? myoSetIdx ?? -1);
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
-        ? { ...e, sets: e.sets.map(st => st.warmup ? st : { ...st, done: true }) }
+        ? { ...e, sets: e.sets.map((st, si) => (st.warmup || si === skipIdx) ? st : { ...st, done: true }) }
         : e),
     }));
-    persistRestStart(Date.now(), restDef);
-    setTimeout(() => navigate(1), 600);
+    if (skipIdx >= 0) { persistRestStart(Date.now(), restDef); return; }
+    // Superset/giant-set aware: jump to whichever partner still has open
+    // sets instead of blindly advancing past the whole group.
+    if (!advanceIntoGroupOrPartner(300)) {
+      persistRestStart(Date.now(), restDef);
+      setTimeout(() => navigate(1), 600);
+    }
   };
 
   const skipWarmup = () => {
@@ -2674,6 +3159,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         <div style={{ position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 100 }} />,
         document.body
       )}
+
+      <CardioPROverlay pr={cardioPR} onDone={() => setCardioPR(null)} />
 
       {/* New best (personal record) overlay */}
       {newBestSet && ReactDOM.createPortal(
@@ -2753,7 +3240,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* Progression unlocked overlay */}
       {progressionUnlocked && ReactDOM.createPortal(
-        <div onClick={() => { setProgressionUnlocked(null); if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); } }} style={{
+        <div onClick={() => setProgressionUnlocked(null)} style={{
           position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 160,
           background: 'var(--bg-body)',
           animation: 'improvedFade 4s ease forwards',
@@ -2811,7 +3298,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <Btn style={{ flex: 1 }} onClick={() => {
                 const s = outlierConfirm.setIdx;
                 setOutlierConfirm(null);
-                completeSet(s, true);
+                const lpExtra = (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === s)
+                  ? { technique: 'lengthened_partial', drops: { partials: lpCount } }
+                  : null;
+                completeSet(s, true, true, lpExtra);
               }}>{(() => {
                 const oc = outlierConfirm;
                 if (oc.kind === 'both') return 'Yes, log it anyway';
@@ -2942,6 +3432,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const chip = (
             <button key={`chip-${i}`}
               data-reorder-item="true"
+              data-ex-idx={i}
               onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
               style={{
                 flexShrink: 0, maxWidth: 110,
@@ -3206,7 +3697,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
                         ...en,
                         sets: en.sets.map((st, si) =>
-                          si === bgSetIdx ? { ...st, kg, done: false }
+                          si === bgSetIdx ? { ...st, kg, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
                           : store.settings?.weightFillDown !== false && si > bgSetIdx && !st.done && !st.warmup ? { ...st, kg }
                           : st
                         ),
@@ -3282,25 +3773,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           )}
           <div className="knurl" style={{ marginBottom: 2 }} />
 
-          {lpTarget?.exIdx === exIdx && (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 8px' }}>
-              <span className="micro-gold">LENGTHENED PARTIALS</span>
-              <button onClick={() => {
-                const si = lpTarget.setIdx;
-                updateSession(sess => ({
-                  ...sess,
-                  entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
-                    ...en,
-                    sets: en.sets.map((st, k) => k === si && st.technique === 'lengthened_partial'
-                      ? { ...st, technique: null, drops: null, updatedAt: new Date().toISOString() }
-                      : st),
-                  }),
-                }));
-                setLpTarget(null);
-              }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
-            </div>
-          )}
-
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {entry.sets.map((s, i) => {
               const isWarmupRow = !!s.warmup;
@@ -3329,6 +3801,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {(() => {
                     const isDropActive = dropSetIdx === i && !s.done;
                     const isMyoActive = myoSetIdx === i && !s.done;
+                    const isLpActive = lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && !s.done;
                     const isIntensityActive = isDropActive || isMyoActive;
                     return (
                     <div data-kb-row={i} style={{
@@ -3349,14 +3822,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
                       {isIntensityActive ? null : isNoWeightReps ? <div /> : (
-                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match') && s.done
+                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match' || s.technique === 'lengthened_partial') && s.done
                           ? <span style={{
                               display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
                               fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
                               background: 'rgba(var(--accent-rgb),0.12)',
                               border: '0.5px solid rgba(var(--accent-rgb),0.35)',
                               borderRadius: 4, padding: '2px 6px',
-                            }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : 'MYO REP'}</span>
+                            }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : s.technique === 'myorep' ? 'MYO REP' : 'PARTIALS'}</span>
                           : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                               {isWarmupRow
                                 ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
@@ -3377,7 +3850,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
                             ...en,
                             sets: en.sets.map((st, si) =>
-                              si === i ? { ...st, kg, done: false }
+                              si === i ? { ...st, kg, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
                               : store.settings?.weightFillDown !== false && si > i && !st.done && !st.warmup ? { ...st, kg }
                               : st
                             ),
@@ -3394,7 +3867,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                       ))}
 
-                      {!isIntensityActive && <button
+                      {!isIntensityActive && !isLpActive && <button
                         data-complete-btn
                         onPointerDown={e => { _log(`row${i} pointerdown done=${s.done}`); e.stopPropagation(); }}
                         onClick={() => {
@@ -3405,8 +3878,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             const globalDelta = now - (lastCompleteRef.current || 0);
                             const rowDelta = now - (recentCompleteRef.current[i] || 0);
                             _log(`row${i} uncheck? globalΔ=${globalDelta}ms rowΔ=${rowDelta}ms`);
-                            if (globalDelta < 2000) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
-                            if (rowDelta < 3000) { _log(`row${i} BLOCKED by row guard (${rowDelta}ms)`); return; }
+                            // These windows exist only to swallow iOS ghost-clicks, which land
+                            // 200-400ms after the real one (see recentCompleteRef/lastCompleteRef
+                            // above) — 2000/3000ms was several seconds wider than that, so a
+                            // genuine, deliberate uncheck right after completing a set silently
+                            // did nothing for up to 3 full seconds.
+                            if (globalDelta < 400) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
+                            if (rowDelta < 600) { _log(`row${i} BLOCKED by row guard (${rowDelta}ms)`); return; }
                             _log(`row${i} UNCHECK → updateSet done:false`);
                             updateSet(i, { done: false });
                             return;
@@ -3414,7 +3892,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           if (dropSetIdx === i || myoSetIdx === i) return;
                           if (!isNoWeightReps && !isBodyweight && s.kg == null) return;
                           _log(`row${i} → completeSet`);
-                          completeSet(i);
+                          completeSet(i, false, true);
                         }}
                         disabled={!s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)))}
                         style={{
@@ -3429,6 +3907,38 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         }}>{s.skipped ? '×' : '✓'}</button>}
 
                     </div>
+                    );
+                  })()}
+                  {lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && !s.done && (() => {
+                    const missingData = !isNoWeightReps && ((!isBodyweight && s.kg == null) || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)));
+                    return (
+                      <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
+                          <span className="micro-gold">LENGTHENED PARTIALS</span>
+                          <button onClick={() => { setLpTarget(null); setLpCount(0); }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px 10px' }}>
+                          <span className="micro" style={{ color: UI.inkFaint }}>Partials in the stretch</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <button onClick={() => setLpCount(c => Math.max(0, c - 1))} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
+                            <span className="num" style={{ fontSize: 18, minWidth: 16, textAlign: 'center', color: lpCount > 0 ? UI.gold : UI.inkFaint }}>{lpCount}</span>
+                            <button onClick={() => setLpCount(c => c + 1)} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>+</button>
+                          </div>
+                        </div>
+                        <div style={{ padding: '0 4px 10px' }}>
+                          <button onClick={() => finishLengthenedPartial(i)}
+                            disabled={missingData}
+                            style={{
+                              width: '100%', padding: '8px 0',
+                              background: missingData ? 'transparent' : 'rgba(var(--accent-rgb),0.12)',
+                              border: `1px solid ${missingData ? UI.hair : 'rgba(var(--accent-rgb),0.5)'}`,
+                              borderRadius: 6, color: missingData ? UI.inkGhost : 'var(--accent)',
+                              fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                              cursor: missingData ? 'default' : 'pointer',
+                              WebkitTapHighlightColor: 'transparent',
+                            }}>✓ FINISH</button>
+                        </div>
+                      </div>
                     );
                   })()}
                   {dropSetIdx === i && !s.done && (
@@ -3482,6 +3992,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                         );
                       })}
+                      {(() => {
+                        const canFinishDrop = !!dropDrops[0]?.reps && (isNoWeightReps || isBodyweight || dropDrops[0]?.kg != null);
+                        return (
                       <div data-drop-actions style={{ display: 'flex', gap: 8, padding: '4px 4px 10px', scrollMarginBottom: 260 }}>
                         <button onClick={() => {
                           const newIdx = dropDropsRef.current.length;
@@ -3494,17 +4007,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                         }}>↓ ADD DROP</button>
                         <button onClick={() => finishDropSet(dropDropsRef.current)}
-                          disabled={!dropDrops[0]?.reps}
+                          disabled={!canFinishDrop}
                           style={{
                             flex: 2, padding: '8px 0',
-                            background: dropDrops[0]?.reps ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-                            border: `1px solid ${dropDrops[0]?.reps ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
-                            borderRadius: 6, color: dropDrops[0]?.reps ? 'var(--accent)' : UI.inkGhost,
+                            background: canFinishDrop ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                            border: `1px solid ${canFinishDrop ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                            borderRadius: 6, color: canFinishDrop ? 'var(--accent)' : UI.inkGhost,
                             fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                            cursor: dropDrops[0]?.reps ? 'pointer' : 'default',
+                            cursor: canFinishDrop ? 'pointer' : 'default',
                             WebkitTapHighlightColor: 'transparent',
                           }}>✓ FINISH</button>
                       </div>
+                        );
+                      })()}
                     </div>
                   )}
                   {s.technique === 'drop' && s.done && (s.drops || []).length > 1 && (
@@ -3532,7 +4047,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {myoSetIdx === i && !s.done && (() => {
                     const myoTotalReps = myoDrops.reduce((acc, d) => acc + (d.reps || 0), 0);
                     const myoProgress = myoTarget ? Math.min(1, myoTotalReps / myoTarget) : 0;
-                    const canFinish = myoDrops.length >= 2 && myoDrops[0]?.reps != null;
+                    const canFinish = myoDrops.length >= 2 && myoDrops[0]?.reps != null && (isNoWeightReps || isBodyweight || myoDrops[0]?.kg != null);
                     const activationDone = myoDrops[0]?.reps != null;
                     return (
                       <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
@@ -3667,13 +4182,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       {(() => { const t = (s.drops || []).reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? <div style={{ marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>Total {t}</div> : null; })()}
                     </div>
                   )}
-                  {lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && s.done && !s.warmup && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '2px 4px 8px' }}>
-                      <span style={{ gridColumn: 'span 2', fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, padding: '4px 0', textAlign: 'center' }}>PARTIALS</span>
-                      <div style={{ gridColumn: 'span 3', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <button onClick={() => setPartials(i, Math.max(0, (s.drops?.partials || 0) - 1))} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
-                        <span className="num" style={{ fontSize: 18, color: (s.drops?.partials || 0) > 0 ? UI.gold : UI.inkFaint }}>{s.drops?.partials || 0}</span>
-                        <button onClick={() => setPartials(i, (s.drops?.partials || 0) + 1)} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>+</button>
+                  {/* Committed lengthened-partial count — read-only, like the myo-rep total tag below */}
+                  {s.technique === 'lengthened_partial' && s.done && !s.warmup && (s.drops?.partials || 0) > 0 && (
+                    <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8 }}>
+                      <div style={{ display: 'inline-block', padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
+                        {s.drops.partials} partial{s.drops.partials === 1 ? '' : 's'}
                       </div>
                     </div>
                   )}
@@ -3987,11 +4500,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* intensity technique picker */}
       <Sheet open={intensityOpen} onClose={() => setIntensityOpen(false)} title="Intensity">
         {(() => {
+          // Exactly one intensity technique can be "in flight" at a time —
+          // picking one always clears any other left unfinished (e.g. the
+          // user opened Intensity, picked Drop Set, then reopened Intensity
+          // on the same still-unfinished set and picked Myo-Rep instead).
+          // Without this, both sub-panels could end up targeting the same
+          // row simultaneously.
+          const clearDrop = () => { setDropSetIdx(null); setDropDrops([]); };
+          const clearMyo = () => { setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); };
+          const clearLp = () => { setLpTarget(null); setLpCount(0); };
           const startDrop = () => {
             const target = currentSetIdx >= 0
               ? currentSetIdx
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
+            clearMyo(); clearLp();
             const s = entry.sets[target];
             const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null }];
             setDropDrops(initDrops);
@@ -4005,6 +4528,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               ? currentSetIdx
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
+            clearDrop(); clearLp();
             const s = entry.sets[target];
             const anchor = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
             // For match: activation kg locked to the preceding myo set's activation kg
@@ -4033,6 +4557,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           });
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {/* Superset / Giant Set — structural (links this exercise with
+                  another), not a set-completion technique like the three
+                  below, so it's only offered before the whole current group
+                  has started. Listed first: the most recognized technique. */}
+              {supersetEligible && (
+                <button onClick={() => {
+                  setIntensityOpen(false);
+                  if (supersetCandidates.length === 0) setSupersetNewPickerOpen(true);
+                  else setSupersetLinkData({});
+                }} style={btnBase(true)}>
+                  <i className="fa-solid fa-link" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>{supersetMode === 'giant' ? 'GIANT SET' : 'SUPERSET'}</div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>{supersetMode === 'giant' ? 'Add a third exercise to the rotation, no rest between' : 'Pair with another exercise, no rest between'}</div>
+                  </div>
+                </button>
+              )}
               {/* Drop Set */}
               <button onClick={startDrop} style={btnBase(true)}>
                 <i className="fa-solid fa-angles-down" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
@@ -4047,7 +4588,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   ? currentSetIdx
                   : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
                 if (target < 0) return;
+                clearDrop(); clearMyo();
                 setLpTarget({ exIdx, setIdx: target });
+                setLpCount(0);
                 setIntensityOpen(false);
               }} style={btnBase(true)}>
                 <i className="fa-solid fa-arrow-down-long" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
@@ -4081,6 +4624,38 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           );
         })()}
       </Sheet>
+
+      {/* superset-link modal (from Intensity): step 1 existing-vs-new, step 2 pick existing */}
+      {supersetLinkData && (
+        <Sheet open={true} onClose={() => setSupersetLinkData(null)} title={supersetMode === 'giant' ? 'Giant Set' : 'Superset'}>
+          {!supersetLinkData.picking ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.inkSoft, lineHeight: 1.5 }}>
+                Link "{entry.name}" with an existing exercise, or add a new one?
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn kind="ghost" onClick={() => setSupersetLinkData(d => ({ ...d, picking: true }))} style={{ flex: 1 }}>Existing</Btn>
+                <Btn onClick={() => { setSupersetLinkData(null); setSupersetNewPickerOpen(true); }} style={{ flex: 1 }}>New</Btn>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {supersetCandidates.map(({ e, i }) => (
+                <button key={i} onClick={() => linkExistingSuperset(i)} style={{
+                  padding: '14px 0', textAlign: 'left', background: 'none', border: 'none',
+                  borderBottom: `1px solid ${UI.hair}`, cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <span className="micro" style={{ display: 'block', marginBottom: 3, color: UI.inkFaint }}>EX {String(i + 1).padStart(2, '0')}</span>
+                  <span style={{ fontFamily: UI.fontDisplay, fontSize: 15, color: UI.ink }}>{e.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </Sheet>
+      )}
+
+      {supersetNewPickerOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSupersetNewPickerOpen(false)} onPick={doLinkNewExerciseSuperset} singleSelect />}
 
       {/* session note editor */}
       <Sheet open={sessionNoteOpen} onClose={() => setSessionNoteOpen(false)} title="Session note">
@@ -4143,6 +4718,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     {d.supersetWithName && <span>{' · superset with '}<strong style={{ color: UI.ink }}>{d.supersetWithName}</strong></span>}
                   </span>
                 </>
+              ) : d.type === 'superset' ? (
+                <>
+                  <span style={{ color: UI.goldLight, fontSize: 14 }}>⟷</span>
+                  <span style={{ color: UI.inkSoft }}>
+                    <strong style={{ color: UI.ink }}>{d.exName}</strong>
+                    {d.linked
+                      ? <>{' · superset with '}<strong style={{ color: UI.ink }}>{d.partnerName}</strong></>
+                      : ' · superset removed'}
+                  </span>
+                </>
               ) : d.type === 'reorder' ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3, width: '100%' }}>
                   {d.moves.map((m, mi) => (
@@ -4191,7 +4776,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {session.entries.map((e, i) => (
+              {addSupersetCandidates.map(({ e, i }) => (
                 <button key={i} onClick={() => confirmAdd(i)} style={{
                   padding: '14px 0', textAlign: 'left', background: 'none', border: 'none',
                   borderBottom: `1px solid ${UI.hair}`, cursor: 'pointer',
@@ -4378,10 +4963,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
           {/* Exercise name */}
           <div className="display-it" style={{
-            fontSize: session.entries[0]?.name.length > 22 ? 22 : 30,
+            fontSize: warmupEntry?.name.length > 22 ? 22 : 30,
             color: UI.ink, lineHeight: 1.05,
             textAlign: 'center', marginBottom: 48,
-          }}>{session.entries[0]?.name}</div>
+          }}>{warmupEntry?.name}</div>
 
           {/* Big countdown */}
           <div className="num" style={{
@@ -4487,7 +5072,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ].map(opt => (
           <button key={opt.key} onClick={() => handleJointAnswer(opt.key)} style={{
             width: '100%', marginBottom: 8, padding: '12px 14px',
-            background: UI.bgInset, border: `1px solid ${opt.key === 'sharp' ? 'rgba(var(--danger-rgb, 220,53,69),0.4)' : UI.hairStrong}`,
+            background: UI.bgInset, border: `1px solid ${opt.key === 'sharp' ? 'rgba(var(--danger-rgb),0.4)' : UI.hairStrong}`,
             borderRadius: 6, cursor: 'pointer', textAlign: 'left',
             WebkitTapHighlightColor: 'transparent',
           }}>
@@ -4564,7 +5149,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: UI.ink }}>{item.name}</span>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 {item.setDelta !== 0 && (
-                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.setDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb,220,53,69),0.9)' }}>
+                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.setDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)' }}>
                     {item.setDelta > 0 ? '+' : ''}{item.setDelta} set
                   </span>
                 )}

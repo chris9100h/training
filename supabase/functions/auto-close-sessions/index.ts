@@ -62,10 +62,32 @@ Deno.serve(async (req) => {
       );
       const sets: { updated_at: string }[] = await setsRes.json().catch(() => []);
       const hasSets = sets.length > 0;
-      const lastActivity = hasSets ? new Date(sets[0].updated_at) : new Date(sess.started_at);
+      // started_at is legitimately NULL until the last warmup set completes
+      // ("start with warmup"), but the seeded sets themselves sync right
+      // away — so hasSets is true well before started_at is ever set. Prefer
+      // the real set timestamp whenever one exists; only fall back to
+      // started_at (and then to "now", i.e. not yet inactive) when there's
+      // truly no activity of any kind to go on.
+      const lastActivity = hasSets ? new Date(sets[0].updated_at) : (sess.started_at ? new Date(sess.started_at) : now);
 
       const minutesInactive = (now.getTime() - lastActivity.getTime()) / 60000;
       if (minutesInactive < timeoutMin) continue;
+
+      // A session that isn't this user's currently-tracked in-progress one is
+      // an orphan (lost cross-device start race, or a local abandon/delete
+      // that hasn't synced yet) — the client's own boot reconciliation
+      // (store.js loadFromSupabase) silently deletes any such session rather
+      // than treating it as real, so mirror that here instead of "closing"
+      // it with a real notification for a workout the user never left open.
+      const isTracked = sett?.in_progress_session_id === sess.id;
+      if (!isTracked) {
+        await dbFetch(`zane_sets?session_id=eq.${sess.id}`, { method: 'DELETE' });
+        await dbFetch(`zane_session_entries?session_id=eq.${sess.id}`, { method: 'DELETE' });
+        await dbFetch(`zane_sessions?id=eq.${sess.id}`, { method: 'DELETE' });
+        console.log(`[auto-close] deleted untracked orphan session ${sess.id}`);
+        deleted++;
+        continue;
+      }
 
       if (!hasSets) {
         // Butt start — delete everything silently
@@ -75,15 +97,20 @@ Deno.serve(async (req) => {
         console.log(`[auto-close] deleted butt-start session ${sess.id}`);
         deleted++;
       } else {
-        // Has sets — close with ended = last set's updated_at
-        const startedAt = new Date(sess.started_at);
-        const durationMinutes = Math.round((lastActivity.getTime() - startedAt.getTime()) / 60000);
+        // Has sets — close with ended = last set's updated_at. started_at is
+        // legitimately NULL until the last warmup set completes ("start with
+        // warmup"), so a session abandoned mid-warmup has no real start time
+        // to compute a duration from — leave duration_minutes unset rather
+        // than let `new Date(null)` (epoch 1970) silently produce a
+        // multi-million-minute duration.
+        const startedAt = sess.started_at ? new Date(sess.started_at) : null;
+        const durationMinutes = startedAt ? Math.round((lastActivity.getTime() - startedAt.getTime()) / 60000) : null;
         await dbFetch(`zane_sessions?id=eq.${sess.id}`, {
           method: 'PATCH',
           headers: { 'Prefer': 'return=minimal' },
-          body: JSON.stringify({ ended: lastActivity.toISOString(), duration_minutes: durationMinutes }),
+          body: JSON.stringify({ ended: lastActivity.toISOString(), ...(durationMinutes != null ? { duration_minutes: durationMinutes } : {}) }),
         });
-        console.log(`[auto-close] closed session ${sess.id} (${durationMinutes} min)`);
+        console.log(`[auto-close] closed session ${sess.id} (${durationMinutes ?? 'unknown'} min)`);
 
         // Write notification for next app start
         await dbFetch(`zane_user_settings?user_id=eq.${sess.user_id}`, {
@@ -99,7 +126,9 @@ Deno.serve(async (req) => {
         });
 
         if (sett?.push_enabled) {
-          const msg = `Session auto-ended after ${timeoutMin} min of inactivity (${durationMinutes} min total).`;
+          const msg = durationMinutes != null
+            ? `Session auto-ended after ${timeoutMin} min of inactivity (${durationMinutes} min total).`
+            : `Session auto-ended after ${timeoutMin} min of inactivity.`;
           if (sett.pushover_user_key) {
             await sendPushover(sett.pushover_user_key, sess.user_id, msg);
           }

@@ -388,10 +388,12 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [confirmDeletePeriodId, setConfirmDeletePeriodId] = useStateSet(null);
   const [budgetSheet, setBudgetSheet] = useStateSet(false);
   const [budgetDraft, setBudgetDraft] = useStateSet(20);
-  const [recentSignups, setRecentSignups] = useStateSet([]);
-  const [signupsSheet, setSignupsSheet] = useStateSet(false);
-  const [onboardedUsers, setOnboardedUsers] = useStateSet([]);
-  const [onboardedSheet, setOnboardedSheet] = useStateSet(false);
+  const [allUsers, setAllUsers] = useStateSet([]);
+  const [allUsersSheet, setAllUsersSheet] = useStateSet(false);
+  const [allUsersSearch, setAllUsersSearch] = useStateSet('');
+  const [allUsersNewOnly, setAllUsersNewOnly] = useStateSet(false);
+  const [allUsersOnboardedOnly, setAllUsersOnboardedOnly] = useStateSet(false);
+  const [allUsersOutdatedOnly, setAllUsersOutdatedOnly] = useStateSet(false);
   const [adminUserDetail, setAdminUserDetail] = useStateSet(null); // { userId, name, plans }
   const [adminUserDetailLoading, setAdminUserDetailLoading] = useStateSet(false);
   const [adminUserDetailSheet, setAdminUserDetailSheet] = useStateSet(false);
@@ -411,7 +413,6 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [importSourceUnit, _setImportSourceUnit] = useStateSet(store.settings?.unit || 'kg');
   const importSourceUnitRef = useRefSet(store.settings?.unit || 'kg');
   const setImportSourceUnit = v => { importSourceUnitRef.current = v; _setImportSourceUnit(v); };
-  const [swVersion, setSwVersion] = useStateSet('');
   const [pushStatus, setPushStatus] = useStateSet(null);
   const [pushEnabled, setPushEnabled] = useStateSet(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
   const [pushKeyDraft, setPushKeyDraft] = useStateSet('');
@@ -481,6 +482,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const [vipBgSaving, setVipBgSaving] = useStateSet(false);
   const [vipBgMsg, setVipBgMsg] = useStateSet(null);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
+  // Detected/reported in app.jsx (boot, foreground, controllerchange) — this
+  // screen only reads it for display, so it stays fresh even if Settings is
+  // never opened.
+  const swVersion = store.settings?.swVersion || '';
 
   useEffectSet(() => {
     if (openSupportInbox && isAdmin) setSupportInboxSheet(true);
@@ -505,11 +510,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const iv = setInterval(() => { loadSessions(); setNowS(Date.now()); }, 2000);
     return () => { mounted = false; clearInterval(iv); };
   }, [hasActiveUsersAccess, isAdmin]);
-
-  useEffectSet(() => {
-    if (!('caches' in window)) return;
-    caches.keys().then(keys => { const name = keys.find(k => k.startsWith('zane-')); if (name) setSwVersion(name.replace('zane-', '')); });
-  }, []);
 
   useEffectSet(() => {
     if (!pushSheet) return;
@@ -621,7 +621,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     return () => { mounted = false; clearInterval(poll); };
   }, [supportTicket]);
 
-  // Admin-only: load all admin state on mount (signup config, sign-ups, support inbox).
+  // Admin-only: load all admin state on mount (signup config, support inbox).
   useEffectSet(() => {
     if (!isAdmin) return;
     let mounted = true;
@@ -631,21 +631,38 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       setSignupApproval(row ? row.requires_approval !== false : true);
       setAutoApproveLeft(row ? (row.auto_approve_remaining ?? null) : null);
     }).catch(() => {});
-    LB.supabase.rpc('get_recent_signups', { p_limit: 50 }).then(({ data, error }) => { if (mounted && !error) setRecentSignups(data || []); }).catch(() => {});
-    LB.supabase.rpc('get_users_with_plans').then(({ data, error }) => { if (mounted && !error) setOnboardedUsers(data || []); }).catch(() => {});
     LB.supabase.rpc('get_support_chats').then(({ data }) => { if (mounted) setSupportInbox(data || []); }).catch(() => {});
     return () => { mounted = false; };
   }, [isAdmin]);
 
-  // Admin-only: recent sign-ups feed + support inbox. Reloaded each time Account or Admin sheet opens.
+  // Admin-only: support inbox. Reloaded each time Account or Admin sheet opens.
   useEffectSet(() => {
     if (!isAdmin || (!accountSheet && !adminSheet)) return;
     let mounted = true;
-    LB.supabase.rpc('get_recent_signups', { p_limit: 50 }).then(({ data, error }) => { if (mounted && !error) setRecentSignups(data || []); }).catch(() => {});
-    LB.supabase.rpc('get_users_with_plans').then(({ data, error }) => { if (mounted && !error) setOnboardedUsers(data || []); }).catch(() => {});
     LB.supabase.rpc('get_support_chats').then(({ data }) => { if (mounted) setSupportInbox(data || []); }).catch(() => {});
     return () => { mounted = false; };
   }, [isAdmin, accountSheet, adminSheet]);
+
+  // Admin-only: full user list (name/email/last-known SW version/plan count)
+  // — the single source for the unseen-signup badge (computed from it) and
+  // the All-users sheet, which folds in what used to be the separate Recent
+  // Sign-ups/Onboarded views as client-side filters. Loaded on mount and
+  // refreshed whenever Account/Admin opens, so the badge stays current.
+  useEffectSet(() => {
+    if (!isAdmin) return;
+    let mounted = true;
+    LB.supabase.rpc('get_all_users_admin').then(({ data, error }) => { if (mounted && !error) setAllUsers(data || []); }).catch(() => {});
+    return () => { mounted = false; };
+  }, [isAdmin, accountSheet, adminSheet]);
+
+  // Admin-only: re-fetch every time the All-users sheet itself is opened, so
+  // it never shows a stale snapshot from whenever the badge last refreshed.
+  useEffectSet(() => {
+    if (!isAdmin || !allUsersSheet) return;
+    let mounted = true;
+    LB.supabase.rpc('get_all_users_admin').then(({ data, error }) => { if (mounted && !error) setAllUsers(data || []); }).catch(() => {});
+    return () => { mounted = false; };
+  }, [isAdmin, allUsersSheet]);
 
   useEffectSet(() => {
     if (!isAdmin || !vipBgSheet) return;
@@ -1283,7 +1300,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `0.5px solid ${UI.hair}`, background: UI.bg }}>
         <Btn kind="ghost" onClick={async () => { if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); } window.location.reload(true); }}>Clear cache &amp; reload</Btn>
         {isAdmin ? (() => {
-          const unseenCount = recentSignups.filter(u => !seenSignups.has(u.user_id)).length;
+          const unseenCount = allUsers.filter(u => !seenSignups.has(u.user_id)).length;
           const adminUnread = supportInbox.reduce((sum, t) => sum + Number(t.unread_count || 0), 0);
           const hasBadge = unseenCount > 0 || adminUnread > 0;
           return (
@@ -1967,6 +1984,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           const plateSizes  = isLbs ? PLATE_SIZE_LBS   : PLATE_SIZE_KG;
           const current = store.settings?.equipmentConfig?.[invKey] ?? allPlates;
           const toggle = (p) => {
+            // The plate calculator's correction math indexes the smallest
+            // available plate (plateSet[plateSet.length - 1]) — an empty
+            // inventory turns that into NaN throughout. Refuse to deselect
+            // the last remaining plate instead of allowing an empty set.
+            if (current.includes(p) && current.length <= 1) return;
             const newInv = current.includes(p)
               ? current.filter(x => x !== p)
               : [...current, p].sort((a, b) => b - a);
@@ -2023,7 +2045,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Admin sheet ══ */}
       <SettingsSheet open={adminSheet} onClose={() => setAdminSheet(false)} title={'Admin'}>
         {(() => {
-          const unseenCount = recentSignups.filter(u => !seenSignups.has(u.user_id)).length;
+          const unseenCount = allUsers.filter(u => !seenSignups.has(u.user_id)).length;
           const adminUnread = supportInbox.reduce((sum, t) => sum + Number(t.unread_count || 0), 0);
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -2042,8 +2064,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4, lineHeight: 1.5, paddingBottom: 8 }}>
                   Open registration for a batch — auto-approved until used up, then turns back on.
                 </div>
-                <NavRow label="Recent sign-ups" hint={unseenCount > 0 ? `${unseenCount} new` : `${recentSignups.length}`} onTap={() => setSignupsSheet(true)} />
-                <NavRow label="Onboarded" hint={`${onboardedUsers.length}`} onTap={() => setOnboardedSheet(true)} />
+                <NavRow label="All users" hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
               </Frame>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
@@ -2559,70 +2580,91 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       </FullSheet>
 
 
-      {/* ══ Recent sign-ups sheet (admin) ══ */}
-      <SettingsSheet open={signupsSheet} onClose={() => setSignupsSheet(false)} title="Recent sign-ups">
+      {/* ══ All users sheet (admin) ══ — folds in what used to be separate
+          Recent sign-ups (New sign-ups only filter) and Onboarded (Onboarded
+          only filter) sheets, plus the SW-version lookup. */}
+      <SettingsSheet open={allUsersSheet} onClose={() => setAllUsersSheet(false)} title="All users">
         {(() => {
-          const unseen = recentSignups.filter(u => !seenSignups.has(u.user_id));
-          if (unseen.length === 0) {
-            return <div className="micro" style={{ color: UI.inkGhost, padding: '4px 0 12px' }}>Nothing new — you're all caught up.</div>;
-          }
+          const q = allUsersSearch.trim().toLowerCase();
+          const filtered = allUsers.filter(u => {
+            if (allUsersNewOnly && seenSignups.has(u.user_id)) return false;
+            if (allUsersOnboardedOnly && !(u.plan_count > 0)) return false;
+            if (allUsersOutdatedOnly && swVersion && u.sw_version === swVersion) return false;
+            if (!q) return true;
+            return (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
+          });
+          const openUserDetail = (u) => {
+            setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, plans: null, exercises: null });
+            setAdminUserDetailLoading(true);
+            setAdminUserDetailSheet(true);
+            LB.supabase.rpc('get_user_detail_admin', { p_user_id: u.user_id })
+              .then(({ data, error }) => {
+                if (error || !data) { setAdminUserDetailLoading(false); return; }
+                setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, activeScheduleId: data.active_schedule_id || null, plans: data.plans || [] });
+                setAdminUserDetailLoading(false);
+              }).catch(() => setAdminUserDetailLoading(false));
+          };
           return (
-            <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
-              {unseen.map((u, i) => (
-                <div key={u.user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
-                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, color: UI.inkSoft }}>{(u.name || u.email || '?')[0].toUpperCase()}</span>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</span>
-                      <span className="micro" style={{ flexShrink: 0, color: u.approved ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.75)' }}>{u.approved ? 'ACTIVE' : 'PENDING'}</span>
-                    </div>
-                    <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email} · {fmtAgo(u.created_at)}</div>
-                  </div>
-                  <button onClick={() => markSignupSeen(u.user_id)} style={{ ...accentBtn, padding: '5px 10px' }}>Got it</button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <input
+                value={allUsersSearch}
+                onChange={e => setAllUsersSearch(e.target.value)}
+                placeholder="Search by name or email…"
+                style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
+              />
+              <Frame style={{ padding: '0 14px' }}>
+                <Row label="New sign-ups only" first>
+                  <Toggle on={allUsersNewOnly} onToggle={() => setAllUsersNewOnly(v => !v)} />
+                </Row>
+                <Row label="Onboarded only">
+                  <Toggle on={allUsersOnboardedOnly} onToggle={() => setAllUsersOnboardedOnly(v => !v)} />
+                </Row>
+                <Row label="Outdated version only">
+                  <Toggle on={allUsersOutdatedOnly} onToggle={() => setAllUsersOutdatedOnly(v => !v)} />
+                </Row>
+              </Frame>
+              {allUsersOutdatedOnly && !swVersion && (
+                <div className="micro" style={{ color: UI.inkFaint }}>Your own version isn't known yet — this device hasn't reported one.</div>
+              )}
+              <div className="micro" style={{ color: UI.inkGhost }}>{filtered.length} of {allUsers.length}{swVersion ? ` · you're on ${swVersion}` : ''}</div>
+              {filtered.length === 0 ? (
+                <div className="micro" style={{ color: UI.inkGhost, padding: '4px 0 12px' }}>No matching users.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+                  {filtered.map((u, i) => {
+                    const isCurrent = swVersion && u.sw_version === swVersion;
+                    const isNew = !seenSignups.has(u.user_id);
+                    return (
+                      <div key={u.user_id} onClick={() => openUserDetail(u)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                        <div style={{ width: 34, height: 34, borderRadius: '50%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, color: UI.inkSoft }}>{(u.name || u.email || '?')[0].toUpperCase()}</span>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</span>
+                            <span className="micro" style={{ flexShrink: 0, color: u.approved ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.75)' }}>{u.approved ? 'ACTIVE' : 'PENDING'}</span>
+                            {isNew && <span className="micro" style={{ flexShrink: 0, color: UI.gold }}>NEW</span>}
+                          </div>
+                          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {u.email} · joined {fmtAgo(u.created_at)} · {u.plan_count} {u.plan_count === 1 ? 'plan' : 'plans'}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5, flexShrink: 0 }}>
+                          <span className="num" style={{ fontSize: 11, color: !u.sw_version ? UI.inkGhost : isCurrent ? UI.inkFaint : UI.gold }}>
+                            {u.sw_version || '—'}
+                          </span>
+                          {isNew && (
+                            <button onClick={e => { e.stopPropagation(); markSignupSeen(u.user_id); }} style={{ ...accentBtn, padding: '3px 8px', fontSize: 9 }}>Got it</button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
+              )}
             </div>
           );
         })()}
-      </SettingsSheet>
-
-      {/* ══ Onboarded users sheet (admin) ══ */}
-      <SettingsSheet open={onboardedSheet} onClose={() => setOnboardedSheet(false)} title="Onboarded">
-        {onboardedUsers.length === 0
-          ? <div className="micro" style={{ color: UI.inkGhost, padding: '4px 0 12px' }}>No users with plans yet.</div>
-          : (
-            <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
-              <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 10 }}>{onboardedUsers.length} users with at least one plan</div>
-              {onboardedUsers.map((u, i) => (
-                <button key={u.user_id} onClick={() => {
-                  setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, plans: null, exercises: null });
-                  setAdminUserDetailLoading(true);
-                  setAdminUserDetailSheet(true);
-                  LB.supabase.rpc('get_user_detail_admin', { p_user_id: u.user_id })
-                    .then(({ data, error }) => {
-                      if (error || !data) { setAdminUserDetailLoading(false); return; }
-                      setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, activeScheduleId: data.active_schedule_id || null, plans: data.plans || [] });
-                      setAdminUserDetailLoading(false);
-                    }).catch(() => setAdminUserDetailLoading(false));
-                }} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, color: UI.inkSoft }}>{(u.name || u.email || '?')[0].toUpperCase()}</span>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</span>
-                      <span className="micro" style={{ flexShrink: 0, color: u.approved ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.75)' }}>{u.approved ? 'ACTIVE' : 'PENDING'}</span>
-                    </div>
-                    <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email} · joined {fmtAgo(u.joined_at)}</div>
-                  </div>
-                  <span className="micro" style={{ color: UI.inkSoft, flexShrink: 0 }}>{u.plan_count} {u.plan_count === 1 ? 'plan' : 'plans'}</span>
-                </button>
-              ))}
-            </div>
-          )
-        }
       </SettingsSheet>
 
       {/* ══ User detail sheet (admin — plans list) ══ */}

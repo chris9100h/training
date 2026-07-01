@@ -464,6 +464,24 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                 </div>
                 {(() => {
                   const storeWithoutToday = { ...clientStore, sessions: clientStore.sessions.filter(s => s.ended && s.ended < todaySession.ended) };
+                  // See ClientSessionsTab's fmtSetChip — same gap, same fix.
+                  const fmtSetChip = (s) => {
+                    const drops = s.drops && Array.isArray(s.drops) && s.drops.length > 0 ? s.drops : null;
+                    if (s.technique === 'drop' && drops) {
+                      return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+                    }
+                    if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
+                      const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
+                      const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
+                      return `${chain} (${total})`;
+                    }
+                    if (s.technique === 'lengthened_partial') {
+                      const partials = s.drops?.partials || 0;
+                      const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
+                      return partials > 0 ? `${main} +${partials}` : main;
+                    }
+                    return `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
+                  };
                   return (todaySession.entries || []).map((e, i) => {
                     const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutToday, e.exId, todaySession.dayId) : null;
                     const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null));
@@ -484,7 +502,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                                 borderRadius: 4, padding: '2px 8px',
                                 border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
                               }}>
-                                {s.kg ?? '—'}{unit} × {s.reps ?? s.repsL ?? '—'}
+                                {fmtSetChip(s)}
                               </span>
                             );
                           })}
@@ -494,7 +512,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                             <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
                             {lastSets.map((s, j) => (
                               <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `0.5px solid ${UI.hair}` }}>
-                                {s.kg ?? '—'}{unit} × {s.reps ?? s.repsL ?? '—'}
+                                {fmtSetChip(s)}
                               </span>
                             ))}
                             <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
@@ -1257,6 +1275,27 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
           {(selected.entries || []).map((e, i) => {
             const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutSelected, e.exId, selected.dayId) : null;
             const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null));
+            // This compact coach/self-coaching view had no intensity-technique
+            // awareness at all — a drop-set/myo-rep/lengthened-partial set just
+            // showed its main kg×reps (drops[0] mirrors the top-level fields)
+            // with the rest of the technique's data silently invisible.
+            const fmtSetChip = (s) => {
+              const drops = s.drops && Array.isArray(s.drops) && s.drops.length > 0 ? s.drops : null;
+              if (s.technique === 'drop' && drops) {
+                return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+              }
+              if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
+                const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
+                const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
+                return `${chain} (${total})`;
+              }
+              if (s.technique === 'lengthened_partial') {
+                const partials = s.drops?.partials || 0;
+                const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
+                return partials > 0 ? `${main} +${partials}` : main;
+              }
+              return `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
+            };
             return (
               <div key={i}
                 onClick={() => e.exId && selected.dayId && setHistEx({ exId: e.exId, dayId: selected.dayId, exName: e.name })}
@@ -1279,7 +1318,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                         borderRadius: 4, padding: '2px 8px',
                         border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
                       }}>
-                        {s.kg ?? '—'}{unit} × {s.reps ?? s.repsL ?? '—'}
+                        {fmtSetChip(s)}
                       </span>
                     );
                   })}
@@ -1289,7 +1328,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                     <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
                     {lastSets.map((s, j) => (
                       <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `0.5px solid ${UI.hair}` }}>
-                        {s.kg ?? '—'}{unit} × {s.reps ?? s.repsL ?? '—'}
+                        {fmtSetChip(s)}
                       </span>
                     ))}
                     <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>

@@ -208,20 +208,67 @@
 </head>
 <body>
 <div id="root"></div>
-<div id="err" style="display:none;position:fixed;inset:0;background:#07060a;color:#c87469;font-family:monospace;font-size:13px;padding:24px;white-space:pre-wrap;z-index:9999;overflow:auto"></div>
+<div id="err" style="display:none;position:fixed;inset:0;background:#07060a;color:#c87469;font-family:monospace;font-size:13px;padding:24px;overflow:auto;z-index:9999">
+  <div id="err-log" style="white-space:pre-wrap"></div>
+</div>
 <script>
 
-window.onerror = function(msg, src, line, col, err) {
-  // Benign, well-known browser warning — not a real error; don't surface it.
-  if (typeof msg === 'string' && msg.indexOf('ResizeObserver loop') !== -1) return;
+// Known-benign global noise — never actionable here, and blocking the whole
+// screen for it does real harm: browser extensions (crypto wallets like
+// Brave's own built-in wallet, translators, etc.) inject their own scripts
+// into every page and can throw on their own internal state, which
+// window.onerror/onunhandledrejection can't tell apart from a real app bug.
+var BENIGN_NOISE = /ResizeObserver loop|translateDisabled|ethereum/i;
+
+// Shared by every path that shows this overlay (below, plus the "React did
+// not mount" and BOOT-failure fallbacks further down) — a stale/broken
+// precompile cache is a common real cause, and "Dismiss" alone wouldn't fix
+// that, only hide the symptom.
+function makeClearCacheButton() {
+  var btn = document.createElement('button');
+  btn.textContent = 'Clear cache & reload';
+  btn.style.cssText = 'margin-top:16px;margin-right:8px;display:inline-block;padding:10px 20px;background:#c87469;color:#07060a;border:none;border-radius:6px;font-family:monospace;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:0.04em';
+  btn.onclick = async function() {
+    btn.textContent = 'Clearing…';
+    if ('caches' in window) { var keys = await caches.keys(); await Promise.all(keys.map(function(k){ return caches.delete(k); })); }
+    window.location.reload(true);
+  };
+  return btn;
+}
+
+// Shows the overlay with a "Clear cache & reload" button always available
+// (in case a stale/broken cache is the actual cause) and — only once the
+// app has actually mounted, so there's something usable to dismiss to — a
+// lighter Dismiss button too.
+function showErrOverlay() {
   var d = document.getElementById('err');
-  d.style.display = 'block';
-  d.textContent += '[JS ERROR] ' + msg + '\n  ' + src + ':' + line + '\n\n';
+  if (d.style.display !== 'block') {
+    d.style.display = 'block';
+    d.appendChild(makeClearCacheButton());
+    if (document.getElementById('root').children.length) {
+      var dismiss = document.createElement('button');
+      dismiss.textContent = 'Dismiss';
+      dismiss.style.cssText = 'margin-top:16px;display:inline-block;padding:10px 20px;background:transparent;color:#c87469;border:1px solid #c87469;border-radius:6px;font-family:monospace;font-size:13px;cursor:pointer;letter-spacing:0.04em';
+      dismiss.onclick = function() { d.style.display = 'none'; };
+      d.appendChild(dismiss);
+    }
+  }
+  return document.getElementById('err-log');
+}
+
+window.onerror = function(msg, src, line, col, err) {
+  if (typeof msg === 'string' && BENIGN_NOISE.test(msg)) return;
+  // Cross-origin/extension-injected scripts report as a bare "Script error."
+  // with no location at all — the browser deliberately strips all detail for
+  // these, so it's never actionable and is most often a browser extension
+  // throwing on its own injected script, not a bug in this app.
+  if (msg === 'Script error.' && !src && !line) return;
+  showErrOverlay().textContent += '[JS ERROR] ' + msg + '\n  ' + src + ':' + line + '\n\n';
 };
 window.onunhandledrejection = function(e) {
-  var d = document.getElementById('err');
-  d.style.display = 'block';
-  d.textContent += '[PROMISE] ' + (e.reason?.message || e.reason) + '\n\n';
+  var reason = e.reason?.message || e.reason;
+  if (typeof reason === 'string' && BENIGN_NOISE.test(reason)) return;
+  showErrOverlay().textContent += '[PROMISE] ' + reason + '\n\n';
 };
 // Fallback: if React never mounts after 6s, show diagnostic info.
 // If a new SW is waiting, auto-send SKIP_WAITING and reload — this breaks
@@ -241,22 +288,15 @@ setTimeout(async function() {
     }
   } catch(e) {}
   var d = document.getElementById('err');
+  var log = document.getElementById('err-log');
   d.style.display = 'block';
-  d.textContent += '[TIMEOUT] React did not mount.\n';
-  d.textContent += 'window.LB: ' + typeof window.LB + '\n';
-  d.textContent += 'window.supabase: ' + typeof window.supabase + '\n';
-  d.textContent += 'window.Screens: ' + JSON.stringify(Object.keys(window.Screens||{})) + '\n';
-  d.textContent += 'window.React: ' + typeof window.React + '\n';
-  d.textContent += 'window.Screen: ' + typeof window.Screen + '\n';
-  var btn = document.createElement('button');
-  btn.textContent = 'Clear cache & reload';
-  btn.style.cssText = 'margin-top:24px;display:block;padding:12px 24px;background:#c87469;color:#07060a;border:none;border-radius:6px;font-family:monospace;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:0.04em';
-  btn.onclick = async function() {
-    btn.textContent = 'Clearing…';
-    if ('caches' in window) { var keys = await caches.keys(); await Promise.all(keys.map(function(k){ return caches.delete(k); })); }
-    window.location.reload(true);
-  };
-  d.appendChild(btn);
+  log.textContent += '[TIMEOUT] React did not mount.\n';
+  log.textContent += 'window.LB: ' + typeof window.LB + '\n';
+  log.textContent += 'window.supabase: ' + typeof window.supabase + '\n';
+  log.textContent += 'window.Screens: ' + JSON.stringify(Object.keys(window.Screens||{})) + '\n';
+  log.textContent += 'window.React: ' + typeof window.React + '\n';
+  log.textContent += 'window.Screen: ' + typeof window.Screen + '\n';
+  d.appendChild(makeClearCacheButton());
 }, 6000);
 </script>
 
@@ -503,7 +543,8 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 
   function showError(e) {
     var d = document.getElementById('err');
-    if (d) { d.style.display = 'block'; d.textContent += '[BOOT] ' + (e && e.message || e) + '\n'; }
+    var log = document.getElementById('err-log');
+    if (d && log) { d.style.display = 'block'; log.textContent += '[BOOT] ' + (e && e.message || e) + '\n'; }
   }
 
   // Last resort: transpile + run everything through Babel (no caching).

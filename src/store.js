@@ -634,7 +634,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, deltas, joint_flags, pump_low_counts, weight_boosts, completions, pending_meso2').eq('user_id', userId),
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, deltas, joint_flags, pump_low_counts, weight_boosts, completions, pending_meso2, updated_at').eq('user_id', userId),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -799,6 +799,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {},
       pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
       completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
+      updatedAt: m.updated_at ?? null,
     })),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
     // and via the local cache also offline). bestE1rmForExercise combines this
@@ -848,6 +849,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         onboardingCompleted: sett.onboarding_completed ?? false,
         glucoseUnit: sett.glucose_unit ?? 'mmol',
         vipBackground: sett.vip_background ?? null,
+        swVersion: sett.sw_version ?? null,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -963,6 +965,12 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
   const now = new Date().toISOString();
   const allEntries = [];
   const allSets = [];
+  // Rows for entries/sets removed since the previous sync (removeExercise,
+  // "− REMOVE SET") — never upserted again, so without an explicit delete
+  // they'd stay orphaned server-side and resurface on the next re-fetch
+  // (boot merge, fetchSessionEntries, the coach spectator view).
+  const entryIdsToDelete = [];
+  const setIdsToDelete = [];
 
   // Normalize set fields for comparison — guards against null vs undefined and missing
   // keys when comparing sets from an old (pre-migration) store format with new format.
@@ -975,6 +983,11 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
     if (!entries.length) continue;
 
     const prevSession = prevSessions ? prevSessions.find(x => x.id === s.id) : null;
+    const prevEntries = prevSession ? (prevSession.entries || []) : [];
+
+    for (let ei = entries.length; ei < prevEntries.length; ei++) {
+      entryIdsToDelete.push(`${s.id}_e${ei}`);
+    }
 
     for (let ei = 0; ei < entries.length; ei++) {
       const e = entries[ei];
@@ -992,7 +1005,11 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
         superset_group: e.supersetGroup || null,
       });
 
-      const prevEntry = prevSession ? (prevSession.entries || [])[ei] : null;
+      const prevEntry = prevEntries[ei];
+      for (let si = (e.sets || []).length; si < (prevEntry?.sets || []).length; si++) {
+        setIdsToDelete.push(`${s.id}_e${ei}_s${si}`);
+      }
+
       (e.sets || []).forEach((set, si) => {
         const prevSet = prevEntry ? (prevEntry.sets || [])[si] : null;
         if (!prevSessions || !prevSet || normSet(prevSet) !== normSet(set)) {
@@ -1017,6 +1034,9 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
       });
     }
   }
+
+  if (entryIdsToDelete.length) await unwrap(_supabase.from('zane_session_entries').delete().in('id', entryIdsToDelete));
+  if (setIdsToDelete.length) await unwrap(_supabase.from('zane_sets').delete().in('id', setIdsToDelete));
 
   // Import path uses small chunks (50 rows) to stay well under iOS Safari's
   // per-request payload limits; sync path keeps 500 rows for throughput.
@@ -1190,14 +1210,18 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(m);
     });
     const removed = (prev.mesoStates || []).filter(m => !(next.mesoStates || []).find(x => x.id === m.id));
-    if (upsert.length) ops.push(_supabase.from('zane_meso_states').upsert(upsert.map(m => ({
-      id: m.id, user_id: userId, schedule_id: m.scheduleId, weeks: m.weeks,
+    // Batch RPC only overwrites when the incoming updated_at is newer than
+    // what's stored — two devices training the same mesocycle plan don't
+    // silently clobber each other's deltas/jointFlags/weightBoosts on a plain
+    // last-write-wins upsert. See migration 0122.
+    if (upsert.length) ops.push(_supabase.rpc('sync_meso_states_batch', { p_states: upsert.map(m => ({
+      id: m.id, schedule_id: m.scheduleId, weeks: m.weeks,
       start_date: m.startDate, start_cycle_index: m.startCycleIndex ?? 0,
       deltas: m.deltas ?? {}, joint_flags: m.jointFlags ?? {},
       pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
       completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
-      updated_at: new Date().toISOString(),
-    }))));
+      updated_at: m.updatedAt ?? new Date().toISOString(),
+    })) }));
     if (removed.length) ops.push(_supabase.from('zane_meso_states').delete().in('id', removed.map(m => m.id)));
   }
 
@@ -1272,7 +1296,8 @@ async function syncStore(prev, next, userId) {
     prev.statusMode                       !== next.statusMode       ||
     prev.statusModeSince                  !== next.statusModeSince  ||
     prev.deloadPromptDismissedAt          !== next.deloadPromptDismissedAt ||
-    prev.activeCardioPlanId               !== next.activeCardioPlanId;
+    prev.activeCardioPlanId               !== next.activeCardioPlanId     ||
+    prev.settings?.swVersion              !== next.settings?.swVersion;
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
@@ -1320,6 +1345,7 @@ async function syncStore(prev, next, userId) {
       status_mode: next.statusMode ?? null,
       status_mode_since: next.statusModeSince ?? null,
       deload_prompt_dismissed_at: next.deloadPromptDismissedAt ?? null,
+      sw_version: next.settings?.swVersion ?? null,
     }));
   }
 
@@ -1710,7 +1736,12 @@ function bestEntryFromSetLists(perSession) {
 function bestRecentEntry(state, exId, dayId = null, window = 3) {
   const recent = recentSessionsForExercise(state, exId, dayId, window);
   if (!recent.length) return null;
-  return bestEntryFromSetLists(recent.map(r => (r.entry.sets || []).filter(s => !s.warmup && !s.skipped)));
+  // Only warm-ups are stripped — warm-ups are always a contiguous prefix, so
+  // dropping them still leaves working-set position i aligned across
+  // sessions. A skipped set must stay in place instead: dropping it too would
+  // shift every later set one slot to the left, misaligning bestEntryFromSetLists'
+  // same-position comparison against sessions where that set wasn't skipped.
+  return bestEntryFromSetLists(recent.map(r => (r.entry.sets || []).filter(s => !s.warmup)));
 }
 
 // Recent ended sessions for an exercise from the server (get_exercise_history),
@@ -1754,8 +1785,10 @@ async function fetchSeedEntries(state, items, dayId, userId, window = 3) {
         if (!merged.some(m => m.sessionId === row.sessionId) && !deloadIds.has(row.sessionId)) merged.push(row);
       }
       merged.sort((a, b) => (Date.parse(b.ended) || 0) - (Date.parse(a.ended) || 0));
+      // Keep skipped sets in place (only warm-ups are stripped) so working-set
+      // position stays aligned across sessions — see bestRecentEntry above.
       const ref = bestEntryFromSetLists(
-        merged.slice(0, window).map(r => (r.sets || []).filter(s => !s.warmup && !s.skipped))
+        merged.slice(0, window).map(r => (r.sets || []).filter(s => !s.warmup))
       );
       if (ref) out[exId] = ref;
     } catch (_) { /* offline / RPC failure → caller uses the local window */ }
@@ -1823,17 +1856,23 @@ function getCycleNumForDate(schedule, dateStr) {
     const nextV = sorted[i + 1];
     const daysLen = (v.days || []).length;
     if (!daysLen) continue;
+    // A version can start mid-cycle (the "start with day K" version-change
+    // option) — cycleOffset shifts the whole days-since-validFrom axis the
+    // same way getCyclePosForDate already does, so the cycle count lines up
+    // with the actual rotation position instead of always assuming the
+    // version began at day 0 of a fresh cycle.
+    const offset = v.cycleOffset || 0;
 
     if (!nextV || dateStr < nextV.validFrom) {
       // dateStr is within this version's period
       const daysDiff = Math.round((new Date(dateStr + 'T12:00:00') - new Date(v.validFrom + 'T12:00:00')) / 86400000);
-      return totalPriorCycles + Math.floor(Math.max(0, daysDiff) / daysLen) + 1;
+      return totalPriorCycles + Math.floor(Math.max(0, daysDiff + offset) / daysLen) + 1;
     }
     // Add the cycle number of this version's last day (= the highest cycle it reached)
     const vStart = new Date(v.validFrom + 'T12:00:00');
     const vEnd = new Date(nextV.validFrom + 'T12:00:00');
     const daysInVersion = Math.round((vEnd - vStart) / 86400000);
-    totalPriorCycles += Math.floor((daysInVersion - 1) / daysLen) + 1;
+    totalPriorCycles += Math.floor((daysInVersion - 1 + offset) / daysLen) + 1;
   }
   return totalPriorCycles + 1;
 }
@@ -1849,18 +1888,30 @@ function getCycleStartForNum(schedule, cycleNum) {
     const nextV = sorted[i + 1];
     const daysLen = (v.days || []).length;
     if (!daysLen) continue;
+    // Mirrors the same cycleOffset shift getCycleNumForDate applies, so the
+    // two stay inverses of each other across a version boundary.
+    const offset = v.cycleOffset || 0;
     if (nextV) {
       const vStart = new Date(v.validFrom + 'T12:00:00');
       const vEnd = new Date(nextV.validFrom + 'T12:00:00');
       const daysInVersion = Math.round((vEnd - vStart) / 86400000);
-      const cyclesInVersion = Math.floor((daysInVersion - 1) / daysLen) + 1;
+      const cyclesInVersion = Math.floor((daysInVersion - 1 + offset) / daysLen) + 1;
       if (totalPriorCycles + cyclesInVersion >= cycleNum) {
-        return new Date(vStart.getTime() + (cycleNum - totalPriorCycles - 1) * daysLen * 86400000);
+        // For a version's first cycle, `offset` can push the computed start
+        // before validFrom — but no real date before validFrom is actually
+        // governed by this version's cycle numbering (those dates belong to
+        // the previous version), so getCycleNumForDate would misattribute
+        // that date back to the wrong version and break the inverse
+        // relationship. Clamp to validFrom: the earliest real date this
+        // cycle can be associated with under this schedule.
+        const computed = vStart.getTime() + ((cycleNum - totalPriorCycles - 1) * daysLen - offset) * 86400000;
+        return new Date(Math.max(vStart.getTime(), computed));
       }
       totalPriorCycles += cyclesInVersion;
     } else {
       const vStartDate = new Date(v.validFrom + 'T12:00:00');
-      return new Date(vStartDate.getTime() + (cycleNum - totalPriorCycles - 1) * daysLen * 86400000);
+      const computed = vStartDate.getTime() + ((cycleNum - totalPriorCycles - 1) * daysLen - offset) * 86400000;
+      return new Date(Math.max(vStartDate.getTime(), computed));
     }
   }
   return null;
@@ -2030,7 +2081,12 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
   const sessions = freshSessions.filter(s => !locallyDeletedIds?.has(s.id)).map(s => {
     const mem = (curSessions || []).find(x => x.id === s.id);
     if (!mem) return s;
-    const isActive = s.id === inProgressId;
+    // The server's `ended` is authoritative: if another device (or the
+    // auto-close cron) already finished this session while this device was
+    // offline, a stale local inProgressId must never resurrect it as still
+    // active — that would overwrite the server's finished entries with the
+    // stale local (incomplete) cache and push them right back on next sync.
+    const isActive = s.id === inProgressId && s.ended == null;
     const hasServerEntries = (s.entries || []).length > 0;
     const hasCachedEntries = (mem.entries || []).length > 0;
     const keepCachedEntries = !isActive && !hasServerEntries && hasCachedEntries;
@@ -2063,8 +2119,9 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     (x.id === inProgressId ||
       ((x.date || '') >= cutoffISO && x.ended != null && !baseIds?.has(x.id)))
   );
+  const inProgressServerSession = freshSessions.find(s => s.id === inProgressId);
   const activeExists = !!(inProgressId && (
-    serverIds.has(inProgressId) ||
+    (serverIds.has(inProgressId) && inProgressServerSession?.ended == null) ||
     localOnly.some(s => s.id === inProgressId)
   ));
   return { sessions: [...localOnly, ...sessions], activeExists };
@@ -2161,10 +2218,15 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
   if (!ref) return null;
 
   const range = store.settings?.progressionRangeTop ?? 4;
-  const doneSets = (ref.entry.sets || []).filter(s => !s.skipped && !s.warmup && s.kg != null);
-  if (!doneSets.length) return null;
+  // Index by true working-set position (warm-ups stripped, nothing else) so
+  // plannedRepsPerSet[i] lines up correctly — filtering skipped sets out
+  // before indexing (as this used to) shifts every later set's target one
+  // slot left/right whenever an earlier set in the reference was skipped.
+  const workingSets = (ref.entry.sets || []).filter(s => !s.warmup);
+  if (!workingSets.some(s => !s.skipped && s.kg != null)) return null;
 
-  const allHitTop = doneSets.every((s, i) => {
+  const allHitTop = workingSets.every((s, i) => {
+    if (s.skipped || s.kg == null) return true; // no data at this position — neither confirms nor blocks progression
     const perSet = plannedRepsPerSet && plannedRepsPerSet.length > 1
       ? (plannedRepsPerSet[i] ?? plannedRepsPerSet[plannedRepsPerSet.length - 1])
       : null;
@@ -2173,7 +2235,8 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
   });
   if (!allHitTop) return null;
 
-  const refKg = doneSets[0].kg;
+  const refKg = workingSets.find(s => !s.skipped && s.kg != null)?.kg;
+  if (refKg == null) return null;
   const newKg = Math.round((refKg + increment) * 100) / 100;
   const cappedKg = maxKg ? Math.min(newKg, maxKg) : newKg;
   if (cappedKg <= refKg) return null;
@@ -2705,6 +2768,16 @@ function plannedTrainingDay(state, dateStr) {
     const vDays = getPlanDaysForDate(sch, ds);
     return vDays.find(d => d.weekday === wd && d.items?.length > 0) || null;
   }
+  if (isFlexPlan(sch)) {
+    // Flex plans have no calendar mapping — position only advances by action
+    // (cycleIndex, mirroring todaysDay), so there's no planned day for any
+    // date other than today.
+    if (ds !== todayISO()) return null;
+    const len = sch.days.length;
+    const idx = ((state.cycleIndex || 0) % len + len) % len;
+    const dayData = sch.days[idx];
+    return (dayData?.items?.length > 0) ? dayData : null;
+  }
   if (state.cycleStartDate) {
     const vDays = getPlanDaysForDate(sch, ds);
     if (!vDays.length) return null;
@@ -3067,7 +3140,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
+  uid, todayISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,

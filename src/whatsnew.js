@@ -16,6 +16,29 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.445',
+    title: 'Bug Hunt',
+    items: [
+      '🔗 Supersets and Giant Sets got a full reliability pass — a cardio exercise in a group now correctly hands off to its training partner, "Check All" respects the group too, and dragging exercises around the chip strip can no longer accidentally split a pair apart.',
+      '🎯 Fixed several cases where a skipped set threw off progression targets and PR detection — whether you hit your numbers is now judged correctly no matter which set got skipped.',
+      '👀 Drop Sets, Myo-Reps and Lengthened Partials now actually show up in the coaching dashboard and spectator view — previously invisible there, even though you did the work.',
+      '🛠 Fixed two crashes: one when switching plans, one when opening an exercise\'s history if its set count differed between sessions.',
+      '🔔 Push notifications for very long rest timers now line up with what\'s on screen instead of risking an early ping.',
+    ],
+  },
+  {
+    id: 'v2.444',
+    title: 'Supersets, Unchained',
+    items: [
+      '🔗 Superset or Giant Set any exercise mid-workout — no pre-planning required. Tap INTENSITY on an exercise\'s first set and choose Superset to pair it with another exercise in your session, or a new one. Already paired up? The same button becomes Giant Set, adding a third exercise to the rotation.',
+      '🩹 Cleaned up superset navigation: checking off a set could send you (or the keyboard) to the wrong exercise, and Drop Sets or Myo-Reps inside a superset ignored your training partner entirely. Finishing a set now reliably takes you to the right place.',
+      '⌨️ Lengthened Partials now has its own FINISH button instead of the regular checkbox, so a set only counts once you\'ve confirmed your partials.',
+      '🐛 Unchecking a completed Drop Set, Myo-Rep or Lengthened Partial left old data behind. Unchecking now clears it properly.',
+      '📱 The exercise strip at the top of the training screen could leave the last exercise half off-screen. It now scrolls fully into view.',
+      '🔄 Mesocycle progress (set adjustments, weight boosts, week counter) now syncs reliably across devices, and a crash when starting Meso 2 is fixed.',
+    ],
+  },
+  {
     id: 'v2.439',
     title: 'Mesocycles',
     items: [
