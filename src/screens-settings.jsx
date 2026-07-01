@@ -392,6 +392,10 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [signupsSheet, setSignupsSheet] = useStateSet(false);
   const [onboardedUsers, setOnboardedUsers] = useStateSet([]);
   const [onboardedSheet, setOnboardedSheet] = useStateSet(false);
+  const [allUsers, setAllUsers] = useStateSet([]);
+  const [allUsersSheet, setAllUsersSheet] = useStateSet(false);
+  const [allUsersSearch, setAllUsersSearch] = useStateSet('');
+  const [allUsersOutdatedOnly, setAllUsersOutdatedOnly] = useStateSet(false);
   const [adminUserDetail, setAdminUserDetail] = useStateSet(null); // { userId, name, plans }
   const [adminUserDetailLoading, setAdminUserDetailLoading] = useStateSet(false);
   const [adminUserDetailSheet, setAdminUserDetailSheet] = useStateSet(false);
@@ -508,7 +512,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
 
   useEffectSet(() => {
     if (!('caches' in window)) return;
-    caches.keys().then(keys => { const name = keys.find(k => k.startsWith('zane-')); if (name) setSwVersion(name.replace('zane-', '')); });
+    caches.keys().then(keys => {
+      const name = keys.find(k => k.startsWith('zane-'));
+      if (!name) return;
+      const version = name.replace('zane-', '');
+      setSwVersion(version);
+      // Report to the account so an admin can tell whether a user reporting
+      // a bug is stuck on a stale/broken cache without asking them to check.
+      if (version !== store.settings?.swVersion) {
+        setStore(s => ({ ...s, settings: { ...s.settings, swVersion: version } }));
+      }
+    });
   }, []);
 
   useEffectSet(() => {
@@ -646,6 +660,16 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     LB.supabase.rpc('get_support_chats').then(({ data }) => { if (mounted) setSupportInbox(data || []); }).catch(() => {});
     return () => { mounted = false; };
   }, [isAdmin, accountSheet, adminSheet]);
+
+  // Admin-only: full user list (name/email/last-known SW version), reloaded
+  // each time the All Users sheet opens — no need to poll this in the
+  // background like Active Sessions, it's a lookup tool, not a live view.
+  useEffectSet(() => {
+    if (!isAdmin || !allUsersSheet) return;
+    let mounted = true;
+    LB.supabase.rpc('get_all_users_admin').then(({ data, error }) => { if (mounted && !error) setAllUsers(data || []); }).catch(() => {});
+    return () => { mounted = false; };
+  }, [isAdmin, allUsersSheet]);
 
   useEffectSet(() => {
     if (!isAdmin || !vipBgSheet) return;
@@ -2049,6 +2073,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 </div>
                 <NavRow label="Recent sign-ups" hint={unseenCount > 0 ? `${unseenCount} new` : `${recentSignups.length}`} onTap={() => setSignupsSheet(true)} />
                 <NavRow label="Onboarded" hint={`${onboardedUsers.length}`} onTap={() => setOnboardedSheet(true)} />
+                <NavRow label="All users" hint={allUsers.length ? `${allUsers.length}` : undefined} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
               </Frame>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
@@ -2628,6 +2653,63 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             </div>
           )
         }
+      </SettingsSheet>
+
+      {/* ══ All users sheet (admin) ══ */}
+      <SettingsSheet open={allUsersSheet} onClose={() => setAllUsersSheet(false)} title="All users">
+        {(() => {
+          const q = allUsersSearch.trim().toLowerCase();
+          const filtered = allUsers.filter(u => {
+            if (allUsersOutdatedOnly && swVersion && u.sw_version === swVersion) return false;
+            if (!q) return true;
+            return (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
+          });
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <input
+                value={allUsersSearch}
+                onChange={e => setAllUsersSearch(e.target.value)}
+                placeholder="Search by name or email…"
+                style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
+              />
+              <Frame style={{ padding: '0 14px' }}>
+                <Row label="Outdated version only" first>
+                  <Toggle on={allUsersOutdatedOnly} onToggle={() => setAllUsersOutdatedOnly(v => !v)} />
+                </Row>
+              </Frame>
+              {allUsersOutdatedOnly && !swVersion && (
+                <div className="micro" style={{ color: UI.inkFaint }}>Your own version isn't known yet — this device hasn't reported one.</div>
+              )}
+              <div className="micro" style={{ color: UI.inkGhost }}>{filtered.length} of {allUsers.length}{swVersion ? ` · you're on ${swVersion}` : ''}</div>
+              {filtered.length === 0 ? (
+                <div className="micro" style={{ color: UI.inkGhost, padding: '4px 0 12px' }}>No matching users.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+                  {filtered.map((u, i) => {
+                    const isCurrent = swVersion && u.sw_version === swVersion;
+                    return (
+                      <div key={u.user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                        <div style={{ width: 34, height: 34, borderRadius: '50%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, color: UI.inkSoft }}>{(u.name || u.email || '?')[0].toUpperCase()}</span>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || '—'}</span>
+                            <span className="micro" style={{ flexShrink: 0, color: u.approved ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.75)' }}>{u.approved ? 'ACTIVE' : 'PENDING'}</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email} · joined {fmtAgo(u.created_at)}</div>
+                        </div>
+                        <span className="num" style={{ fontSize: 11, flexShrink: 0, color: !u.sw_version ? UI.inkGhost : isCurrent ? UI.inkFaint : UI.gold }}>
+                          {u.sw_version || '—'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </SettingsSheet>
 
       {/* ══ User detail sheet (admin — plans list) ══ */}

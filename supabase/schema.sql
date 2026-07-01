@@ -183,7 +183,8 @@ CREATE TABLE public.zane_user_settings (
   status_mode text,
   status_mode_since timestamp with time zone,
   active_cardio_plan_id text,
-  deload_prompt_dismissed_at timestamp with time zone
+  deload_prompt_dismissed_at timestamp with time zone,
+  sw_version text
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -612,6 +613,28 @@ BEGIN
     JOIN auth.users u ON u.id = p.id
     ORDER BY u.created_at DESC
     LIMIT GREATEST(p_limit, 1);
+END;
+$function$;
+
+-- All-users admin lookup (name/email/last-known SW version), independent of
+-- whether the user is currently training or a recent sign-up — the existing
+-- admin views (Active users, Recent sign-ups) only cover those two subsets.
+CREATE OR REPLACE FUNCTION public.get_all_users_admin()
+ RETURNS TABLE(user_id uuid, name text, email text, sw_version text, created_at timestamptz, approved boolean)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
+    RETURN;
+  END IF;
+  RETURN QUERY
+    SELECT p.id, p.name, u.email::text, us.sw_version, u.created_at, p.approved
+    FROM zane_profiles p
+    JOIN auth.users u ON u.id = p.id
+    LEFT JOIN zane_user_settings us ON us.user_id = p.id
+    ORDER BY u.created_at DESC;
 END;
 $function$;
 

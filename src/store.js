@@ -849,6 +849,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         onboardingCompleted: sett.onboarding_completed ?? false,
         glucoseUnit: sett.glucose_unit ?? 'mmol',
         vipBackground: sett.vip_background ?? null,
+        swVersion: sett.sw_version ?? null,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -1295,7 +1296,8 @@ async function syncStore(prev, next, userId) {
     prev.statusMode                       !== next.statusMode       ||
     prev.statusModeSince                  !== next.statusModeSince  ||
     prev.deloadPromptDismissedAt          !== next.deloadPromptDismissedAt ||
-    prev.activeCardioPlanId               !== next.activeCardioPlanId;
+    prev.activeCardioPlanId               !== next.activeCardioPlanId     ||
+    prev.settings?.swVersion              !== next.settings?.swVersion;
 
   if (settingsChanged) {
     ops.push(_supabase.from('zane_user_settings').upsert({
@@ -1343,6 +1345,7 @@ async function syncStore(prev, next, userId) {
       status_mode: next.statusMode ?? null,
       status_mode_since: next.statusModeSince ?? null,
       deload_prompt_dismissed_at: next.deloadPromptDismissedAt ?? null,
+      sw_version: next.settings?.swVersion ?? null,
     }));
   }
 
