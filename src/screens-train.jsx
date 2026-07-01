@@ -785,6 +785,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // beats the all-time e1RM record for this exercise — independent of smart
     // progression, max once per exercise. A first-ever set (no record yet) and
     // bodyweight sets (no kg) never count as a new best.
+    // overlayHoldMs stretches the auto-advance delay below to match whichever
+    // of these toasts is showing, so navigating to the next exercise doesn't
+    // cut its 2.5s display short (PROGRESSION UNLOCKED already waits on its
+    // own longer timeline further down).
+    let overlayHoldMs = 0;
     if (!entry.sets[setIdx]?.warmup && !progressionResult && !isDeloadSession) {
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
@@ -795,14 +800,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
         setNewBestSet(true);
+        overlayHoldMs = 2500;
         setTimeout(() => setNewBestSet(false), 2500);
       } else if (isImprovement(completed, prevSet)) {
         setImprovedSet(true);
+        overlayHoldMs = 2500;
         setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, prevWorkingSetFor(k)));
         if (!anyImprovementBefore && isDecline(completed, prevSet) && store.settings?.showRegression !== false) {
           setRegressionSet(true);
+          overlayHoldMs = 2500;
           setTimeout(() => setRegressionSet(false), 2500);
         }
       }
@@ -834,7 +842,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           setTimeout(() => {
             if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
             else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
-          }, 600);
+          }, Math.max(600, overlayHoldMs));
         } else if (!allGroupDone) {
           const allGroup = session.entries.map((e, i) => ({ e, i })).filter(({ e }) => e.supersetGroup === group);
           const firstIncomplete = allGroup.find(({ e, i }) =>
@@ -848,7 +856,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         persistRestStart(Date.now(), restDef);
       }
       if (updatedSets.every(st => st.done)) {
-        if (!progressionResult && !lpPending) setTimeout(() => navigate(1), 600);
+        if (!progressionResult && !lpPending) setTimeout(() => navigate(1), Math.max(600, overlayHoldMs));
       }
     }
     // Last warmup set done → start 3-min rest, workout timer begins when rest expires
@@ -881,6 +889,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setDropSetIdx(null);
     // Improvement / regression / new best overlays (same logic as completeSet)
     const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+    let overlayHoldMs = 0;
     if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && first.kg != null && first.reps > 0) {
       const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
       const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
@@ -891,9 +900,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
-        setNewBestSet(true); setTimeout(() => setNewBestSet(false), 2500);
+        setNewBestSet(true); overlayHoldMs = 2500; setTimeout(() => setNewBestSet(false), 2500);
       } else if (isImprovement(first, prevSet)) {
-        setImprovedSet(true); setTimeout(() => setImprovedSet(false), 2500);
+        setImprovedSet(true); overlayHoldMs = 2500; setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
           if (s.warmup) return false;
@@ -901,14 +910,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
         });
         if (!anyImpBefore && isDecline(first, prevSet) && store.settings?.showRegression !== false) {
-          setRegressionSet(true); setTimeout(() => setRegressionSet(false), 2500);
+          setRegressionSet(true); overlayHoldMs = 2500; setTimeout(() => setRegressionSet(false), 2500);
         }
       }
     }
     // Rest timer + navigation
     const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
     if (!entry.sets[targetIdx]?.warmup) persistRestStart(Date.now(), restDef);
-    if (updatedSets.every(st => st.done)) setTimeout(() => navigate(1), 600);
+    if (updatedSets.every(st => st.done)) setTimeout(() => navigate(1), Math.max(600, overlayHoldMs));
   };
 
   const cancelMyo = () => {
@@ -941,6 +950,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setMyoSetIdx(null); setMyoTechnique(null); setMyoDrops([]); setMyoTarget(null);
     // Improvement / regression / new best overlays
     const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+    let overlayHoldMs = 0;
     if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && first.kg != null && first.reps > 0) {
       const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
       const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
@@ -951,9 +961,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
-        setNewBestSet(true); setTimeout(() => setNewBestSet(false), 2500);
+        setNewBestSet(true); overlayHoldMs = 2500; setTimeout(() => setNewBestSet(false), 2500);
       } else if (isImprovement(first, prevSet)) {
-        setImprovedSet(true); setTimeout(() => setImprovedSet(false), 2500);
+        setImprovedSet(true); overlayHoldMs = 2500; setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
           if (s.warmup) return false;
@@ -961,13 +971,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
         });
         if (!anyImpBefore && isDecline(first, prevSet) && store.settings?.showRegression !== false) {
-          setRegressionSet(true); setTimeout(() => setRegressionSet(false), 2500);
+          setRegressionSet(true); overlayHoldMs = 2500; setTimeout(() => setRegressionSet(false), 2500);
         }
       }
     }
     if (!entry.sets[targetIdx]?.warmup) persistRestStart(Date.now(), restDef);
     const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
-    if (updatedSets.every(st => st.done)) setTimeout(() => navigate(1), 600);
+    if (updatedSets.every(st => st.done)) setTimeout(() => navigate(1), Math.max(600, overlayHoldMs));
   };
 
   const setPartials = (setIdx, count) => {
@@ -1437,18 +1447,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [lpTarget, setLpTarget] = useStateT(null); // { exIdx, setIdx } | null
   // Persist intensity state so a background/resume on iOS doesn't wipe mid-set progress
   useEffectT(() => {
-    if (dropSetIdx != null || myoSetIdx != null) {
+    if (dropSetIdx != null || myoSetIdx != null || lpTarget != null) {
       try {
         localStorage.setItem('logbook-intensity-state', JSON.stringify({
           sessionId, exIdx,
           dropSetIdx, dropDrops,
           myoSetIdx, myoDrops, myoTechnique, myoTarget,
+          lpSetIdx: lpTarget?.setIdx ?? null,
         }));
       } catch {}
     } else {
       localStorage.removeItem('logbook-intensity-state');
     }
-  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, sessionId, exIdx]);
+  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, lpTarget, sessionId, exIdx]);
   useEffectT(() => {
     try {
       const raw = localStorage.getItem('logbook-intensity-state');
@@ -1467,6 +1478,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setMyoDrops(md); myoDropsRef.current = md;
         setMyoTechnique(st.myoTechnique || null);
         setMyoTarget(st.myoTarget ?? null);
+      }
+      // Lengthened partials, unlike drop/myo, is still relevant AFTER the set
+      // is done (the partials-count stepper is a post-completion step) — so,
+      // unlike the two guards above, restore it regardless of done state.
+      if (st.lpSetIdx != null && targetEntry?.sets[st.lpSetIdx]) {
+        setLpTarget({ exIdx, setIdx: st.lpSetIdx });
       }
     } catch {}
   }, [sessionId, exIdx]);
