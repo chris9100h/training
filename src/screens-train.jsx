@@ -1018,6 +1018,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setFlashSet(dropSetIdx);
     setTimeout(() => setFlashSet(null), 1400);
     kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+    // Stamp the same ghost-click guards completeSet uses — without these, an
+    // iOS ghost-click landing 200-400ms after this drop-set finished would
+    // read as an intentional uncheck (no recent-completion timestamp to
+    // block it against) and undo the set.
+    armKbShield();
+    recentCompleteRef.current[dropSetIdx] = Date.now();
+    lastCompleteRef.current = Date.now();
     const targetIdx = dropSetIdx;
     setDropSetIdx(null);
     // Improvement / regression / new best overlays (same logic as completeSet)
@@ -1080,6 +1087,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setFlashSet(myoSetIdx);
     setTimeout(() => setFlashSet(null), 1400);
     kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+    // Stamp the same ghost-click guards completeSet uses (see finishDropSet).
+    armKbShield();
+    recentCompleteRef.current[myoSetIdx] = Date.now();
+    lastCompleteRef.current = Date.now();
     const targetIdx = myoSetIdx;
     setMyoSetIdx(null); setMyoTechnique(null); setMyoDrops([]); setMyoTarget(null);
     // Improvement / regression / new best overlays
@@ -2573,6 +2584,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         addAndJumpRef.current = false;
         setTimeout(() => activateKb(0, 'kg'), 200);
       }
+    } else if (addSupersetCandidates.length === 0) {
+      // Nothing eligible to pair with — skip the superset prompt entirely
+      // rather than show an empty picker.
+      if (jump) addAndJumpRef.current = false;
+      linkNewExercise(null, newExId, jump);
     } else {
       // Defer insertion until the user picks a superset (or solo) —
       // that choice determines where the new exercise is placed.
@@ -3032,6 +3048,24 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     .map((e, i) => ({ e, i }))
     .filter(({ e, i }) => i !== exIdx && !e.isCardio && !e.supersetGroup
       && (e.sets || []).filter(s => !s.warmup).every(s => !s.done && !s.skipped));
+
+  // "Add exercise" flow's link-target list: entries eligible to accept the
+  // brand-new exercise as a groupmate. Unlike supersetCandidates above
+  // (which only offers ungrouped entries — growing the CURRENT entry's own
+  // group is handled separately there), a target here may already be paired,
+  // since picking one of an existing pair's members is the only way this
+  // flow can grow it into a giant set. Still excludes cardio, an
+  // already-full (3-member) group, and any group where a member has already
+  // started (retroactively linking would insert the new exercise's round 0
+  // after rounds already logged).
+  const addSupersetCandidates = session.entries
+    .map((e, i) => ({ e, i }))
+    .filter(({ e }) => {
+      if (e.isCardio) return false;
+      const groupMembers = e.supersetGroup ? session.entries.filter(x => x.supersetGroup === e.supersetGroup) : [e];
+      if (groupMembers.length >= 3) return false;
+      return groupMembers.every(m => (m.sets || []).filter(s => !s.warmup).every(s => !s.done && !s.skipped));
+    });
 
   const checkAllSets = async () => {
     if (allWorkingDone || anyMissingData) return;
@@ -3815,8 +3849,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             const globalDelta = now - (lastCompleteRef.current || 0);
                             const rowDelta = now - (recentCompleteRef.current[i] || 0);
                             _log(`row${i} uncheck? globalΔ=${globalDelta}ms rowΔ=${rowDelta}ms`);
-                            if (globalDelta < 2000) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
-                            if (rowDelta < 3000) { _log(`row${i} BLOCKED by row guard (${rowDelta}ms)`); return; }
+                            // These windows exist only to swallow iOS ghost-clicks, which land
+                            // 200-400ms after the real one (see recentCompleteRef/lastCompleteRef
+                            // above) — 2000/3000ms was several seconds wider than that, so a
+                            // genuine, deliberate uncheck right after completing a set silently
+                            // did nothing for up to 3 full seconds.
+                            if (globalDelta < 400) { _log(`row${i} BLOCKED by global guard (${globalDelta}ms)`); return; }
+                            if (rowDelta < 600) { _log(`row${i} BLOCKED by row guard (${rowDelta}ms)`); return; }
                             _log(`row${i} UNCHECK → updateSet done:false`);
                             updateSet(i, { done: false });
                             return;
@@ -4708,7 +4747,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {session.entries.map((e, i) => (
+              {addSupersetCandidates.map(({ e, i }) => (
                 <button key={i} onClick={() => confirmAdd(i)} style={{
                   padding: '14px 0', textAlign: 'left', background: 'none', border: 'none',
                   borderBottom: `1px solid ${UI.hair}`, cursor: 'pointer',
