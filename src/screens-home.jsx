@@ -1584,7 +1584,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   useEffect(() => {
     if (!sch?.mesocycle_weeks || !sch?.id || !userId) return;
     const existing = (store?.mesoStates || []).find(m => m.scheduleId === sch.id);
-    if (existing) return;
+    // Keep existing meso only if weeks match the current config — mirrors the
+    // recreate guard in screens-train.jsx's session auto-start effect, so a
+    // changed week count always starts fresh regardless of which effect runs
+    // first.
+    if (existing && existing.weeks === sch.mesocycle_weeks) return;
     const _daysLen = sch.days.length || 1;
     const _isWeekday = LB.isWeekdayPlan(sch);
     const _isFlex = LB.isFlexPlan(sch);
@@ -1607,7 +1611,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       startDate: alignedStartDate,
       startCycleIndex: alignedStartIdx,
       deltas: {}, jointFlags: {}, pumpLowCounts: {}, weightBoosts: {},
-      completions: 0,
+      completions: existing?.completions ?? 0,
+      updatedAt: new Date().toISOString(),
     };
     setStore(s => {
       const others = (s.mesoStates || []).filter(m => m.scheduleId !== newMeso.scheduleId);
@@ -1662,7 +1667,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             startCycleIndex2 = ci % daysLen2 === 0 ? ci : Math.ceil(ci / daysLen2) * daysLen2;
             startDate2 = LB.todayISO();
           } else {
-            startDate2 = LB.nextCycleD1ISOFromSchedule(sch2, s.cycleStartDate);
+            startDate2 = LB.nextCycleD1ISOFromSchedule(sc2, s.cycleStartDate);
             startCycleIndex2 = 0;
           }
           const newMeso = {
@@ -1673,6 +1678,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             jointFlags: {},
             pumpLowCounts: {},
             pendingMeso2: false,
+            updatedAt: new Date().toISOString(),
           };
           const others = (s.mesoStates || []).filter(m => m.scheduleId !== scheduleId);
           return { ...s, mesoStates: [...others, newMeso] };
@@ -1690,7 +1696,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
           ),
           mesoStates: (s.mesoStates || []).map(m =>
-            m.scheduleId === scheduleId ? { ...m, pendingMeso2: false } : m
+            m.scheduleId === scheduleId ? { ...m, pendingMeso2: false, updatedAt: new Date().toISOString() } : m
           ),
         }));
       } else {
@@ -1701,7 +1707,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
           ),
           mesoStates: (s.mesoStates || []).map(m =>
-            m.scheduleId === scheduleId ? { ...m, pendingMeso2: false } : m
+            m.scheduleId === scheduleId ? { ...m, pendingMeso2: false, updatedAt: new Date().toISOString() } : m
           ),
         }));
       }
@@ -2508,7 +2514,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             {sch.mesocycle_weeks ? (() => {
               const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
               const weeks = sch.mesocycle_weeks;
-              const week = m ? mesoCurrentWeek(m, store) : null;
+              const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, store) : null;
               if (week == null) {
                 // Pending — meso hasn't started yet; show start date if known
                 const startLabel = m?.startDate
@@ -2520,7 +2526,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   </span>
                 );
               }
-              const rir = (typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks) : Math.max(0, Math.round(3 - (week - 1) * 3 / (weeks - 1)));
+              const rir = (typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks) : null;
+              if (rir == null) return null;
               const unit = weekdayMode ? 'W' : 'C';
               return (
                 <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>

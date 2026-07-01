@@ -634,7 +634,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, deltas, joint_flags, pump_low_counts, weight_boosts, completions, pending_meso2').eq('user_id', userId),
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, deltas, joint_flags, pump_low_counts, weight_boosts, completions, pending_meso2, updated_at').eq('user_id', userId),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -799,6 +799,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {},
       pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
       completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
+      updatedAt: m.updated_at ?? null,
     })),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
     // and via the local cache also offline). bestE1rmForExercise combines this
@@ -1190,14 +1191,18 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(m);
     });
     const removed = (prev.mesoStates || []).filter(m => !(next.mesoStates || []).find(x => x.id === m.id));
-    if (upsert.length) ops.push(_supabase.from('zane_meso_states').upsert(upsert.map(m => ({
-      id: m.id, user_id: userId, schedule_id: m.scheduleId, weeks: m.weeks,
+    // Batch RPC only overwrites when the incoming updated_at is newer than
+    // what's stored — two devices training the same mesocycle plan don't
+    // silently clobber each other's deltas/jointFlags/weightBoosts on a plain
+    // last-write-wins upsert. See migration 0122.
+    if (upsert.length) ops.push(_supabase.rpc('sync_meso_states_batch', { p_states: upsert.map(m => ({
+      id: m.id, schedule_id: m.scheduleId, weeks: m.weeks,
       start_date: m.startDate, start_cycle_index: m.startCycleIndex ?? 0,
       deltas: m.deltas ?? {}, joint_flags: m.jointFlags ?? {},
       pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
       completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
-      updated_at: new Date().toISOString(),
-    }))));
+      updated_at: m.updatedAt ?? new Date().toISOString(),
+    })) }));
     if (removed.length) ops.push(_supabase.from('zane_meso_states').delete().in('id', removed.map(m => m.id)));
   }
 

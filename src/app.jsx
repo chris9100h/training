@@ -591,6 +591,22 @@ function App() {
             const delDailyIds = baseDailyIds ? new Set([...baseDailyIds].filter(id => !curDailyIdSet.has(id))) : null;
             const curCardioIdSet = new Set((cur.cardioLogs || []).map(l => l.id));
             const delCardioIds = baseCardioIds ? new Set([...baseCardioIds].filter(id => !curCardioIdSet.has(id))) : null;
+            // Meso states are a mutable per-plan row (not an append/delete list),
+            // so instead of a base-membership resurrection guard we compare
+            // updatedAt per id and keep whichever side is newer — this is what
+            // protects an in-flight local session's not-yet-synced feedback
+            // deltas from being clobbered by a boot refresh that raced ahead.
+            const freshMesoMap = new Map((fresh.mesoStates || []).map(m => [m.id, m]));
+            const curMesoMap = new Map((cur.mesoStates || []).map(m => [m.id, m]));
+            const mesoStates = [...new Set([...freshMesoMap.keys(), ...curMesoMap.keys()])].map(id => {
+              const f = freshMesoMap.get(id);
+              const c = curMesoMap.get(id);
+              if (!f) return c;
+              if (!c) return f;
+              const fT = f.updatedAt ? new Date(f.updatedAt).getTime() : 0;
+              const cT = c.updatedAt ? new Date(c.updatedAt).getTime() : 0;
+              return cT >= fT ? c : f;
+            }).filter(Boolean);
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
@@ -613,6 +629,7 @@ function App() {
               skips: [...localOnlySkips, ...(fresh.skips || []).filter(s => !delSkipIds?.has(s.id))],
               dailyLogs: [...localOnlyDailyLogs, ...(fresh.dailyLogs || []).filter(l => !delDailyIds?.has(l.id))],
               cardioLogs: [...localOnlyCardioLogs, ...(fresh.cardioLogs || []).filter(l => !delCardioIds?.has(l.id))],
+              mesoStates,
             };
           }
           if (!fresh.user.approved) { setPhase('pending'); return; }

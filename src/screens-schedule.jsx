@@ -147,14 +147,14 @@ function PlanScreen({ store, setStore, go, userId }) {
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1 }}>{s.name}</div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0, marginLeft: 8 }}>
                   {s.mesocycle_weeks && mesoPending && (() => {
                     const d = new Date(mesoSt.startDate + 'T12:00:00');
                     const startLabel = `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`;
                     return (
                       <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkFaint, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
-                        MESO · {startLabel}
+                        MESO · starts {startLabel}
                       </span>
                     );
                   })()}
@@ -192,7 +192,7 @@ function PlanScreen({ store, setStore, go, userId }) {
             <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
                 <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1 }}>{s.name}</div>
-                {mesoCompletions > 0 && (
+                {!mesoPending && mesoCompletions > 0 && (
                   <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkSoft, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em', flexShrink: 0, marginLeft: 8 }}>
                     MESO {mesoCompletions + 1}
                   </span>
@@ -532,6 +532,12 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
     </div>
   );
 
+  // Cross-device meso set/weight adjustments — must pass store.mesoStates
+  // (the DB-synced source of truth) same as every other call site, otherwise
+  // this preview silently falls back to a per-device localStorage cache that
+  // may not exist here, showing the un-adjusted baseline plan.
+  const mesoBoosts = (typeof getMesoWeightBoosts === 'function') ? getMesoWeightBoosts(sch?.id, store.mesoStates) : null;
+
   const exerciseList = isRest ? (
     <BracketFrame style={{ textAlign: 'center', padding: 36 }}>
       <div className="display-it" style={{ fontSize: 38, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, marginBottom: 6 }}>Recover.</div>
@@ -545,8 +551,14 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
         const last = LB.bestRecentEntry(store, it.exId, day.id);
         const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps);
         const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-        const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, day.id, sch?.id) : it;
-        const seedSets = LB.buildSeedSets(itAdj, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
+        const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, day.id, sch?.id, store.mesoStates) : it;
+        const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
+        let suggestionFinal = suggestion;
+        if (weightBoost != null && !suggestionFinal && last) {
+          const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
+          if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
+        }
+        const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression, bodyweightKg);
         return (
           <Frame key={k} style={{ padding: '12px 16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
@@ -1576,7 +1588,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span className="label" style={{ flex: 1 }}>Mesocycle</span>
                   <button onClick={() => setMesoInfoOpen(true)} style={{
-                    background: 'transparent', border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
+                    background: 'transparent', border: `1px solid ${UI.hairStrong}`, borderRadius: '50%',
                     width: 22, height: 22, cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi,
                     fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
                   }}>ⓘ</button>

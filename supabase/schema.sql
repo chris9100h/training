@@ -42,7 +42,8 @@ CREATE TABLE public.zane_schedules (
   archived boolean NOT NULL DEFAULT false,
   versions jsonb NOT NULL DEFAULT '[]'::jsonb,
   is_flex boolean NOT NULL DEFAULT false,
-  sessions_per_week integer
+  sessions_per_week integer,
+  mesocycle_weeks integer
 );
 
 CREATE TABLE public.zane_sessions (
@@ -1383,3 +1384,47 @@ ALTER TABLE zane_meso_states ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users manage own meso states"
   ON zane_meso_states FOR ALL
   USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- Batch upsert for meso states. Only overwrites when the incoming updated_at
+-- is newer (no stale clobber) so two devices training the same mesocycle plan
+-- don't silently discard each other's deltas/jointFlags/weightBoosts.
+-- Migration 0122.
+CREATE OR REPLACE FUNCTION public.sync_meso_states_batch(p_states jsonb)
+ RETURNS void
+ LANGUAGE sql
+ SECURITY INVOKER
+ SET search_path TO 'public'
+AS $function$
+  INSERT INTO zane_meso_states (
+    id, user_id, schedule_id, weeks, start_date, start_cycle_index,
+    deltas, joint_flags, pump_low_counts, weight_boosts,
+    completions, pending_meso2, updated_at
+  )
+  SELECT
+    m->>'id',
+    auth.uid(),
+    m->>'schedule_id',
+    (m->>'weeks')::int,
+    m->>'start_date',
+    COALESCE((m->>'start_cycle_index')::int, 0),
+    COALESCE(m->'deltas', '{}'::jsonb),
+    COALESCE(m->'joint_flags', '{}'::jsonb),
+    COALESCE(m->'pump_low_counts', '{}'::jsonb),
+    COALESCE(m->'weight_boosts', '{}'::jsonb),
+    COALESCE((m->>'completions')::int, 0),
+    COALESCE((m->>'pending_meso2')::boolean, false),
+    COALESCE((m->>'updated_at')::timestamptz, now())
+  FROM jsonb_array_elements(p_states) AS m
+  ON CONFLICT (id) DO UPDATE SET
+    weeks             = EXCLUDED.weeks,
+    start_date        = EXCLUDED.start_date,
+    start_cycle_index = EXCLUDED.start_cycle_index,
+    deltas            = EXCLUDED.deltas,
+    joint_flags       = EXCLUDED.joint_flags,
+    pump_low_counts   = EXCLUDED.pump_low_counts,
+    weight_boosts     = EXCLUDED.weight_boosts,
+    completions       = EXCLUDED.completions,
+    pending_meso2     = EXCLUDED.pending_meso2,
+    updated_at        = EXCLUDED.updated_at
+  WHERE zane_meso_states.updated_at < EXCLUDED.updated_at;
+$function$;
