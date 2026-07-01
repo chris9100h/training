@@ -16,6 +16,35 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.439',
+    title: 'Mesocycles',
+    items: [
+      'Turn any plan into a mesocycle (4–8 weeks). Target RIR counts down from 3 → 0 as the block progresses — the big glowing number in the training hero is your weekly cue, so you always know exactly how hard to push.',
+      'After each exercise, a quick check-in on soreness, joints, pump and volume lets the app auto-tune your set count week over week. Hit all your planned reps with positive feedback? You earn a weight boost for next session — stacks on top of Smart Progression, which keeps doing its job in the background.',
+      'When the meso wraps up, you\'re offered a deload (50% loads handled automatically), then Meso 2. Set counts reset to baseline so week 1 stays sane — your earned weight boosts compound forward across blocks.',
+      'Your meso state — week counter, set deltas, weight boosts, everything — syncs to your account and picks up seamlessly on any device.',
+    ],
+  },
+  {
+    id: 'v2.438',
+    title: 'Freestyle, for Humans',
+    items: [
+      'The finish screen now has a big "Add another exercise" button — so adding exercises to a freestyle workout is impossible to miss. If you ever wondered how to squeeze in one more movement, wonder no more.',
+      'The button also changes personality based on how long you\'ve been training. Under 20 minutes? It glows and begs you to stay. 20–45 minutes? A gentle nudge. Over 45 minutes? It respects your life choices.',
+      'A time-based message in the finish dialog sets the scene — anywhere from "the barbell\'s barely warm" to "now THAT\'s a workout." Honest feedback, no hurt feelings.',
+    ],
+  },
+  {
+    id: 'v2.437',
+    title: 'Lengthened Partials',
+    items: [
+      'New intensity technique: finish your full reps, then keep pumping out partials at the bottom of the movement — the stretched position where the muscle is under the most tension. Your muscle fibres will hate you. In a good way.',
+      'Tap INTENSITY during any exercise and choose Lengthened Partials. After you check off the set, a stepper appears so you can log how many partials you got.',
+      'Partials show up in your session summary and history — so you always know exactly how much extra work went into a set.',
+      'Various bug fixes and improvements.',
+    ],
+  },
+  {
     id: 'v2.422',
     title: '⚡ Drop Sets, Myo-Reps & Myo-Rep Match',
     items: [

@@ -96,6 +96,49 @@ function todayISO() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+// Returns the coming Monday as YYYY-MM-DD (returns today if today is Monday).
+function nextMondayISO() {
+  const today = new Date();
+  const daysUntil = (1 - today.getDay() + 7) % 7;
+  const d = new Date(today);
+  d.setDate(d.getDate() + daysUntil);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// Returns the next D1 of a date-based cycle plan as YYYY-MM-DD.
+// Returns today if today is already D1; otherwise the start of the next full rotation.
+function nextCycleD1ISO(cycleStartDate, daysLen) {
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  if (!cycleStartDate || daysLen <= 0) return todayISO();
+  const start = parseDate(cycleStartDate);
+  const n = Math.max(0, Math.round((today - start) / 86400000));
+  const pos = n % daysLen;
+  const daysUntilD1 = pos === 0 ? 0 : daysLen - pos;
+  const d = new Date(today);
+  d.setDate(d.getDate() + daysUntilD1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// Version-aware wrapper: uses getCyclePosForDate when the plan has versions so
+// cycleOffset and version boundaries are respected (same logic as the date strip).
+// Falls back to cycleStartDate-based math for unversioned plans.
+function nextCycleD1ISOFromSchedule(schedule, cycleStartDate) {
+  const todayStr = todayISO();
+  if (schedule?.versions?.length) {
+    const pos = getCyclePosForDate(schedule, todayStr);
+    if (pos !== null) {
+      const vi = getActiveVersionIdx(schedule, todayStr);
+      const activeV = vi >= 0 ? schedule.versions[vi] : null;
+      const vDaysLen = (activeV?.days || schedule.days || []).length;
+      if (vDaysLen > 0) {
+        const today = new Date(); today.setHours(12, 0, 0, 0);
+        const daysUntilD1 = pos === 0 ? 0 : vDaysLen - pos;
+        const d = new Date(today);
+        d.setDate(d.getDate() + daysUntilD1);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      }
+    }
+  }
+  return nextCycleD1ISO(cycleStartDate, (schedule?.days || []).length);
+}
 
 // ─── QUICK SWITCH ────────────────────────────────────────────────────────
 
@@ -542,7 +585,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, youtube_url').eq('user_id', userId),
-    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week').eq('user_id', userId),
+    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload')
@@ -590,12 +633,14 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, deltas, joint_flags, pump_low_counts, weight_boosts, completions, pending_meso2').eq('user_id', userId),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
-         supportTicketsRes, glucoseLogsRes, templatesRes] = await Promise.all(queries);
+         supportTicketsRes, glucoseLogsRes, templatesRes, mesoStatesRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -747,6 +792,13 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       id: t.id, name: t.name,
       exercises: Array.isArray(t.exercises) ? t.exercises : [],
       createdAt: t.created_at,
+    })),
+    mesoStates: (mesoStatesRes?.data || []).map(m => ({
+      id: m.id, scheduleId: m.schedule_id, weeks: m.weeks,
+      startDate: m.start_date, startCycleIndex: m.start_cycle_index ?? 0,
+      deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {},
+      pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
+      completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
     })),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
     // and via the local cache also offline). bestE1rmForExercise combines this
@@ -1130,6 +1182,23 @@ async function syncStore(prev, next, userId) {
       id: t.id, user_id: userId, name: t.name, exercises: t.exercises || [],
     }))));
     if (removed.length) ops.push(_supabase.from('zane_workout_templates').delete().in('id', removed.map(t => t.id)));
+  }
+
+  if (prev.mesoStates !== next.mesoStates) {
+    const upsert = (next.mesoStates || []).filter(m => {
+      const p = (prev.mesoStates || []).find(x => x.id === m.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(m);
+    });
+    const removed = (prev.mesoStates || []).filter(m => !(next.mesoStates || []).find(x => x.id === m.id));
+    if (upsert.length) ops.push(_supabase.from('zane_meso_states').upsert(upsert.map(m => ({
+      id: m.id, user_id: userId, schedule_id: m.scheduleId, weeks: m.weeks,
+      start_date: m.startDate, start_cycle_index: m.startCycleIndex ?? 0,
+      deltas: m.deltas ?? {}, joint_flags: m.jointFlags ?? {},
+      pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
+      completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
+      updated_at: new Date().toISOString(),
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_meso_states').delete().in('id', removed.map(m => m.id)));
   }
 
   if (prev.dailyLogs !== next.dailyLogs) {
@@ -1676,9 +1745,13 @@ async function fetchSeedEntries(state, items, dayId, userId, window = 3) {
       if (!rows.length) return;
       const local = recentSessionsForExercise(state, exId, dayId, window)
         .map(r => ({ sessionId: r.session.id, ended: r.session.ended, sets: r.entry.sets || [] }));
+      // Deload sessions are excluded from local via recentSessionsForExercise, but
+      // the server RPC doesn't know about is_deload and may return them. Guard by
+      // checking server rows against locally-known deload session ids.
+      const deloadIds = new Set((state.sessions || []).filter(s => s.isDeload).map(s => s.id));
       const merged = [...local];
       for (const row of rows) {
-        if (!merged.some(m => m.sessionId === row.sessionId)) merged.push(row);
+        if (!merged.some(m => m.sessionId === row.sessionId) && !deloadIds.has(row.sessionId)) merged.push(row);
       }
       merged.sort((a, b) => (Date.parse(b.ended) || 0) - (Date.parse(a.ended) || 0));
       const ref = bestEntryFromSetLists(
@@ -2994,7 +3067,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
+  uid, todayISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,

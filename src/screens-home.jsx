@@ -1576,6 +1576,45 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     })();
   }, [store?.statusMode, store?.sessions, store?.cardioLogs]);
 
+  // Eagerly create the meso state as soon as a plan with mesocycle_weeks is
+  // detected but has no corresponding state yet. This ensures the pending chip
+  // appears immediately after enabling meso — not only after the first training
+  // session opens. The useEffectT in screens-train still handles the live
+  // training case and re-creates if the week count changes.
+  useEffect(() => {
+    if (!sch?.mesocycle_weeks || !sch?.id || !userId) return;
+    const existing = (store?.mesoStates || []).find(m => m.scheduleId === sch.id);
+    if (existing) return;
+    const _daysLen = sch.days.length || 1;
+    const _isWeekday = LB.isWeekdayPlan(sch);
+    const _isFlex = LB.isFlexPlan(sch);
+    const _ci = store.cycleIndex || 0;
+    let alignedStartDate, alignedStartIdx;
+    if (_isWeekday) {
+      alignedStartDate = LB.nextMondayISO();
+      alignedStartIdx = _ci;
+    } else if (_isFlex) {
+      alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
+      alignedStartDate = LB.todayISO();
+    } else {
+      alignedStartDate = LB.nextCycleD1ISOFromSchedule(sch, store.cycleStartDate);
+      alignedStartIdx = 0;
+    }
+    const newMeso = {
+      id: userId + '_' + sch.id,
+      scheduleId: sch.id,
+      weeks: sch.mesocycle_weeks,
+      startDate: alignedStartDate,
+      startCycleIndex: alignedStartIdx,
+      deltas: {}, jointFlags: {}, pumpLowCounts: {}, weightBoosts: {},
+      completions: 0,
+    };
+    setStore(s => {
+      const others = (s.mesoStates || []).filter(m => m.scheduleId !== newMeso.scheduleId);
+      return { ...s, mesoStates: [...others, newMeso] };
+    });
+  }, [sch?.id, sch?.mesocycle_weeks, store?.mesoStates, userId]); // eslint-disable-line
+
   // Auto-end a deload once it has run its course (one cycle / week elapsed, or
   // the flex session goal of deload sessions logged). Runs on mount and when the
   // relevant inputs change; endDeload no-ops if already off.
@@ -1588,6 +1627,86 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       LB.endDeload(userId, store, setStore);
     }
   }, [store?.statusMode, store?.statusModeSince, store?.sessions]);
+
+  // After a meso-triggered deload ends (or if pendingMeso2 is set without an active deload),
+  // offer to start Meso 2, continue as a regular cycle, or deactivate the plan.
+  const pendingMeso2Checked = useRef(false);
+  useEffect(() => {
+    if (store?.statusMode === 'deload') { pendingMeso2Checked.current = false; return; }
+    if (pendingMeso2Checked.current) return;
+    if (store?.inProgress) return;
+    if (!sch) return;
+    const mesoSt = (store?.mesoStates || []).find(m => m.scheduleId === sch.id);
+    if (!mesoSt?.pendingMeso2) return;
+    pendingMeso2Checked.current = true;
+    (async () => {
+      const scheduleId = sch.id;
+      const wantMeso2 = await confirm(
+        'Your deload is done — nice recovery! Ready to kick off Meso 2? Your earned weight boosts carry over and set counts reset to baseline.',
+        { title: 'Start Meso 2?', ok: 'Start Meso 2', cancel: 'Skip', preventBackdropClose: true },
+      );
+      if (wantMeso2) {
+        setStore(s => {
+          const existing = (s.mesoStates || []).find(m => m.scheduleId === scheduleId);
+          if (!existing) return s;
+          const sc2 = s.schedules?.find(sc => sc.id === scheduleId);
+          const isWd = sc2 ? LB.isWeekdayPlan(sc2) : false;
+          const isFlex2 = sc2 ? LB.isFlexPlan(sc2) : false;
+          const daysLen2 = sc2?.days?.length || 1;
+          const ci = s.cycleIndex || 0;
+          let startDate2, startCycleIndex2;
+          if (isWd) {
+            startDate2 = LB.nextMondayISO();
+            startCycleIndex2 = existing.startCycleIndex ?? 0;
+          } else if (isFlex2) {
+            startCycleIndex2 = ci % daysLen2 === 0 ? ci : Math.ceil(ci / daysLen2) * daysLen2;
+            startDate2 = LB.todayISO();
+          } else {
+            startDate2 = LB.nextCycleD1ISOFromSchedule(sch2, s.cycleStartDate);
+            startCycleIndex2 = 0;
+          }
+          const newMeso = {
+            ...existing,
+            startDate: startDate2,
+            startCycleIndex: startCycleIndex2,
+            deltas: {},
+            jointFlags: {},
+            pumpLowCounts: {},
+            pendingMeso2: false,
+          };
+          const others = (s.mesoStates || []).filter(m => m.scheduleId !== scheduleId);
+          return { ...s, mesoStates: [...others, newMeso] };
+        });
+        return;
+      }
+      const keepActive = await confirm(
+        'Keep the plan active as a regular cycle (no meso), or deactivate it?',
+        { title: 'What\'s next?', ok: 'Continue as cycle', cancel: 'Deactivate plan', preventBackdropClose: true },
+      );
+      if (keepActive) {
+        setStore(s => ({
+          ...s,
+          schedules: s.schedules.map(sc =>
+            sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
+          ),
+          mesoStates: (s.mesoStates || []).map(m =>
+            m.scheduleId === scheduleId ? { ...m, pendingMeso2: false } : m
+          ),
+        }));
+      } else {
+        setStore(s => ({
+          ...s,
+          activeScheduleId: null,
+          schedules: s.schedules.map(sc =>
+            sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
+          ),
+          mesoStates: (s.mesoStates || []).map(m =>
+            m.scheduleId === scheduleId ? { ...m, pendingMeso2: false } : m
+          ),
+        }));
+      }
+    })();
+  }, [store?.statusMode, store?.mesoStates, sch?.id, store?.inProgress]);
 
   // After every 8 completed cycles (cycle plans), 8 complete weeks (weekday plans),
   // or 8×sessions_per_week sessions (flex plans), congratulate the user and offer a
@@ -1868,6 +1987,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // the server first (fetchSeedEntries resolves instantly when the local
     // window suffices, and never rejects — offline falls back to local data).
     const seedRefs = await LB.fetchSeedEntries(store, activeDay.items, activeDay.id, userId);
+    const mesoBoosts = (typeof getMesoWeightBoosts === 'function') ? getMesoWeightBoosts(sch.id, store.mesoStates) : null;
     const entries = activeDay.items.map(it => {
       const ex = LB.findExercise(store, it.exId);
       if (ex?.movement_type === 'cardio') {
@@ -1877,10 +1997,17 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps, it.repsPerSet || null, seedRefs[it.exId]);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-      const seedSets = LB.buildSeedSets(it, last, suggestion, isUnilateral, !!store.settings?.smartProgression, bodyweightKg);
+      const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, activeDay.id, sch.id, store.mesoStates) : it;
+      const weightBoost = mesoBoosts?.[it.exId + '_' + activeDay.id] ?? null;
+      let suggestionFinal = suggestion;
+      if (weightBoost != null && !suggestionFinal && last) {
+        const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
+        if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
+      }
+      const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUnilateral, !!store.settings?.smartProgression, bodyweightKg);
       return {
         exId: it.exId, name: ex?.name || '?',
-        plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null,
+        plannedSets: itAdj.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null,
         sets: seedSets, note: '',
         supersetGroup: it.supersetGroup || null,
       };
@@ -2086,6 +2213,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     setWorkoutSubOpen(false);
     setQuickActionsOpen(false);
     const seedRefs = await LB.fetchSeedEntries(store, day.items, day.id, userId);
+    const mesoBoosts = (typeof getMesoWeightBoosts === 'function') ? getMesoWeightBoosts(sch?.id, store.mesoStates) : null;
     const entries = (day.items || []).map(it => {
       const ex = LB.findExercise(store, it.exId);
       if (ex?.movement_type === 'cardio') {
@@ -2095,8 +2223,15 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const isUni = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet, seedRefs[it.exId]);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-      const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
-      return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+      const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, day.id, sch?.id, store.mesoStates) : it;
+      const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
+      let suggestionFinal = suggestion;
+      if (weightBoost != null && !suggestionFinal && last) {
+        const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
+        if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
+      }
+      const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression, bodyweightKg);
+      return { exId: it.exId, name: ex?.name || '?', plannedSets: itAdj.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
     });
     // Treat as normal (cycle advances) only when this is today's scheduled day
     // AND it hasn't been trained yet today. If already done, it's always bonus.
@@ -2123,6 +2258,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     setBacklogPickerOpen(false);
     const { dayData, dayId, dayName, date } = missed;
     const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
+    const mesoBoosts = (typeof getMesoWeightBoosts === 'function') ? getMesoWeightBoosts(sch?.id, store.mesoStates) : null;
     const entries = (dayData?.items || []).map(it => {
       const ex = LB.findExercise(store, it.exId);
       if (ex?.movement_type === 'cardio') {
@@ -2132,8 +2268,15 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const isUni = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-      const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
-      return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+      const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, dayId, sch?.id, store.mesoStates) : it;
+      const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
+      let suggestionFinal = suggestion;
+      if (weightBoost != null && !suggestionFinal && last) {
+        const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
+        if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
+      }
+      const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression, bodyweightKg);
+      return { exId: it.exId, name: ex?.name || '?', plannedSets: itAdj.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
     });
     const session = { id: LB.uid(), scheduleId: sch?.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
     const autoSkip = skipsMap.get(missed.dateKey);
@@ -2362,7 +2505,31 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             </button>
           )}
           <div style={{ flex: 1, textAlign: 'center' }}>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft, textTransform: 'uppercase' }}>{periodLabel}</span>
+            {sch.mesocycle_weeks ? (() => {
+              const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+              const weeks = sch.mesocycle_weeks;
+              const week = m ? mesoCurrentWeek(m, store) : null;
+              if (week == null) {
+                // Pending — meso hasn't started yet; show start date if known
+                const startLabel = m?.startDate
+                  ? (() => { const d = new Date(m.startDate + 'T12:00:00'); return `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`; })()
+                  : 'D1';
+                return (
+                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                    MESO · starts {startLabel}
+                  </span>
+                );
+              }
+              const rir = (typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks) : Math.max(0, Math.round(3 - (week - 1) * 3 / (weeks - 1)));
+              const unit = weekdayMode ? 'W' : 'C';
+              return (
+                <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                  MESO {unit}{week}/{weeks} · {rir} RIR
+                </span>
+              );
+            })() : (
+              <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft, textTransform: 'uppercase' }}>{periodLabel}</span>
+            )}
           </div>
           {!isFlex && (
             <button onClick={goForward} disabled={weekOffset === 0} style={{
@@ -2776,6 +2943,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               setNotLoggedModalOpen(false);
               const { dayData, dayId, dayName, date } = recentBannerDay;
               const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
+              const mesoBoosts = (typeof getMesoWeightBoosts === 'function') ? getMesoWeightBoosts(sch.id, store.mesoStates) : null;
               const entries = (dayData?.items || []).map(it => {
                 const ex = LB.findExercise(store, it.exId);
                 if (ex?.movement_type === 'cardio') {
@@ -2785,8 +2953,15 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 const isUni = ex?.unilateral || false;
                 const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
                 const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-                const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
-                return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+                const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, dayId, sch.id, store.mesoStates) : it;
+                const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
+                let suggestionFinal = suggestion;
+                if (weightBoost != null && !suggestionFinal && last) {
+                  const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
+                  if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
+                }
+                const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression, bodyweightKg);
+                return { exId: it.exId, name: ex?.name || '?', plannedSets: itAdj.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
               });
               const session = { id: LB.uid(), scheduleId: sch.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
               setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));

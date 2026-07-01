@@ -1358,3 +1358,28 @@ ALTER TABLE zane_schedule_backups ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "own backups"
   ON zane_schedule_backups FOR ALL
   USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- ── Mesocycle states (migration 0120) ───────────────────────────────────────
+
+CREATE TABLE zane_meso_states (
+  id                 text        PRIMARY KEY,
+  user_id            uuid        NOT NULL REFERENCES auth.users ON DELETE CASCADE,
+  schedule_id        text        NOT NULL,
+  weeks              int         NOT NULL,
+  start_date         text        NOT NULL,
+  start_cycle_index  int         NOT NULL DEFAULT 0,
+  deltas             jsonb       NOT NULL DEFAULT '{}',
+  joint_flags        jsonb       NOT NULL DEFAULT '{}',
+  pump_low_counts    jsonb       NOT NULL DEFAULT '{}',
+  weight_boosts      jsonb       NOT NULL DEFAULT '{}',
+  completions        int         NOT NULL DEFAULT 0,
+  pending_meso2      boolean     NOT NULL DEFAULT false,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE zane_meso_states ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users manage own meso states"
+  ON zane_meso_states FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);

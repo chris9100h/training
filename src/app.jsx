@@ -287,7 +287,6 @@ function App() {
   const waitingWorker             = useRefA(null);
   const intentionalUpdate         = useRefA(false);
   const swReg                     = useRefA(null);
-  const lastSeenSWVersion         = useRefA(null);
   const prevStore                 = useRefA(null);
   const syncBase                  = useRefA(null);  // last state confirmed written to Supabase
   const pendingStore              = useRefA(null);  // latest state awaiting sync
@@ -904,10 +903,15 @@ function App() {
         const m = text.match(/const CACHE = '([^']+)'/);
         if (!m) return;
         const v = m[1];
-        if (!lastSeenSWVersion.current) {
-          lastSeenSWVersion.current = v;
-        } else if (v !== lastSeenSWVersion.current) {
-          lastSeenSWVersion.current = v;
+        // Persist the last-seen version to localStorage so cold starts (iOS
+        // terminates PWA, clears in-memory state) still detect stale caches.
+        // An in-memory ref would always start null after a cold start, making
+        // the first fetch a no-op that "consumes" the update without showing
+        // the banner — the user would never see it.
+        let stored = null;
+        try { stored = localStorage.getItem('logbook-sw-version'); } catch (_) {}
+        try { localStorage.setItem('logbook-sw-version', v); } catch (_) {}
+        if (stored && v !== stored) {
           setUpdateAvailable(true);
           swReg.current?.update().catch(() => {});
         }

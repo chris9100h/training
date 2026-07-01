@@ -19,14 +19,15 @@ const daysArr = s => Array.isArray(s?.days) ? s.days : [];
 // One-line plan summary shown in the plan list and viewer header.
 function planDescriptor(s) {
   const trainingDays = daysArr(s).filter(d => d.items.length).length;
+  const mesoSuffix = s.mesocycle_weeks ? ` · ${s.mesocycle_weeks}wk meso` : '';
   if (LB.isFlexPlan(s)) {
     const goal = s.sessions_per_week;
-    return `Flexible · ${trainingDays} ${trainingDays === 1 ? 'workout' : 'workouts'}${goal ? ` · ${goal}×/week` : ''}`;
+    return `Flexible · ${trainingDays} ${trainingDays === 1 ? 'workout' : 'workouts'}${goal ? ` · ${goal}×/week` : ''}${mesoSuffix}`;
   }
   if (LB.isWeekdayPlan(s)) {
-    return `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}`;
+    return `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}${mesoSuffix}`;
   }
-  return `${s.days.length}-day cycle · ${trainingDays} training days`;
+  return `${s.days.length}-day cycle · ${trainingDays} training days${mesoSuffix}`;
 }
 
 // ─── PlanScreen ────────────────────────────────────────────────────
@@ -129,13 +130,41 @@ function PlanScreen({ store, setStore, go, userId }) {
             action={<Btn data-tour="plan-new-btn" onClick={() => go({ name: 'schedule-new' })}>Create plan</Btn>}
             icon={ICON_CALENDAR} />
         )}
-        {store.schedules.filter(s => !s.archived).map(s => {
+        {[...store.schedules.filter(s => !s.archived)].sort((a, b) => {
+          if (a.id === store.activeScheduleId) return -1;
+          if (b.id === store.activeScheduleId) return 1;
+          return 0;
+        }).map(s => {
           const isActive = s.id === store.activeScheduleId;
+          const mesoSt = s.mesocycle_weeks ? (store.mesoStates || []).find(m => m.scheduleId === s.id) : null;
+          const mesoCompletions = mesoSt?.completions ?? 0;
+          const mesoPending = mesoSt?.startDate && new Date(mesoSt.startDate + 'T12:00:00') > new Date();
           return isActive ? (
-            <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer' }}>
+            <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', overflow: 'hidden' }}>
+              {s.mesocycle_weeks && (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
+                  <span className="display-it" style={{ fontSize: 52, fontWeight: 900, letterSpacing: '0.18em', color: UI.gold, opacity: mesoPending ? 0.04 : 0.07, transform: 'rotate(-22deg)', whiteSpace: 'nowrap', userSelect: 'none' }}>MESOCYCLE</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <div className="display" style={{ fontSize: 22, color: UI.gold, lineHeight: 1.1 }}>{s.name}</div>
-                <Pill gold>active</Pill>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  {s.mesocycle_weeks && mesoPending && (() => {
+                    const d = new Date(mesoSt.startDate + 'T12:00:00');
+                    const startLabel = `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`;
+                    return (
+                      <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkFaint, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                        MESO · {startLabel}
+                      </span>
+                    );
+                  })()}
+                  {!mesoPending && mesoCompletions > 0 && (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                      MESO {mesoCompletions + 1}
+                    </span>
+                  )}
+                  <Pill gold>active</Pill>
+                </div>
               </div>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>
                 {planDescriptor(s)}
@@ -161,7 +190,14 @@ function PlanScreen({ store, setStore, go, userId }) {
             </BracketFrame>
           ) : (
             <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px' }}>
-              <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1, marginBottom: 6 }}>{s.name}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1 }}>{s.name}</div>
+                {mesoCompletions > 0 && (
+                  <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkSoft, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em', flexShrink: 0, marginLeft: 8 }}>
+                    MESO {mesoCompletions + 1}
+                  </span>
+                )}
+              </div>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>
                 {planDescriptor(s)}
               </div>
@@ -282,6 +318,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
   const [restoreFromDate, setRestoreFromDate] = useStateS('');
   const [restoreFromDayIdx, setRestoreFromDayIdx] = useStateS(0);
   const [pendingBackup, setPendingBackup] = useStateS(null);
+  const [previewBackup, setPreviewBackup] = useStateS(null);
+  const [previewDayIdx, setPreviewDayIdx] = useStateS(0);
 
   const openBackupSheet = async () => {
     setBackupSheet(true);
@@ -507,7 +545,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
         const last = LB.bestRecentEntry(store, it.exId, day.id);
         const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps);
         const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-        const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
+        const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, day.id, sch?.id) : it;
+        const seedSets = LB.buildSeedSets(itAdj, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
         return (
           <Frame key={k} style={{ padding: '12px 16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
@@ -828,7 +867,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
                         {date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · {(b.days || []).length} days · {dayCount} training
                       </div>
                     </div>
-                    <Btn kind="ghost" onClick={() => restoreBackup(b)} style={{ fontSize: 11, flexShrink: 0 }}>Restore</Btn>
+                    <Btn kind="ghost" onClick={() => { setPreviewBackup(b); setPreviewDayIdx(0); }} style={{ fontSize: 11, flexShrink: 0 }}>Preview</Btn>
                   </div>
                 );
               })}
@@ -836,6 +875,118 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
           </div>
         </div>
       )}
+
+      {previewBackup && (() => {
+        const previewDays = previewBackup.days || [];
+        const closePreview = () => { setPreviewBackup(null); setPreviewDayIdx(0); };
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 350, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
+            onClick={closePreview}>
+            <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
+              onClick={e => e.stopPropagation()}>
+
+              {/* Header */}
+              <div style={{ padding: '18px 22px 0', flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                  <div>
+                    <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>BACKUP PREVIEW</div>
+                    <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>
+                      {new Date(previewBackup.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                    </div>
+                    <div className="micro" style={{ color: UI.inkFaint, marginTop: 3, letterSpacing: '0.06em' }}>
+                      {new Date(previewBackup.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                      {' · '}{previewDays.length} days · {previewDays.filter(d => (d.items || []).length).length} training
+                    </div>
+                  </div>
+                  <button onClick={closePreview} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontSize: 20, lineHeight: 1, padding: '2px 0', flexShrink: 0 }}>×</button>
+                </div>
+              </div>
+
+              {/* Day chips */}
+              <div style={{ display: 'flex', gap: 6, overflowX: 'auto', padding: '14px 22px 12px', flexShrink: 0, scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+                {previewDays.map((d, i) => {
+                  const active = previewDayIdx === i;
+                  const hasItems = (d.items || []).length > 0;
+                  return (
+                    <button key={d.id || i} onClick={() => setPreviewDayIdx(i)} style={{
+                      flexShrink: 0, padding: '5px 12px', borderRadius: 4, cursor: 'pointer',
+                      border: `1px solid ${active ? UI.goldSoft : UI.hairStrong}`,
+                      background: active ? UI.goldFaint : 'transparent',
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, color: active ? UI.gold : UI.inkSoft }}>{d.name}</div>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 8, color: active ? UI.gold : UI.inkFaint, letterSpacing: '0.06em', marginTop: 1 }}>
+                        {hasItems ? `${(d.items || []).length} ex` : 'REST'}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Exercise list — all days rendered in a CSS grid stack so the
+                  sheet height is anchored to the tallest day; non-active days
+                  are invisible but still occupy space, preventing resize on switch */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '0 22px 12px' }}>
+                <div style={{ display: 'grid' }}>
+                  {previewDays.map((d, i) => {
+                    const items = d.items || [];
+                    const isRest = !items.length;
+                    const visible = i === previewDayIdx;
+                    return (
+                      <div key={d.id || i} style={{ gridArea: '1/1', visibility: visible ? 'visible' : 'hidden', pointerEvents: visible ? 'auto' : 'none' }}>
+                        {isRest ? (
+                          <div style={{ textAlign: 'center', padding: '28px 0' }}>
+                            <div className="display-it" style={{ fontSize: 28, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, marginBottom: 4 }}>Recover.</div>
+                            <div style={{ fontSize: 12, color: UI.inkFaint }}>Rest day</div>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {items.map((it, k) => {
+                              const ex = LB.findExercise(store, it.exId);
+                              const label = it.repsPerSet && it.repsPerSet.length > 1
+                                ? it.repsPerSet.join('/')
+                                : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`;
+                              const nextIt = items[k + 1];
+                              const prevIt = items[k - 1];
+                              const linkedNext = it.supersetGroup && it.supersetGroup === nextIt?.supersetGroup;
+                              const linkedPrev = it.supersetGroup && it.supersetGroup === prevIt?.supersetGroup;
+                              const inGroup = linkedNext || linkedPrev;
+                              return (
+                                <div key={k} style={{
+                                  display: 'flex', alignItems: 'center', gap: 10,
+                                  padding: '9px 12px',
+                                  borderRadius: linkedPrev && linkedNext ? 0 : linkedPrev ? '0 0 6px 6px' : linkedNext ? '6px 6px 0 0' : 6,
+                                  border: `1px solid ${inGroup ? UI.goldSoft : UI.hairStrong}`,
+                                  background: inGroup ? UI.goldFaint : UI.bgRaised,
+                                }}>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>{ex?.name || '—'}</div>
+                                    {it.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 2, fontStyle: 'italic' }}>{it.note}</div>}
+                                  </div>
+                                  <span className="num" style={{
+                                    fontSize: 12, color: UI.gold, background: UI.goldFaint,
+                                    border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
+                                    padding: '3px 8px', whiteSpace: 'nowrap', flexShrink: 0,
+                                  }}>{label}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Restore button */}
+              <div style={{ padding: '12px 22px calc(16px + env(safe-area-inset-bottom, 0px))', borderTop: `0.5px solid ${UI.hairStrong}`, flexShrink: 0 }}>
+                <Btn onClick={() => { closePreview(); restoreBackup(previewBackup); }} style={{ width: '100%', textAlign: 'center', justifyContent: 'center' }}>Restore this backup</Btn>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </Screen>
   );
 }
@@ -863,6 +1014,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const [applyFromDate, setApplyFromDate] = useStateS('');
   const [applyFromDayIdx, setApplyFromDayIdx] = useStateS(0);
   const [editingDay, setEditingDay] = useStateS(null);
+  const [mesoInfoOpen, setMesoInfoOpen] = useStateS(false);
+  const [modifiersOpen, setModifiersOpen] = useStateS(false);
 
   const reorderDays = (from, to) => {
     if (from === to) return;
@@ -937,6 +1090,16 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         savedDraft = { ...draft, versions: draft.versions.map((v, i) => i === 0 ? { ...v, days: draft.days } : v) };
       }
       setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
+    }
+
+    // If mesocycle_weeks changed (activated, deactivated, or weeks count changed),
+    // clear any stored meso state for this plan — it belongs to the old config.
+    if (original.mesocycle_weeks !== draft.mesocycle_weeks) {
+      // Clear localStorage cache (new per-plan key + legacy single key)
+      try { localStorage.removeItem('logbook-meso-state-' + draft.id); } catch {}
+      try { localStorage.removeItem('logbook-meso-state'); } catch {}
+      // Remove from store so syncStore deletes it from DB
+      setStore(s => ({ ...s, mesoStates: (s.mesoStates || []).filter(m => m.scheduleId !== draft.id) }));
     }
 
     const asClient = store.coaching?.asClient;
@@ -1018,10 +1181,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(original);
   const dateInputStyle = {
-    background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+    background: UI.bgInset, border: 'none',
     borderRadius: 4, padding: '10px 14px', color: UI.ink,
     fontFamily: UI.fontNum, fontSize: 15, outline: 'none',
-    width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark',
+    width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark', textAlign: 'center', WebkitAppearance: 'none',
   };
 
   const dayActionLabel = (day) => (day.name === 'REST' || !day.items.length) ? 'edit' : `${day.items.length} ex · edit`;
@@ -1108,92 +1271,43 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           </div>
         </Field>
 
-        {!isWeekday && (
-          <Field label="Flexible schedule">
-            <button onClick={toggleFlex} style={{
-              display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-              background: UI.bgInset, border: `1px solid ${isFlex ? UI.goldSoft : UI.hairStrong}`,
-              borderRadius: 4, padding: '10px 12px', cursor: 'pointer', textAlign: 'left',
-            }}>
-              <div style={{
-                width: 44, height: 26, borderRadius: 13, flexShrink: 0, position: 'relative',
-                background: isFlex ? UI.gold : UI.hairStrong, transition: 'background 0.15s',
-              }}>
-                <div style={{
-                  position: 'absolute', top: 3, left: isFlex ? 21 : 3, width: 20, height: 20,
-                  borderRadius: '50%', background: '#fff', transition: 'left 0.15s',
-                }} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Advance only when I train</div>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
-                  No fixed days and no rest days — your next workout simply waits until you log it, whenever that is.
-                </div>
-              </div>
-            </button>
-          </Field>
-        )}
-
-        {isFlex && (() => {
-          const hasGoal = draft.sessions_per_week != null;
-          const toggle = () => setDraft(d => ({
-            ...d,
-            sessions_per_week: d.sessions_per_week != null ? null
-              : Math.min(7, Math.max(1, (d.days || []).filter(x => x.items?.length > 0).length || 3)),
-          }));
+        {/* Options row — opens modifiers sheet */}
+        {(() => {
+          const parts = [];
+          if (!isWeekday && isFlex) {
+            parts.push('Flex');
+            if (draft.sessions_per_week != null) parts.push(`${draft.sessions_per_week}×/wk`);
+          }
+          if (draft.mesocycle_weeks != null) parts.push(`${draft.mesocycle_weeks}wk meso`);
+          const summary = parts.join(' · ');
           return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span className="label">Weekly goal</span>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-                background: UI.bgInset, border: `1px solid ${hasGoal ? UI.goldSoft : UI.hairStrong}`,
-                borderRadius: 4, padding: '10px 12px',
-              }}>
-                <button onClick={toggle} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                  <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasGoal ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
-                    <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
-                  </div>
-                </button>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>
-                    {hasGoal ? `${draft.sessions_per_week}× per week` : 'No target'}
-                  </div>
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
-                    {hasGoal
-                      ? 'Used for your weekly adherence score and deload timing.'
-                      : 'Just train whenever — adherence and deload timing won\'t apply.'}
-                  </div>
-                </div>
+            <button onClick={() => setModifiersOpen(true)} style={{
+              display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+              background: summary ? `rgba(var(--accent-rgb),0.06)` : UI.bgRaised,
+              border: `1px solid ${summary ? UI.goldSoft : UI.hairStrong}`,
+              borderRadius: 6, padding: '13px 16px', cursor: 'pointer', textAlign: 'left',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={summary ? UI.gold : UI.inkSoft} strokeWidth="1.8" strokeLinecap="round">
+                <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>
+                <circle cx="9" cy="6" r="2.5" fill={summary ? UI.gold : UI.inkSoft} stroke="none"/>
+                <circle cx="15" cy="12" r="2.5" fill={summary ? UI.gold : UI.inkSoft} stroke="none"/>
+                <circle cx="9" cy="18" r="2.5" fill={summary ? UI.gold : UI.inkSoft} stroke="none"/>
+              </svg>
+              <div style={{ flex: 1, textAlign: 'center' }}>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: summary ? UI.gold : UI.inkSoft, fontWeight: 600, marginBottom: summary ? 3 : 0 }}>Options</div>
+                {summary && <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink }}>{summary}</div>}
               </div>
-              {hasGoal && (() => {
-                const spw = draft.sessions_per_week;
-                const hint = spw >= 50 ? '50 sessions. You win.' :
-                             spw > 30  ? 'At this point the gym should pay you.' :
-                             spw > 20  ? 'Dude. Really?' :
-                             spw > 14  ? '…okay, you\'re serious about this.' :
-                             spw > 10  ? 'Calm down, dude.' :
-                             spw > 7   ? 'Oh, an overachiever. We see you.' :
-                             spw >= 4  ? 'Solid.' :
-                             spw >= 2  ? 'That\'s a start.' :
-                                         'Better than nothing.';
-                return (
-                  <div style={{ marginTop: 10, width: '100%' }}>
-                    <Stepper value={spw} step={1} min={1} max={50}
-                      suffix="/ week"
-                      onChange={v => setDraft(d => ({ ...d, sessions_per_week: Math.min(50, Math.max(1, Math.round(v))) }))} />
-                    {hint && (
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, textAlign: 'center', lineHeight: 1.4 }}>{hint}</div>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
+              <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 2l5 5-5 5"/>
+              </svg>
+            </button>
           );
         })()}
 
         {isActive && !isWeekday && !isFlex && (
           <Field label="Cycle start date (Day 1)">
-            <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%' }}>
+            <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%', border: `1px solid ${UI.hairStrong}` }}>
               <input type="date" value={store.cycleStartDate || ''}
                 onChange={e => { if (e.target.value) setStore(s => ({ ...s, cycleStartDate: e.target.value })); }}
                 style={dateInputStyle} />
@@ -1208,7 +1322,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         )}
         {isActive && isWeekday && (
           <Field label="Week plan start date (Week 1)">
-            <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%' }}>
+            <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%', border: `1px solid ${UI.hairStrong}` }}>
               <input type="date" value={store.weekPlanStartDate || ''}
                 onChange={e => { if (e.target.value) setStore(s => ({ ...s, weekPlanStartDate: e.target.value })); }}
                 style={dateInputStyle} />
@@ -1376,6 +1490,177 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           </div>
         </div>
       )}
+
+      <Sheet open={modifiersOpen} onClose={() => setModifiersOpen(false)} title="Options">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+
+          {!isWeekday && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span className="label">Flexible schedule</span>
+              <button onClick={toggleFlex} style={{
+                display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                background: UI.bgInset, border: `1px solid ${isFlex ? UI.goldSoft : UI.hairStrong}`,
+                borderRadius: 4, padding: '10px 12px', cursor: 'pointer', textAlign: 'left',
+              }}>
+                <div style={{ width: 44, height: 26, borderRadius: 13, flexShrink: 0, position: 'relative', background: isFlex ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
+                  <div style={{ position: 'absolute', top: 3, left: isFlex ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Advance only when I train</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
+                    No fixed days and no rest days — your next workout simply waits until you log it, whenever that is.
+                  </div>
+                </div>
+              </button>
+            </div>
+          )}
+
+          {isFlex && (() => {
+            const hasGoal = draft.sessions_per_week != null;
+            const toggle = () => setDraft(d => ({
+              ...d,
+              sessions_per_week: d.sessions_per_week != null ? null
+                : Math.min(7, Math.max(1, (d.days || []).filter(x => x.items?.length > 0).length || 3)),
+            }));
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <span className="label">Weekly goal</span>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                  background: UI.bgInset, border: `1px solid ${hasGoal ? UI.goldSoft : UI.hairStrong}`,
+                  borderRadius: 4, padding: '10px 12px',
+                }}>
+                  <button onClick={toggle} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                    <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasGoal ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
+                      <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                    </div>
+                  </button>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>
+                      {hasGoal ? `${draft.sessions_per_week}× per week` : 'No target'}
+                    </div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
+                      {hasGoal ? 'Used for your weekly adherence score and deload timing.' : 'Just train whenever — adherence and deload timing won\'t apply.'}
+                    </div>
+                  </div>
+                </div>
+                {hasGoal && (() => {
+                  const spw = draft.sessions_per_week;
+                  const hint = spw >= 50 ? '50 sessions. You win.' :
+                               spw > 30  ? 'At this point the gym should pay you.' :
+                               spw > 20  ? 'Dude. Really?' :
+                               spw > 14  ? '…okay, you\'re serious about this.' :
+                               spw > 10  ? 'Calm down, dude.' :
+                               spw > 7   ? 'Oh, an overachiever. We see you.' :
+                               spw >= 4  ? 'Solid.' :
+                               spw >= 2  ? 'That\'s a start.' :
+                                           'Better than nothing.';
+                  return (
+                    <div style={{ marginTop: 4 }}>
+                      <Stepper value={spw} step={1} min={1} max={50}
+                        suffix="/ week"
+                        onChange={v => setDraft(d => ({ ...d, sessions_per_week: Math.min(50, Math.max(1, Math.round(v))) }))} />
+                      {hint && <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, textAlign: 'center', lineHeight: 1.4 }}>{hint}</div>}
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })()}
+
+          {(() => {
+            const hasMeso = draft.mesocycle_weeks != null;
+            const toggleMeso = () => setDraft(d => ({ ...d, mesocycle_weeks: d.mesocycle_weeks != null ? null : 6 }));
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="label" style={{ flex: 1 }}>Mesocycle</span>
+                  <button onClick={() => setMesoInfoOpen(true)} style={{
+                    background: 'transparent', border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
+                    width: 22, height: 22, cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi,
+                    fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+                  }}>ⓘ</button>
+                </div>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                  background: UI.bgInset, border: `1px solid ${hasMeso ? UI.goldSoft : UI.hairStrong}`,
+                  borderRadius: 4, padding: '10px 12px',
+                }}>
+                  <button onClick={toggleMeso} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                    <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasMeso ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
+                      <div style={{ position: 'absolute', top: 3, left: hasMeso ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                    </div>
+                  </button>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>
+                      {hasMeso ? `${draft.mesocycle_weeks}-week mesocycle` : 'No mesocycle'}
+                    </div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
+                      {hasMeso ? 'RIR targets + auto-regulation feedback during training.' : 'Enable for RIR-based progressive overload.'}
+                    </div>
+                  </div>
+                </div>
+                {hasMeso && (() => {
+                  const mesoCompletions = store.mesoStates?.find(m => m.scheduleId === draft.id)?.completions ?? 0;
+                  return (
+                    <div style={{ marginTop: 2 }}>
+                      <Stepper value={draft.mesocycle_weeks} step={1} min={4} max={8}
+                        suffix=" weeks"
+                        onChange={v => setDraft(d => ({ ...d, mesocycle_weeks: Math.min(8, Math.max(4, Math.round(v))) }))} />
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, textAlign: 'center', lineHeight: 1.5 }}>
+                        {'Week 1 = 3 RIR · Week ' + draft.mesocycle_weeks + ' = 0 RIR · then deload'}
+                      </div>
+                      {mesoCompletions > 0 && (
+                        <button onClick={() => setStore(s => ({
+                          ...s,
+                          mesoStates: (s.mesoStates || []).map(m =>
+                            m.scheduleId === draft.id ? { ...m, completions: 0 } : m
+                          ),
+                        }))} style={{
+                          marginTop: 10, width: '100%', background: 'transparent',
+                          border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
+                          padding: '7px 12px', cursor: 'pointer', fontFamily: UI.fontUi,
+                          fontSize: 11, color: UI.inkSoft, textAlign: 'center',
+                          WebkitTapHighlightColor: 'transparent',
+                        }}>
+                          Reset meso history ({mesoCompletions}× completed)
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })()}
+
+          <Btn onClick={() => setModifiersOpen(false)} style={{ width: '100%', textAlign: 'center', justifyContent: 'center' }}>Done</Btn>
+        </div>
+      </Sheet>
+
+      <Sheet open={mesoInfoOpen} onClose={() => setMesoInfoOpen(false)} title="Mesocycle">
+        <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <p style={{ margin: 0 }}>A <strong style={{ color: UI.ink }}>mesocycle</strong> is a structured training block (4–8 weeks) where effort progressively increases each week, measured by <strong style={{ color: UI.ink }}>Reps in Reserve (RIR)</strong> — how many reps you could still do before failure.</p>
+          <p style={{ margin: 0 }}>Week 1 starts easy (3 RIR) and ramps up to all-out effort (0 RIR) by the final week. Then you deload.</p>
+          <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', border: `1px solid ${UI.hairStrong}` }}>
+            <div className="label" style={{ marginBottom: 10 }}>What Zane asks during training</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {[
+                ['Before first set of a muscle group', 'Soreness carryover from last session?'],
+                ['After last set of each exercise', 'Any joint discomfort?'],
+                ['After last exercise of a muscle group', 'Pump quality + volume feel?'],
+              ].map(([when, what]) => (
+                <div key={when} style={{ fontSize: 12 }}>
+                  <div style={{ color: UI.gold, fontWeight: 600, marginBottom: 2 }}>{when}</div>
+                  <div style={{ color: UI.ink }}>{what}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <p style={{ margin: 0 }}>Your answers auto-adjust set targets for the next time you run that session — more sets when you need more stimulus, fewer when recovery is lagging.</p>
+          <p style={{ margin: 0 }}>Weight increases are earned at session end: if you hit all your reps <em>and</em> the feedback comes back clean — no joint issues, pump was good, volume felt right — Zane banks a load boost for the next time you hit that session. Miss any of those signals and the weight holds. <strong style={{ color: UI.ink }}>Smart Progression</strong> works alongside this: if enabled, it also suggests load steps based on your rep range history. Together they keep the bar moving forward across weeks and into Meso 2.</p>
+        </div>
+        <Btn onClick={() => setMesoInfoOpen(false)} style={{ width: '100%', marginTop: 20 }}>Got it</Btn>
+      </Sheet>
     </Screen>
   );
 }

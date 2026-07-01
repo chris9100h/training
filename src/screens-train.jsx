@@ -10,6 +10,87 @@ const MI_TO_M_T = 1609.344;
 function mToDisplayT(m, unit) { return m == null ? '' : unit === 'mi' ? (m / MI_TO_M_T).toFixed(2) : (m / 1000).toFixed(2); }
 function distToMT(val, unit) { const n = parseFloat(val); return isNaN(n) ? null : unit === 'mi' ? Math.round(n * MI_TO_M_T) : Math.round(n * 1000); }
 
+// ─── Mesocycle helpers ─────────────────────────────────────────────────────────
+const MESO_KEY = 'logbook-meso-state';
+const MESO_MUSCLE_PRIORITY = ['Back','Quads','Chest','Glutes','Hamstrings','Shoulders','Calves','Abs','Triceps','Biceps','Forearms'];
+
+function primaryMuscleForExercise(ex) {
+  if (!ex?.tags?.length) return null;
+  for (const m of MESO_MUSCLE_PRIORITY) {
+    if (ex.tags.includes(m)) return m;
+  }
+  return ex.tags[0] || null;
+}
+// Read meso state: store (DB-loaded, cross-device) first, localStorage fallback for
+// in-session writes that haven't been flushed to store yet.
+function getMesoState(scheduleId, mesoStates) {
+  if (!scheduleId) return null;
+  if (mesoStates?.length) {
+    const found = mesoStates.find(m => m.scheduleId === scheduleId);
+    if (found) return found;
+  }
+  // localStorage fallback: in-session cache or old single-key migration path
+  try {
+    const r = localStorage.getItem(MESO_KEY + '-' + scheduleId)
+           || localStorage.getItem(MESO_KEY); // old single-key format
+    if (!r) return null;
+    const parsed = JSON.parse(r);
+    // Old single-key format check
+    if (parsed && !parsed.scheduleId && parsed.planId) parsed.scheduleId = parsed.planId;
+    return parsed?.scheduleId === scheduleId ? parsed : null;
+  } catch { return null; }
+}
+// Write meso state to per-plan localStorage key (in-session fast cache).
+// The store (DB) is updated via setStore at session end.
+function saveMesoStateToStorage(s) {
+  if (!s?.scheduleId) return;
+  try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(s)); } catch {}
+}
+function mesoCurrentWeek(mesoState, store) {
+  if (!mesoState?.startDate) return 1;
+  const sch = store?.schedules?.find(s => s.id === (mesoState.scheduleId ?? mesoState.planId));
+  // Flex plans only: rotation-based tracking via cycleIndex (action-advanced counter).
+  if (sch && sch.days?.length > 0 && LB.isFlexPlan(sch)) {
+    const startIdx = mesoState.startCycleIndex ?? 0;
+    const currentIdx = store.cycleIndex || 0;
+    if (currentIdx < startIdx) return null; // pending — waiting for next rotation start
+    const rotations = Math.floor((currentIdx - startIdx) / sch.days.length);
+    return Math.min(Math.max(1, rotations + 1), mesoState.weeks);
+  }
+  // Weekday and date-based cycle plans: date arithmetic.
+  // Cycle plans: one meso "week" = one full rotation (daysLen days).
+  // Weekday plans: one meso "week" = 7 calendar days.
+  const start = new Date(mesoState.startDate); start.setHours(12, 0, 0, 0);
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  if (today < start) return null; // pending
+  const days = Math.round((today - start) / 86400000);
+  const cycleLen = (sch && !LB.isWeekdayPlan(sch) && sch.days?.length > 0) ? sch.days.length : 7;
+  return Math.min(Math.max(1, Math.floor(days / cycleLen) + 1), mesoState.weeks);
+}
+function mesoRirForWeek(week, weeks) {
+  if (!weeks || weeks <= 1) return 0;
+  return Math.max(0, Math.round(3 - (week - 1) * 3 / (weeks - 1)));
+}
+// Apply stored meso set-delta to a plan item before building seed sets.
+// Returns a shallow copy with adjusted .sets (min 1); no-ops if no meso or no delta.
+function applyMesoSetDelta(it, dayId, scheduleId, mesoStates) {
+  if (!dayId || !scheduleId) return it;
+  const m = getMesoState(scheduleId, mesoStates);
+  if (!m) return it;
+  const delta = (m.deltas || {})[it.exId + '_' + dayId];
+  if (!delta) return it;
+  return { ...it, sets: Math.max(1, (it.sets || 1) + delta) };
+}
+// Returns stored meso weight boosts map (exId_dayId → kg increment) for a schedule.
+// Called at session start; boosts are overwritten at next session end by computeMesoGains.
+function getMesoWeightBoosts(scheduleId, mesoStates) {
+  const m = getMesoState(scheduleId, mesoStates);
+  if (!m || !m.weightBoosts) return null;
+  return m.weightBoosts;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+
 // ── Debug log (disabled) ──────────────────────────────────────────────────────
 // NOTE: a previous debugging session monkey-patched window.fetch, window.WebSocket
 // and console here. The WebSocket wrapper dropped the static WebSocket.OPEN/
@@ -346,6 +427,55 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const _sch = store.schedules?.find(s => s.id === session.scheduleId);
   const isWeekdayMode = _sch ? LB.isWeekdayPlan(_sch) : false;
+
+  // Auto-start a mesocycle when the session's plan has mesocycle_weeks set
+  // and there's no active meso for this plan yet.
+  useEffectT(() => {
+    if (!_sch?.mesocycle_weeks || !session.scheduleId) return;
+    const existing = getMesoState(session.scheduleId, store.mesoStates);
+    // Keep existing meso only if weeks match the current config.
+    // A mismatch (changed week count) always starts fresh.
+    if (existing && existing.weeks === _sch.mesocycle_weeks) return;
+    // Align meso start to a clean boundary so week 1 is always a full rotation/week.
+    // Weekday: next Monday (or today). Flex: next D1 via cycleIndex. Cycle: next D1 via date.
+    const _isWeekday = LB.isWeekdayPlan(_sch);
+    const _isFlex = LB.isFlexPlan(_sch);
+    const _daysLen = _sch.days.length || 1;
+    const _ci = store.cycleIndex || 0;
+    let alignedStartDate, alignedStartIdx;
+    if (_isWeekday) {
+      alignedStartDate = LB.nextMondayISO();
+      alignedStartIdx = _ci;
+    } else if (_isFlex) {
+      alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
+      alignedStartDate = LB.todayISO();
+    } else {
+      // Date-based cycle plan: use version-aware D1 so the meso aligns with how
+      // the date strip renders (getCyclePosForDate respects version boundaries).
+      alignedStartDate = LB.nextCycleD1ISOFromSchedule(_sch, store.cycleStartDate);
+      alignedStartIdx = 0;
+    }
+    const newMeso = {
+      id: userId + '_' + session.scheduleId,
+      scheduleId: session.scheduleId,
+      weeks: _sch.mesocycle_weeks,
+      startDate: alignedStartDate,
+      startCycleIndex: alignedStartIdx,
+      deltas: {},
+      jointFlags: {},
+      pumpLowCounts: {},
+      weightBoosts: {},
+      completions: existing?.completions ?? 0,
+    };
+    saveMesoStateToStorage(newMeso);
+    setMesoStateLocal(newMeso);
+    // Immediately flush new meso state to store so it's synced to DB without
+    // waiting for session end (covers the case where user exits without finishing).
+    setStore(s => {
+      const others = (s.mesoStates || []).filter(m => m.scheduleId !== newMeso.scheduleId);
+      return { ...s, mesoStates: [...others, newMeso] };
+    });
+  }, []);
 
   const exIdx = session.currentExIdx || 0;
   const entry = session.entries[exIdx];
@@ -787,6 +917,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (updatedSets.every(st => st.done)) setTimeout(() => navigate(1), 600);
   };
 
+  const setPartials = (setIdx, count) => {
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+        ...en,
+        sets: en.sets.map((st, si) => si !== setIdx ? st : {
+          ...st,
+          technique: count > 0 ? 'lengthened_partial' : (st.technique === 'lengthened_partial' ? null : st.technique),
+          drops: count > 0 ? { partials: count } : (st.technique === 'lengthened_partial' ? null : st.drops),
+          updatedAt: new Date().toISOString(),
+        }),
+      }),
+    }));
+  };
+
   const addSet = () => {
     const bwKg = exercise?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
     updateSession(sess => ({
@@ -1049,6 +1194,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
       };
     });
+    if (mesoState) {
+      const isComplete = mesoWeek != null && mesoState?.weeks != null && mesoWeek >= mesoState.weeks;
+      const gains = computeMesoGains(isComplete); // also flushes final meso state to store
+      if (gains.length > 0) {
+        mesoGainNavRef.current = session.id;
+        setMesoGainItems(gains);
+        mesoJustCompletedRef.current = isComplete;
+        setMesoGainSheetOpen(true);
+        return;
+      }
+      if (isComplete) {
+        mesoJustCompletedRef.current = false;
+        handleMesoComplete();
+        return;
+      }
+    }
     go({ name: 'session', sessionId: session.id, justFinished: true });
   };
 
@@ -1220,6 +1381,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const myoDropsRef = useRefT([]);
   myoDropsRef.current = myoDrops;
   const [myoTarget, setMyoTarget] = useStateT(null);
+  const [lpTarget, setLpTarget] = useStateT(null); // { exIdx, setIdx } | null
   // Persist intensity state so a background/resume on iOS doesn't wipe mid-set progress
   useEffectT(() => {
     if (dropSetIdx != null || myoSetIdx != null) {
@@ -1264,9 +1426,387 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [swapOpen, setSwapOpen] = useStateT(false);
   const [addOpen, setAddOpen] = useStateT(() => !!(session.isFreestyle && session.entries.length === 0));
   const [addSupersetData, setAddSupersetData] = useStateT(null); // { newIdx } | null
+  const addAndJumpRef = useRefT(false); // set to true when adding via the finish-dialog button
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
   const [outlierConfirm, setOutlierConfirm] = useStateT(null);
+
+  // ── Mesocycle state ─────────────────────────────────────────────────────────
+  // Init from store (DB-loaded, cross-device) with localStorage fallback for
+  // in-progress sessions. Old format (planId field) is handled by getMesoState.
+  const [mesoState, setMesoStateLocal] = useStateT(() =>
+    getMesoState(session.scheduleId, store.mesoStates)
+  );
+  // Write meso state: localStorage for instant in-session persistence, store sync
+  // happens at session end via flushMesoStateToStore().
+  const saveMesoState = (updater) => {
+    setMesoStateLocal(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      if (next) saveMesoStateToStorage(next);
+      return next;
+    });
+  };
+  // Flush final meso state to the store (triggers DB sync via syncStore).
+  // Called at session end so cross-device sync happens once per session, not per answer.
+  const flushMesoStateToStore = (finalState) => {
+    if (!finalState?.scheduleId) return;
+    setStore(s => {
+      const others = (s.mesoStates || []).filter(m => m.scheduleId !== finalState.scheduleId);
+      return { ...s, mesoStates: [...others, finalState] };
+    });
+    // Clean up old localStorage keys after successful flush
+    try { localStorage.removeItem(MESO_KEY + '-' + finalState.scheduleId); } catch {}
+    try { localStorage.removeItem(MESO_KEY); } catch {} // old single-key format
+  };
+  const mesoWeek = mesoState ? mesoCurrentWeek(mesoState, store) : null;
+  const mesoRirVal = (mesoWeek != null && mesoState?.weeks != null) ? mesoRirForWeek(mesoWeek, mesoState.weeks) : null;
+  const [mesoGainSheetOpen, setMesoGainSheetOpen] = useStateT(false);
+  const [mesoGainItems, setMesoGainItems] = useStateT([]);
+  const mesoGainNavRef = useRefT(null);
+  const mesoJustCompletedRef = useRefT(false); // set when last meso week finished
+
+  const startMeso2ForSchedule = (scheduleId) => {
+    setStore(s => {
+      const existing = (s.mesoStates || []).find(m => m.scheduleId === scheduleId);
+      if (!existing) return s;
+      const sch2 = s.schedules?.find(sc => sc.id === scheduleId);
+      const isWd = sch2 ? LB.isWeekdayPlan(sch2) : false;
+      const isFlex2 = sch2 ? LB.isFlexPlan(sch2) : false;
+      const daysLen2 = sch2?.days?.length || 1;
+      const ci = s.cycleIndex || 0;
+      let startDate2, startCycleIndex2;
+      if (isWd) {
+        startDate2 = LB.nextMondayISO();
+        startCycleIndex2 = existing.startCycleIndex ?? 0;
+      } else if (isFlex2) {
+        startCycleIndex2 = ci % daysLen2 === 0 ? ci : Math.ceil(ci / daysLen2) * daysLen2;
+        startDate2 = LB.todayISO();
+      } else {
+        startDate2 = LB.nextCycleD1ISOFromSchedule(sch2, s.cycleStartDate);
+        startCycleIndex2 = 0;
+      }
+      const newMeso = {
+        ...existing,
+        startDate: startDate2,
+        startCycleIndex: startCycleIndex2,
+        deltas: {},
+        jointFlags: {},
+        pumpLowCounts: {},
+        pendingMeso2: false,
+        // weightBoosts carries over to meso 2
+      };
+      const others = (s.mesoStates || []).filter(m => m.scheduleId !== scheduleId);
+      return { ...s, mesoStates: [...others, newMeso] };
+    });
+  };
+
+  const continueAsCycle = (scheduleId) => {
+    setStore(s => ({
+      ...s,
+      schedules: s.schedules.map(sc =>
+        sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
+      ),
+      mesoStates: (s.mesoStates || []).map(m =>
+        m.scheduleId === scheduleId ? { ...m, pendingMeso2: false } : m
+      ),
+    }));
+  };
+
+  const deactivatePlanForMeso = (scheduleId) => {
+    setStore(s => ({
+      ...s,
+      activeScheduleId: null,
+      schedules: s.schedules.map(sc =>
+        sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
+      ),
+      mesoStates: (s.mesoStates || []).map(m =>
+        m.scheduleId === scheduleId ? { ...m, pendingMeso2: false } : m
+      ),
+    }));
+  };
+
+  const handleMesoComplete = async () => {
+    const scheduleId = session.scheduleId;
+    const wantDeload = await confirm(
+      'You crushed it — that\'s one full mesocycle done! A deload now helps you recover and come back even stronger. Want to start one?',
+      { title: 'Mesocycle complete! 🎉', ok: 'Start deload', cancel: 'Skip deload', preventBackdropClose: true },
+    );
+    if (wantDeload) {
+      await LB.startDeload(userId, store, setStore);
+      // pendingMeso2 flag already set; home screen picks it up after deload ends.
+      go({ name: 'session', sessionId: session.id, justFinished: true });
+      return;
+    }
+    const wantMeso2 = await confirm(
+      'Start Meso 2 with the same plan? Your earned weight boosts carry over — set counts reset to baseline so week 1 feels fresh again.',
+      { title: 'Start Meso 2?', ok: 'Start Meso 2', cancel: 'Skip', preventBackdropClose: true },
+    );
+    if (wantMeso2) {
+      startMeso2ForSchedule(scheduleId);
+      go({ name: 'session', sessionId: session.id, justFinished: true });
+      return;
+    }
+    const keepActive = await confirm(
+      'Keep the plan active as a regular cycle (no meso), or deactivate it?',
+      { title: 'What\'s next?', ok: 'Continue as cycle', cancel: 'Deactivate plan', preventBackdropClose: true },
+    );
+    if (keepActive) {
+      continueAsCycle(scheduleId);
+    } else {
+      deactivatePlanForMeso(scheduleId);
+    }
+    go({ name: 'session', sessionId: session.id, justFinished: true });
+  };
+
+  // Per-session meso feedback tracking
+  const [mesoSorenessOpen, setMesoSorenessOpen] = useStateT(false);
+  const [mesoSorenessMusc, setMesoSorenessMusc] = useStateT(null); // muscle group being asked
+  const [mesoJointOpen, setMesoJointOpen] = useStateT(false);
+  const [mesoJointExId, setMesoJointExId] = useStateT(null);
+  const [mesoJointExName, setMesoJointExName] = useStateT(null);
+  const [mesoJointPendingNav, setMesoJointPendingNav] = useStateT(false);
+  const [mesoJointMuscle, setMesoJointMuscle] = useStateT(null);
+  const mesoJointExIdxRef = useRefT(null);
+  const [mesoVolumeOpen, setMesoVolumeOpen] = useStateT(false);
+  const [mesoVolumeMusc, setMesoVolumeMusc] = useStateT(null);
+  const [mesoVolumeExIds, setMesoVolumeExIds] = useStateT([]); // exId+dayId pairs for delta
+  const [mesoPumpAnswer, setMesoPumpAnswer] = useStateT(null);
+  const [mesoVolumeAnswer, setMesoVolumeAnswer] = useStateT(null);
+  const askedSorenessRef = useRefT(new Set());
+  const askedJointRef = useRefT(new Set());
+  const askedVolumeRef = useRefT(new Set());
+  // Per-session quality tracking for weight progression
+  const mesoJointFineRef = useRefT(new Set());    // exIds where joint was 'fine'
+  const mesoPumpOkRef = useRefT(new Set());        // muscles where pump was moderate/amazing
+  const mesoVolumeOkRef = useRefT(new Set());      // muscles where volume was just_right/not_enough
+  const mesoSessionSetGainsRef = useRefT({});      // key → { exId, name } for set +1s this session
+  // ────────────────────────────────────────────────────────────────────────────
+
+  // ── Meso feedback handlers ─────────────────────────────────────────────────
+  const handleSorenessAnswer = (answer, muscle) => {
+    setMesoSorenessOpen(false);
+    if ((answer !== 'still_sore' && answer !== 'very_sore') || !mesoState) return;
+    const mesoStart = mesoState.startDate;
+    const matchSessions = (store.sessions || [])
+      .filter(s => s.ended && s.date >= mesoStart && s.scheduleId === session.scheduleId && s.id !== session.id)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    for (const prev of matchSessions) {
+      const muscleEntries = (prev.entries || []).filter(e => {
+        const ex2 = store.exercises?.find(x => x.id === e.exId);
+        return primaryMuscleForExercise(ex2) === muscle;
+      });
+      if (!muscleEntries.length) continue;
+      // still_sore → only main lift; very_sore → all exercises of the group
+      const targets = answer === 'very_sore' ? muscleEntries : [muscleEntries[0]];
+      saveMesoState(m => {
+        const newDeltas = { ...(m.deltas || {}) };
+        targets.forEach(e => {
+          const key = e.exId + '_' + prev.dayId;
+          newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
+        });
+        return { ...m, deltas: newDeltas };
+      });
+      break;
+    }
+  };
+
+  const handleJointAnswer = (answer) => {
+    setMesoJointOpen(false);
+    const exId = mesoJointExId;
+    const muscle = mesoJointMuscle;
+    if (!mesoState || !exId) return;
+
+    if (answer === 'none') mesoJointFineRef.current.add(exId);
+
+    // Apply delta for joint pain
+    if (answer === 'noticeable' || answer === 'sharp') {
+      const key = exId + '_' + session.dayId;
+      mesoSessionSetGainsRef.current[key] = { exId, name: mesoJointExName, delta: -1 };
+      saveMesoState(m => ({
+        ...m,
+        deltas: { ...(m.deltas || {}), [key]: ((m.deltas || {})[key] || 0) - 1 },
+        ...(answer === 'sharp' ? { jointFlags: { ...(m.jointFlags || {}), [exId]: true } } : {}),
+      }));
+    }
+
+    // Check if this was the last exercise for this muscle group → open pump/volume
+    if (!muscle || askedVolumeRef.current.has(muscle)) return;
+    const currentIdx = mesoJointExIdxRef.current ?? exIdx;
+    const isLastOfMuscle = !session.entries.slice(currentIdx + 1).some(e => {
+      const ex2 = store.exercises?.find(x => x.id === e.exId);
+      return primaryMuscleForExercise(ex2) === muscle;
+    });
+    if (!isLastOfMuscle) return;
+    askedVolumeRef.current.add(muscle);
+    // Collect all exIds for this muscle group in this session
+    const muscleExIds = session.entries
+      .slice(0, currentIdx + 1)
+      .filter(e => {
+        const ex2 = store.exercises?.find(x => x.id === e.exId);
+        return primaryMuscleForExercise(ex2) === muscle;
+      })
+      .map(e => e.exId);
+    setMesoVolumeMusc(muscle);
+    setMesoVolumeExIds(muscleExIds);
+    setMesoPumpAnswer(null);
+    setMesoVolumeAnswer(null);
+    setMesoVolumeOpen(true);
+  };
+
+  const handleVolumeAnswer = (pump, volume) => {
+    setMesoVolumeOpen(false);
+    if (!mesoState || !mesoVolumeExIds.length) return;
+    // Track quality signals for weight progression
+    if (pump === 'moderate' || pump === 'amazing') mesoPumpOkRef.current.add(mesoVolumeMusc);
+    if (volume === 'just_right' || volume === 'not_enough') mesoVolumeOkRef.current.add(mesoVolumeMusc);
+    // Track set delta for summary screen
+    if (volume === 'not_enough' && mesoVolumeExIds[0]) {
+      const key = mesoVolumeExIds[0] + '_' + session.dayId;
+      const exName = session.entries.find(e => e.exId === mesoVolumeExIds[0])?.name || '';
+      mesoSessionSetGainsRef.current[key] = { exId: mesoVolumeExIds[0], name: exName, delta: 1 };
+    } else if (volume === 'pushed' && mesoVolumeExIds[0]) {
+      const key = mesoVolumeExIds[0] + '_' + session.dayId;
+      const exName = session.entries.find(e => e.exId === mesoVolumeExIds[0])?.name || '';
+      mesoSessionSetGainsRef.current[key] = { exId: mesoVolumeExIds[0], name: exName, delta: -1 };
+    } else if (volume === 'too_much') {
+      mesoVolumeExIds.forEach(exId => {
+        const key = exId + '_' + session.dayId;
+        const exName = session.entries.find(e => e.exId === exId)?.name || '';
+        mesoSessionSetGainsRef.current[key] = { exId, name: exName, delta: -1 };
+      });
+    }
+
+    // Pump: if low on "just right" volume, track for swap suggestion
+    const pumpLow = pump === 'low' && volume === 'just_right';
+
+    saveMesoState(m => {
+      const newDeltas = { ...(m.deltas || {}) };
+      const newPumpLow = { ...(m.pumpLowCounts || {}) };
+
+      // "Not enough" → +1 on main lift (first exercise of the muscle group) only
+      // "Pushed my limits" → -1 on main lift only
+      // "Too much" → -1 on every exercise of the muscle group
+      const mainExId = mesoVolumeExIds[0];
+      if (volume === 'not_enough' && mainExId) {
+        const key = mainExId + '_' + session.dayId;
+        newDeltas[key] = ((m.deltas || {})[key] || 0) + 1;
+      } else if (volume === 'pushed' && mainExId) {
+        const key = mainExId + '_' + session.dayId;
+        newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
+      } else if (volume === 'too_much') {
+        mesoVolumeExIds.forEach(exId => {
+          const key = exId + '_' + session.dayId;
+          newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
+        });
+      }
+
+      if (pumpLow && mainExId) newPumpLow[mainExId] = ((m.pumpLowCounts || {})[mainExId] || 0) + 1;
+      return { ...m, deltas: newDeltas, pumpLowCounts: newPumpLow };
+    });
+  };
+
+  // Compute per-exercise weight boosts earned this session and return gain items for
+  // the post-session screen. Also merges set-gain info from mesoSessionSetGainsRef.
+  const computeMesoGains = (isComplete = false) => {
+    if (!mesoState) return [];
+    const unit = store.settings?.unit || 'kg';
+    const weightBoostMap = {};
+    const gainMap = {}; // key → { name, setDelta, weightDelta }
+
+    // Set changes recorded during feedback (positive = gain, negative = reduction)
+    for (const [key, { name, delta }] of Object.entries(mesoSessionSetGainsRef.current)) {
+      if (!gainMap[key]) gainMap[key] = { name, setDelta: 0, weightDelta: 0 };
+      gainMap[key].setDelta += (delta ?? 1);
+    }
+
+    // Weight boosts: joint fine + pump ok + volume ok + all reps hit
+    for (const e of session.entries) {
+      if (e.isCardio) continue;
+      const exId = e.exId;
+      const ex = store.exercises?.find(x => x.id === exId);
+      const muscle = primaryMuscleForExercise(ex);
+
+      if (!mesoJointFineRef.current.has(exId)) continue;
+      if (muscle && !mesoPumpOkRef.current.has(muscle)) continue;
+      if (muscle && !mesoVolumeOkRef.current.has(muscle)) continue;
+
+      const workingSets = e.sets.filter(s => !s.warmup && !s.skipped);
+      if (!workingSets.length) continue;
+      const plannedReps = e.plannedReps ?? null;
+      const allHit = workingSets.every(s => {
+        if (!s.done) return false;
+        if (plannedReps == null) return true;
+        const reps = s.reps != null ? s.reps : Math.max(s.repsL ?? 0, s.repsR ?? 0);
+        return reps >= plannedReps;
+      });
+      if (!allHit) continue;
+
+      const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
+      const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
+      const key = exId + '_' + session.dayId;
+      weightBoostMap[key] = increment;
+      if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0 };
+      gainMap[key].weightDelta = increment;
+    }
+
+    // Merge weight boosts into meso state and flush to store (DB sync).
+    // mesoState here is the React state — already contains all feedback deltas from this session.
+    const withBoosts = Object.keys(weightBoostMap).length
+      ? { ...mesoState, weightBoosts: { ...(mesoState.weightBoosts || {}), ...weightBoostMap } }
+      : mesoState;
+    // If the last meso week just finished: bump completions + set pendingMeso2 so the
+    // home screen can offer Meso 2 after a deload (or immediately).
+    const finalMeso = isComplete
+      ? { ...withBoosts, completions: (withBoosts.completions ?? 0) + 1, pendingMeso2: true }
+      : withBoosts;
+    if (finalMeso) {
+      setMesoStateLocal(finalMeso);
+      saveMesoStateToStorage(finalMeso);
+      flushMesoStateToStore(finalMeso);
+    }
+
+    return Object.values(gainMap).filter(g => g.setDelta !== 0 || g.weightDelta !== 0);
+  };
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // Soreness trigger: fires when exIdx changes to first exercise of a new muscle group
+  useEffectT(() => {
+    if (!mesoState || !entry || isCardio) return;
+    if (mesoWeek == null) return; // pending period — meso not yet started
+    if (mesoWeek === 1) return; // week 1: no previous meso session to be sore from
+    const ex = entry ? store.exercises?.find(e => e.id === entry.exId) : null;
+    const pm = primaryMuscleForExercise(ex);
+    if (!pm || askedSorenessRef.current.has(pm)) return;
+    const isFirst = !session.entries.slice(0, exIdx).some(e => {
+      const ex2 = store.exercises?.find(x => x.id === e.exId);
+      return primaryMuscleForExercise(ex2) === pm;
+    });
+    if (!isFirst) return;
+    askedSorenessRef.current.add(pm);
+    setMesoSorenessMusc(pm);
+    setMesoSorenessOpen(true);
+  }, [exIdx, !!mesoState]);
+
+  // Joint + pump/volume trigger: when all working sets of an exercise are done,
+  // ask joint feedback. Fires whenever the current entry's sets change.
+  useEffectT(() => {
+    if (!mesoState || !entry || isCardio) return;
+    if (mesoWeek == null) return; // pending period — meso not yet started
+    const exId = entry.exId;
+    if (askedJointRef.current.has(exId)) return;
+    const workingSets = entry.sets.filter(s => !s.warmup);
+    if (workingSets.length === 0) return;
+    if (!workingSets.every(s => s.done || s.skipped)) return;
+    const ex = store.exercises?.find(e => e.id === exId);
+    const pm = primaryMuscleForExercise(ex);
+    askedJointRef.current.add(exId);
+    mesoJointExIdxRef.current = exIdx;
+    setMesoJointExId(exId);
+    setMesoJointExName(entry.name);
+    setMesoJointMuscle(pm);
+    setMesoJointOpen(true);
+  }, [entry?.sets?.map(s => s.done ? 1 : 0).join(','), !!mesoState]);
+
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
@@ -1697,14 +2237,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const doAdd = (ids) => {
     const newExId = Array.isArray(ids) ? ids[0] : ids;
+    const jump = addAndJumpRef.current;
     setAddOpen(false);
     if (session.entries.length === 0) {
       // First exercise in an empty session — skip the superset prompt and insert directly.
+      let isNewCardio = false;
       setStore(s => {
         const sess = s.sessions.find(x => x.id === session.id);
         if (!sess) return s;
         const newEx = LB.findExercise(s, newExId);
-        const isNewCardio = newEx?.movement_type === 'cardio';
+        isNewCardio = newEx?.movement_type === 'cardio';
         let newEntry;
         if (isNewCardio) {
           newEntry = { exId: newExId, name: newEx?.name || newExId, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: null, addedDuringSession: true };
@@ -1725,6 +2267,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           }),
         };
       });
+      if (jump && !isNewCardio) {
+        addAndJumpRef.current = false;
+        setTimeout(() => activateKb(0, 'kg'), 200);
+      }
     } else {
       // Defer insertion until the user picks a superset (or solo) —
       // that choice determines where the new exercise is placed.
@@ -1736,6 +2282,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // targetIdx = i → link with entry i and insert right after it.
   const confirmAdd = (targetIdx) => {
     const { newExId } = addSupersetData;
+    const jump = addAndJumpRef.current;
+    if (jump) addAndJumpRef.current = false;
     setAddSupersetData(null);
     setStore(s => {
       const sess = s.sessions.find(x => x.id === session.id);
@@ -1769,8 +2317,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const finalEntries = targetIdx !== null
         ? withNew.map((e, i) => i === targetIdx ? { ...e, supersetGroup: group } : e)
         : withNew;
-      // Keep the user on the same exercise — only adjust index if insertion shifts it
-      const newCurrentIdx = insertIdx <= currentIdx ? currentIdx + 1 : currentIdx;
+      // Jump: go to the new exercise; otherwise keep the user on the same exercise
+      const newCurrentIdx = jump ? insertIdx : (insertIdx <= currentIdx ? currentIdx + 1 : currentIdx);
       return {
         ...s,
         sessions: s.sessions.map(x => x.id !== session.id ? x : {
@@ -1780,6 +2328,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         }),
       };
     });
+    if (jump && store.exercises?.find(e => e.id === newExId)?.movement_type !== 'cardio') {
+      setTimeout(() => activateKb(0, 'kg'), 200);
+    }
   };
 
   const removeExercise = async () => {
@@ -1847,12 +2398,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       });
     });
 
-    // Set count changes for matched exercises
+    // Set count changes for matched exercises.
+    // Compare against plannedSets (meso-adjusted at session start) not item.sets (raw plan),
+    // so meso-induced deltas never appear as user-driven changes in this diff.
     planItems.forEach(({ item, originalIdx }, i) => {
       if (!matched[i]) return;
-      const newSets = matched[i].sets.filter(s => !s.warmup).length;
-      if (newSets !== item.sets) {
-        diffs.push({ type: 'sets', idx: originalIdx, exName: matched[i].name, oldSets: item.sets, newSets });
+      const entry = matched[i];
+      const newSets = entry.sets.filter(s => !s.warmup).length;
+      const mesoAdjustedPlan = entry.plannedSets ?? item.sets;
+      if (newSets !== mesoAdjustedPlan) {
+        diffs.push({ type: 'sets', idx: originalIdx, exName: entry.name, oldSets: item.sets, newSets });
       }
     });
 
@@ -2366,6 +2921,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {(store.statusMode === 'deload' || session.isDeload) && (
             <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 6px' }}>DELOAD · 50%</span>
           )}
+          {mesoState && mesoWeek != null && (
+            <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '1px 6px' }}>
+              {isWeekdayMode ? 'W' : 'C'}{mesoWeek}/{mesoState.weeks}
+            </span>
+          )}
         </span>
         <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>
           {String(exIdx + 1).padStart(2, '0')} <span style={{ color: UI.hair }}>/</span> {String(session.entries.length).padStart(2, '0')}
@@ -2445,6 +3005,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {(exercise?.tags || []).map(t => <Pill key={t}>{t}</Pill>)}
             </div>
           )}
+          {/* Meso swap suggestions */}
+          {mesoState && exercise && (() => {
+            const flags = [];
+            if (mesoState.jointFlags?.[exercise.id]) {
+              flags.push({ icon: '⚠️', msg: 'Caused sharp joint pain last session — consider swapping this exercise.' });
+            }
+            const pumpLow = mesoState.pumpLowCounts?.[exercise.id] || 0;
+            if (pumpLow >= 3) {
+              flags.push({ icon: '💡', msg: `Low pump ${pumpLow} sessions in a row — a different variation might work better for you.` });
+            }
+            if (!flags.length) return null;
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+                {flags.map((f, i) => (
+                  <div key={i} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 12px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <span style={{ fontSize: 13 }}>{f.icon}</span>
+                    <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{f.msg}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
 
         {/* HERO CURRENT SET — or CARDIO FORM */}
@@ -2567,6 +3149,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </Frame>
         ) : heroSet && (
           <BracketFrame gold padding={0}>
+            {mesoState && mesoRirVal != null && !isCurrentWarmup && (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
+                <span className="display-it" style={{
+                  fontSize: 72, fontWeight: 900, letterSpacing: '0.18em', whiteSpace: 'nowrap', userSelect: 'none',
+                  color: mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold,
+                  opacity: mesoRirVal === 0 ? 0.13 : 0.09,
+                  transform: 'rotate(-22deg)',
+                }}>{mesoRirVal} RIR</span>
+              </div>
+            )}
             <div style={{ padding: '12px 6px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0 18px', marginBottom: 8 }}>
                 <span className="micro-gold">
@@ -2690,6 +3282,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           )}
           <div className="knurl" style={{ marginBottom: 2 }} />
 
+          {lpTarget?.exIdx === exIdx && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 8px' }}>
+              <span className="micro-gold">LENGTHENED PARTIALS</span>
+              <button onClick={() => {
+                const si = lpTarget.setIdx;
+                updateSession(sess => ({
+                  ...sess,
+                  entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+                    ...en,
+                    sets: en.sets.map((st, k) => k === si && st.technique === 'lengthened_partial'
+                      ? { ...st, technique: null, drops: null, updatedAt: new Date().toISOString() }
+                      : st),
+                  }),
+                }));
+                setLpTarget(null);
+              }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+            </div>
+          )}
+
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {entry.sets.map((s, i) => {
               const isWarmupRow = !!s.warmup;
@@ -2745,7 +3356,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                               background: 'rgba(var(--accent-rgb),0.12)',
                               border: '0.5px solid rgba(var(--accent-rgb),0.35)',
                               borderRadius: 4, padding: '2px 6px',
-                            }}>{s.technique === 'drop' ? 'DS' : s.technique === 'myorep_match' ? 'MM' : 'MR'}</span>
+                            }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : 'MYO REP'}</span>
                           : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                               {isWarmupRow
                                 ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
@@ -3056,6 +3667,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       {(() => { const t = (s.drops || []).reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? <div style={{ marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>Total {t}</div> : null; })()}
                     </div>
                   )}
+                  {lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && s.done && !s.warmup && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '2px 4px 8px' }}>
+                      <span style={{ gridColumn: 'span 2', fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, padding: '4px 0', textAlign: 'center' }}>PARTIALS</span>
+                      <div style={{ gridColumn: 'span 3', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <button onClick={() => setPartials(i, Math.max(0, (s.drops?.partials || 0) - 1))} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
+                        <span className="num" style={{ fontSize: 18, color: (s.drops?.partials || 0) > 0 ? UI.gold : UI.inkFaint }}>{s.drops?.partials || 0}</span>
+                        <button onClick={() => setPartials(i, (s.drops?.partials || 0) + 1)} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>+</button>
+                      </div>
+                    </div>
+                  )}
                   {i < entry.sets.length - 1 && !(i === warmupCount - 1 && warmupCount > 0) && <div className="knurl" />}
                 </React.Fragment>
               );
@@ -3263,6 +3884,37 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <span className="num" style={{ color: UI.ink }}>{sessionTimeStr}</span>
             </div>
           </div>
+          {session.isFreestyle && (() => {
+            const elapsedMin = Math.floor(sessionElapsed / 60);
+            const msg = elapsedMin < 10
+              ? "Really done already? The barbell's barely warm — how about one more exercise?"
+              : elapsedMin < 20
+              ? "A bit thin. One more exercise to round it out?"
+              : elapsedMin < 30
+              ? "Short session. Got time for one more?"
+              : elapsedMin < 45
+              ? "Getting there. Another exercise or calling it here?"
+              : elapsedMin < 60
+              ? "Solid session going. One more exercise or is this it?"
+              : elapsedMin < 75
+              ? "Good work. Ready to wrap it up?"
+              : elapsedMin < 90
+              ? "Nice session. Almost at the 90-minute mark — finish strong?"
+              : "Now THAT's a workout. You've earned this finish.";
+            return <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 10 }}>{msg}</div>;
+          })()}
+          {(() => {
+            const onAddEx = () => { addAndJumpRef.current = true; setFinishOpen(false); setAddOpen(true); };
+            if (session.isFreestyle) {
+              const elapsedMin = Math.floor(sessionElapsed / 60);
+              if (elapsedMin < 20) {
+                return <Btn className="intensity-glow" onClick={onAddEx} style={{ width: '100%', marginBottom: 8 }}>+ Add another exercise</Btn>;
+              } else if (elapsedMin < 45) {
+                return <Btn kind="ghost" onClick={onAddEx} style={{ width: '100%', marginBottom: 8, border: '1px solid rgba(var(--accent-rgb),0.6)', background: 'rgba(var(--accent-rgb),0.07)' }}>+ Add another exercise</Btn>;
+              }
+            }
+            return <Btn kind="ghost" onClick={onAddEx} style={{ width: '100%', marginBottom: 8 }}>+ Add another exercise</Btn>;
+          })()}
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn kind="ghost" onClick={() => setFinishOpen(false)} style={{ flex: 1 }}>Continue</Btn>
             <Btn onClick={tryFinish} style={{ flex: 2 }}>Finish ✓</Btn>
@@ -3387,6 +4039,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <div>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>DROP SET</div>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Descend the weight, keep the reps coming</div>
+                </div>
+              </button>
+              {/* Lengthened Partials */}
+              <button onClick={() => {
+                const target = currentSetIdx >= 0
+                  ? currentSetIdx
+                  : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
+                if (target < 0) return;
+                setLpTarget({ exIdx, setIdx: target });
+                setIntensityOpen(false);
+              }} style={btnBase(true)}>
+                <i className="fa-solid fa-arrow-down-long" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>LENGTHENED PARTIALS</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Full reps, then partials in the stretch</div>
                 </div>
               </button>
               {/* Myo-Rep row: two compact buttons matching DROP style */}
@@ -3782,6 +4449,144 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ? (store.settings?.equipmentConfig?.plateInventoryLbs ?? PLATES_LBS)
           : (store.settings?.equipmentConfig?.plateInventoryKg ?? PLATES_KG)}
       />
+
+      {/* ── Meso feedback sheets ─────────────────────────────────────────────── */}
+
+      {/* Soreness */}
+      <Sheet open={mesoSorenessOpen} onClose={() => {}} title="Soreness check">
+        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 20, lineHeight: 1.5 }}>
+          Any soreness carryover from your last <strong style={{ color: UI.ink }}>{mesoSorenessMusc}</strong> workout?
+        </div>
+        {[
+          { key: 'never', label: 'Never sore', sub: 'No soreness from previous sessions' },
+          { key: 'healed_long', label: 'Healed a while ago', sub: 'Fully recovered well before this session' },
+          { key: 'healed_just', label: 'Healed just in time', sub: 'Recovered right around this session' },
+          { key: 'still_sore', label: 'Still sore', sub: 'Still feeling last session in this muscle' },
+        ].map(opt => (
+          <button key={opt.key} onClick={() => handleSorenessAnswer(opt.key, mesoSorenessMusc)} style={{
+            width: '100%', marginBottom: 8, padding: '12px 14px',
+            background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600 }}>{opt.label}</div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+          </button>
+        ))}
+      </Sheet>
+
+      {/* Joint discomfort */}
+      <Sheet open={mesoJointOpen} onClose={() => {}} title="Joint check">
+        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 20, lineHeight: 1.5 }}>
+          Any joint discomfort during <strong style={{ color: UI.ink }}>{mesoJointExName}</strong>?
+        </div>
+        {[
+          { key: 'none', label: 'None', sub: 'All good — joints felt fine' },
+          { key: 'noticeable', label: 'Noticeable', sub: 'Some discomfort but manageable' },
+          { key: 'sharp', label: 'Sharp pain', sub: 'Clear pain — this exercise gets flagged' },
+        ].map(opt => (
+          <button key={opt.key} onClick={() => handleJointAnswer(opt.key)} style={{
+            width: '100%', marginBottom: 8, padding: '12px 14px',
+            background: UI.bgInset, border: `1px solid ${opt.key === 'sharp' ? 'rgba(var(--danger-rgb, 220,53,69),0.4)' : UI.hairStrong}`,
+            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: opt.key === 'sharp' ? UI.danger : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+          </button>
+        ))}
+      </Sheet>
+
+      {/* Pump + Volume */}
+      <Sheet open={mesoVolumeOpen} onClose={() => {}} title={mesoVolumeMusc ? `${mesoVolumeMusc} feedback` : 'Session feedback'}>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Pump</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+          {[
+            { key: 'low', label: 'Low', sub: 'Barely felt it' },
+            { key: 'moderate', label: 'Moderate', sub: 'Decent pump' },
+            { key: 'amazing', label: 'Amazing', sub: 'Skin-splitting' },
+          ].map(opt => (
+            <button key={opt.key} onClick={() => setMesoPumpAnswer(opt.key)} style={{
+              flex: 1, padding: '10px 8px',
+              background: mesoPumpAnswer === opt.key ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
+              border: `1px solid ${mesoPumpAnswer === opt.key ? 'var(--accent)' : UI.hairStrong}`,
+              borderRadius: 6, cursor: 'pointer', textAlign: 'center',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: mesoPumpAnswer === opt.key ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+            </button>
+          ))}
+        </div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Volume</div>
+        <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginBottom: 14, lineHeight: 1.5 }}>Overall, how did the {mesoVolumeMusc ? mesoVolumeMusc.toLowerCase() + ' ' : ''}workload sit with you today?</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+          {['not_enough', 'just_right', 'pushed', 'too_much'].map(key => {
+            const label = key === 'not_enough' ? 'Not enough' : key === 'just_right' ? 'Just right' : key === 'pushed' ? 'Pushed my limits' : 'Too much';
+            const sel = mesoVolumeAnswer === key;
+            return (
+              <button key={key} onClick={() => setMesoVolumeAnswer(key)} style={{
+                width: '100%', padding: '10px 14px',
+                background: sel ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
+                border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
+                borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{label}</div>
+              </button>
+            );
+          })}
+        </div>
+        <Btn
+          disabled={!mesoPumpAnswer || !mesoVolumeAnswer}
+          onClick={() => handleVolumeAnswer(mesoPumpAnswer, mesoVolumeAnswer)}
+          style={{ width: '100%' }}
+        >
+          Save feedback
+        </Btn>
+      </Sheet>
+
+      {/* Meso changes — post-session set/weight adjustment summary */}
+      {mesoGainSheetOpen && (
+        <Sheet open={mesoGainSheetOpen} onClose={() => {
+          setMesoGainSheetOpen(false);
+          go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
+        }} title="Next session">
+          <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, marginBottom: 20, lineHeight: 1.5 }}>
+            Based on your feedback, here's what changes next time:
+          </div>
+          {mesoGainItems.map((item, i) => (
+            <div key={i} style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '10px 0',
+              borderBottom: i < mesoGainItems.length - 1 ? `1px solid ${UI.hair}` : 'none',
+            }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: UI.ink }}>{item.name}</span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {item.setDelta !== 0 && (
+                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.setDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb,220,53,69),0.9)' }}>
+                    {item.setDelta > 0 ? '+' : ''}{item.setDelta} set
+                  </span>
+                )}
+                {item.weightDelta > 0 && (
+                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: 'var(--accent)', fontWeight: 700 }}>+{item.weightDelta} {UI.unit()}</span>
+                )}
+              </div>
+            </div>
+          ))}
+          <Btn onClick={() => {
+            setMesoGainSheetOpen(false);
+            if (mesoJustCompletedRef.current) {
+              mesoJustCompletedRef.current = false;
+              handleMesoComplete();
+            } else {
+              go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
+            }
+          }} style={{ width: '100%', marginTop: 20 }}>Got it</Btn>
+        </Sheet>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────────── */}
 
     </Screen>
   );

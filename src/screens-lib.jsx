@@ -1819,6 +1819,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                         >
                           {s.dayName}
                           {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
+                          {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
                           {hasCharts && <i className="fa-solid fa-chart-line" style={{ fontSize: 10, color: UI.gold }} />}
                         </div>
                       );
@@ -2275,18 +2276,16 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     <Screen>
       <ScreenHead
         ref_={LB.parseDate(s.date).toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
-        title={s.dayName}
+        title={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, lineHeight: 1 }}>
+            {s.dayName}
+            {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>BONUS</span>}
+            {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>DELOAD</span>}
+          </span>
+        }
         onBack={() => go(justFinished ? { name: 'home' } : (back || { name: 'hist' }))}
         right={
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            {s.isBonus && (
-              <span style={{
-                fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
-                color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)',
-                border: `0.5px solid rgba(var(--accent-rgb), 0.3)`,
-                borderRadius: 4, padding: '3px 6px',
-              }}>BONUS</span>
-            )}
             <button onClick={takeScreenshot} disabled={capturing} style={{
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
               borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
@@ -2322,7 +2321,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 4 }}>
                   {LB.parseDate(s.date).toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' }).toUpperCase()}
                 </div>
-                <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
+                  {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
+                  {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
+                </div>
               </div>
               <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
             </div>
@@ -2424,7 +2427,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         )}
 
         {/* Volume delta vs previous same-day session */}
-        {volDelta != null && (
+        {volDelta != null && !s.isDeload && (
           <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
             {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} · vs last {s.dayName}
           </div>
@@ -2645,6 +2648,29 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   Total {t}
                                 </div>
                               ) : null; })()}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // Lengthened Partials: badge + main chip + partials count
+                      if (st.technique === 'lengthened_partial' && !isCheckboxOnly) {
+                        const partials = st.drops?.partials || 0;
+                        const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
+                        const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
+                        const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
+                        return (
+                          <div key={j} style={{ width: '100%', marginTop: j > 0 ? 6 : 0, borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`, paddingLeft: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                              <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint, background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                              <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
+                                {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                              </span>
+                              {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
+                              {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}<span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>}
                             </div>
                           </div>
                         );
