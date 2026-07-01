@@ -57,9 +57,39 @@ window.TOURS = {
     },
     {
       target: null,
+      title: 'The Exercise Library',
+      body: "Every exercise lives here — search, filter by muscle, equipment or rest size, and a Recent tab for what you've logged lately. Tap Select to multi-select a batch: bulk-edit them one after another, or delete several at once. Each exercise has muscle group, size, equipment, movement type and rep-target fields, plus an optional YouTube link that shows as a form-check button during training.",
+      visual: 'planLibrary',
+    },
+    {
+      target: null,
       title: 'Drag to reorder',
       body: 'Long-press any day or exercise to drag it into a new position. Reorder your plan structure at any time.',
       visual: 'drag',
+    },
+    {
+      target: null,
+      title: 'Workout Templates',
+      body: 'Finish a freestyle session and you can save it as a template — every exercise and rep scheme included. Reuse it later from Quick Actions → Workout → Freestyle → From template, or pull it straight into a plan day: open the day\'s import picker and switch to the Templates tab.',
+      visual: 'planTemplates',
+    },
+    {
+      target: null,
+      title: 'Flexible & Mesocycle Plans',
+      body: 'In a plan\'s Options, "Flexible schedule" drops fixed days entirely — your next workout just waits until you log it, with an optional weekly-sessions goal for adherence tracking. "Mesocycle" turns on a 4–8 week block with RIR targets and the in-session check-ins from the workout tour — auto-regulating your sets as the block progresses.',
+      visual: 'planFlexMeso',
+    },
+    {
+      target: null,
+      title: 'Plan Versioning',
+      body: 'Changing your split later? Schedule the new day layout to take effect from a future date instead of overwriting today\'s plan. The ‹› browser in the plan viewer steps through every past and scheduled version, each tagged ACTIVE, SCHEDULED, or PAST.',
+      visual: 'planVersions',
+    },
+    {
+      target: null,
+      title: 'Plan Backups',
+      body: 'Every time your training days change, a snapshot is saved automatically. Tap Backups in the plan viewer to preview or restore an older day layout — pick the date it should take effect from, done.',
+      visual: 'planBackups',
     },
     {
       route: 'home',
@@ -120,6 +150,12 @@ window.TOURS.doWorkout = [
   },
   {
     target: null,
+    title: 'Intensity Techniques',
+    body: "Tap INTENSITY above the sets to go beyond a plain working set. Drop Set descends the weight and keeps the reps coming. Lengthened Partials adds partial reps in the stretch after your full reps. Myo Rep (and Myo Match, once you've done one) chains activation sets with mini bursts to failure. You can also pair two exercises into a Superset — or three into a Giant Set — with no rest between them.",
+    visual: 'trainIntensity',
+  },
+  {
+    target: null,
     title: 'Exercise Notes',
     body: 'The Note button sits to the right of the + button, below the sets. Tap it to add a session note or a permanent exercise note — cues, tempo, substitutions. The note is shown every time you train that exercise.',
     visual: 'trainNotes',
@@ -138,6 +174,12 @@ window.TOURS.doWorkout = [
   },
   {
     target: null,
+    title: 'Mesocycle Check-ins',
+    body: "Running a mesocycle (turn it on in a plan's Options)? A short check-in can pop up after a muscle group's sets — soreness carryover, joint discomfort, and how the pump and workload felt. Your honest answers quietly adjust next session's sets, and repeated joint pain or a weak pump on an exercise flags it as a swap candidate.",
+    visual: 'trainMeso',
+  },
+  {
+    target: null,
     title: 'Finish Your Workout',
     body: "Once you reach the last exercise, a 'Finish →' button appears in the footer. Tap it to end the session — you'll see a summary of sets, volume, and duration.",
     visual: 'trainEnd',
@@ -147,6 +189,12 @@ window.TOURS.doWorkout = [
     title: 'Rate Your Session',
     body: 'Pick how the workout felt — Easy to Max Effort. This data powers your training load overview and helps identify fatigue patterns over time.',
     visual: 'trainFeel',
+  },
+  {
+    target: null,
+    title: 'Save as a Template',
+    body: 'Finished a freestyle session? A "Save as template" button appears right on the well-done screen. Name it and every exercise, set and rep scheme is saved — start from it again later via Quick Actions → Workout → Freestyle → From template, or import it straight into a plan day.',
+    visual: 'trainSaveTemplate',
   },
   {
     target: null,
@@ -178,7 +226,7 @@ window.TOURS.quickActions = [
   {
     target: null,
     title: 'Workout',
-    body: 'Always there. One tap, then choose "From plan" to pick a day from your schedule, or "Freestyle" for an open session with no plan — add exercises as you go.',
+    body: '"From plan" lets you pick any day from your schedule, not just today\'s — you decide at the end whether it replaces the scheduled day or just counts as a bonus session. "Freestyle" opens a blank session, or one seeded from a saved template.',
     visual: 'quickActionsWorkout',
   },
   {
@@ -253,7 +301,7 @@ window.TOURS.healthTab = [
   {
     target: null,
     title: 'Cardio Logging',
-    body: 'Log cardio from the Home screen — tap the golden CARDIO button at the bottom. Start a live timer or log manually. The Health tab shows your cardio minutes as a chart.',
+    body: "Log cardio from the Home screen — tap the golden CARDIO button at the bottom. Start a live timer or log manually. The Health tab shows your cardio minutes as a chart. Want a structured plan that ramps toward a goal instead? See the Cardio Plans tour in Settings → How to…",
     visual: 'healthCardio',
   },
   {
@@ -266,6 +314,126 @@ window.TOURS.healthTab = [
     target: null,
     title: "You're all set!",
     body: 'Start logging daily and let the charts fill in over time. Even partial data — just weight or steps — is useful. Find the Health tab again in the bottom nav.',
+  },
+];
+
+window.TOURS.cardioPlans = [
+  {
+    target: null,
+    title: 'Cardio Plans',
+    body: "Beyond logging a session, you can build a structured cardio plan — fixed weekly targets, or a progressive plan that ramps you toward a goal by a due date. Create one from the Cardio tab.",
+    visual: 'cardioIntro',
+  },
+  {
+    target: null,
+    title: 'Choose Your Activity',
+    body: 'Pick from Running, Walking, Cycling, Swimming, Rowing, Elliptical, Hiking — or Custom for anything else you log. Then choose the plan type: Manual (fixed weekly targets you set) or Goal (the app builds a progression for you).',
+    visual: 'cardioActivity',
+  },
+  {
+    target: null,
+    title: 'Manual Plan',
+    body: 'Tap the days you train, then set targets — the same distance or duration every day, or different per day. Prefer to just show up with no numbers attached? Turn targets off entirely.',
+    visual: 'cardioManual',
+  },
+  {
+    target: null,
+    title: 'Goal Plan',
+    body: "Pick a goal type — Distance, Distance + Pace, or Duration — set your target and a due date, and the days you'll train. Then tell it your current fitness: how far or how long you can comfortably go right now.",
+    visual: 'cardioGoal',
+  },
+  {
+    target: null,
+    title: 'Progressive Plan Preview',
+    body: "The plan ramps session by session toward your goal — capped at a sustainable ~10% increase per week — with every 4th week a lighter recovery week. If the math shows you won't reach the goal by your due date, you'll get a warning to extend the timeline.",
+    visual: 'cardioPreview',
+  },
+  {
+    target: null,
+    title: 'One Active Plan',
+    body: "Only one plan is active at a time — it's the one shown on the Home screen widget and pre-fills your cardio logs. Activate or deactivate any plan from its detail sheet; a new plan auto-activates if nothing else is running.",
+    visual: 'cardioActivate',
+  },
+  {
+    target: null,
+    title: "You're all set!",
+    body: 'Build a plan and let it guide your pace and distance week by week. Find this tour again in Settings → How to…',
+  },
+];
+
+window.TOURS.statusModes = [
+  {
+    target: null,
+    title: 'Deload, Sick & Vacation',
+    body: "Life doesn't always follow the plan. Three modes let the app know when you're taking it easier — without losing your progress or skewing your stats.",
+    visual: 'statusIntro',
+  },
+  {
+    target: null,
+    title: 'Deload Week',
+    body: '"Start deload week" sits on your active plan card. It trains your normal plan at ~50% load for one cycle — weights pre-fill light and a DELOAD · 50% badge shows during training. It excludes itself from progression, so the week after picks up right where you left off.',
+    visual: 'statusDeload',
+  },
+  {
+    target: null,
+    title: 'The Deload Nudge',
+    body: "After 8 full training cycles, the app asks if you'd like a deload week — dedication earns a break. Start one, or dismiss it and get asked again after another 8.",
+    visual: 'statusNudge',
+  },
+  {
+    target: null,
+    title: 'Sick & Vacation',
+    body: 'For time off training entirely, log a Sick or Vacation period in Settings → Health. Unlike deload, these are just a record of time away — they don\'t adjust your weights, but they do keep sick/vacation days out of your training-adherence score.',
+    visual: 'statusSickVacation',
+  },
+  {
+    target: null,
+    title: "You're all set!",
+    body: 'Use these whenever training takes a back seat — your stats and progression stay honest either way. Find this tour again in Settings → How to…',
+  },
+];
+
+window.TOURS.customize = [
+  {
+    target: null,
+    title: 'Customize ZANE',
+    body: "A quick pass through the settings worth knowing about — the ones that change how the app looks, and the ones that change how it trains you.",
+    visual: 'customIntro',
+  },
+  {
+    target: null,
+    title: 'Appearance',
+    body: 'Pick an accent color and a theme — Dark, OLED Black, or a light cream. Your unit preference (kg/lbs) lives here too — it only relabels displayed weights, your logged numbers never get converted.',
+    visual: 'customAppearance',
+  },
+  {
+    target: null,
+    title: 'Rest Timers',
+    body: 'Set default rest durations by exercise size — Big compounds, Medium, and Small isolation moves each get their own timer. Tag an exercise with a size in the library and the right rest applies automatically.',
+    visual: 'customRest',
+  },
+  {
+    target: null,
+    title: 'Equipment & Plates',
+    body: "Equipment setup defines the weight increment and max load per equipment type, so the app suggests sensible jumps. Plate inventory tells the plate calculator exactly which plates you own, so it never suggests one you don't have.",
+    visual: 'customEquipment',
+  },
+  {
+    target: null,
+    title: 'Smart Progression',
+    body: 'Turn this on and the app bumps your weight automatically once every set clears a rep threshold above target — e.g. target 8 reps, range top +4, weight goes up once all sets hit 12. Different from Mesocycle: this is the everyday auto-progression, Mesocycle is the structured multi-week block with RIR targets.',
+    visual: 'customProgression',
+  },
+  {
+    target: null,
+    title: 'Paceguard',
+    body: 'Want tempo control on your reps? Paceguard beeps out the eccentric (down) and concentric (up) phase of each rep at durations you set — useful for slowing down and controlling form.',
+    visual: 'customPaceguard',
+  },
+  {
+    target: null,
+    title: "You're all set!",
+    body: 'Small settings, real difference — worth a look once, then forget about them. Find this tour again in Settings → How to…',
   },
 ];
 
@@ -466,6 +634,121 @@ function TourVisualDrag() {
           {i === 1 && <span style={{ marginLeft: 'auto', fontFamily: UI.fontUi, fontSize: 9, color: 'var(--accent)', letterSpacing: '0.08em' }}>DRAG</span>}
         </div>
       ))}
+    </div>
+  );
+}
+
+function TourVisualPlanLibrary() {
+  const rows = [
+    { name: 'BENCH PRESS', sub: 'Chest · Barbell' },
+    { name: 'INCLINE DUMBBELL', sub: 'Chest · Dumbbell' },
+  ];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ flex: 1, padding: '8px 10px', borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkFaint }}>Search…</div>
+        <div style={{ padding: '8px 10px', borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint, fontWeight: 700, letterSpacing: '0.06em' }}>FILTER</div>
+        <div style={{ padding: '8px 10px', borderRadius: 4, background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)`, fontSize: 10, fontFamily: UI.fontUi, color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.06em' }}>SELECT</div>
+      </div>
+      <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+        {rows.map((r, i) => (
+          <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderBottom: i === 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+            <div style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid rgba(var(--accent-rgb),0.5)`, flexShrink: 0 }} />
+            <div>
+              <div style={{ fontSize: 11.5, fontFamily: UI.fontUi, fontWeight: 600, color: UI.ink }}>{r.name}</div>
+              <div style={{ fontSize: 9.5, fontFamily: UI.fontUi, color: UI.inkFaint, marginTop: 1 }}>{r.sub}</div>
+            </div>
+            <i className="fa-brands fa-youtube" style={{ marginLeft: 'auto', fontSize: 12, color: UI.inkGhost }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TourVisualPlanTemplates() {
+  const tabs = ['Plans', 'Templates'];
+  const templates = [{ name: 'Push A', sub: '5 exercises' }, { name: 'Pull A', sub: '6 exercises' }];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 3, background: UI.bgInset, borderRadius: 4, padding: 3 }}>
+        {tabs.map((t, i) => (
+          <div key={t} style={{ flex: 1, textAlign: 'center', padding: '6px 0', borderRadius: 4, background: i === 1 ? 'var(--accent)' : 'transparent', color: i === 1 ? '#0a0805' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: i === 1 ? 600 : 400, letterSpacing: '0.06em' }}>{t}</div>
+        ))}
+      </div>
+      <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+        {templates.map((t, i) => (
+          <div key={t.name} style={{ display: 'flex', alignItems: 'center', padding: '9px 11px', borderBottom: i === 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+            <i className="fa-solid fa-bookmark" style={{ fontSize: 11, color: 'var(--accent)', width: 18 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11.5, fontFamily: UI.fontUi, fontWeight: 600, color: UI.ink }}>{t.name}</div>
+              <div style={{ fontSize: 9.5, fontFamily: UI.fontUi, color: UI.inkFaint, marginTop: 1 }}>{t.sub}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function tourToggleRow(label, sub, on) {
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 12.5, fontFamily: UI.fontUi, color: UI.ink, fontWeight: 600 }}>{label}</div>
+        <div style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint, marginTop: 2 }}>{sub}</div>
+      </div>
+      <div style={{ width: 40, height: 23, borderRadius: 13, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'var(--accent)' : UI.hairStrong}`, position: 'relative', flexShrink: 0 }}>
+        <div style={{ position: 'absolute', top: 2.5, [on ? 'right' : 'left']: 2.5, width: 16, height: 16, borderRadius: '50%', background: on ? '#0a0805' : UI.inkFaint }} />
+      </div>
+    </div>
+  );
+}
+
+function TourVisualPlanFlexMeso() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {tourToggleRow('Flexible schedule', 'Advance only when I train', true)}
+      {tourToggleRow('Mesocycle', '6-week mesocycle', true)}
+    </div>
+  );
+}
+
+function TourVisualPlanVersions() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '9px 12px' }}>
+        <i className="fa-solid fa-chevron-left" style={{ fontSize: 10, color: UI.inkFaint }} />
+        <div style={{ flex: 1, textAlign: 'center' }}>
+          <span style={{ fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.06em' }}>V3 · ACTIVE</span>
+          <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint, marginLeft: 6 }}>Dec 15</span>
+        </div>
+        <i className="fa-solid fa-chevron-right" style={{ fontSize: 10, color: UI.inkGhost }} />
+      </div>
+      <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, textAlign: 'center' }}>swipe through past &amp; scheduled versions</div>
+    </div>
+  );
+}
+
+function TourVisualPlanBackups() {
+  const backups = [
+    { when: 'Today, 14:02', sub: '4 days' },
+    { when: 'Jun 03, 09:41', sub: '3 days' },
+  ];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+        {backups.map((b, i) => (
+          <div key={b.when} style={{ display: 'flex', alignItems: 'center', padding: '9px 11px', borderBottom: i === 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+            <i className="fa-solid fa-clock-rotate-left" style={{ fontSize: 11, color: UI.inkFaint, width: 18 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11.5, fontFamily: UI.fontUi, color: UI.ink, fontWeight: 600 }}>{b.when}</div>
+              <div style={{ fontSize: 9.5, fontFamily: UI.fontUi, color: UI.inkFaint, marginTop: 1 }}>{b.sub}</div>
+            </div>
+            <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.06em' }}>PREVIEW</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -780,6 +1063,78 @@ function TourVisualTrainSkip() {
   );
 }
 
+function TourVisualTrainIntensity() {
+  const techniques = [
+    { label: 'DROP SET', sub: 'Descend the weight, keep the reps coming' },
+    { label: 'LENGTHENED PARTIALS', sub: 'Full reps, then partials in the stretch' },
+    { label: 'MYO REP', sub: 'Activation + minis to failure' },
+  ];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'inline-flex', alignSelf: 'flex-start', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 4, background: `rgba(var(--accent-rgb),0.12)`, border: `0.5px solid rgba(var(--accent-rgb),0.4)` }}>
+        <i className="fa-solid fa-bolt intensity-glow" style={{ fontSize: 10, color: 'var(--accent)' }} />
+        <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.08em' }}>INTENSITY</span>
+      </div>
+      <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+        {techniques.map((t, i) => (
+          <div key={t.label} style={{ padding: '8px 11px', borderBottom: i < techniques.length - 1 ? `0.5px solid ${UI.hair}` : 'none' }}>
+            <div style={{ fontSize: 11, fontFamily: UI.fontUi, fontWeight: 700, color: UI.ink, letterSpacing: '0.04em' }}>{t.label}</div>
+            <div style={{ fontSize: 10.5, fontFamily: UI.fontUi, color: UI.inkFaint, marginTop: 2 }}>{t.sub}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: `rgba(var(--accent-rgb),0.05)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, borderRadius: 4 }}>
+        <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.06em' }}>DROP SET</span>
+        <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint }}>80 → 60 → 45 {UI.unit()}</span>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualTrainMeso() {
+  const checks = [
+    { title: 'Soreness check', q: 'Any soreness carryover from last session?', opts: ['Never sore', 'Healed a while ago', 'Still sore'] },
+    { title: 'Joint check', q: 'Any joint discomfort?', opts: ['None', 'Noticeable', 'Sharp pain'] },
+    { title: 'Pump & volume', q: 'How did the workload sit with you?', opts: ['Not enough', 'Just right', 'Too much'] },
+  ];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {checks.map(c => (
+        <div key={c.title} style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, padding: '9px 11px' }}>
+          <div style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: 'var(--accent)', fontWeight: 700, marginBottom: 3 }}>{c.title.toUpperCase()}</div>
+          <div style={{ fontSize: 10.5, fontFamily: UI.fontUi, color: UI.inkSoft, marginBottom: 6 }}>{c.q}</div>
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            {c.opts.map((o, i) => (
+              <span key={o} style={{
+                fontSize: 9, fontFamily: UI.fontUi, padding: '4px 8px', borderRadius: 4,
+                background: i === 1 ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset,
+                border: `0.5px solid ${i === 1 ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`,
+                color: i === 1 ? 'var(--accent)' : UI.inkFaint,
+              }}>{o}</span>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualTrainSaveTemplate() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'inline-flex', alignSelf: 'flex-start', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 6, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}` }}>
+        <i className="fa-solid fa-floppy-disk" style={{ fontSize: 11, color: UI.inkSoft }} />
+        <span style={{ fontSize: 11, fontFamily: UI.fontUi, fontWeight: 600, color: UI.inkSoft }}>Save as template</span>
+      </div>
+      <div style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.1em', color: UI.inkFaint }}>TEMPLATE NAME</div>
+      <div style={{ padding: '10px 12px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset }}>
+        <span style={{ fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft }}>Push A</span>
+      </div>
+      <div style={{ padding: '10px 0', borderRadius: 6, textAlign: 'center', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700 }}>Save template</div>
+    </div>
+  );
+}
+
 function TourVisualTrainEnd() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1011,6 +1366,287 @@ function TourVisualHealthWeek() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ─── Cardio plans tour visuals ───────────────────────────────────────
+function TourVisualCardioIntro() {
+  const modes = [
+    { icon: 'fa-calendar-days', label: 'Manual', sub: 'Fixed weekly targets' },
+    { icon: 'fa-bullseye', label: 'Goal', sub: 'Progressive plan to a due date' },
+  ];
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      {modes.map((m, i) => (
+        <div key={m.label} style={{
+          flex: 1, padding: '14px 10px', borderRadius: 6, textAlign: 'center',
+          background: i === 1 ? 'rgba(var(--accent-rgb),0.08)' : UI.bgInset,
+          border: `0.5px solid ${i === 1 ? 'rgba(var(--accent-rgb),0.35)' : UI.hairStrong}`,
+        }}>
+          <i className={`fa-solid ${m.icon}`} style={{ fontSize: 18, color: i === 1 ? 'var(--accent)' : UI.inkFaint }} />
+          <div style={{ fontSize: 12, fontFamily: UI.fontUi, fontWeight: 700, color: i === 1 ? 'var(--accent)' : UI.inkSoft, marginTop: 8 }}>{m.label}</div>
+          <div style={{ fontSize: 9.5, fontFamily: UI.fontUi, color: UI.inkFaint, marginTop: 3 }}>{m.sub}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualCardioActivity() {
+  const activities = [
+    { icon: 'fa-person-running', label: 'Running' }, { icon: 'fa-person-walking', label: 'Walking' },
+    { icon: 'fa-person-biking', label: 'Cycling' }, { icon: 'fa-person-swimming', label: 'Swimming' },
+  ];
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 7 }}>
+      {activities.map((a, i) => (
+        <div key={a.label} style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '10px 11px', borderRadius: 6,
+          background: i === 0 ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
+          border: `0.5px solid ${i === 0 ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`,
+        }}>
+          <i className={`fa-solid ${a.icon}`} style={{ fontSize: 13, color: i === 0 ? 'var(--accent)' : UI.inkFaint }} />
+          <span style={{ fontSize: 11, fontFamily: UI.fontUi, fontWeight: 600, color: i === 0 ? 'var(--accent)' : UI.inkSoft }}>{a.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualCardioManual() {
+  const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {days.map((d, i) => (
+          <div key={i} style={{
+            flex: 1, textAlign: 'center', padding: '7px 0', borderRadius: 4,
+            background: [0, 2, 4].includes(i) ? 'var(--accent)' : UI.bgInset,
+            color: [0, 2, 4].includes(i) ? '#0a0805' : UI.inkFaint,
+            fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
+          }}>{d}</div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, padding: '9px 12px', background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6 }}>
+        <span className="num" style={{ fontSize: 18, color: UI.ink, fontWeight: 300 }}>5.0</span>
+        <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint }}>km per session</span>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualCardioGoal() {
+  const field = (label, value) => (
+    <div style={{ display: 'flex', alignItems: 'center', padding: '8px 10px', borderBottom: `0.5px solid ${UI.hair}` }}>
+      <span style={{ flex: 1, fontSize: 10.5, fontFamily: UI.fontUi, color: UI.inkFaint, letterSpacing: '0.04em' }}>{label}</span>
+      <span className="num" style={{ fontSize: 13, color: UI.ink }}>{value}</span>
+    </div>
+  );
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+      {field('TARGET DISTANCE', '10.0 km')}
+      {field('DUE DATE', 'Sep 20')}
+      <div style={{ display: 'flex', alignItems: 'center', padding: '8px 10px' }}>
+        <span style={{ flex: 1, fontSize: 10.5, fontFamily: UI.fontUi, color: UI.inkFaint, letterSpacing: '0.04em' }}>CURRENT PACE</span>
+        <span className="num" style={{ fontSize: 13, color: 'var(--accent)' }}>5:30/km</span>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualCardioPreview() {
+  const sessions = [
+    { n: 1, val: '5.0 km' }, { n: 8, val: '6.4 km' }, { n: 8, val: '5.6 km', deload: true }, { n: 16, val: '10.0 km', goal: true },
+  ];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ padding: '9px 11px', background: `rgba(var(--accent-rgb),0.08)`, border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, fontSize: 10.5, fontFamily: UI.fontUi, color: UI.inkSoft, lineHeight: 1.5 }}>
+        16 sessions over 8 weeks. Every 4th week is a lighter recovery week.
+      </div>
+      <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+        {sessions.map((s, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '7px 11px', borderBottom: i < sessions.length - 1 ? `0.5px solid ${UI.hair}` : 'none', background: s.goal ? 'rgba(var(--accent-rgb),0.06)' : 'transparent' }}>
+            <span style={{ flex: 1, fontSize: 10.5, fontFamily: UI.fontUi, color: s.deload ? UI.inkFaint : UI.inkSoft }}>Session {s.n}{s.deload ? ' (deload)' : ''}</span>
+            <span className="num" style={{ fontSize: 12, color: s.goal ? 'var(--accent)' : UI.ink }}>{s.val}{s.goal ? ' · Goal' : ''}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TourVisualCardioActivate() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 13px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid rgba(var(--accent-rgb),0.35)` }}>
+        <i className="fa-solid fa-person-running" style={{ fontSize: 14, color: 'var(--accent)' }} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 12.5, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>Running Plan</div>
+          <div style={{ fontSize: 9.5, color: UI.inkFaint, fontFamily: UI.fontUi }}>GOAL PLAN · Session 8/16</div>
+        </div>
+        <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.06em' }}>● ACTIVE</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 13px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, opacity: 0.6 }}>
+        <i className="fa-solid fa-person-biking" style={{ fontSize: 14, color: UI.inkFaint }} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 12.5, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>Cycling Plan</div>
+          <div style={{ fontSize: 9.5, color: UI.inkFaint, fontFamily: UI.fontUi }}>MANUAL PLAN</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Status modes (deload/sick/vacation) tour visuals ────────────────
+function TourVisualStatusIntro() {
+  const modes = [
+    { icon: 'fa-battery-quarter', label: 'DELOAD' },
+    { icon: 'fa-bed-pulse', label: 'SICK' },
+    { icon: 'fa-umbrella-beach', label: 'VACATION' },
+  ];
+  return (
+    <div style={{ display: 'flex', gap: 7 }}>
+      {modes.map(m => (
+        <div key={m.label} style={{ flex: 1, textAlign: 'center', padding: '13px 6px', borderRadius: 6, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}` }}>
+          <i className={`fa-solid ${m.icon}`} style={{ fontSize: 16, color: 'var(--accent)' }} />
+          <div style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkSoft, letterSpacing: '0.06em', marginTop: 7 }}>{m.label}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualStatusDeload() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 13px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.1)`, border: `0.5px solid rgba(var(--accent-rgb),0.35)` }}>
+        <i className="fa-solid fa-arrow-rotate-left" style={{ fontSize: 13, color: 'var(--accent)' }} />
+        <span style={{ fontSize: 11.5, fontFamily: UI.fontUi, fontWeight: 700, color: 'var(--accent)' }}>DELOAD ACTIVE · 4d left · END</span>
+      </div>
+      <div style={{ display: 'inline-flex', alignSelf: 'flex-start', padding: '5px 10px', borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}` }}>
+        <span style={{ fontSize: 9.5, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkSoft, letterSpacing: '0.06em' }}>DELOAD · 50%</span>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualStatusNudge() {
+  return (
+    <div style={{ background: UI.bgCard, border: `1px solid ${UI.goldSoft}`, borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, textAlign: 'center' }}>
+      <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: UI.ink, fontWeight: 700 }}>8 cycles done! 🎉</div>
+      <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>A deload week now means you come back stronger. Want to start one?</div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+        <div style={{ flex: 1, padding: '8px 0', borderRadius: 6, textAlign: 'center', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700 }}>Start deload</div>
+        <div style={{ flex: 1, padding: '8px 0', borderRadius: 6, textAlign: 'center', border: `0.5px solid ${UI.hairStrong}`, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700 }}>Not now</div>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualStatusSickVacation() {
+  const rows = [
+    { icon: 'fa-bed-pulse', label: 'Sick', range: 'Jun 03 – Jun 07' },
+    { icon: 'fa-umbrella-beach', label: 'Vacation', range: 'Jul 12 – ongoing' },
+  ];
+  return (
+    <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+      {rows.map((r, i) => (
+        <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderBottom: i === 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+          <i className={`fa-solid ${r.icon}`} style={{ fontSize: 13, color: 'var(--accent)', width: 16, textAlign: 'center' }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontFamily: UI.fontUi, fontWeight: 600, color: UI.ink }}>{r.label}</div>
+            <div style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint, marginTop: 1, fontStyle: i === 1 ? 'italic' : 'normal' }}>{r.range}</div>
+          </div>
+          <i className="fa-solid fa-trash" style={{ fontSize: 11, color: UI.inkGhost }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Customize tour visuals ───────────────────────────────────────────
+function TourVisualCustomIntro() {
+  const items = ['fa-palette', 'fa-stopwatch', 'fa-dumbbell', 'fa-chart-line'];
+  return (
+    <div style={{ display: 'flex', gap: 7 }}>
+      {items.map((ic, i) => (
+        <div key={ic} style={{ flex: 1, textAlign: 'center', padding: '13px 4px', borderRadius: 6, background: i === 0 ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset, border: `0.5px solid ${i === 0 ? 'rgba(var(--accent-rgb),0.35)' : UI.hairStrong}` }}>
+          <i className={`fa-solid ${ic}`} style={{ fontSize: 15, color: i === 0 ? 'var(--accent)' : UI.inkFaint }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualCustomAppearance() {
+  const colors = ['#c9a961', '#c47828', '#c96060', '#9b6dd4', '#4aab97'];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {colors.map((c, i) => (
+          <div key={c} style={{ width: 26, height: 26, borderRadius: '50%', background: c, border: i === 0 ? '2px solid #fff' : 'none', boxShadow: i === 0 ? '0 0 0 2px var(--accent)' : 'none' }} />
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 5 }}>
+        {['Dark', 'Black', 'Light'].map((t, i) => (
+          <div key={t} style={{ flex: 1, textAlign: 'center', padding: '7px 0', borderRadius: 4, background: i === 0 ? 'var(--accent)' : UI.bgInset, color: i === 0 ? '#0a0805' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600 }}>{t}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TourVisualCustomRest() {
+  const rows = [['Big', '180s'], ['Medium', '120s'], ['Small', '90s']];
+  return (
+    <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+      {rows.map(([label, val], i) => (
+        <div key={label} style={{ display: 'flex', alignItems: 'center', padding: '9px 12px', borderBottom: i < rows.length - 1 ? `0.5px solid ${UI.hair}` : 'none' }}>
+          <span style={{ flex: 1, fontSize: 11.5, fontFamily: UI.fontUi, color: UI.inkSoft }}>{label}</span>
+          <span className="num" style={{ fontSize: 13, color: UI.ink }}>{val}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualCustomEquipment() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, padding: '9px 12px', display: 'flex', alignItems: 'center' }}>
+        <span style={{ flex: 1, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft }}>Barbell — increment</span>
+        <span className="num" style={{ fontSize: 12, color: UI.ink }}>2.5 kg</span>
+      </div>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'center', paddingTop: 2 }}>
+        {[{ c: '#c0392b', on: true }, { c: '#2471a3', on: true }, { c: '#27ae60', on: false }].map((p, i) => (
+          <div key={i} style={{ width: 30, height: 30, borderRadius: '50%', background: p.c, opacity: p.on ? 1 : 0.25 }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TourVisualCustomProgression() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {tourToggleRow('Smart progression', 'Rep range top +4', true)}
+      <div style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint, lineHeight: 1.5, padding: '0 2px' }}>
+        Target 8 reps → weight increases once every set reaches 12.
+      </div>
+    </div>
+  );
+}
+
+function TourVisualCustomPaceguard() {
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      {[['Eccentric', '3s'], ['Concentric', '1s']].map(([label, val]) => (
+        <div key={label} style={{ flex: 1, textAlign: 'center', padding: '11px 6px', background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6 }}>
+          <div className="num" style={{ fontSize: 17, color: 'var(--accent)', fontWeight: 300 }}>{val}</div>
+          <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint, marginTop: 3, letterSpacing: '0.06em' }}>{label.toUpperCase()}</div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1491,17 +2127,30 @@ function TourVisualPwaAndroidInstall() {
 
 const TOUR_VISUALS = {
   days: TourVisualDays, exercises: TourVisualExercises, drag: TourVisualDrag,
+  planLibrary: TourVisualPlanLibrary, planTemplates: TourVisualPlanTemplates,
+  planFlexMeso: TourVisualPlanFlexMeso, planVersions: TourVisualPlanVersions,
+  planBackups: TourVisualPlanBackups,
   trainOverview: TourVisualTrainOverview, trainWarmup: TourVisualTrainWarmup,
   trainLogSet: TourVisualTrainLogSet, trainKeyboard: TourVisualTrainKeyboard,
   trainPlates: TourVisualTrainPlates, trainSets: TourVisualTrainSets,
   trainNotes: TourVisualTrainNotes, trainNav: TourVisualTrainNav,
   trainSkip: TourVisualTrainSkip, trainEnd: TourVisualTrainEnd,
   trainFeel: TourVisualTrainFeel, trainWellDone: TourVisualTrainWellDone,
+  trainIntensity: TourVisualTrainIntensity, trainMeso: TourVisualTrainMeso,
+  trainSaveTemplate: TourVisualTrainSaveTemplate,
   quickActionsSwipe: TourVisualQuickActionsSwipe, quickActionsDailyLog: TourVisualQuickActionsDailyLog,
   quickActionsWorkout: TourVisualQuickActionsWorkout, quickActionsBacklog: TourVisualQuickActionsBacklog,
   quickActionsCardio: TourVisualQuickActionsCardio, quickActionsCheckin: TourVisualQuickActionsCheckin,
   quickActionsMessage: TourVisualQuickActionsMessage,
   healthLog: TourVisualHealthLog, healthWeek: TourVisualHealthWeek,
+  cardioIntro: TourVisualCardioIntro, cardioActivity: TourVisualCardioActivity,
+  cardioManual: TourVisualCardioManual, cardioGoal: TourVisualCardioGoal,
+  cardioPreview: TourVisualCardioPreview, cardioActivate: TourVisualCardioActivate,
+  statusIntro: TourVisualStatusIntro, statusDeload: TourVisualStatusDeload,
+  statusNudge: TourVisualStatusNudge, statusSickVacation: TourVisualStatusSickVacation,
+  customIntro: TourVisualCustomIntro, customAppearance: TourVisualCustomAppearance,
+  customRest: TourVisualCustomRest, customEquipment: TourVisualCustomEquipment,
+  customProgression: TourVisualCustomProgression, customPaceguard: TourVisualCustomPaceguard,
   healthCardio: TourVisualHealthCardio, healthEnable: TourVisualHealthEnable,
   coachEnable: TourVisualCoachEnable, coachRoles: TourVisualCoachRoles,
   coachInviteAccept: TourVisualCoachInviteAccept, coachCheckin: TourVisualCoachCheckin,
