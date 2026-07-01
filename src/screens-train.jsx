@@ -1342,7 +1342,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   useEffectT(() => {
     const row = chipRowRef.current;
     if (!row) return;
-    const chip = row.querySelector(`[data-reorder-item]:nth-child(${exIdx + 1})`);
+    // Superset connectors ("⟷") are interspersed as siblings between grouped
+    // chips, so :nth-child(exIdx+1) drifted from the real chip position as
+    // soon as any connector rendered before it — data-ex-idx addresses the
+    // chip directly regardless of how many connectors sit in between.
+    const chip = row.querySelector(`[data-ex-idx="${exIdx}"]`);
     if (!chip) return;
     const target = chip.offsetLeft - row.offsetWidth / 2 + chip.offsetWidth / 2;
     row.scrollLeft = target;
@@ -3212,6 +3216,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const chip = (
             <button key={`chip-${i}`}
               data-reorder-item="true"
+              data-ex-idx={i}
               onClick={() => updateSession(sess => ({ ...sess, currentExIdx: i }))}
               style={{
                 flexShrink: 0, maxWidth: 110,

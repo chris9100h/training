@@ -2707,7 +2707,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 <div key={gi}>
                   {g.type === 'superset' ? (
                     <div style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 12 }}>
-                      <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>SUPERSET</div>
+                      <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{g.members.length >= 3 ? 'GIANT SET' : 'SUPERSET'}</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                         {g.members.map(({ entry: e, idx: i }) => renderEntry(e, i))}
                       </div>
