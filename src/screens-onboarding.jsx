@@ -156,6 +156,62 @@ window.TOURS.doWorkout = [
   },
 ];
 
+window.TOURS.quickActions = [
+  {
+    target: null,
+    title: 'Quick Actions',
+    body: "One gesture, every shortcut. Swipe down anywhere on the Home screen to log today's data, start a workout, catch up on a missed day, log cardio, or message your coach — without digging through tabs.",
+    visual: 'quickActionsSwipe',
+  },
+  {
+    target: null,
+    title: 'How to open it',
+    body: 'From the Home screen, swipe down and let go once the label flips to RELEASE. The sheet slides up with every shortcut available to you right now.',
+    visual: 'quickActionsSwipe',
+  },
+  {
+    target: null,
+    title: 'Daily Log',
+    body: "Always there. Opens today's health entry straight away — body weight, macros, water and steps — no need to go through the Health tab first.",
+    visual: 'quickActionsDailyLog',
+  },
+  {
+    target: null,
+    title: 'Workout',
+    body: 'Always there. One tap, then choose "From plan" to pick a day from your schedule, or "Freestyle" for an open session with no plan — add exercises as you go.',
+    visual: 'quickActionsWorkout',
+  },
+  {
+    target: null,
+    title: 'Backlog Session',
+    body: "Shows up only when a day from your plan went unlogged. One tap logs it retroactively, dated back to when it should've happened — pick which one if there's more than one.",
+    visual: 'quickActionsBacklog',
+  },
+  {
+    target: null,
+    title: 'Cardio',
+    body: 'Always there. Start a live cardio timer or log a past session manually — running, cycling, rowing, whatever you tracked.',
+    visual: 'quickActionsCardio',
+  },
+  {
+    target: null,
+    title: 'Check-in',
+    body: "Shows up only while a weekly check-in is due — as a coaching client, self-coaching, or both. One tap drops you straight into the form.",
+    visual: 'quickActionsCheckin',
+  },
+  {
+    target: null,
+    title: 'Message Coach',
+    body: 'Shows up only while you have an active coach. Jumps straight into your private chat thread with them.',
+    visual: 'quickActionsMessage',
+  },
+  {
+    target: null,
+    title: "You're all set!",
+    body: 'Swipe down on Home any time you need to log something fast. Find this tour again in Settings → How to…',
+  },
+];
+
 window.TOURS.healthTab = [
   {
     target: null,
@@ -805,6 +861,46 @@ function TourVisualTrainWellDone() {
   );
 }
 
+// ─── Quick Actions tour visuals ──────────────────────────────────────
+// Mirrors the real action-row look from the Quick Actions sheet
+// (src/screens-home.jsx, actionBtn helper) so the tour matches what users see.
+function qaRow(icon, label, sub) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 14,
+      padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+      borderRadius: 6,
+    }}>
+      <i className={`fa-solid ${icon}`} style={{ fontSize: 20, color: 'var(--accent)', width: 22, textAlign: 'center', flexShrink: 0 }} />
+      <div style={{ flex: 1, textAlign: 'left' }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', fontFamily: UI.fontUi }}>{label}</div>
+        <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>{sub}</div>
+      </div>
+      <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+    </div>
+  );
+}
+function TourVisualQuickActionsSwipe() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '8px 0' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+        <svg width="16" height="10" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        <svg width="16" height="10" viewBox="0 0 12 7" fill="none" style={{ opacity: 0.5 }}><path d="M1 1l5 4.5L11 1" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 999, background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.3)' }}>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.18em', fontWeight: 700, color: 'var(--accent)' }}>QUICK ACTIONS</span>
+      </div>
+      <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>swipe down anywhere on Home</div>
+    </div>
+  );
+}
+function TourVisualQuickActionsDailyLog() { return qaRow('fa-calendar-day', 'Daily Log', 'Weight, macros, water & steps'); }
+function TourVisualQuickActionsWorkout() { return qaRow('fa-dumbbell', 'Workout', 'From plan or freestyle'); }
+function TourVisualQuickActionsBacklog() { return qaRow('fa-clock-rotate-left', 'Backlog Session', 'Log Push Day (2d ago)'); }
+function TourVisualQuickActionsCardio() { return qaRow('fa-person-running', 'Cardio', 'Start live or log manually'); }
+function TourVisualQuickActionsCheckin() { return qaRow('fa-clipboard-check', 'Check-in', "This week's check-in is due"); }
+function TourVisualQuickActionsMessage() { return qaRow('fa-message', 'Message Coach', 'Send a note to your coach'); }
+
 function TourVisualHealthEnable() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1401,6 +1497,10 @@ const TOUR_VISUALS = {
   trainNotes: TourVisualTrainNotes, trainNav: TourVisualTrainNav,
   trainSkip: TourVisualTrainSkip, trainEnd: TourVisualTrainEnd,
   trainFeel: TourVisualTrainFeel, trainWellDone: TourVisualTrainWellDone,
+  quickActionsSwipe: TourVisualQuickActionsSwipe, quickActionsDailyLog: TourVisualQuickActionsDailyLog,
+  quickActionsWorkout: TourVisualQuickActionsWorkout, quickActionsBacklog: TourVisualQuickActionsBacklog,
+  quickActionsCardio: TourVisualQuickActionsCardio, quickActionsCheckin: TourVisualQuickActionsCheckin,
+  quickActionsMessage: TourVisualQuickActionsMessage,
   healthLog: TourVisualHealthLog, healthWeek: TourVisualHealthWeek,
   healthCardio: TourVisualHealthCardio, healthEnable: TourVisualHealthEnable,
   coachEnable: TourVisualCoachEnable, coachRoles: TourVisualCoachRoles,
