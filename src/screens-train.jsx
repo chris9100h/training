@@ -711,6 +711,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (afterSuccess) afterSuccess();
     recentCompleteRef.current[setIdx] = Date.now();
     lastCompleteRef.current = Date.now();
+    // Lengthened partials still needs the partials-count stepper filled in for
+    // this exact set (it only appears once the set is done) — don't auto-
+    // advance to the next exercise out from under the user, or they land on
+    // the next exercise with no way to reach the stepper except navigating
+    // back. A manual next-exercise control remains available.
+    const lpPending = lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx;
     _log(`completeSet(${setIdx}) → lastCompleteRef stamped`);
 
     // Build the done patch inside the functional updater so we can read the
@@ -808,7 +814,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setProgressionUnlocked(progressionResult);
         setTimeout(() => {
           setProgressionUnlocked(null);
-          if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); }
+          if (pendingNavRef.current) { pendingNavRef.current = false; if (!lpPending) navigate(1); }
         }, 4000);
       }, 800);
     }
@@ -823,13 +829,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         // Round complete: start rest
         persistRestStart(Date.now(), restDef);
         const allGroupDone = updatedSets.every(s => s.done) && partners.every(({ e }) => e.sets.every(s => s.done));
-        if (allGroupDone) {
+        if (allGroupDone && !lpPending) {
           const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
           setTimeout(() => {
             if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
             else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
           }, 600);
-        } else {
+        } else if (!allGroupDone) {
           const allGroup = session.entries.map((e, i) => ({ e, i })).filter(({ e }) => e.supersetGroup === group);
           const firstIncomplete = allGroup.find(({ e, i }) =>
             i === exIdx ? !updatedSets.every(s => s.done) : e.sets.some(s => !s.done)
@@ -842,7 +848,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         persistRestStart(Date.now(), restDef);
       }
       if (updatedSets.every(st => st.done)) {
-        if (!progressionResult) setTimeout(() => navigate(1), 600);
+        if (!progressionResult && !lpPending) setTimeout(() => navigate(1), 600);
       }
     }
     // Last warmup set done → start 3-min rest, workout timer begins when rest expires
@@ -2706,7 +2712,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         : e),
     }));
     persistRestStart(Date.now(), restDef);
-    setTimeout(() => navigate(1), 600);
+    // Same lengthened-partials guard as completeSet: don't jump away before
+    // the partials-count stepper for the pending set is reachable.
+    if (!(lpTarget?.exIdx === exIdx)) setTimeout(() => navigate(1), 600);
   };
 
   const skipWarmup = () => {
@@ -3356,25 +3364,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           )}
           <div className="knurl" style={{ marginBottom: 2 }} />
 
-          {lpTarget?.exIdx === exIdx && (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 8px' }}>
-              <span className="micro-gold">LENGTHENED PARTIALS</span>
-              <button onClick={() => {
-                const si = lpTarget.setIdx;
-                updateSession(sess => ({
-                  ...sess,
-                  entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
-                    ...en,
-                    sets: en.sets.map((st, k) => k === si && st.technique === 'lengthened_partial'
-                      ? { ...st, technique: null, drops: null, updatedAt: new Date().toISOString() }
-                      : st),
-                  }),
-                }));
-                setLpTarget(null);
-              }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
-            </div>
-          )}
-
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {entry.sets.map((s, i) => {
               const isWarmupRow = !!s.warmup;
@@ -3399,6 +3388,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       </div>
                       <div className="knurl" style={{ marginBottom: 2 }} />
                     </>
+                  )}
+                  {lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 8px' }}>
+                      <span className="micro-gold">LENGTHENED PARTIALS</span>
+                      <button onClick={() => {
+                        updateSession(sess => ({
+                          ...sess,
+                          entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+                            ...en,
+                            sets: en.sets.map((st, k) => k === i && st.technique === 'lengthened_partial'
+                              ? { ...st, technique: null, drops: null, updatedAt: new Date().toISOString() }
+                              : st),
+                          }),
+                        }));
+                        setLpTarget(null);
+                      }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                    </div>
                   )}
                   {(() => {
                     const isDropActive = dropSetIdx === i && !s.done;
