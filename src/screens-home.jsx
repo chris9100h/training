@@ -1559,39 +1559,49 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // training case and re-creates if the week count changes.
   useEffect(() => {
     if (!sch?.mesocycle_weeks || !sch?.id || !userId) return;
-    const existing = (store?.mesoStates || []).find(m => m.scheduleId === sch.id);
-    // Keep existing meso only if weeks match the current config — mirrors the
-    // recreate guard in screens-train.jsx's session auto-start effect, so a
-    // changed week count always starts fresh regardless of which effect runs
-    // first.
-    if (existing && existing.weeks === sch.mesocycle_weeks) return;
-    const _daysLen = sch.days.length || 1;
-    const _isWeekday = LB.isWeekdayPlan(sch);
-    const _isFlex = LB.isFlexPlan(sch);
-    const _ci = store.cycleIndex || 0;
-    let alignedStartDate, alignedStartIdx;
-    if (_isWeekday) {
-      alignedStartDate = LB.nextMondayISO();
-      alignedStartIdx = _ci;
-    } else if (_isFlex) {
-      alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
-      alignedStartDate = LB.todayISO();
-    } else {
-      alignedStartDate = LB.nextCycleD1ISOFromSchedule(sch, store.cycleStartDate);
-      alignedStartIdx = 0;
-    }
-    const newMeso = {
-      id: userId + '_' + sch.id,
-      scheduleId: sch.id,
-      weeks: sch.mesocycle_weeks,
-      startDate: alignedStartDate,
-      startCycleIndex: alignedStartIdx,
-      deltas: {}, jointFlags: {}, pumpLowCounts: {}, weightBoosts: {},
-      completions: existing?.completions ?? 0,
-      updatedAt: new Date().toISOString(),
-    };
+    const schId = sch.id;
+    // Recompute everything from the freshest store snapshot (`s`, inside the
+    // functional setStore updater) instead of the `sch`/`store` closed over
+    // above. A plan edit that both changes the day structure (new version +
+    // cycleOffset) AND flips mesocycle_weeks on commits via two back-to-back
+    // setStore calls in doSave() — aligning against the closure risks reading
+    // a schedule snapshot that predates one of those commits, which silently
+    // drops the cycleOffset and computes "today" instead of the true next D1.
     setStore(s => {
-      const others = (s.mesoStates || []).filter(m => m.scheduleId !== newMeso.scheduleId);
+      const freshSch = s.schedules.find(x => x.id === schId);
+      if (!freshSch?.mesocycle_weeks) return s;
+      const existing = (s.mesoStates || []).find(m => m.scheduleId === schId);
+      // Keep existing meso only if weeks match the current config — mirrors the
+      // recreate guard in screens-train.jsx's session auto-start effect, so a
+      // changed week count always starts fresh regardless of which effect runs
+      // first.
+      if (existing && existing.weeks === freshSch.mesocycle_weeks) return s;
+      const _daysLen = freshSch.days.length || 1;
+      const _isWeekday = LB.isWeekdayPlan(freshSch);
+      const _isFlex = LB.isFlexPlan(freshSch);
+      const _ci = s.cycleIndex || 0;
+      let alignedStartDate, alignedStartIdx;
+      if (_isWeekday) {
+        alignedStartDate = LB.nextMondayISO();
+        alignedStartIdx = _ci;
+      } else if (_isFlex) {
+        alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
+        alignedStartDate = LB.todayISO();
+      } else {
+        alignedStartDate = LB.nextCycleD1ISOFromSchedule(freshSch, s.cycleStartDate);
+        alignedStartIdx = 0;
+      }
+      const newMeso = {
+        id: userId + '_' + schId,
+        scheduleId: schId,
+        weeks: freshSch.mesocycle_weeks,
+        startDate: alignedStartDate,
+        startCycleIndex: alignedStartIdx,
+        deltas: {}, jointFlags: {}, pumpLowCounts: {}, weightBoosts: {},
+        completions: existing?.completions ?? 0,
+        updatedAt: new Date().toISOString(),
+      };
+      const others = (s.mesoStates || []).filter(m => m.scheduleId !== schId);
       return { ...s, mesoStates: [...others, newMeso] };
     });
   }, [sch?.id, sch?.mesocycle_weeks, store?.mesoStates, userId]); // eslint-disable-line

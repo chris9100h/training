@@ -521,50 +521,63 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // and there's no active meso for this plan yet.
   useEffectT(() => {
     if (!_sch?.mesocycle_weeks || !session.scheduleId) return;
-    const existing = getMesoState(session.scheduleId, store.mesoStates);
-    // Keep existing meso only if weeks match the current config.
-    // A mismatch (changed week count) always starts fresh.
-    if (existing && existing.weeks === _sch.mesocycle_weeks) return;
-    // Align meso start to a clean boundary so week 1 is always a full rotation/week.
-    // Weekday: next Monday (or today). Flex: next D1 via cycleIndex. Cycle: next D1 via date.
-    const _isWeekday = LB.isWeekdayPlan(_sch);
-    const _isFlex = LB.isFlexPlan(_sch);
-    const _daysLen = _sch.days.length || 1;
-    const _ci = store.cycleIndex || 0;
-    let alignedStartDate, alignedStartIdx;
-    if (_isWeekday) {
-      alignedStartDate = LB.nextMondayISO();
-      alignedStartIdx = _ci;
-    } else if (_isFlex) {
-      alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
-      alignedStartDate = LB.todayISO();
-    } else {
-      // Date-based cycle plan: use version-aware D1 so the meso aligns with how
-      // the date strip renders (getCyclePosForDate respects version boundaries).
-      alignedStartDate = LB.nextCycleD1ISOFromSchedule(_sch, store.cycleStartDate);
-      alignedStartIdx = 0;
-    }
-    const newMeso = {
-      id: userId + '_' + session.scheduleId,
-      scheduleId: session.scheduleId,
-      weeks: _sch.mesocycle_weeks,
-      startDate: alignedStartDate,
-      startCycleIndex: alignedStartIdx,
-      deltas: {},
-      jointFlags: {},
-      pumpLowCounts: {},
-      weightBoosts: {},
-      completions: existing?.completions ?? 0,
-      updatedAt: new Date().toISOString(),
-    };
-    saveMesoStateToStorage(newMeso);
-    setMesoStateLocal(newMeso);
-    // Immediately flush new meso state to store so it's synced to DB without
-    // waiting for session end (covers the case where user exits without finishing).
+    const schId = session.scheduleId;
+    // Recompute everything from the freshest store snapshot (`s`, inside the
+    // functional setStore updater) instead of the `_sch`/`store` closed over
+    // above — a plan edit that changes the day structure (new version +
+    // cycleOffset) and flips mesocycle_weeks on can commit via back-to-back
+    // setStore calls, and aligning against a stale closure risks dropping the
+    // cycleOffset and computing "today" instead of the true next D1.
+    let newMeso = null;
     setStore(s => {
-      const others = (s.mesoStates || []).filter(m => m.scheduleId !== newMeso.scheduleId);
+      const freshSch = s.schedules.find(x => x.id === schId);
+      if (!freshSch?.mesocycle_weeks) return s;
+      const existing = getMesoState(schId, s.mesoStates);
+      // Keep existing meso only if weeks match the current config.
+      // A mismatch (changed week count) always starts fresh.
+      if (existing && existing.weeks === freshSch.mesocycle_weeks) return s;
+      // Align meso start to a clean boundary so week 1 is always a full rotation/week.
+      // Weekday: next Monday (or today). Flex: next D1 via cycleIndex. Cycle: next D1 via date.
+      const _isWeekday = LB.isWeekdayPlan(freshSch);
+      const _isFlex = LB.isFlexPlan(freshSch);
+      const _daysLen = freshSch.days.length || 1;
+      const _ci = s.cycleIndex || 0;
+      let alignedStartDate, alignedStartIdx;
+      if (_isWeekday) {
+        alignedStartDate = LB.nextMondayISO();
+        alignedStartIdx = _ci;
+      } else if (_isFlex) {
+        alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
+        alignedStartDate = LB.todayISO();
+      } else {
+        // Date-based cycle plan: use version-aware D1 so the meso aligns with how
+        // the date strip renders (getCyclePosForDate respects version boundaries).
+        alignedStartDate = LB.nextCycleD1ISOFromSchedule(freshSch, s.cycleStartDate);
+        alignedStartIdx = 0;
+      }
+      newMeso = {
+        id: userId + '_' + schId,
+        scheduleId: schId,
+        weeks: freshSch.mesocycle_weeks,
+        startDate: alignedStartDate,
+        startCycleIndex: alignedStartIdx,
+        deltas: {},
+        jointFlags: {},
+        pumpLowCounts: {},
+        weightBoosts: {},
+        completions: existing?.completions ?? 0,
+        updatedAt: new Date().toISOString(),
+      };
+      const others = (s.mesoStates || []).filter(m => m.scheduleId !== schId);
       return { ...s, mesoStates: [...others, newMeso] };
     });
+    // Immediately mirror the new meso state to the local cache / component
+    // state too, so it's synced to DB without waiting for session end (covers
+    // the case where user exits without finishing) and is available offline.
+    if (newMeso) {
+      saveMesoStateToStorage(newMeso);
+      setMesoStateLocal(newMeso);
+    }
   }, []);
 
   const exIdx = session.currentExIdx || 0;
