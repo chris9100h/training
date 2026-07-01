@@ -602,7 +602,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
-        ? { ...e, sets: e.sets.map((st, k) => k === setIdx ? { ...st, ...patch } : st) }
+        ? { ...e, sets: e.sets.map((st, k) => {
+            if (k !== setIdx) return st;
+            // Unchecking (or editing a value on) a set that was completed via
+            // an intensity technique (drop-set/myo-rep/lengthened partials)
+            // reopens it for editing — clear the stale technique/drops so a
+            // later plain re-check doesn't carry forward data that no longer
+            // matches what's actually on the set.
+            const clearsTechnique = patch.done === false && st.technique && !('technique' in patch);
+            return { ...st, ...patch, ...(clearsTechnique ? { technique: null, drops: null } : {}) };
+          }) }
         : e),
     }));
   };
@@ -2175,8 +2184,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ...sess,
           entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
             ...en,
+            // Editing the weight of an already-committed intensity-technique
+            // set (drop-set/myo-rep/lengthened partials) reopens it for
+            // editing — clear the stale technique/drops so it doesn't carry
+            // forward data that no longer matches what's being typed.
             sets: en.sets.map((st, si) =>
-              si === setIdx ? { ...st, kg: num ?? null, done: false }
+              si === setIdx ? { ...st, kg: num ?? null, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
               : store.settings?.weightFillDown !== false && si > setIdx && !st.done ? { ...st, kg: num ?? null }
               : st
             ),
@@ -2267,7 +2280,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
           ...en,
           sets: en.sets.map((st, si) =>
-            si === setIdx ? { ...st, kg: next, done: false }
+            si === setIdx ? { ...st, kg: next, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
             : si > setIdx && !st.done ? { ...st, kg: next }
             : st
           ),
@@ -3359,7 +3372,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
                         ...en,
                         sets: en.sets.map((st, si) =>
-                          si === bgSetIdx ? { ...st, kg, done: false }
+                          si === bgSetIdx ? { ...st, kg, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
                           : store.settings?.weightFillDown !== false && si > bgSetIdx && !st.done && !st.warmup ? { ...st, kg }
                           : st
                         ),
@@ -3512,7 +3525,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
                             ...en,
                             sets: en.sets.map((st, si) =>
-                              si === i ? { ...st, kg, done: false }
+                              si === i ? { ...st, kg, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
                               : store.settings?.weightFillDown !== false && si > i && !st.done && !st.warmup ? { ...st, kg }
                               : st
                             ),
