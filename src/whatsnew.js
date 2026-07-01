@@ -16,6 +16,17 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.445',
+    title: 'Bug Hunt',
+    items: [
+      '🔗 Supersets and Giant Sets got a full reliability pass — a cardio exercise in a group now correctly hands off to its training partner, "Check All" respects the group too, and dragging exercises around the chip strip can no longer accidentally split a pair apart.',
+      '🎯 Fixed several cases where a skipped set threw off progression targets and PR detection — whether you hit your numbers is now judged correctly no matter which set got skipped.',
+      '👀 Drop Sets, Myo-Reps and Lengthened Partials now actually show up in the coaching dashboard and spectator view — previously invisible there, even though you did the work.',
+      '🛠 Fixed two crashes: one when switching plans, one when opening an exercise\'s history if its set count differed between sessions.',
+      '🔔 Push notifications for very long rest timers now line up with what\'s on screen instead of risking an early ping.',
+    ],
+  },
+  {
     id: 'v2.444',
     title: 'Supersets, Unchained',
     items: [
