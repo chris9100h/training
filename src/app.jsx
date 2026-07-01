@@ -97,7 +97,7 @@ function AutoCloseBanner({ notify, onDismiss }) {
           Session auto-ended
         </div>
         <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
-          Your <strong style={{ color: UI.ink }}>{dayName}</strong> session{dateLabel ? ` on ${dateLabel}` : ''} was automatically ended — <strong style={{ color: UI.ink }}>{durationMinutes} min</strong> recorded.
+          Your <strong style={{ color: UI.ink }}>{dayName}</strong> session{dateLabel ? ` on ${dateLabel}` : ''} was automatically ended{durationMinutes != null ? <> — <strong style={{ color: UI.ink }}>{durationMinutes} min</strong> recorded</> : ''}.
         </div>
         <button onClick={onDismiss} style={{
           marginTop: 10, width: '100%', padding: '14px 0',
@@ -579,6 +579,16 @@ function App() {
             const serverCardioIds = new Set((fresh.cardioLogs || []).map(l => l.id));
             const baseCardioIds = base ? new Set((base.cardioLogs || []).map(l => l.id)) : null;
             const localOnlyCardioLogs = (cur.cardioLogs || []).filter(x => !serverCardioIds.has(x.id) && !baseCardioIds?.has(x.id));
+            // Templates and cardio plans need the same resurrection guard as
+            // exercises/schedules — previously missing here entirely, so a
+            // template saved (or a cardio plan created) offline before the
+            // first sync completed was silently discarded on the next merge.
+            const serverTplIds = new Set((fresh.workoutTemplates || []).map(t => t.id));
+            const baseTplIds = base ? new Set((base.workoutTemplates || []).map(t => t.id)) : null;
+            const localOnlyTemplates = (cur.workoutTemplates || []).filter(x => !serverTplIds.has(x.id) && !baseTplIds?.has(x.id));
+            const serverCardioPlanIds = new Set((fresh.cardioPlans || []).map(p => p.id));
+            const baseCardioPlanIds = base ? new Set((base.cardioPlans || []).map(p => p.id)) : null;
+            const localOnlyCardioPlans = (cur.cardioPlans || []).filter(x => !serverCardioPlanIds.has(x.id) && !baseCardioPlanIds?.has(x.id));
             // Locally-deleted items (in base but not in cur): exclude from fresh
             // so they aren't resurrected while syncStore deletion is in flight.
             const curExIdSet = new Set((cur.exercises || []).map(e => e.id));
@@ -591,6 +601,10 @@ function App() {
             const delDailyIds = baseDailyIds ? new Set([...baseDailyIds].filter(id => !curDailyIdSet.has(id))) : null;
             const curCardioIdSet = new Set((cur.cardioLogs || []).map(l => l.id));
             const delCardioIds = baseCardioIds ? new Set([...baseCardioIds].filter(id => !curCardioIdSet.has(id))) : null;
+            const curTplIdSet = new Set((cur.workoutTemplates || []).map(t => t.id));
+            const delTplIds = baseTplIds ? new Set([...baseTplIds].filter(id => !curTplIdSet.has(id))) : null;
+            const curCardioPlanIdSet = new Set((cur.cardioPlans || []).map(p => p.id));
+            const delCardioPlanIds = baseCardioPlanIds ? new Set([...baseCardioPlanIds].filter(id => !curCardioPlanIdSet.has(id))) : null;
             // Meso states are a mutable per-plan row (not an append/delete list),
             // so for ids present on both sides we compare updatedAt and keep
             // whichever is newer — this protects an in-flight local session's
@@ -634,6 +648,8 @@ function App() {
               skips: [...localOnlySkips, ...(fresh.skips || []).filter(s => !delSkipIds?.has(s.id))],
               dailyLogs: [...localOnlyDailyLogs, ...(fresh.dailyLogs || []).filter(l => !delDailyIds?.has(l.id))],
               cardioLogs: [...localOnlyCardioLogs, ...(fresh.cardioLogs || []).filter(l => !delCardioIds?.has(l.id))],
+              workoutTemplates: [...localOnlyTemplates, ...(fresh.workoutTemplates || []).filter(t => !delTplIds?.has(t.id))],
+              cardioPlans: [...localOnlyCardioPlans, ...(fresh.cardioPlans || []).filter(p => !delCardioPlanIds?.has(p.id))],
               mesoStates,
             };
           }
