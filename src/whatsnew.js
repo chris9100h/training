@@ -16,7 +16,7 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
-    id: 'v2.443',
+    id: 'v2.444',
     title: 'Supersets, Unchained',
     items: [
       '🔗 Superset or Giant Set any exercise mid-workout — no pre-planning required. Tap INTENSITY on an exercise\'s first set and choose Superset to pair it with another exercise in your session, or a new one. Already paired up? The same button becomes Giant Set, adding a third exercise to the rotation.',
