@@ -588,7 +588,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
         const linkedToNext = it.supersetGroup && it.supersetGroup === nextIt?.supersetGroup;
         const isGiant = it.supersetGroup && day.items.filter(x => x.supersetGroup === it.supersetGroup).length >= 3;
         const frame = (
-          <Frame key={k} style={{ padding: '12px 16px', ...(it.supersetGroup ? { borderColor: UI.goldSoft } : {}) }}>
+          <Frame key={k} style={{ padding: '12px 16px', borderColor: it.supersetGroup ? UI.goldSoft : UI.hairStrong }}>
             {it.supersetGroup && (
               <div className="micro" style={{ color: UI.gold, marginBottom: 6, letterSpacing: '0.12em' }}>{isGiant ? 'GIANT SET' : 'SUPERSET'}</div>
             )}
