@@ -852,16 +852,31 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }, 800);
     }
     const group = entry.supersetGroup;
-    if (group) {
+    // Warmup sets are only ever seeded onto the very first exercise of the
+    // whole session (see the session-start warmup builder in screens-home.jsx),
+    // never per-exercise — so a superset member's warmup sets have no
+    // meaningful "round" position to match against a partner. Skip the
+    // round-matching entirely for a warmup completion; it just behaves like
+    // any other row on the same exercise (no cross-exercise navigation).
+    if (group && !entry.sets[setIdx]?.warmup) {
+      // Match superset partners by WORKING-set-relative position, not raw
+      // array index. Because warmups are seeded onto only ONE exercise
+      // (whichever is first overall), a superset pair where one member is
+      // that exercise has mismatched raw set-array lengths between partners
+      // even with the same number of working sets — comparing raw indices
+      // then reads the wrong "round", making the partner's still-open set
+      // look already done (skipping straight past it) or vice versa.
+      const workingIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
+      const partnerWorkingSets = (e) => (e.sets || []).filter(s => !s.warmup);
       const partners = session.entries.map((e, i) => ({ e, i })).filter(({ e, i }) => e.supersetGroup === group && i !== exIdx);
-      const nextPartner = partners.find(({ e }) => e.sets[setIdx]?.done === false);
+      const nextPartner = partners.find(({ e }) => partnerWorkingSets(e)[workingIdx]?.done === false);
       if (nextPartner) {
         // Mid-round: jump to partner, no rest
         setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), 300);
       } else {
         // Round complete: start rest
         persistRestStart(Date.now(), restDef);
-        const allGroupDone = updatedSets.every(s => s.done) && partners.every(({ e }) => e.sets.every(s => s.done));
+        const allGroupDone = updatedSets.every(s => s.done) && partners.every(({ e }) => partnerWorkingSets(e).every(s => s.done));
         if (allGroupDone) {
           const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
           setTimeout(() => {
@@ -871,7 +886,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         } else {
           const allGroup = session.entries.map((e, i) => ({ e, i })).filter(({ e }) => e.supersetGroup === group);
           const firstIncomplete = allGroup.find(({ e, i }) =>
-            i === exIdx ? !updatedSets.every(s => s.done) : e.sets.some(s => !s.done)
+            i === exIdx ? !updatedSets.every(s => s.done) : partnerWorkingSets(e).some(s => !s.done)
           );
           if (firstIncomplete) setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: firstIncomplete.i })), 600);
         }
