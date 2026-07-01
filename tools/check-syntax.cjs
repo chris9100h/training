@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /* Transpiles every app source exactly like the in-app precompile loader does
-   (Babel standalone, presets react+env, sourceType script) and fails on the
-   first error. This catches the worst failure mode of the no-build setup:
+   (Babel standalone, presets react+env with esmodules targets, sourceType
+   script) and fails on the first error. This catches the worst failure mode
+   of the no-build setup:
    a single syntax error blanks the entire app, and GitHub Pages deploys
    every push immediately.
 
@@ -37,7 +38,7 @@ for (const rel of [...plainSources, ...jsxSources]) {
     continue;
   }
   try {
-    Babel.transform(src, { presets: ['react', 'env'], sourceType: 'script', filename: rel });
+    Babel.transform(src, { presets: ['react', ['env', { targets: { esmodules: true } }]], sourceType: 'script', filename: rel });
     console.log(`ok   ${rel}`);
   } catch (e) {
     failed = true;
