@@ -24,7 +24,12 @@ BEGIN
     JOIN auth.users u ON u.id = p.id
     LEFT JOIN zane_user_settings us ON us.user_id = p.id
     LEFT JOIN (
-      SELECT user_id, COUNT(*) AS plan_count FROM zane_schedules GROUP BY user_id
+      -- Table-qualified: an unqualified "user_id" here is ambiguous against
+      -- the function's own user_id OUT parameter (PL/pgSQL resolves bare
+      -- column names against local variables first) and fails at call time
+      -- with "column reference is ambiguous", even though a plain top-level
+      -- SELECT of the same query runs fine outside the function body.
+      SELECT s.user_id, COUNT(*) AS plan_count FROM zane_schedules s GROUP BY s.user_id
     ) sc ON sc.user_id = p.id
     ORDER BY u.created_at DESC;
 END;

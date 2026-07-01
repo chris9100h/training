@@ -640,7 +640,9 @@ BEGIN
     JOIN auth.users u ON u.id = p.id
     LEFT JOIN zane_user_settings us ON us.user_id = p.id
     LEFT JOIN (
-      SELECT user_id, COUNT(*) AS plan_count FROM zane_schedules GROUP BY user_id
+      -- Table-qualified: unqualified "user_id" is ambiguous against the
+      -- function's own user_id OUT parameter and fails at call time.
+      SELECT s.user_id, COUNT(*) AS plan_count FROM zane_schedules s GROUP BY s.user_id
     ) sc ON sc.user_id = p.id
     ORDER BY u.created_at DESC;
 END;
