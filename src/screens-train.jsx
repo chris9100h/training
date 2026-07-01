@@ -611,7 +611,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return (st.kg < prevSet.kg && rA <= rB) || (st.kg === prevSet.kg && rA < rB);
   };
 
-  const completeSet = (setIdx, bypassOutlierCheck = false, afterSuccess = null) => {
+  const completeSet = (setIdx, bypassOutlierCheck = false, afterSuccess = null, extraPatch = null) => {
+    // Lengthened partials only ever completes via finishLengthenedPartial,
+    // which supplies extraPatch with the chosen partials count — every other
+    // entry point (checkbox is hidden for this row, "Check set", keyboard
+    // confirm, bulk check-all) is guarded to redirect or skip this set
+    // instead of reaching here bare, but this is the backstop.
+    if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx && !extraPatch) return;
     // Unlock AudioContext on this user gesture so the rest-timer beep works on iOS
     // even when the tempo feature is disabled (only other init path).
     try {
@@ -711,12 +717,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (afterSuccess) afterSuccess();
     recentCompleteRef.current[setIdx] = Date.now();
     lastCompleteRef.current = Date.now();
-    // Lengthened partials still needs the partials-count stepper filled in for
-    // this exact set (it only appears once the set is done) — don't auto-
-    // advance to the next exercise out from under the user, or they land on
-    // the next exercise with no way to reach the stepper except navigating
-    // back. A manual next-exercise control remains available.
-    const lpPending = lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx;
+    if (extraPatch) { setLpTarget(null); setLpCount(0); }
     _log(`completeSet(${setIdx}) → lastCompleteRef stamped`);
 
     // Build the done patch inside the functional updater so we can read the
@@ -725,7 +726,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     updateSession(sess => {
       const currSet = sess.entries[exIdx]?.sets[setIdx];
       if (!currSet) return sess;
-      const patch = { done: true };
+      const patch = { done: true, ...extraPatch };
       if (kb && kb.setIdx === setIdx && kb.field !== 'kg') {
         const fromRef = parseInt(rawRef, 10);
         const fromSess = currSet[kb.field] || 0;
@@ -822,7 +823,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setProgressionUnlocked(progressionResult);
         setTimeout(() => {
           setProgressionUnlocked(null);
-          if (pendingNavRef.current) { pendingNavRef.current = false; if (!lpPending) navigate(1); }
+          if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); }
         }, 4000);
       }, 800);
     }
@@ -837,13 +838,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         // Round complete: start rest
         persistRestStart(Date.now(), restDef);
         const allGroupDone = updatedSets.every(s => s.done) && partners.every(({ e }) => e.sets.every(s => s.done));
-        if (allGroupDone && !lpPending) {
+        if (allGroupDone) {
           const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
           setTimeout(() => {
             if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
             else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
           }, Math.max(600, overlayHoldMs));
-        } else if (!allGroupDone) {
+        } else {
           const allGroup = session.entries.map((e, i) => ({ e, i })).filter(({ e }) => e.supersetGroup === group);
           const firstIncomplete = allGroup.find(({ e, i }) =>
             i === exIdx ? !updatedSets.every(s => s.done) : e.sets.some(s => !s.done)
@@ -856,7 +857,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         persistRestStart(Date.now(), restDef);
       }
       if (updatedSets.every(st => st.done)) {
-        if (!progressionResult && !lpPending) setTimeout(() => navigate(1), Math.max(600, overlayHoldMs));
+        if (!progressionResult) setTimeout(() => navigate(1), Math.max(600, overlayHoldMs));
       }
     }
     // Last warmup set done → start 3-min rest, workout timer begins when rest expires
@@ -980,19 +981,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (updatedSets.every(st => st.done)) setTimeout(() => navigate(1), Math.max(600, overlayHoldMs));
   };
 
-  const setPartials = (setIdx, count) => {
-    updateSession(sess => ({
-      ...sess,
-      entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
-        ...en,
-        sets: en.sets.map((st, si) => si !== setIdx ? st : {
-          ...st,
-          technique: count > 0 ? 'lengthened_partial' : (st.technique === 'lengthened_partial' ? null : st.technique),
-          drops: count > 0 ? { partials: count } : (st.technique === 'lengthened_partial' ? null : st.drops),
-          updatedAt: new Date().toISOString(),
-        }),
-      }),
-    }));
+  // Commits the set exactly like completeSet, plus the technique/partials
+  // count chosen via the stepper — both land in the same session update, so
+  // there's no window (crash, background, navigation) where the set is done
+  // but the chosen partials count wasn't recorded yet.
+  const finishLengthenedPartial = (setIdx) => {
+    completeSet(setIdx, false, null, { technique: 'lengthened_partial', drops: { partials: lpCount } });
   };
 
   const addSet = () => {
@@ -1079,6 +1073,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (idx < 0) return;
     if (dropSetIdx === idx) { finishDropSet(dropDropsRef.current); return; }
     if (myoSetIdx === idx) { finishMyoSet(myoDropsRef.current, myoTechnique); return; }
+    if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === idx) { finishLengthenedPartial(idx); return; }
     completeSet(idx, false, () => jumpToNextSet(idx));
   };
 
@@ -1444,7 +1439,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const myoDropsRef = useRefT([]);
   myoDropsRef.current = myoDrops;
   const [myoTarget, setMyoTarget] = useStateT(null);
-  const [lpTarget, setLpTarget] = useStateT(null); // { exIdx, setIdx } | null
+  const [lpTarget, setLpTarget] = useStateT(null); // { exIdx, setIdx } | null — set is NOT done yet, replaces its checkbox with a stepper + FINISH button
+  const [lpCount, setLpCount] = useStateT(0); // in-progress partials count for lpTarget, committed to the set only on Finish
   // Persist intensity state so a background/resume on iOS doesn't wipe mid-set progress
   useEffectT(() => {
     if (dropSetIdx != null || myoSetIdx != null || lpTarget != null) {
@@ -1453,13 +1449,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           sessionId, exIdx,
           dropSetIdx, dropDrops,
           myoSetIdx, myoDrops, myoTechnique, myoTarget,
-          lpSetIdx: lpTarget?.setIdx ?? null,
+          lpSetIdx: lpTarget?.setIdx ?? null, lpCount,
         }));
       } catch {}
     } else {
       localStorage.removeItem('logbook-intensity-state');
     }
-  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, lpTarget, sessionId, exIdx]);
+  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, lpTarget, lpCount, sessionId, exIdx]);
   useEffectT(() => {
     try {
       const raw = localStorage.getItem('logbook-intensity-state');
@@ -1479,11 +1475,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setMyoTechnique(st.myoTechnique || null);
         setMyoTarget(st.myoTarget ?? null);
       }
-      // Lengthened partials, unlike drop/myo, is still relevant AFTER the set
-      // is done (the partials-count stepper is a post-completion step) — so,
-      // unlike the two guards above, restore it regardless of done state.
-      if (st.lpSetIdx != null && targetEntry?.sets[st.lpSetIdx]) {
+      // The set only ever gets marked done via the dedicated FINISH button
+      // (which commits technique+drops in the same update), so — like
+      // drop/myo — there is nothing left to resume once the set is done.
+      if (st.lpSetIdx != null && !targetEntry?.sets[st.lpSetIdx]?.done) {
         setLpTarget({ exIdx, setIdx: st.lpSetIdx });
+        setLpCount(st.lpCount || 0);
       }
     } catch {}
   }, [sessionId, exIdx]);
@@ -2287,6 +2284,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     } else {
       _log(`kbConfirm: ${field}→completeSet(${setIdx})`);
       if (dropSetIdx === setIdx || myoSetIdx === setIdx) return;
+      if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx) return;
       completeSet(setIdx);
       const nextIdx = entry.sets.findIndex((s, i) => i > setIdx && !s.done);
       if (nextIdx !== -1) setTimeout(() => activateKb(nextIdx, isUnilateral ? 'repsL' : 'reps'), 350);
@@ -2722,16 +2720,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const checkAllSets = async () => {
     if (allWorkingDone || anyMissingData) return;
     if (!await confirm(`Check off all ${workingSetsArr.length} sets and continue?`, { ok: 'Check all' })) return;
+    // Lengthened partials only ever completes via its own FINISH button (it
+    // needs a partials count, which bulk-check has no way to supply) — leave
+    // that one set for the user to finish individually.
+    const lpIdx = lpTarget?.exIdx === exIdx ? lpTarget.setIdx : -1;
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
-        ? { ...e, sets: e.sets.map(st => st.warmup ? st : { ...st, done: true }) }
+        ? { ...e, sets: e.sets.map((st, si) => (st.warmup || si === lpIdx) ? st : { ...st, done: true }) }
         : e),
     }));
     persistRestStart(Date.now(), restDef);
-    // Same lengthened-partials guard as completeSet: don't jump away before
-    // the partials-count stepper for the pending set is reachable.
-    if (!(lpTarget?.exIdx === exIdx)) setTimeout(() => navigate(1), 600);
+    if (lpIdx < 0) setTimeout(() => navigate(1), 600);
   };
 
   const skipWarmup = () => {
@@ -2910,7 +2910,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <Btn style={{ flex: 1 }} onClick={() => {
                 const s = outlierConfirm.setIdx;
                 setOutlierConfirm(null);
-                completeSet(s, true);
+                const lpExtra = (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === s)
+                  ? { technique: 'lengthened_partial', drops: { partials: lpCount } }
+                  : null;
+                completeSet(s, true, null, lpExtra);
               }}>{(() => {
                 const oc = outlierConfirm;
                 if (oc.kind === 'both') return 'Yes, log it anyway';
@@ -3406,26 +3409,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       <div className="knurl" style={{ marginBottom: 2 }} />
                     </>
                   )}
-                  {lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 8px' }}>
-                      <span className="micro-gold">LENGTHENED PARTIALS</span>
-                      <button onClick={() => {
-                        updateSession(sess => ({
-                          ...sess,
-                          entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
-                            ...en,
-                            sets: en.sets.map((st, k) => k === i && st.technique === 'lengthened_partial'
-                              ? { ...st, technique: null, drops: null, updatedAt: new Date().toISOString() }
-                              : st),
-                          }),
-                        }));
-                        setLpTarget(null);
-                      }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
-                    </div>
-                  )}
                   {(() => {
                     const isDropActive = dropSetIdx === i && !s.done;
                     const isMyoActive = myoSetIdx === i && !s.done;
+                    const isLpActive = lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && !s.done;
                     const isIntensityActive = isDropActive || isMyoActive;
                     return (
                     <div data-kb-row={i} style={{
@@ -3446,14 +3433,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
                       {isIntensityActive ? null : isNoWeightReps ? <div /> : (
-                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match') && s.done
+                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match' || s.technique === 'lengthened_partial') && s.done
                           ? <span style={{
                               display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
                               fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
                               background: 'rgba(var(--accent-rgb),0.12)',
                               border: '0.5px solid rgba(var(--accent-rgb),0.35)',
                               borderRadius: 4, padding: '2px 6px',
-                            }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : 'MYO REP'}</span>
+                            }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : s.technique === 'myorep' ? 'MYO REP' : 'PARTIALS'}</span>
                           : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                               {isWarmupRow
                                 ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
@@ -3491,7 +3478,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                       ))}
 
-                      {!isIntensityActive && <button
+                      {!isIntensityActive && !isLpActive && <button
                         data-complete-btn
                         onPointerDown={e => { _log(`row${i} pointerdown done=${s.done}`); e.stopPropagation(); }}
                         onClick={() => {
@@ -3526,6 +3513,38 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         }}>{s.skipped ? '×' : '✓'}</button>}
 
                     </div>
+                    );
+                  })()}
+                  {lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && !s.done && (() => {
+                    const missingData = !isNoWeightReps && ((!isBodyweight && s.kg == null) || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)));
+                    return (
+                      <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
+                          <span className="micro-gold">LENGTHENED PARTIALS</span>
+                          <button onClick={() => { setLpTarget(null); setLpCount(0); }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px 10px' }}>
+                          <span className="micro" style={{ color: UI.inkFaint }}>Partials in the stretch</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <button onClick={() => setLpCount(c => Math.max(0, c - 1))} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
+                            <span className="num" style={{ fontSize: 18, minWidth: 16, textAlign: 'center', color: lpCount > 0 ? UI.gold : UI.inkFaint }}>{lpCount}</span>
+                            <button onClick={() => setLpCount(c => c + 1)} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>+</button>
+                          </div>
+                        </div>
+                        <div style={{ padding: '0 4px 10px' }}>
+                          <button onClick={() => finishLengthenedPartial(i)}
+                            disabled={missingData}
+                            style={{
+                              width: '100%', padding: '8px 0',
+                              background: missingData ? 'transparent' : 'rgba(var(--accent-rgb),0.12)',
+                              border: `1px solid ${missingData ? UI.hair : 'rgba(var(--accent-rgb),0.5)'}`,
+                              borderRadius: 6, color: missingData ? UI.inkGhost : 'var(--accent)',
+                              fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                              cursor: missingData ? 'default' : 'pointer',
+                              WebkitTapHighlightColor: 'transparent',
+                            }}>✓ FINISH</button>
+                        </div>
+                      </div>
                     );
                   })()}
                   {dropSetIdx === i && !s.done && (
@@ -3764,13 +3783,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       {(() => { const t = (s.drops || []).reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? <div style={{ marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>Total {t}</div> : null; })()}
                     </div>
                   )}
-                  {lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && s.done && !s.warmup && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '2px 4px 8px' }}>
-                      <span style={{ gridColumn: 'span 2', fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, padding: '4px 0', textAlign: 'center' }}>PARTIALS</span>
-                      <div style={{ gridColumn: 'span 3', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <button onClick={() => setPartials(i, Math.max(0, (s.drops?.partials || 0) - 1))} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
-                        <span className="num" style={{ fontSize: 18, color: (s.drops?.partials || 0) > 0 ? UI.gold : UI.inkFaint }}>{s.drops?.partials || 0}</span>
-                        <button onClick={() => setPartials(i, (s.drops?.partials || 0) + 1)} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>+</button>
+                  {/* Committed lengthened-partial count — read-only, like the myo-rep total tag below */}
+                  {s.technique === 'lengthened_partial' && s.done && !s.warmup && (s.drops?.partials || 0) > 0 && (
+                    <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8 }}>
+                      <div style={{ display: 'inline-block', padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
+                        {s.drops.partials} partial{s.drops.partials === 1 ? '' : 's'}
                       </div>
                     </div>
                   )}
@@ -4145,6 +4162,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
                 if (target < 0) return;
                 setLpTarget({ exIdx, setIdx: target });
+                setLpCount(0);
                 setIntensityOpen(false);
               }} style={btnBase(true)}>
                 <i className="fa-solid fa-arrow-down-long" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
