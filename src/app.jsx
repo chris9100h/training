@@ -295,6 +295,7 @@ function App() {
   const userIdRef                 = useRefA(null);  // current userId for stale-closure contexts
   const phaseRef                  = useRefA('init'); // current phase for stale-closure contexts
   const routeRef                  = useRefA({ name: 'home' }); // current route for stale-closure contexts
+  const detectedSwVersion         = useRefA(null); // set as soon as caches.keys() resolves, applied once the store exists
 
   useEffectA(() => { userIdRef.current = userId; }, [userId]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
@@ -367,9 +368,21 @@ function App() {
       const name = keys.find(k => k.startsWith('zane-'));
       if (!name) return;
       const version = name.replace('zane-', '');
+      detectedSwVersion.current = version;
       setStore(s => (s && s.settings?.swVersion !== version) ? { ...s, settings: { ...s.settings, swVersion: version } } : s);
     }).catch(() => {});
   }, [setStore]);
+
+  // On a genuinely cold boot (fresh install/incognito), the SW can finish
+  // activating — and this effect can fire — before login/data-load has
+  // populated the store, so the setStore call above silently no-ops on a
+  // null store with no retry. Flush the already-detected version the moment
+  // the store actually becomes available.
+  useEffectA(() => {
+    if (!store || !detectedSwVersion.current) return;
+    const version = detectedSwVersion.current;
+    setStore(s => (s && s.settings?.swVersion !== version) ? { ...s, settings: { ...s.settings, swVersion: version } } : s);
+  }, [!!store]);
 
   useEffectA(() => {
     const THRESHOLD      = 30 * 60 * 1000; // full reload after 30 min
