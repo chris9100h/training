@@ -2938,6 +2938,11 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
               const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
               return `${chain} (${total})`;
             }
+            if (s.technique === 'lengthened_partial') {
+              const partials = s.drops?.partials || 0;
+              const main = `${s.kg != null ? s.kg + unit : '—'} × ${s.reps ?? '—'}`;
+              return partials > 0 ? `${main} +${partials} partials` : main;
+            }
             const repsStr = (s.repsL != null || s.repsR != null)
               ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
               : (s.reps ?? '—');
@@ -3262,6 +3267,31 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                           </span>
                         </React.Fragment>
                       ))}
+                    </div>
+                  </div>
+                  {i < entry.sets.length - 1 && <div className="knurl" />}
+                  </React.Fragment>
+                );
+              }
+
+              // Lengthened partials
+              if (s.technique === 'lengthened_partial') {
+                const partials = s.drops?.partials || 0;
+                return (
+                  <React.Fragment key={i}>
+                  <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
+                      <div style={{ marginLeft: 'auto' }}>
+                        {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
+                               : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                      <span className="num" style={{ fontSize: 13, color: UI.ink }}>{s.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {s.reps ?? '—'}</span>
+                      {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
+                      {partials > 0 && <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{partials}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>}
                     </div>
                   </div>
                   {i < entry.sets.length - 1 && <div className="knurl" />}
