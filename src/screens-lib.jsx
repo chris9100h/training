@@ -2031,6 +2031,14 @@ function feelLabel(key) {
   return FEEL_LEVELS.find(f => f.key === key)?.label ?? null;
 }
 
+const FEEL_ICONS = {
+  easy: 'fa-face-smile',
+  good: 'fa-bolt',
+  hard: 'fa-fire',
+  very_hard: 'fa-skull',
+  max: 'fa-trophy',
+};
+
 function FeelSelector({ value, onChange }) {
   return (
     <div style={{ display: 'flex', gap: 6 }}>
@@ -2039,13 +2047,15 @@ function FeelSelector({ value, onChange }) {
         return (
           <button key={f.key} onClick={() => onChange(active ? null : f.key)}
             style={{
-              flex: 1, padding: '7px 2px', borderRadius: 4, cursor: 'pointer',
+              flex: 1, padding: '9px 2px', borderRadius: 4, cursor: 'pointer',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
               border: `1px solid ${active ? f.color : UI.hairStrong}`,
               background: active ? `${f.color}22` : 'transparent',
               color: active ? f.color : UI.inkSoft,
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: active ? 600 : 400,
               letterSpacing: '0.07em', WebkitTapHighlightColor: 'transparent',
             }}>
+            <i className={`fa-solid ${FEEL_ICONS[f.key]}`} style={{ fontSize: 15 }} />
             {f.label}
           </button>
         );
