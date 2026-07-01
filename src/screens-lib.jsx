@@ -3545,6 +3545,12 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
   const maxSets = Math.max(...allSessions.map(s => s.sets.length), 1);
 
   const getValue = (st) => {
+    // Sessions of the same exercise don't all have the same working-set
+    // count (a set added/removed on some day) — the per-set chart line
+    // below reads sess.sets[si] up to the longest session's count, so a
+    // shorter session's slot at that index is undefined, not a set with
+    // null values.
+    if (!st) return null;
     if (metric === 'reps') return isUni
       ? (st.repsL != null ? Math.min(st.repsL ?? 0, st.repsR ?? 0) : (st.reps ?? null))
       : (st.reps ?? null);
