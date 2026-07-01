@@ -376,14 +376,14 @@ window.TOURS.statusModes = [
   },
   {
     target: null,
-    title: 'The Deload Nudge',
-    body: "After 8 full training cycles, the app asks if you'd like a deload week — dedication earns a break. Start one, or dismiss it and get asked again after another 8.",
+    title: 'The Deload Prompt',
+    body: "Two things can offer you one. Finish the last week of a mesocycle and \"Mesocycle complete!\" pops up right on the session-end screen, offering a deload before Meso 2 starts. Independent of that, roughly every 8 training cycles without one, a general nudge asks if you're due a break. Accept either, or dismiss and keep training — you'll be asked again next time.",
     visual: 'statusNudge',
   },
   {
     target: null,
     title: 'Sick & Vacation',
-    body: 'For time off training entirely, log a Sick or Vacation period in Settings → Health. Unlike deload, these are just a record of time away — they don\'t adjust your weights, but they do keep sick/vacation days out of your training-adherence score.',
+    body: "For time off training entirely, mark it right on the day: Health tab → tap a day → Edit Day → the Sick / Normal / Vacation toggle up top. Unlike deload, these don't touch your weights — they just keep sick/vacation days out of your training-adherence score. Review or edit past periods any time in Settings → Health → Sick & Vacation periods.",
     visual: 'statusSickVacation',
   },
   {
@@ -1534,33 +1534,37 @@ function TourVisualStatusDeload() {
 function TourVisualStatusNudge() {
   return (
     <div style={{ background: UI.bgCard, border: `1px solid ${UI.goldSoft}`, borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, textAlign: 'center' }}>
-      <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: UI.ink, fontWeight: 700 }}>8 cycles done! 🎉</div>
-      <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>A deload week now means you come back stronger. Want to start one?</div>
+      <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: UI.ink, fontWeight: 700 }}>Mesocycle complete! 🎉</div>
+      <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>A deload now helps you recover and come back even stronger. Want to start one?</div>
       <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
         <div style={{ flex: 1, padding: '8px 0', borderRadius: 6, textAlign: 'center', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700 }}>Start deload</div>
-        <div style={{ flex: 1, padding: '8px 0', borderRadius: 6, textAlign: 'center', border: `0.5px solid ${UI.hairStrong}`, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700 }}>Not now</div>
+        <div style={{ flex: 1, padding: '8px 0', borderRadius: 6, textAlign: 'center', border: `0.5px solid ${UI.hairStrong}`, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700 }}>Skip deload</div>
       </div>
     </div>
   );
 }
 
 function TourVisualStatusSickVacation() {
-  const rows = [
-    { icon: 'fa-bed-pulse', label: 'Sick', range: 'Jun 03 – Jun 07' },
-    { icon: 'fa-umbrella-beach', label: 'Vacation', range: 'Jul 12 – ongoing' },
+  const opts = [
+    { mode: 'sick', label: 'Sick', icon: 'fa-bed-pulse' },
+    { mode: null, label: 'Normal', icon: 'fa-circle-check' },
+    { mode: 'vacation', label: 'Vacation', icon: 'fa-umbrella-beach' },
   ];
   return (
-    <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
-      {rows.map((r, i) => (
-        <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderBottom: i === 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
-          <i className={`fa-solid ${r.icon}`} style={{ fontSize: 13, color: 'var(--accent)', width: 16, textAlign: 'center' }} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontFamily: UI.fontUi, fontWeight: 600, color: UI.ink }}>{r.label}</div>
-            <div style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint, marginTop: 1, fontStyle: i === 1 ? 'italic' : 'normal' }}>{r.range}</div>
+    <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+      {opts.map((o, i) => {
+        const active = o.mode === 'sick';
+        return (
+          <div key={String(o.mode)} style={{
+            flex: 1, padding: '12px 4px', borderLeft: i > 0 ? `0.5px solid ${UI.hairStrong}` : 'none',
+            background: active ? 'var(--accent)' : 'transparent',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+          }}>
+            <i className={`fa-solid ${o.icon}`} style={{ fontSize: 13, color: active ? '#0a0805' : UI.inkFaint }} />
+            <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: active ? '#0a0805' : UI.inkFaint }}>{o.label}</span>
           </div>
-          <i className="fa-solid fa-trash" style={{ fontSize: 11, color: UI.inkGhost }} />
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
