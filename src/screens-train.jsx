@@ -1324,9 +1324,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setTempoActive(true);
     const eccSecs = store.settings?.tempoEccentric ?? 4;
     const conSecs = store.settings?.tempoConcentric ?? 1;
-    if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    // Unlike playBeep's own try/catch, construction here was unguarded — a
+    // browser without AudioContext support (or one that throws on resume)
+    // would leave tempoActive stuck true with no audio/visual cadence ever
+    // starting.
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
+    } catch (_) {
+      setTempoActive(false);
+      return;
+    }
     const ctx = audioCtxRef.current;
-    if (ctx.state === 'suspended') ctx.resume();
     const runPhase = (phase, phaseStart) => {
       const phaseDur = phase === 'ecc' ? eccSecs : conSecs;
       const n = Math.max(1, Math.floor(phaseDur));
@@ -1506,7 +1515,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (val !== null) {
       if (store.settings?.pushEnabled) {
         const def = newDur ?? restDef;
-        const delaySeconds = Math.round(Math.max(0, val + def * 1000 - Date.now()) / 1000);
+        // Both push edge functions clamp delaySeconds to 3600 (MAX_DELAY)
+        // server-side — matching it here so a very long rest (repeated +30s
+        // extensions can add up) doesn't fire early against the server's
+        // silent truncation while the client still thinks the full delay
+        // was scheduled.
+        const delaySeconds = Math.min(3600, Math.round(Math.max(0, val + def * 1000 - Date.now()) / 1000));
         const nonce = String(val);
         if (store.settings?.pushoverUserKey && store.settings?.usePushover) {
           LB.fnFetch(LB.PUSHOVER_URL, { delaySeconds, nonce, priority: 1 });
@@ -2582,7 +2596,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       });
       if (jump && !isNewCardio) {
         addAndJumpRef.current = false;
-        setTimeout(() => activateKb(0, 'kg'), 200);
+        setTimeout(() => activateKb(0, firstFieldForExercise(LB.findExercise(store, newExId))), 200);
       }
     } else if (addSupersetCandidates.length === 0) {
       // Nothing eligible to pair with — skip the superset prompt entirely
@@ -2594,6 +2608,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // that choice determines where the new exercise is placed.
       setAddSupersetData({ newExId });
     }
+  };
+
+  // First field to jump the keyboard to for a freshly-added exercise — 'kg'
+  // unless the exercise has no weight field at all (no_weight_reps), in
+  // which case it's whichever reps cell is actually rendered first.
+  const firstFieldForExercise = (ex) => {
+    if (!ex?.no_weight_reps) return 'kg';
+    return ex?.movement_type === 'unilateral' ? 'repsL' : 'reps';
   };
 
   // targetIdx = null → solo (insert after current), targetIdx = i → link with
@@ -2645,8 +2667,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         }),
       };
     });
-    if (jump && store.exercises?.find(e => e.id === newExId)?.movement_type !== 'cardio') {
-      setTimeout(() => activateKb(0, 'kg'), 200);
+    if (jump) {
+      const newEx = store.exercises?.find(e => e.id === newExId);
+      if (newEx?.movement_type !== 'cardio') setTimeout(() => activateKb(0, firstFieldForExercise(newEx)), 200);
     }
   };
 
