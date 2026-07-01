@@ -502,11 +502,8 @@ function LastSessionStrip({ session, onClick, exercises }) {
   );
 }
 
-function RecentBannerDay({ banner, store, setStore, go, sch, userId, onOpenSkipSheet }) {
-  const { dateKey, dayName, daysAgo, skip, dayData, date, dayId } = banner;
-  // The Log handler awaits a seed fetch — guard against a double tap creating
-  // two sessions inside that window.
-  const startingRef = useRef(false);
+function RecentBannerDay({ banner, setStore, onOpenSkipSheet, onLog }) {
+  const { dateKey, dayName, daysAgo, skip, dayId } = banner;
   const dateLabel = daysAgo === 1 ? 'YESTERDAY' : `${daysAgo}D AGO`;
   if (skip) {
     return (
@@ -530,28 +527,7 @@ function RecentBannerDay({ banner, store, setStore, go, sch, userId, onOpenSkipS
         <div className="micro" style={{ color: UI.danger, marginBottom: 2 }}>{dayName} · {dateLabel}</div>
         <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Not logged</div>
       </div>
-      <button onClick={async () => {
-        if (startingRef.current) return;
-        startingRef.current = true;
-        // Seeds may live outside the boot window — fetch them before creating
-        // the session (resolves instantly when the local window has them).
-        const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
-        const entries = (dayData?.items || []).map(it => {
-          const ex = LB.findExercise(store, it.exId);
-          if (ex?.movement_type === 'cardio') {
-            return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
-          }
-          const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
-          const isUni = ex?.unilateral || false;
-          const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
-          const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-          const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
-          return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
-        });
-        const session = { id: LB.uid(), scheduleId: sch.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
-        setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
-        go({ name: 'train', sessionId: session.id });
-      }} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 4, background: 'transparent', border: `1px solid ${UI.hairStrong}`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+      <button onClick={() => onLog(banner)} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 4, background: 'transparent', border: `1px solid ${UI.hairStrong}`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
         Log
       </button>
       <button onClick={() => onOpenSkipSheet({ mode: 'dismiss', data: { dateKey, dayId, dayName } })} style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 4, background: 'transparent', border: `1px solid rgba(var(--danger-rgb),0.25)`, cursor: 'pointer', fontSize: 11, fontFamily: UI.fontUi, color: 'rgba(var(--danger-rgb),0.7)', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
@@ -1986,28 +1962,32 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     return () => { cancelled = true; };
   }, [store.coaching?.asClient?.id, store.coaching?.asSelf?.id]);
 
-  const startSession = async () => {
-    if (!activeDay || isActiveRest) return;
+  // Seeded, meso-adjusted, server-history-merged entries for a set of plan
+  // items — the one seeding pipeline every session-start path (normal,
+  // bonus, backlog, recent-banner "Log", not-logged-modal "Log session")
+  // shares, so none of them can silently diverge from the others (a missed
+  // meso adjustment, or progression math that drifts out of sync).
+  const buildSessionEntries = async (items, dayId) => {
     // Seeds/progression consume the recent history synchronously — when an
     // exercise's last sessions are outside the boot window, fetch them from
     // the server first (fetchSeedEntries resolves instantly when the local
     // window suffices, and never rejects — offline falls back to local data).
-    const seedRefs = await LB.fetchSeedEntries(store, activeDay.items, activeDay.id, userId);
+    const seedRefs = await LB.fetchSeedEntries(store, items, dayId, userId);
     // Resolve meso state once (it internally reads localStorage) instead of
     // once per item below.
-    const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+    const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch?.id, store.mesoStates) : null;
     const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
-    const entries = activeDay.items.map(it => {
+    return (items || []).map(it => {
       const ex = LB.findExercise(store, it.exId);
       if (ex?.movement_type === 'cardio') {
         return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
       }
-      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, activeDay.id);
+      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
       const isUnilateral = ex?.unilateral || false;
-      const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps, it.repsPerSet || null, seedRefs[it.exId]);
+      const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet || null, seedRefs[it.exId]);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-      const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, activeDay.id, resolvedMeso) : it;
-      const weightBoost = mesoBoosts?.[it.exId + '_' + activeDay.id] ?? null;
+      const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
+      const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
       let suggestionFinal = suggestion;
       if (weightBoost != null && !suggestionFinal && last) {
         const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
@@ -2021,16 +2001,23 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         supersetGroup: it.supersetGroup || null,
       };
     });
+  };
+
+  const startSession = async () => {
+    if (!activeDay || isActiveRest) return;
+    const entries = await buildSessionEntries(activeDay.items, activeDay.id);
     const cyclePos = weekdayMode ? null :
       cycleWeekView
         ? (week.find(d => d.weekday === selectedWd)?.daysFromStart ?? null)
         : (currentCycleNum + weekOffset) * dayCount + selectedSlot;
-    const firstWorkingKg = entries[0]?.sets[0]?.kg ?? null;
     const firstEx = LB.findExercise(store, activeDay.items[0]?.exId);
     // Flex sessions are always logged "now" — the selected slot is just a
     // rotation position, never a calendar date (catch-ups date to today too).
     const sessionDateISO = (isFlex ? new Date() : sessionDate).toISOString();
-    if (firstEx?.equipment === 'bodyweight') {
+    // No warmup ramp for bodyweight (no meaningful load to ramp) or cardio
+    // (not a weighted movement at all) — offering "3 sets · Treadmill" with
+    // every preview weight blank made no sense.
+    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio') {
       const session = {
         id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
         date: sessionDateISO, startedAt: new Date().toISOString(), entries, currentExIdx: 0, cyclePos,
@@ -2039,7 +2026,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       go({ name: 'train', sessionId: session.id });
       return;
     }
-    setWarmupPromptData({ entries, cyclePos, firstWorkingKg, firstName: entries[0]?.name || '?' });
+    setWarmupPromptData({
+      entries, cyclePos, firstWorkingKg: entries[0]?.sets[0]?.kg ?? null, firstName: entries[0]?.name || '?',
+      scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name, dateISO: sessionDateISO,
+    });
   };
 
   // Flex: skip the current next-up day — advance the rotation by one without
@@ -2050,8 +2040,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     setSelectedSlot((((dayIdx + 1) % dayCount) + dayCount) % dayCount);
   };
 
+  // Shared by every session-start path: the ones with a weighted first
+  // exercise route through here (via setWarmupPromptData) instead of each
+  // reimplementing the warmup ramp — previously bonus/backlog/catch-up
+  // session starts each skipped this prompt entirely, so those sessions
+  // never got the 30/60/100% warmup ramp a normal session gets.
   const confirmStart = (withWarmup) => {
-    const { entries: rawEntries, cyclePos, firstWorkingKg } = warmupPromptData;
+    const { entries: rawEntries, cyclePos, firstWorkingKg, scheduleId, dayId, dayName, dateISO, extra, autoSkipId } = warmupPromptData;
     setWarmupPromptData(null);
     let entries = rawEntries;
     let startedAt = new Date().toISOString();
@@ -2067,11 +2062,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       startedAt = null; // timer starts when last warmup set is completed
     }
     const session = {
-      id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
-      date: (isFlex ? new Date() : sessionDate).toISOString(), startedAt, ended: null, entries, currentExIdx: 0,
-      cyclePos,
+      id: LB.uid(), scheduleId, dayId, dayName,
+      date: dateISO, startedAt, ended: null, entries, currentExIdx: 0,
+      cyclePos, ...(extra || {}),
     };
-    setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    setStore(s => ({
+      ...s,
+      sessions: [...s.sessions, session],
+      inProgress: session.id,
+      ...(autoSkipId ? { skips: (s.skips || []).filter(x => x.id !== autoSkipId) } : {}),
+    }));
     go({ name: 'train', sessionId: session.id });
   };
 
@@ -2221,28 +2221,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     setBonusDayPickerOpen(false);
     setWorkoutSubOpen(false);
     setQuickActionsOpen(false);
-    const seedRefs = await LB.fetchSeedEntries(store, day.items, day.id, userId);
-    const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch?.id, store.mesoStates) : null;
-    const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
-    const entries = (day.items || []).map(it => {
-      const ex = LB.findExercise(store, it.exId);
-      if (ex?.movement_type === 'cardio') {
-        return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
-      }
-      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, day.id);
-      const isUni = ex?.unilateral || false;
-      const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet, seedRefs[it.exId]);
-      const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-      const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
-      const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
-      let suggestionFinal = suggestion;
-      if (weightBoost != null && !suggestionFinal && last) {
-        const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
-        if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
-      }
-      const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression, bodyweightKg);
-      return { exId: it.exId, name: ex?.name || '?', plannedSets: itAdj.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
-    });
+    const entries = await buildSessionEntries(day.items, day.id);
     // Treat as normal (cycle advances) only when this is today's scheduled day
     // AND it hasn't been trained yet today. If already done, it's always bonus.
     const todayStr = LB.todayISO();
@@ -2250,15 +2229,23 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const alreadyDoneToday = isTodaysDay && store.sessions.some(
       s => s.ended && s.dayId === day.id && s.date?.slice(0, 10) === todayStr
     );
-    const session = {
-      id: LB.uid(), scheduleId: sch?.id, dayId: day.id, dayName: day.name,
-      date: new Date().toISOString(), startedAt: new Date().toISOString(),
-      ended: null, entries, currentExIdx: 0, cyclePos: null,
-      ...(!isTodaysDay || alreadyDoneToday ? { isBonus: true } : {}),
-    };
-    setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+    const extra = (!isTodaysDay || alreadyDoneToday) ? { isBonus: true } : {};
+    const firstEx = LB.findExercise(store, day.items?.[0]?.exId);
     loggingRef.current = false;
-    go({ name: 'train', sessionId: session.id });
+    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio') {
+      const session = {
+        id: LB.uid(), scheduleId: sch?.id, dayId: day.id, dayName: day.name,
+        date: new Date().toISOString(), startedAt: new Date().toISOString(),
+        ended: null, entries, currentExIdx: 0, cyclePos: null, ...extra,
+      };
+      setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
+      go({ name: 'train', sessionId: session.id });
+      return;
+    }
+    setWarmupPromptData({
+      entries, cyclePos: null, firstWorkingKg: entries[0]?.sets[0]?.kg ?? null, firstName: entries[0]?.name || '?',
+      scheduleId: sch?.id, dayId: day.id, dayName: day.name, dateISO: new Date().toISOString(), extra,
+    });
   };
 
   const startBacklogSession = async (missed) => {
@@ -2267,38 +2254,26 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     setQuickActionsOpen(false);
     setBacklogPickerOpen(false);
     const { dayData, dayId, dayName, date } = missed;
-    const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
-    const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch?.id, store.mesoStates) : null;
-    const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
-    const entries = (dayData?.items || []).map(it => {
-      const ex = LB.findExercise(store, it.exId);
-      if (ex?.movement_type === 'cardio') {
-        return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
-      }
-      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
-      const isUni = ex?.unilateral || false;
-      const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
-      const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-      const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
-      const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
-      let suggestionFinal = suggestion;
-      if (weightBoost != null && !suggestionFinal && last) {
-        const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
-        if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
-      }
-      const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression, bodyweightKg);
-      return { exId: it.exId, name: ex?.name || '?', plannedSets: itAdj.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
-    });
-    const session = { id: LB.uid(), scheduleId: sch?.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
+    const entries = await buildSessionEntries(dayData?.items, dayId);
     const autoSkip = skipsMap.get(missed.dateKey);
-    setStore(s => ({
-      ...s,
-      sessions: [...s.sessions, session],
-      inProgress: session.id,
-      ...(autoSkip?.skipReason === '—' ? { skips: (s.skips || []).filter(x => x.id !== autoSkip.id) } : {}),
-    }));
+    const autoSkipId = autoSkip?.skipReason === '—' ? autoSkip.id : null;
+    const firstEx = LB.findExercise(store, dayData?.items?.[0]?.exId);
     loggingRef.current = false;
-    go({ name: 'train', sessionId: session.id });
+    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio') {
+      const session = { id: LB.uid(), scheduleId: sch?.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
+      setStore(s => ({
+        ...s,
+        sessions: [...s.sessions, session],
+        inProgress: session.id,
+        ...(autoSkipId ? { skips: (s.skips || []).filter(x => x.id !== autoSkipId) } : {}),
+      }));
+      go({ name: 'train', sessionId: session.id });
+      return;
+    }
+    setWarmupPromptData({
+      entries, cyclePos: null, firstWorkingKg: entries[0]?.sets[0]?.kg ?? null, firstName: entries[0]?.name || '?',
+      scheduleId: sch?.id, dayId, dayName, dateISO: date.toISOString(), autoSkipId,
+    });
   };
 
 
@@ -2866,7 +2841,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           ) : lastSession ? (
             <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id, back: { name: 'home' } })} exercises={store.exercises} />
           ) : (
-            <RecentBannerDay banner={recentBannerDay} store={store} setStore={setStore} go={go} sch={sch} userId={userId} onOpenSkipSheet={setSkipReasonModal} />
+            <RecentBannerDay banner={recentBannerDay} store={store} setStore={setStore} go={go} sch={sch} userId={userId} onOpenSkipSheet={setSkipReasonModal} onLog={startBacklogSession} />
           )}
         </div>
       )}
@@ -2949,37 +2924,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           </div>
           <div style={{ fontSize: 18, fontFamily: UI.fontDisplay, fontWeight: 700, textTransform: 'uppercase', textAlign: 'center', color: UI.ink, marginBottom: 20 }}>Not logged</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <Btn onClick={async () => {
-              if (loggingRef.current) return;
-              loggingRef.current = true;
-              setNotLoggedModalOpen(false);
-              const { dayData, dayId, dayName, date } = recentBannerDay;
-              const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
-              const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
-              const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
-              const entries = (dayData?.items || []).map(it => {
-                const ex = LB.findExercise(store, it.exId);
-                if (ex?.movement_type === 'cardio') {
-                  return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
-                }
-                const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
-                const isUni = ex?.unilateral || false;
-                const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
-                const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-                const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
-                const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
-                let suggestionFinal = suggestion;
-                if (weightBoost != null && !suggestionFinal && last) {
-                  const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
-                  if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
-                }
-                const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression, bodyweightKg);
-                return { exId: it.exId, name: ex?.name || '?', plannedSets: itAdj.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
-              });
-              const session = { id: LB.uid(), scheduleId: sch.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
-              setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
-              go({ name: 'train', sessionId: session.id });
-            }}>Log session</Btn>
+            <Btn onClick={() => { setNotLoggedModalOpen(false); startBacklogSession(recentBannerDay); }}>Log session</Btn>
             <Btn kind="ghost" onClick={() => {
               setNotLoggedModalOpen(false);
               setSkipReasonModal({ mode: 'dismiss', data: { dateKey: recentBannerDay.dateKey, dayId: recentBannerDay.dayId, dayName: recentBannerDay.dayName } });
