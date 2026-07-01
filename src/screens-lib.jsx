@@ -2130,17 +2130,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     go({ name: 'hist' });
   };
 
+  // Deload sessions are deliberately light — comparing against one as "last
+  // time" would show every set as a fabricated "improvement" purely because
+  // it beats the artificially-reduced deload weights. store.js already
+  // excludes deload from lastSessionForExercise/recentSessionsForExercise;
+  // this mirrors that exclusion for the same reason.
   const prevEntryMap = {};
   s.entries.forEach(e => {
     const prev = store.sessions
-      .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId)
+      .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
       .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
       .find(x => x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null)));
     prevEntryMap[e.exId] = prev?.entries.find(en => en.exId === e.exId) ?? null;
   });
 
   const prevSameDay = store.sessions
-    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId)
+    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
   const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay) : null;
 
@@ -2152,27 +2157,34 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     ? (st.repsL != null && st.repsR != null)
     : st.reps != null;
 
+  // e1RM-based comparison (not raw kg-then-reps) so e.g. 100kg×5 correctly
+  // loses to a prior 90kg×10 — matches the PR logic used everywhere else
+  // (store.js bestE1rmForExercise). Deload sessions are excluded as a PR
+  // baseline for the same reason as prevEntryMap above. The `x.ended < s.ended`
+  // cutoff is deliberately kept (instead of reusing bestE1rmForExercise, which
+  // has no such cutoff) so a session's PR status reflects only what was known
+  // at the time it happened, not later sessions bleeding backward into it.
   const prMap = {};
-  store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended).forEach(sess =>
+  store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload).forEach(sess =>
     sess.entries.forEach(e => e.sets.filter(st => st.done && st.kg != null && prRepsValid(st, e.exId)).forEach(st => {
-      const cur = prMap[e.exId];
-      const reps = prReps(st, e.exId);
-      if (!cur || st.kg > cur.kg || (st.kg === cur.kg && reps > cur.reps)) prMap[e.exId] = { kg: st.kg, reps };
+      const val = LB.e1rm(st.kg, prReps(st, e.exId));
+      if (!(val > (prMap[e.exId] ?? -Infinity))) return;
+      prMap[e.exId] = val;
     }))
   );
   const sessionBestMap = {};
   s.entries.forEach(e => e.sets.filter(st => st.done && st.kg != null && prRepsValid(st, e.exId)).forEach(st => {
-    const cur = sessionBestMap[e.exId];
-    const reps = prReps(st, e.exId);
-    if (!cur || st.kg > cur.kg || (st.kg === cur.kg && reps > cur.reps)) sessionBestMap[e.exId] = { kg: st.kg, reps };
+    const val = LB.e1rm(st.kg, prReps(st, e.exId));
+    if (!(val > (sessionBestMap[e.exId] ?? -Infinity))) return;
+    sessionBestMap[e.exId] = val;
   }));
   const isPR = (st, exId) => {
     if (!st.done || st.kg == null || !prRepsValid(st, exId)) return false;
-    const reps = prReps(st, exId);
+    const val = LB.e1rm(st.kg, prReps(st, exId));
     const sessionBest = sessionBestMap[exId];
-    if (!sessionBest || st.kg !== sessionBest.kg || reps !== sessionBest.reps) return false;
+    if (sessionBest == null || val !== sessionBest) return false;
     const best = prMap[exId];
-    return !best || st.kg > best.kg || (st.kg === best.kg && reps > best.reps);
+    return best == null || val > best;
   };
 
   const muscleGroups = [...new Set(
@@ -2542,7 +2554,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       {exName}{canHistory && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <div data-shot-chips="1" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {filteredSets.map((st, j) => {
                       const isWarm = !!st.warmup;
                       const prevSet = prevWorkingFor(j);
@@ -2910,7 +2922,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px 22px' }}>
         {entries.map((entry, ei) => {
-          const lastEntry = lastEntries.find(e => e.name === entry.name);
+          const lastEntry = lastEntries.find(e => e.exId === entry.exId);
           const sets      = (entry.sets || []).filter(s => !s.warmup);
           const lastSets  = (lastEntry?.sets || []).filter(s => !s.warmup);
           const maxLen    = Math.max(sets.length, lastSets.length);
@@ -3170,6 +3182,11 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>
               EXERCISE {exIdx + 1} OF {entries.length}
             </div>
+            {entry.supersetGroup && (
+              <div className="micro" style={{ color: UI.gold, letterSpacing: '0.12em', marginBottom: 4 }}>
+                {entries.filter(e => e.supersetGroup === entry.supersetGroup).length >= 3 ? 'GIANT SET' : 'SUPERSET'}
+              </div>
+            )}
             <div className="display" style={{ fontSize: 28, color: UI.ink, fontWeight: 400 }}>{entry.name}</div>
             <div className="micro" style={{ marginTop: 4, color: UI.inkSoft }}>
               {entry.plannedSets} SETS · {entry.plannedReps} REPS PLANNED
@@ -3302,7 +3319,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
 
           {/* Last time card */}
           {(() => {
-            const lastEntry = (session.last_session_entries || []).find(e => e.name === entry.name);
+            const lastEntry = (session.last_session_entries || []).find(e => e.exId === entry.exId);
             if (!lastEntry?.sets?.length) return null;
             const lastSets = lastEntry.sets.filter(s => !s.warmup);
             const currWorkingSets = (entry.sets || []).filter(s => !s.warmup);
