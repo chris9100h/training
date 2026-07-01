@@ -805,17 +805,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       return nextKg > refKg ? { exName: entry.name, currentKg: refKg, nextKg } : null;
     })();
 
-    // Overlay precedence (one per completed set): PROGRESSION UNLOCKED (handled
-    // below) > NEW BEST > IMPROVEMENT > REGRESSION. NEW BEST fires when the set
-    // beats the all-time e1RM record for this exercise — independent of smart
+    // Overlay precedence (one per completed set): PROGRESSION UNLOCKED > NEW
+    // BEST > IMPROVEMENT > REGRESSION. NEW BEST fires when the set beats the
+    // all-time e1RM record for this exercise — independent of smart
     // progression, max once per exercise. A first-ever set (no record yet) and
     // bodyweight sets (no kg) never count as a new best.
     // overlayHoldMs stretches the auto-advance delay below to match whichever
     // of these toasts is showing, so navigating to the next exercise doesn't
-    // cut its 2.5s display short (PROGRESSION UNLOCKED already waits on its
-    // own longer timeline further down).
+    // cut its display short. Every overlay (including progression) now only
+    // ever schedules its own show/hide timers here — the actual navigation
+    // decision happens exactly once, further down, in the superset-aware
+    // code shared by every completion. Previously PROGRESSION UNLOCKED ran an
+    // entirely separate, non-superset-aware navigate(1) on its own 4.8s
+    // timer, which could fire well after (and override) wherever the
+    // superset flow had already correctly moved the user on to.
     let overlayHoldMs = 0;
-    if (!entry.sets[setIdx]?.warmup && !progressionResult && !isDeloadSession) {
+    if (progressionResult) {
+      overlayHoldMs = 4800; // 800ms delay + 4000ms display, matching the toast's own timing below
+      setTimeout(() => {
+        setProgressionUnlocked(progressionResult);
+        setTimeout(() => setProgressionUnlocked(null), 4000);
+      }, 800);
+    } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
       const cE1rm = (completed?.kg != null && cReps != null && cReps > 0) ? LB.e1rm(completed.kg, cReps) : 0;
@@ -839,17 +850,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           setTimeout(() => setRegressionSet(false), 2500);
         }
       }
-    }
-
-    if (progressionResult) {
-      pendingNavRef.current = true;
-      setTimeout(() => {
-        setProgressionUnlocked(progressionResult);
-        setTimeout(() => {
-          setProgressionUnlocked(null);
-          if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); }
-        }, 4000);
-      }, 800);
     }
     const group = entry.supersetGroup;
     // Warmup sets are only ever seeded onto the very first exercise of the
@@ -896,7 +896,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         persistRestStart(Date.now(), restDef);
       }
       if (updatedSets.every(st => st.done)) {
-        if (!progressionResult) setTimeout(() => navigate(1), Math.max(600, overlayHoldMs));
+        setTimeout(() => navigate(1), Math.max(600, overlayHoldMs));
       }
     }
     // Last warmup set done → start 3-min rest, workout timer begins when rest expires
@@ -2002,7 +2002,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
     return result;
   }, [store.cardioLogs]);
-  const pendingNavRef = useRefT(false);
   const pendingFocusRef = useRefT(null);
   // Records when a set was last completed via the checkbox; used to ignore
   // iOS ghost-clicks that fire 200-400ms after completion and would otherwise
@@ -2931,7 +2930,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* Progression unlocked overlay */}
       {progressionUnlocked && ReactDOM.createPortal(
-        <div onClick={() => { setProgressionUnlocked(null); if (pendingNavRef.current) { pendingNavRef.current = false; navigate(1); } }} style={{
+        <div onClick={() => setProgressionUnlocked(null)} style={{
           position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 160,
           background: 'var(--bg-body)',
           animation: 'improvedFade 4s ease forwards',
