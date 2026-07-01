@@ -554,14 +554,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const exercise = entry ? LB.findExercise(store, entry.exId) : null;
 
   // "Last time" reference + remote best e1RM for this day type.
+  // Matches LB.bestRecentEntry (best set at the current working weight across
+  // the last 3 sessions, not merely the single most recent one) — the same
+  // reference buildSeedSets/progressionSuggestion use to seed this session's
+  // targets at start, so the live outlier check and "Last time" display never
+  // disagree with what was actually seeded.
   // The local window covers recently trained exercises; when an exercise has
   // no local history (last logged before the boot window), fetch its recent
-  // sessions from the server once. limit=20 covers both the "last session"
-  // (for improve/regress) and a broad enough window for the day-specific
-  // best-e1RM comparison (for NEW BEST).
+  // sessions from the server once. limit=20 covers both the windowed "last
+  // time" reference and a broad enough window for the day-specific best-e1RM
+  // comparison (for NEW BEST).
   const [remoteLast, setRemoteLast] = useStateT({});
   const remoteBestE1rmRef = useRefT({}); // exId → best day-specific e1RM from server
-  const localLast = entry ? LB.lastSessionForExercise(store, entry.exId, session.dayId) : null;
+  const localLast = entry ? LB.bestRecentEntry(store, entry.exId, session.dayId) : null;
   useEffectT(() => {
     const exId = entry?.exId;
     if (!exId || remoteLast[exId] !== undefined) return;
@@ -580,8 +585,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           }
         }
         remoteBestE1rmRef.current[exId] = best;
-        const row = filtered[0];
-        setRemoteLast(m => ({ ...m, [exId]: row ? { entry: { sets: row.sets } } : null }));
+        // Keep skipped sets in place (only warm-ups stripped) so working-set
+        // position stays aligned across sessions — see bestRecentEntry.
+        const ref = LB.bestEntryFromSetLists(filtered.slice(0, 3).map(r => (r.sets || []).filter(s => !s.warmup)));
+        setRemoteLast(m => ({ ...m, [exId]: ref }));
       })
       .catch(() => { if (on) setRemoteLast(m => ({ ...m, [exId]: null })); });
     return () => { on = false; };
@@ -682,11 +689,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // that race for good.
   const finishSetNavigation = (setIdx, updatedSets, overlayHoldMs, advanceFocus) => {
     const group = entry.supersetGroup;
+    // A skipped set is resolved (nothing left to log there) just like a done
+    // one — only "not done and not skipped" is still pending. Checking
+    // `.done === false` alone would treat a partner's skipped set as still
+    // pending, jumping to it mid-round for no reason and blocking the
+    // round/group from ever reading as complete.
+    const resolved = (s) => !!s && (s.done || s.skipped);
     if (group && !entry.sets[setIdx]?.warmup) {
       const workingIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
       const partnerWorkingSets = (e) => (e.sets || []).filter(s => !s.warmup);
       const partners = session.entries.map((e, i) => ({ e, i })).filter(({ e, i }) => e.supersetGroup === group && i !== exIdx);
-      const nextPartner = partners.find(({ e }) => partnerWorkingSets(e)[workingIdx]?.done === false);
+      const nextPartner = partners.find(({ e }) => !resolved(partnerWorkingSets(e)[workingIdx]));
       if (nextPartner) {
         // Mid-round: jump to partner, no rest
         if (advanceFocus) pendingFocusRef.current = firstOpenWorkingFocus(nextPartner.e);
@@ -694,7 +707,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       } else {
         // Round complete: start rest
         persistRestStart(Date.now(), restDef);
-        const allGroupDone = updatedSets.every(s => s.done) && partners.every(({ e }) => partnerWorkingSets(e).every(s => s.done));
+        const allGroupDone = updatedSets.every(resolved) && partners.every(({ e }) => partnerWorkingSets(e).every(resolved));
         if (allGroupDone) {
           const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
           const nextAfterGroup = lastGroupIdx + 1 < session.entries.length ? session.entries[lastGroupIdx + 1] : null;
@@ -706,7 +719,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         } else {
           const allGroup = session.entries.map((e, i) => ({ e, i })).filter(({ e }) => e.supersetGroup === group);
           const firstIncomplete = allGroup.find(({ e, i }) =>
-            i === exIdx ? !updatedSets.every(s => s.done) : partnerWorkingSets(e).some(s => !s.done)
+            i === exIdx ? !updatedSets.every(resolved) : partnerWorkingSets(e).some(s => !resolved(s))
           );
           if (firstIncomplete) {
             if (advanceFocus) pendingFocusRef.current = firstOpenWorkingFocus(firstIncomplete.i === exIdx ? { ...entry, sets: updatedSets } : firstIncomplete.e);
@@ -718,7 +731,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (!entry.sets[setIdx]?.warmup) {
         persistRestStart(Date.now(), restDef);
       }
-      if (updatedSets.every(st => st.done)) {
+      if (updatedSets.every(resolved)) {
         const nextEntry = session.entries[exIdx + 1];
         if (advanceFocus && nextEntry) pendingFocusRef.current = firstOpenWorkingFocus(nextEntry);
         setTimeout(() => navigate(1), Math.max(600, overlayHoldMs));
