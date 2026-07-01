@@ -387,6 +387,25 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
     row.scrollTo({ left: chip.offsetLeft - row.offsetWidth / 2 + chip.offsetWidth / 2, behavior: 'smooth' });
   }, [selectedDayId]);
 
+  // Computed here (before the early returns below) purely so the seedRefs
+  // hooks that depend on it always run — every other hook in this component
+  // is declared before those returns too; a hook declared after them would
+  // violate React's rules of hooks the moment `sch`/`displayDays` changes
+  // across renders of this same (unkeyed, long-lived) instance.
+  const dayForSeed = displayDays.find(d => d.id === selectedDayId) || displayDays[0] || null;
+  // Merge in server history for exercises whose local window is thin (fresh
+  // device/reinstall) — same call the real session-start flow awaits, so the
+  // weight/progression preview here doesn't disagree with what actually gets
+  // seeded once the session starts. Resolves instantly when the local window
+  // already suffices; never rejects (falls back silently offline).
+  const [seedRefs, setSeedRefs] = useStateS({});
+  React.useEffect(() => {
+    let cancelled = false;
+    if (!dayForSeed?.items?.length) { setSeedRefs({}); return; }
+    LB.fetchSeedEntries(store, dayForSeed.items, dayForSeed.id, userId).then(refs => { if (!cancelled) setSeedRefs(refs || {}); });
+    return () => { cancelled = true; };
+  }, [dayForSeed?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!sch) {
     return (
       <Screen>
@@ -416,21 +435,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
     );
   }
 
-  const day = displayDays.find(d => d.id === selectedDayId) || displayDays[0];
+  const day = dayForSeed;
   const dayIdx = displayDays.findIndex(d => d.id === day.id);
   const isRest = !day.items.length;
-  // Merge in server history for exercises whose local window is thin (fresh
-  // device/reinstall) — same call the real session-start flow awaits, so the
-  // weight/progression preview here doesn't disagree with what actually gets
-  // seeded once the session starts. Resolves instantly when the local window
-  // already suffices; never rejects (falls back silently offline).
-  const [seedRefs, setSeedRefs] = useStateS({});
-  React.useEffect(() => {
-    let cancelled = false;
-    if (!day.items?.length) { setSeedRefs({}); return; }
-    LB.fetchSeedEntries(store, day.items, day.id, userId).then(refs => { if (!cancelled) setSeedRefs(refs || {}); });
-    return () => { cancelled = true; };
-  }, [day.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const isTodaySel = day.id === todayDayId;
   const dayLabel = isWeekday ? WEEKDAYS_FULL[day.weekday] : `Day ${dayIdx + 1}`;
   const trainingDayCount = displayDays.filter(d => d.items.length).length;
