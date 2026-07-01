@@ -1993,7 +1993,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // the server first (fetchSeedEntries resolves instantly when the local
     // window suffices, and never rejects — offline falls back to local data).
     const seedRefs = await LB.fetchSeedEntries(store, activeDay.items, activeDay.id, userId);
-    const mesoBoosts = (typeof getMesoWeightBoosts === 'function') ? getMesoWeightBoosts(sch.id, store.mesoStates) : null;
+    // Resolve meso state once (it internally reads localStorage) instead of
+    // once per item below.
+    const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+    const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
     const entries = activeDay.items.map(it => {
       const ex = LB.findExercise(store, it.exId);
       if (ex?.movement_type === 'cardio') {
@@ -2003,7 +2006,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, activeDay.id, it.reps, it.repsPerSet || null, seedRefs[it.exId]);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-      const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, activeDay.id, sch.id, store.mesoStates) : it;
+      const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, activeDay.id, resolvedMeso) : it;
       const weightBoost = mesoBoosts?.[it.exId + '_' + activeDay.id] ?? null;
       let suggestionFinal = suggestion;
       if (weightBoost != null && !suggestionFinal && last) {
@@ -2219,7 +2222,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     setWorkoutSubOpen(false);
     setQuickActionsOpen(false);
     const seedRefs = await LB.fetchSeedEntries(store, day.items, day.id, userId);
-    const mesoBoosts = (typeof getMesoWeightBoosts === 'function') ? getMesoWeightBoosts(sch?.id, store.mesoStates) : null;
+    const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch?.id, store.mesoStates) : null;
+    const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
     const entries = (day.items || []).map(it => {
       const ex = LB.findExercise(store, it.exId);
       if (ex?.movement_type === 'cardio') {
@@ -2229,7 +2233,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const isUni = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet, seedRefs[it.exId]);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-      const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, day.id, sch?.id, store.mesoStates) : it;
+      const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
       const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
       let suggestionFinal = suggestion;
       if (weightBoost != null && !suggestionFinal && last) {
@@ -2264,7 +2268,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     setBacklogPickerOpen(false);
     const { dayData, dayId, dayName, date } = missed;
     const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
-    const mesoBoosts = (typeof getMesoWeightBoosts === 'function') ? getMesoWeightBoosts(sch?.id, store.mesoStates) : null;
+    const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch?.id, store.mesoStates) : null;
+    const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
     const entries = (dayData?.items || []).map(it => {
       const ex = LB.findExercise(store, it.exId);
       if (ex?.movement_type === 'cardio') {
@@ -2274,7 +2279,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const isUni = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-      const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, dayId, sch?.id, store.mesoStates) : it;
+      const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
       const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
       let suggestionFinal = suggestion;
       if (weightBoost != null && !suggestionFinal && last) {
@@ -2950,7 +2955,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               setNotLoggedModalOpen(false);
               const { dayData, dayId, dayName, date } = recentBannerDay;
               const seedRefs = await LB.fetchSeedEntries(store, dayData?.items, dayId, userId);
-              const mesoBoosts = (typeof getMesoWeightBoosts === 'function') ? getMesoWeightBoosts(sch.id, store.mesoStates) : null;
+              const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+              const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
               const entries = (dayData?.items || []).map(it => {
                 const ex = LB.findExercise(store, it.exId);
                 if (ex?.movement_type === 'cardio') {
@@ -2960,7 +2966,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 const isUni = ex?.unilateral || false;
                 const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet, seedRefs[it.exId]);
                 const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-                const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, dayId, sch.id, store.mesoStates) : it;
+                const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
                 const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
                 let suggestionFinal = suggestion;
                 if (weightBoost != null && !suggestionFinal && last) {

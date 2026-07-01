@@ -58,10 +58,13 @@ function saveMesoStateToStorage(s) {
 // session, keyed by session id so a resumed session (app reload/crash mid-
 // session) doesn't re-ask a question that was already answered — the
 // in-memory Set trackers reset on every component mount, but a resumed
-// session reuses the same session.id.
+// session reuses the same session.id. Also carries the session's gain
+// summary (mesoSessionSetGainsRef) so the post-session "Next session" sheet
+// still reflects feedback given before a reload, even though the underlying
+// mesoState.deltas were already safe via getMesoState/saveMesoState.
 const MESO_ASKED_KEY = 'logbook-meso-asked-';
 function loadMesoAskedSets(sessionId) {
-  const empty = { soreness: new Set(), joint: new Set(), volume: new Set() };
+  const empty = { soreness: new Set(), joint: new Set(), volume: new Set(), gains: {} };
   if (!sessionId) return empty;
   try {
     const r = localStorage.getItem(MESO_ASKED_KEY + sessionId);
@@ -71,6 +74,7 @@ function loadMesoAskedSets(sessionId) {
       soreness: new Set(p.soreness || []),
       joint: new Set(p.joint || []),
       volume: new Set(p.volume || []),
+      gains: p.gains || {},
     };
   } catch { return empty; }
 }
@@ -79,6 +83,7 @@ function saveMesoAskedSets(sessionId, asked) {
   try {
     localStorage.setItem(MESO_ASKED_KEY + sessionId, JSON.stringify({
       soreness: [...asked.soreness], joint: [...asked.joint], volume: [...asked.volume],
+      gains: asked.gains || {},
     }));
   } catch {}
 }
@@ -114,18 +119,23 @@ function mesoRirForWeek(week, weeks) {
   if (!weeks || weeks <= 1) return 0;
   return Math.max(0, Math.round(3 - (week - 1) * 3 / (weeks - 1)));
 }
-// Apply stored meso set-delta to a plan item before building seed sets.
-// Returns a shallow copy with adjusted .sets, clamped to [1, baseline+4] so
-// repeated "not enough volume" answers across a mesocycle can't balloon a
-// lift's set count without bound; no-ops if no meso or no delta.
-function applyMesoSetDelta(it, dayId, scheduleId, mesoStates) {
-  if (!dayId || !scheduleId) return it;
-  const m = getMesoState(scheduleId, mesoStates);
-  if (!m) return it;
-  const delta = (m.deltas || {})[it.exId + '_' + dayId];
+// Apply an already-resolved meso state's set-delta to a plan item before
+// building seed sets. Returns a shallow copy with adjusted .sets, clamped to
+// [1, baseline+4] so repeated "not enough volume" answers across a mesocycle
+// can't balloon a lift's set count without bound; no-ops if no meso or no
+// delta. Split out from applyMesoSetDelta so callers resolving meso state for
+// every item in a plan (session start, plan viewer) can call getMesoState
+// once instead of once per item (each call touches localStorage).
+function applyMesoSetDeltaFromState(it, dayId, mesoState) {
+  if (!dayId || !mesoState) return it;
+  const delta = (mesoState.deltas || {})[it.exId + '_' + dayId];
   if (!delta) return it;
   const base = it.sets || 1;
   return { ...it, sets: Math.min(base + 4, Math.max(1, base + delta)) };
+}
+function applyMesoSetDelta(it, dayId, scheduleId, mesoStates) {
+  if (!dayId || !scheduleId) return it;
+  return applyMesoSetDeltaFromState(it, dayId, getMesoState(scheduleId, mesoStates));
 }
 // Returns stored meso weight boosts map (exId_dayId → kg increment) for a schedule.
 // Called at session start; boosts are overwritten at next session end by computeMesoGains.
@@ -1279,6 +1289,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const abandon = async () => {
     if (!await confirm('All inputs will be lost.', { title: 'Cancel session?', ok: 'Cancel', cancel: 'Keep training', danger: true })) return;
     cancelPushover();
+    try { localStorage.removeItem(MESO_ASKED_KEY + session.id); } catch {}
     setStore(s => ({
       ...s,
       sessions: s.sessions.filter(x => x.id !== session.id),
@@ -1513,7 +1524,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // happens at session end via flushMesoStateToStore().
   const saveMesoState = (updater) => {
     setMesoStateLocal(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
+      const applied = typeof updater === 'function' ? updater(prev) : updater;
+      // Stamp updatedAt on every in-session write — getMesoState's "pick the
+      // newer of store vs localStorage" comparison (and the sync RPC's
+      // staleness guard) only works if the localStorage copy's updatedAt
+      // actually advances past whatever it inherited at session start.
+      const next = applied ? { ...applied, updatedAt: new Date().toISOString() } : applied;
       if (next) saveMesoStateToStorage(next);
       return next;
     });
@@ -1654,13 +1670,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const askedVolumeRef = useRefT(mesoAskedInitRef.current.volume);
   const persistMesoAsked = () => saveMesoAskedSets(session.id, {
     soreness: askedSorenessRef.current, joint: askedJointRef.current, volume: askedVolumeRef.current,
+    gains: mesoSessionSetGainsRef.current,
   });
   // Per-session quality tracking for weight progression
   const mesoJointFineRef = useRefT(new Set());    // exIds where joint was 'fine'
   const mesoPumpOkRef = useRefT(new Set());        // muscles where pump was moderate/amazing
   const mesoVolumeOkRef = useRefT(new Set());      // muscles where volume was just_right/not_enough
-  const mesoSessionSetGainsRef = useRefT({});      // key → { exId, name } for set +1s this session
-  const mesoJointDeltaExIdsRef = useRefT(new Set()); // exIds already reduced this session via joint pain
+  const mesoSessionSetGainsRef = useRefT(mesoAskedInitRef.current.gains); // key → { exId, name, delta } for set changes this session
+  // exId_dayId keys already hit by a negative set-delta this session (from
+  // soreness, joint pain, or volume feedback) — shared across all three
+  // handlers so two independent negative signals never stack a -2 onto the
+  // same exercise in one session.
+  const mesoNegativeDeltaKeysRef = useRefT(new Set());
   const isMesoDeloadSession = store.statusMode === 'deload' || session.isDeload;
   // ────────────────────────────────────────────────────────────────────────────
 
@@ -1680,22 +1701,32 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (!muscleEntries.length) continue;
       // still_sore → only main lift; very_sore → all exercises of the group
       const targets = answer === 'very_sore' ? muscleEntries : [muscleEntries[0]];
+      // Resolve, ONCE, which of these keys haven't already taken a negative
+      // delta this session from another signal (joint/volume) — computed up
+      // front so the display bookkeeping and the actual deltas mutation stay
+      // in lockstep (mutating the ref between the two would make the second
+      // check always pass).
+      const keysToApply = targets
+        .map(e => ({ e, key: e.exId + '_' + prev.dayId }))
+        .filter(({ key }) => !mesoNegativeDeltaKeysRef.current.has(key));
+      keysToApply.forEach(({ key }) => mesoNegativeDeltaKeysRef.current.add(key));
       // Surface the change in the post-session "Next session" summary, same
       // as joint/volume feedback — otherwise a soreness-only session silently
       // changes next session's plan with no indication anywhere.
-      targets.forEach(e => {
-        const key = e.exId + '_' + prev.dayId;
+      keysToApply.forEach(({ e, key }) => {
         const prevGain = mesoSessionSetGainsRef.current[key];
         mesoSessionSetGainsRef.current[key] = { exId: e.exId, name: e.name, delta: (prevGain?.delta ?? 0) - 1 };
       });
-      saveMesoState(m => {
-        const newDeltas = { ...(m.deltas || {}) };
-        targets.forEach(e => {
-          const key = e.exId + '_' + prev.dayId;
-          newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
+      if (keysToApply.length) {
+        saveMesoState(m => {
+          const newDeltas = { ...(m.deltas || {}) };
+          keysToApply.forEach(({ key }) => {
+            newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
+          });
+          return { ...m, deltas: newDeltas };
         });
-        return { ...m, deltas: newDeltas };
-      });
+        persistMesoAsked();
+      }
       break;
     }
   };
@@ -1708,16 +1739,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     if (answer === 'none') mesoJointFineRef.current.add(exId);
 
-    // Apply delta for joint pain
+    // Apply delta for joint pain — skip if soreness already penalized this
+    // exact exercise/day this session, so two independent negative signals
+    // don't stack to -2. jointFlags is a separate signal (a persistent
+    // "this exercise causes joint pain" marker) and is always recorded
+    // regardless of whether the delta was skipped.
     if (answer === 'noticeable' || answer === 'sharp') {
       const key = exId + '_' + session.dayId;
-      mesoSessionSetGainsRef.current[key] = { exId, name: mesoJointExName, delta: -1 };
-      mesoJointDeltaExIdsRef.current.add(exId);
+      const alreadyPenalized = mesoNegativeDeltaKeysRef.current.has(key);
+      if (!alreadyPenalized) {
+        mesoNegativeDeltaKeysRef.current.add(key);
+        const prevGain = mesoSessionSetGainsRef.current[key];
+        mesoSessionSetGainsRef.current[key] = { exId, name: mesoJointExName, delta: (prevGain?.delta ?? 0) - 1 };
+      }
       saveMesoState(m => ({
         ...m,
-        deltas: { ...(m.deltas || {}), [key]: ((m.deltas || {})[key] || 0) - 1 },
+        ...(alreadyPenalized ? {} : { deltas: { ...(m.deltas || {}), [key]: ((m.deltas || {})[key] || 0) - 1 } }),
         ...(answer === 'sharp' ? { jointFlags: { ...(m.jointFlags || {}), [exId]: true } } : {}),
       }));
+      if (!alreadyPenalized) persistMesoAsked();
     }
 
     // Check if this was the last exercise for this muscle group → open pump/volume
@@ -1751,24 +1791,36 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Track quality signals for weight progression
     if (pump === 'moderate' || pump === 'amazing') mesoPumpOkRef.current.add(mesoVolumeMusc);
     if (volume === 'just_right' || volume === 'not_enough') mesoVolumeOkRef.current.add(mesoVolumeMusc);
+
+    // "Not enough" → +1 on main lift (first exercise of the muscle group) only
+    // "Pushed my limits" → -1 on main lift only
+    // "Too much" → -1 on every exercise of the muscle group
+    const mainExId = mesoVolumeExIds[0];
+    // Which exId/dayId keys this answer wants to apply a NEGATIVE delta to —
+    // resolved once, up front, against mesoNegativeDeltaKeysRef so a prior
+    // soreness/joint penalty on the same key isn't stacked with a second
+    // negative signal (positive deltas like "not enough" are never guarded —
+    // they're an independent, opposite-direction signal, not a double
+    // penalty).
+    const negativeTargets = volume === 'pushed' && mainExId ? [mainExId]
+      : volume === 'too_much' ? mesoVolumeExIds
+      : [];
+    const negKeysToApply = negativeTargets
+      .map(exId => ({ exId, key: exId + '_' + session.dayId }))
+      .filter(({ key }) => !mesoNegativeDeltaKeysRef.current.has(key));
+    negKeysToApply.forEach(({ key }) => mesoNegativeDeltaKeysRef.current.add(key));
+
     // Track set delta for summary screen
-    if (volume === 'not_enough' && mesoVolumeExIds[0]) {
-      const key = mesoVolumeExIds[0] + '_' + session.dayId;
-      const exName = session.entries.find(e => e.exId === mesoVolumeExIds[0])?.name || '';
-      mesoSessionSetGainsRef.current[key] = { exId: mesoVolumeExIds[0], name: exName, delta: 1 };
-    } else if (volume === 'pushed' && mesoVolumeExIds[0]) {
-      const key = mesoVolumeExIds[0] + '_' + session.dayId;
-      const exName = session.entries.find(e => e.exId === mesoVolumeExIds[0])?.name || '';
-      mesoSessionSetGainsRef.current[key] = { exId: mesoVolumeExIds[0], name: exName, delta: -1 };
-    } else if (volume === 'too_much') {
-      mesoVolumeExIds.forEach(exId => {
-        // Skip an exercise that already took a joint-pain delta this session —
-        // otherwise two separate negative signals (joint + volume) would stack
-        // to -2 on the same exercise while sibling exercises only get -1.
-        if (mesoJointDeltaExIdsRef.current.has(exId)) return;
-        const key = exId + '_' + session.dayId;
+    if (volume === 'not_enough' && mainExId) {
+      const key = mainExId + '_' + session.dayId;
+      const exName = session.entries.find(e => e.exId === mainExId)?.name || '';
+      const prevGain = mesoSessionSetGainsRef.current[key];
+      mesoSessionSetGainsRef.current[key] = { exId: mainExId, name: exName, delta: (prevGain?.delta ?? 0) + 1 };
+    } else {
+      negKeysToApply.forEach(({ exId, key }) => {
         const exName = session.entries.find(e => e.exId === exId)?.name || '';
-        mesoSessionSetGainsRef.current[key] = { exId, name: exName, delta: -1 };
+        const prevGain = mesoSessionSetGainsRef.current[key];
+        mesoSessionSetGainsRef.current[key] = { exId, name: exName, delta: (prevGain?.delta ?? 0) - 1 };
       });
     }
 
@@ -1779,20 +1831,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const newDeltas = { ...(m.deltas || {}) };
       const newPumpLow = { ...(m.pumpLowCounts || {}) };
 
-      // "Not enough" → +1 on main lift (first exercise of the muscle group) only
-      // "Pushed my limits" → -1 on main lift only
-      // "Too much" → -1 on every exercise of the muscle group
-      const mainExId = mesoVolumeExIds[0];
       if (volume === 'not_enough' && mainExId) {
         const key = mainExId + '_' + session.dayId;
         newDeltas[key] = ((m.deltas || {})[key] || 0) + 1;
-      } else if (volume === 'pushed' && mainExId) {
-        const key = mainExId + '_' + session.dayId;
-        newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
-      } else if (volume === 'too_much') {
-        mesoVolumeExIds.forEach(exId => {
-          if (mesoJointDeltaExIdsRef.current.has(exId)) return;
-          const key = exId + '_' + session.dayId;
+      } else {
+        negKeysToApply.forEach(({ key }) => {
           newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
         });
       }
@@ -1800,6 +1843,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (pumpLow && mainExId) newPumpLow[mainExId] = ((m.pumpLowCounts || {})[mainExId] || 0) + 1;
       return { ...m, deltas: newDeltas, pumpLowCounts: newPumpLow };
     });
+    persistMesoAsked();
   };
 
   // Compute per-exercise weight boosts earned this session and return gain items for

@@ -592,17 +592,22 @@ function App() {
             const curCardioIdSet = new Set((cur.cardioLogs || []).map(l => l.id));
             const delCardioIds = baseCardioIds ? new Set([...baseCardioIds].filter(id => !curCardioIdSet.has(id))) : null;
             // Meso states are a mutable per-plan row (not an append/delete list),
-            // so instead of a base-membership resurrection guard we compare
-            // updatedAt per id and keep whichever side is newer — this is what
-            // protects an in-flight local session's not-yet-synced feedback
-            // deltas from being clobbered by a boot refresh that raced ahead.
+            // so for ids present on both sides we compare updatedAt and keep
+            // whichever is newer — this protects an in-flight local session's
+            // not-yet-synced feedback deltas from being clobbered by a boot
+            // refresh that raced ahead. Ids present on only one side still
+            // need the same base-membership resurrection guard as every
+            // sibling collection: a row the user deleted locally (e.g. turned
+            // mesocycle off for a plan) whose deletion hasn't synced yet must
+            // not be resurrected from the stale server copy.
             const freshMesoMap = new Map((fresh.mesoStates || []).map(m => [m.id, m]));
             const curMesoMap = new Map((cur.mesoStates || []).map(m => [m.id, m]));
+            const baseMesoIds = base ? new Set((base.mesoStates || []).map(m => m.id)) : null;
             const mesoStates = [...new Set([...freshMesoMap.keys(), ...curMesoMap.keys()])].map(id => {
               const f = freshMesoMap.get(id);
               const c = curMesoMap.get(id);
-              if (!f) return c;
-              if (!c) return f;
+              if (!f) return baseMesoIds?.has(id) ? null : c; // local-only: keep only if never confirmed synced
+              if (!c) return baseMesoIds?.has(id) ? null : f; // server-only: resurrect only if genuinely new elsewhere
               const fT = f.updatedAt ? new Date(f.updatedAt).getTime() : 0;
               const cT = c.updatedAt ? new Date(c.updatedAt).getTime() : 0;
               return cT >= fT ? c : f;

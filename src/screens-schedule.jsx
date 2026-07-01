@@ -191,7 +191,7 @@ function PlanScreen({ store, setStore, go, userId }) {
           ) : (
             <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1 }}>{s.name}</div>
+                <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
                 {!mesoPending && mesoCompletions > 0 && (
                   <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkSoft, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em', flexShrink: 0, marginLeft: 8 }}>
                     MESO {mesoCompletions + 1}
@@ -535,8 +535,10 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
   // Cross-device meso set/weight adjustments — must pass store.mesoStates
   // (the DB-synced source of truth) same as every other call site, otherwise
   // this preview silently falls back to a per-device localStorage cache that
-  // may not exist here, showing the un-adjusted baseline plan.
-  const mesoBoosts = (typeof getMesoWeightBoosts === 'function') ? getMesoWeightBoosts(sch?.id, store.mesoStates) : null;
+  // may not exist here, showing the un-adjusted baseline plan. Resolved once
+  // (it internally reads localStorage) rather than once per item below.
+  const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch?.id, store.mesoStates) : null;
+  const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
 
   const exerciseList = isRest ? (
     <BracketFrame style={{ textAlign: 'center', padding: 36 }}>
@@ -551,7 +553,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
         const last = LB.bestRecentEntry(store, it.exId, day.id);
         const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps);
         const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-        const itAdj = (typeof applyMesoSetDelta === 'function') ? applyMesoSetDelta(it, day.id, sch?.id, store.mesoStates) : it;
+        const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
         const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
         let suggestionFinal = suggestion;
         if (weightBoost != null && !suggestionFinal && last) {
@@ -573,9 +575,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
                     ? `L${st.repsL ?? it.reps}/R${st.repsR ?? it.reps}`
                     : `${st.reps ?? it.reps}`;
                   return (
-                    <span key={si} className="num" style={{ fontSize: 13, color: suggestion ? UI.gold : UI.inkSoft }}>
+                    <span key={si} className="num" style={{ fontSize: 13, color: suggestionFinal ? UI.gold : UI.inkSoft }}>
                       {kg} · {reps}
-                      {suggestion && si === 0 && <i className="fa-solid fa-arrow-up" style={{ fontSize: 9, marginLeft: 4, color: UI.gold }} />}
+                      {suggestionFinal && si === 0 && <i className="fa-solid fa-arrow-up" style={{ fontSize: 9, marginLeft: 4, color: UI.gold }} />}
                     </span>
                   );
                 })}
@@ -1626,7 +1628,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                         <button onClick={() => setStore(s => ({
                           ...s,
                           mesoStates: (s.mesoStates || []).map(m =>
-                            m.scheduleId === draft.id ? { ...m, completions: 0 } : m
+                            m.scheduleId === draft.id ? { ...m, completions: 0, updatedAt: new Date().toISOString() } : m
                           ),
                         }))} style={{
                           marginTop: 10, width: '100%', background: 'transparent',
