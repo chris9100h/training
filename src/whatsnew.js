@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.450',
+    title: 'We Wrote The Manual',
+    items: [
+      "🧭 Four new guided tours — Quick Actions, Cardio Plans, Deload/Sick/Vacation, and Customize — walk you through features you might've never noticed. Find them all in Settings → How to…",
+      '💪 The Workout tour now covers Drop Sets, Myo-Reps, Lengthened Partials, Supersets/Giant Sets, and the mesocycle check-ins that pop up mid-session — plus how to save a freestyle session as a reusable template.',
+      '📋 The plan-creation tour grew up too: the exercise library (search/filter/batch-edit), Flex plans, Mesocycle setup, plan versioning, and Backups are all explained now.',
+    ],
+  },
+  {
     id: 'v2.445',
     title: 'Bug Hunt',
     items: [
