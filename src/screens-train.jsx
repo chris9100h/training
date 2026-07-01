@@ -618,6 +618,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // confirm, bulk check-all) is guarded to redirect or skip this set
     // instead of reaching here bare, but this is the backstop.
     if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx && !extraPatch) return;
+    // Drop-set/myo-rep only ever complete via finishDropSet/finishMyoSet
+    // (which build the whole patch themselves and never call completeSet) —
+    // a bare completeSet on their target set would mark it done with none of
+    // that data, so refuse outright rather than silently corrupting it.
+    if (dropSetIdx === setIdx || myoSetIdx === setIdx) return;
     // Unlock AudioContext on this user gesture so the rest-timer beep works on iOS
     // even when the tempo feature is disabled (only other init path).
     try {
@@ -2720,18 +2725,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const checkAllSets = async () => {
     if (allWorkingDone || anyMissingData) return;
     if (!await confirm(`Check off all ${workingSetsArr.length} sets and continue?`, { ok: 'Check all' })) return;
-    // Lengthened partials only ever completes via its own FINISH button (it
-    // needs a partials count, which bulk-check has no way to supply) — leave
-    // that one set for the user to finish individually.
-    const lpIdx = lpTarget?.exIdx === exIdx ? lpTarget.setIdx : -1;
+    // Every intensity technique (drop-set, myo-rep, lengthened partials) only
+    // ever completes via its own dedicated FINISH button, which commits data
+    // bulk-check has no way to supply (drop weights, myo minis, partials
+    // count) — leave that one set for the user to finish individually rather
+    // than silently marking it done with none of that data recorded.
+    const skipIdx = lpTarget?.exIdx === exIdx ? lpTarget.setIdx : (dropSetIdx ?? myoSetIdx ?? -1);
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
-        ? { ...e, sets: e.sets.map((st, si) => (st.warmup || si === lpIdx) ? st : { ...st, done: true }) }
+        ? { ...e, sets: e.sets.map((st, si) => (st.warmup || si === skipIdx) ? st : { ...st, done: true }) }
         : e),
     }));
     persistRestStart(Date.now(), restDef);
-    if (lpIdx < 0) setTimeout(() => navigate(1), 600);
+    if (skipIdx < 0) setTimeout(() => navigate(1), 600);
   };
 
   const skipWarmup = () => {
@@ -3598,6 +3605,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                         );
                       })}
+                      {(() => {
+                        const canFinishDrop = !!dropDrops[0]?.reps && (isNoWeightReps || isBodyweight || dropDrops[0]?.kg != null);
+                        return (
                       <div data-drop-actions style={{ display: 'flex', gap: 8, padding: '4px 4px 10px', scrollMarginBottom: 260 }}>
                         <button onClick={() => {
                           const newIdx = dropDropsRef.current.length;
@@ -3610,17 +3620,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                         }}>↓ ADD DROP</button>
                         <button onClick={() => finishDropSet(dropDropsRef.current)}
-                          disabled={!dropDrops[0]?.reps}
+                          disabled={!canFinishDrop}
                           style={{
                             flex: 2, padding: '8px 0',
-                            background: dropDrops[0]?.reps ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-                            border: `1px solid ${dropDrops[0]?.reps ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
-                            borderRadius: 6, color: dropDrops[0]?.reps ? 'var(--accent)' : UI.inkGhost,
+                            background: canFinishDrop ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                            border: `1px solid ${canFinishDrop ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                            borderRadius: 6, color: canFinishDrop ? 'var(--accent)' : UI.inkGhost,
                             fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                            cursor: dropDrops[0]?.reps ? 'pointer' : 'default',
+                            cursor: canFinishDrop ? 'pointer' : 'default',
                             WebkitTapHighlightColor: 'transparent',
                           }}>✓ FINISH</button>
                       </div>
+                        );
+                      })()}
                     </div>
                   )}
                   {s.technique === 'drop' && s.done && (s.drops || []).length > 1 && (
@@ -3648,7 +3660,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {myoSetIdx === i && !s.done && (() => {
                     const myoTotalReps = myoDrops.reduce((acc, d) => acc + (d.reps || 0), 0);
                     const myoProgress = myoTarget ? Math.min(1, myoTotalReps / myoTarget) : 0;
-                    const canFinish = myoDrops.length >= 2 && myoDrops[0]?.reps != null;
+                    const canFinish = myoDrops.length >= 2 && myoDrops[0]?.reps != null && (isNoWeightReps || isBodyweight || myoDrops[0]?.kg != null);
                     const activationDone = myoDrops[0]?.reps != null;
                     return (
                       <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
@@ -4101,11 +4113,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* intensity technique picker */}
       <Sheet open={intensityOpen} onClose={() => setIntensityOpen(false)} title="Intensity">
         {(() => {
+          // Exactly one intensity technique can be "in flight" at a time —
+          // picking one always clears any other left unfinished (e.g. the
+          // user opened Intensity, picked Drop Set, then reopened Intensity
+          // on the same still-unfinished set and picked Myo-Rep instead).
+          // Without this, both sub-panels could end up targeting the same
+          // row simultaneously.
+          const clearDrop = () => { setDropSetIdx(null); setDropDrops([]); };
+          const clearMyo = () => { setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); };
+          const clearLp = () => { setLpTarget(null); setLpCount(0); };
           const startDrop = () => {
             const target = currentSetIdx >= 0
               ? currentSetIdx
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
+            clearMyo(); clearLp();
             const s = entry.sets[target];
             const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null }];
             setDropDrops(initDrops);
@@ -4119,6 +4141,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               ? currentSetIdx
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
+            clearDrop(); clearLp();
             const s = entry.sets[target];
             const anchor = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
             // For match: activation kg locked to the preceding myo set's activation kg
@@ -4161,6 +4184,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   ? currentSetIdx
                   : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
                 if (target < 0) return;
+                clearDrop(); clearMyo();
                 setLpTarget({ exIdx, setIdx: target });
                 setLpCount(0);
                 setIntensityOpen(false);
