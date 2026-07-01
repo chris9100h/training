@@ -453,6 +453,24 @@ function reorderSessionEntries(entries, currentIdx, from, to) {
   return { entries: next, currentExIdx: idx };
 }
 
+// A superset/giant-set's members must stay array-adjacent — the "⟷"
+// connector and finishSetNavigation's round-matching both assume it. Used to
+// reject a chip drag that would split an existing group apart (linking a NEW
+// group, e.g. linkExistingSuperset, calls reorderSessionEntries directly and
+// is exempt — it's establishing the very grouping this checks for).
+function groupsContiguous(entries) {
+  const seen = new Set();
+  let i = 0;
+  while (i < entries.length) {
+    const g = entries[i].supersetGroup;
+    if (!g) { i++; continue; }
+    if (seen.has(g)) return false;
+    seen.add(g);
+    while (i < entries.length && entries[i].supersetGroup === g) i++;
+  }
+  return true;
+}
+
 function TrainingScreen(props) {
   const session = props.store.sessions.find(s => s.id === props.sessionId);
   // Redirect from an effect — never call go() during render, and never return
@@ -600,6 +618,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const isBodyweight = !isCardio && exercise?.equipment === 'bodyweight';
   const progressionTargetForSet = (workingSetIdx) => {
     if (!store.settings?.smartProgression) return null;
+    // Progression itself is suppressed during deload (see completeSet's
+    // isDeloadSession guard) — showing the "≥X reps · next weight" hint
+    // anyway would promise an unlock that can never actually fire.
+    if (store.statusMode === 'deload' || session.isDeload) return null;
     const perSet = entry?.plannedRepsPerSet;
     const perSetVal = perSet && perSet.length > 1
       ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
@@ -903,14 +925,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const increment = catCfg.increment ?? null;
       if (!increment) return null;
       const range = store.settings?.progressionRangeTop ?? 4;
-      const doneSets = updatedSets.filter(s => s.done && !s.skipped && !s.warmup && s.kg != null);
-      if (!doneSets.length) return null;
-      const allHitTop = doneSets.every((s, i) => {
+      // Index by true working-set position (warm-ups stripped, nothing else)
+      // so progressionTargetForSet(i) lines up correctly — filtering skipped/
+      // no-kg sets out before indexing (as this used to) shifts every later
+      // set's target one slot whenever an earlier set was skipped, mirroring
+      // the same bug store.js's progressionSuggestion had.
+      const workingSets = updatedSets.filter(s => !s.warmup);
+      if (!workingSets.some(s => !s.skipped && s.kg != null)) return null;
+      const allHitTop = workingSets.every((s, i) => {
+        if (s.skipped || s.kg == null) return true; // no data at this position — neither confirms nor blocks progression
         const reps = s.repsL != null ? Math.min(s.repsL ?? 0, s.repsR ?? 0) : (s.reps ?? 0);
         return reps >= (progressionTargetForSet(i) ?? 0);
       });
       if (!allHitTop) return null;
-      const refKg = doneSets[0].kg;
+      const refKg = workingSets.find(s => !s.skipped && s.kg != null)?.kg;
+      if (refKg == null) return null;
       const newKg = Math.round((refKg + increment) * 100) / 100;
       const nextKg = catCfg.maxKg ? Math.min(newKg, catCfg.maxKg) : newKg;
       return nextKg > refKg ? { exName: entry.name, currentKg: refKg, nextKg } : null;
@@ -1095,18 +1124,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const addSet = () => {
-    const bwKg = exercise?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-    updateSession(sess => ({
-      ...sess,
-      entries: sess.entries.map((e, i) => {
-        if (i !== exIdx) return e;
-        const last = e.sets[e.sets.length - 1];
-        const newSet = isUnilateral
-          ? { kg: last?.kg ?? bwKg ?? null, repsL: last?.repsL ?? null, repsR: last?.repsR ?? null, done: false }
-          : { kg: last?.kg ?? bwKg ?? null, reps: last?.reps ?? null, done: false };
-        return { ...e, sets: [...e.sets, newSet] };
-      }),
-    }));
+    updateSession(sess => {
+      const group = sess.entries[exIdx]?.supersetGroup;
+      return {
+        ...sess,
+        // Superset/giant-set partners must keep matching working-set counts
+        // — finishSetNavigation's round-matching indexes every member's
+        // working sets by position — so add to every member, not just the
+        // one the user is looking at.
+        entries: sess.entries.map((e, i) => {
+          if (i !== exIdx && !(group && e.supersetGroup === group)) return e;
+          const ex = LB.findExercise(store, e.exId);
+          const uni = (ex?.movement_type ?? (ex?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
+          const bwKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+          const last = e.sets[e.sets.length - 1];
+          const newSet = uni
+            ? { kg: last?.kg ?? bwKg ?? null, repsL: last?.repsL ?? null, repsR: last?.repsR ?? null, done: false }
+            : { kg: last?.kg ?? bwKg ?? null, reps: last?.reps ?? null, done: false };
+          return { ...e, sets: [...e.sets, newSet] };
+        }),
+      };
+    });
   };
 
   const removeSet = async (setIdx) => {
@@ -1122,14 +1160,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const removeLastSet = async () => {
     const workingSets = entry.sets.map((s, i) => ({ s, i })).filter(({ s }) => !s.warmup);
     if (workingSets.length <= 1) return;
-    const last = workingSets[workingSets.length - 1];
+    const group = entry.supersetGroup;
+    const members = group ? session.entries.filter(e => e.supersetGroup === group) : [entry];
+    // Superset/giant-set partners must keep matching working-set counts (see
+    // addSet) — refuse if any member is already down to its last working
+    // set, rather than let counts diverge.
+    if (members.some(e => e.sets.filter(s => !s.warmup).length <= 1)) return;
     if (!await confirm(`Remove set ${workingSets.length}?`, { ok: 'Remove', danger: true })) return;
-    updateSession(sess => ({
-      ...sess,
-      entries: sess.entries.map((e, i) => i === exIdx
-        ? { ...e, sets: e.sets.filter((_, k) => k !== last.i) }
-        : e),
-    }));
+    updateSession(sess => {
+      const grp = sess.entries[exIdx]?.supersetGroup;
+      return {
+        ...sess,
+        entries: sess.entries.map((e, i) => {
+          if (i !== exIdx && !(grp && e.supersetGroup === grp)) return e;
+          const eWorkingSets = e.sets.map((s, k) => ({ s, k })).filter(({ s }) => !s.warmup);
+          const lastWorking = eWorkingSets[eWorkingSets.length - 1];
+          return lastWorking ? { ...e, sets: e.sets.filter((_, k) => k !== lastWorking.k) } : e;
+        }),
+      };
+    });
   };
 
   const setNote = (note) => {
@@ -1420,7 +1469,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // chip drag-to-reorder — uses the shared horizontal drag hook from ui.jsx
   const chipDragReorderRef = UI.useDragReorderH({ longPressMs: 600,
     onReorder: (from, to) => {
-      updateSession(sess => ({ ...sess, ...reorderSessionEntries(sess.entries, sess.currentExIdx || 0, from, to) }));
+      updateSession(sess => {
+        const result = reorderSessionEntries(sess.entries, sess.currentExIdx || 0, from, to);
+        // Reject rather than silently corrupt: a drag that would split an
+        // existing superset/giant-set apart is simply ignored.
+        if (!groupsContiguous(result.entries)) return sess;
+        return { ...sess, ...result };
+      });
     },
   });
   const chipRowSetRef = React.useCallback(node => {
