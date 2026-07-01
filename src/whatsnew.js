@@ -16,6 +16,18 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.443',
+    title: 'Supersets, Unchained',
+    items: [
+      '🔗 Superset or Giant Set any exercise mid-workout — no pre-planning required. Tap INTENSITY on an exercise\'s first set and choose Superset to pair it with another exercise in your session, or a new one. Already paired up? The same button becomes Giant Set, adding a third exercise to the rotation.',
+      '🩹 Cleaned up superset navigation: checking off a set could send you (or the keyboard) to the wrong exercise, and Drop Sets or Myo-Reps inside a superset ignored your training partner entirely. Finishing a set now reliably takes you to the right place.',
+      '⌨️ Lengthened Partials now has its own FINISH button instead of the regular checkbox, so a set only counts once you\'ve confirmed your partials.',
+      '🐛 Unchecking a completed Drop Set, Myo-Rep or Lengthened Partial left old data behind. Unchecking now clears it properly.',
+      '📱 The exercise strip at the top of the training screen could leave the last exercise half off-screen. It now scrolls fully into view.',
+      '🔄 Mesocycle progress (set adjustments, weight boosts, week counter) now syncs reliably across devices, and a crash when starting Meso 2 is fixed.',
+    ],
+  },
+  {
     id: 'v2.439',
     title: 'Mesocycles',
     items: [
