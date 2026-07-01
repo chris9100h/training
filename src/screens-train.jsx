@@ -2864,14 +2864,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
   const anyMissingData = !isNoWeightReps && workingSetsArr.some(st => !st.done && !st.skipped && ((!isBodyweight && st.kg == null) || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
 
-  // Superset linking (Intensity sheet) is only offered before the exercise's
-  // own working sets have started — retroactively linking a partially-logged
-  // exercise would need to reconcile already-done sets against the round
-  // matching, so we sidestep that entirely by requiring a clean slate on both
-  // sides (see supersetCandidates below for the partner-side equivalent).
-  // Not offered once already grouped either — growing an existing superset
-  // into a giant set isn't part of this flow.
-  const supersetEligible = !entry.supersetGroup && workingSetsArr.every(s => !s.done && !s.skipped);
+  // Superset linking (Intensity sheet) is only offered before any working set
+  // in the CURRENT group has started — retroactively linking a partially-run
+  // superset would insert the new exercise's round 0 after rounds the
+  // existing pair already logged, confusing the round-index matching. Not
+  // ungrouped entries: [entry] itself (linking makes a first pair). Two
+  // members: 'giant' (add a third — either mother or the 1st daughter can
+  // initiate, both see this since the check is symmetric). Three members:
+  // capped, button hidden entirely.
+  const supersetGroupMembers = entry.supersetGroup
+    ? session.entries.filter(e => e.supersetGroup === entry.supersetGroup)
+    : [entry];
+  const supersetGroupNotStarted = supersetGroupMembers.every(e => (e.sets || []).filter(s => !s.warmup).every(s => !s.done && !s.skipped));
+  const supersetMode = supersetGroupMembers.length >= 3 ? null : supersetGroupMembers.length === 2 ? 'giant' : 'pair';
+  const supersetEligible = supersetMode != null && supersetGroupNotStarted;
   const supersetCandidates = session.entries
     .map((e, i) => ({ e, i }))
     .filter(({ e, i }) => i !== exIdx && !e.isCardio && !e.supersetGroup
@@ -4371,9 +4377,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   </div>
                 </button>
               </div>
-              {/* Superset — structural (links this exercise with another),
-                  not a set-completion technique like the three above, so it's
-                  only offered before this exercise's own working sets start. */}
+              {/* Superset / Giant Set — structural (links this exercise with
+                  another), not a set-completion technique like the three
+                  above, so it's only offered before the whole current group
+                  has started. */}
               {supersetEligible && (
                 <button onClick={() => {
                   setIntensityOpen(false);
@@ -4382,8 +4389,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 }} style={btnBase(true)}>
                   <i className="fa-solid fa-link" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
                   <div>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>SUPERSET</div>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Pair with another exercise, no rest between</div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>{supersetMode === 'giant' ? 'GIANT SET' : 'SUPERSET'}</div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>{supersetMode === 'giant' ? 'Add a third exercise to the rotation, no rest between' : 'Pair with another exercise, no rest between'}</div>
                   </div>
                 </button>
               )}
@@ -4394,7 +4401,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* superset-link modal (from Intensity): step 1 existing-vs-new, step 2 pick existing */}
       {supersetLinkData && (
-        <Sheet open={true} onClose={() => setSupersetLinkData(null)} title="Superset">
+        <Sheet open={true} onClose={() => setSupersetLinkData(null)} title={supersetMode === 'giant' ? 'Giant Set' : 'Superset'}>
           {!supersetLinkData.picking ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.inkSoft, lineHeight: 1.5 }}>
