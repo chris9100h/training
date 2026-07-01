@@ -399,7 +399,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   const isKg = field === 'kg';
   const H = 40;
   const base = {
-    background: 'var(--bg-raised)', border: `0.5px solid var(--hair)`, borderRadius: 8,
+    background: 'var(--bg-raised)', border: `0.5px solid var(--hair)`, borderRadius: 6,
     color: 'var(--ink)', fontFamily: '"JetBrains Mono", monospace', fontSize: 18, fontWeight: 500,
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
     WebkitTapHighlightColor: 'transparent', userSelect: 'none', padding: 0,
@@ -2183,6 +2183,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const cd = entry.cardioData;
     setCardioForm(cd ? { type: cd.type || '', duration: cd.durationMinutes ? String(cd.durationMinutes) : '', distance: cd.distanceM != null ? mToDisplayT(cd.distanceM, du) : '', paceFeeling: cd.paceFeeling ?? null, effort: cd.effort ?? null, distUnit: du } : { type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: du });
   }, [exIdx, sessionId]);
+  // Intentionally NOT keyed on exIdx/entry — Paceguard (tempo) is meant to
+  // keep running across exercise navigation once started, stopping only on
+  // an explicit "Stop" tap or when the whole training screen unmounts
+  // (session finished/abandoned). Do not add exIdx to these deps; that would
+  // silently stop the metronome on every exercise change, which is the
+  // opposite of what this feature is for.
   useEffectT(() => () => stopTempo(), []);
 
   // Log ALL document pointer/click events — captures ghost-clicks and shows where they land.
