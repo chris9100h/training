@@ -1894,12 +1894,21 @@ function getCycleStartForNum(schedule, cycleNum) {
       const daysInVersion = Math.round((vEnd - vStart) / 86400000);
       const cyclesInVersion = Math.floor((daysInVersion - 1 + offset) / daysLen) + 1;
       if (totalPriorCycles + cyclesInVersion >= cycleNum) {
-        return new Date(vStart.getTime() + ((cycleNum - totalPriorCycles - 1) * daysLen - offset) * 86400000);
+        // For a version's first cycle, `offset` can push the computed start
+        // before validFrom — but no real date before validFrom is actually
+        // governed by this version's cycle numbering (those dates belong to
+        // the previous version), so getCycleNumForDate would misattribute
+        // that date back to the wrong version and break the inverse
+        // relationship. Clamp to validFrom: the earliest real date this
+        // cycle can be associated with under this schedule.
+        const computed = vStart.getTime() + ((cycleNum - totalPriorCycles - 1) * daysLen - offset) * 86400000;
+        return new Date(Math.max(vStart.getTime(), computed));
       }
       totalPriorCycles += cyclesInVersion;
     } else {
       const vStartDate = new Date(v.validFrom + 'T12:00:00');
-      return new Date(vStartDate.getTime() + ((cycleNum - totalPriorCycles - 1) * daysLen - offset) * 86400000);
+      const computed = vStartDate.getTime() + ((cycleNum - totalPriorCycles - 1) * daysLen - offset) * 86400000;
+      return new Date(Math.max(vStartDate.getTime(), computed));
     }
   }
   return null;
