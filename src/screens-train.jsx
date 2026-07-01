@@ -1141,6 +1141,33 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (willBeAllDone) navigate(1);
   };
 
+  // Shared by cardio (log/skip) and "Check all sets" — both complete an
+  // entire entry in one shot rather than set-by-set like completeSet/
+  // finishSetNavigation, so there's no per-round index to match against a
+  // superset/giant-set partner. Jump to whichever partner still has open
+  // work instead of blindly advancing past the whole group (schedule-defined
+  // supersets can include cardio — only mid-session linking excludes it).
+  // Returns false (does nothing) when the entry isn't grouped, so callers
+  // keep their own standalone navigation/rest timing.
+  const advanceIntoGroupOrPartner = (jumpDelayMs) => {
+    const group = entry.supersetGroup;
+    if (!group) return false;
+    const isDone = (e) => e.isCardio ? e.cardioDone : (e.sets || []).filter(s => !s.warmup).every(s => s.done || s.skipped);
+    const partners = session.entries.map((e, i) => ({ e, i })).filter(({ e, i }) => e.supersetGroup === group && i !== exIdx);
+    const nextPartner = partners.find(({ e }) => !isDone(e));
+    if (nextPartner) {
+      setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), jumpDelayMs);
+      return true;
+    }
+    persistRestStart(Date.now(), restDef);
+    const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
+    setTimeout(() => {
+      if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
+      else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
+    }, 600);
+    return true;
+  };
+
   const checkSet = () => {
     const idx = entry.sets.findIndex(s => !s.done && !s.skipped);
     if (idx < 0) return;
@@ -1159,7 +1186,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx ? { ...e, cardioDone: true, cardioData: data } : e),
     }));
-    setTimeout(() => navigate(1), 300);
+    // cardioLogs rows are only materialized at session finish (see `finish`),
+    // but PRs read the same shape early so the flash fires the moment the
+    // activity is actually logged, matching the home-tab quick-log/finish-flow
+    // cardio PR overlay instead of never checking at all.
+    const pr = LB.detectCardioPRs({ id: '__pending__', date: session.date, ...data }, store.cardioLogs);
+    if (pr) setCardioPR(pr);
+    if (!advanceIntoGroupOrPartner(300)) setTimeout(() => navigate(1), 300);
   };
 
   const skipCardio = () => {
@@ -1167,7 +1200,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx ? { ...e, cardioDone: true, cardioData: null } : e),
     }));
-    navigate(1);
+    if (!advanceIntoGroupOrPartner(300)) navigate(1);
   };
 
   const skipExercise = () => {
@@ -1482,6 +1515,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [regressionSet, setRegressionSet] = useStateT(false);
   const [newBestSet, setNewBestSet] = useStateT(false);
   const newBestShownRef = useRefT({}); // exId → true once a NEW BEST flashed (max once per exercise per session)
+  const [cardioPR, setCardioPR] = useStateT(null);
   const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
   const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(() => {
@@ -2595,7 +2629,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (session.entries.length <= 1) return;
     if (!await confirm(`Remove "${entry.name}" from this session?`, { ok: 'Remove', danger: true })) return;
     updateSession(sess => {
-      const newEntries = sess.entries.filter((_, i) => i !== exIdx);
+      const removedGroup = sess.entries[exIdx]?.supersetGroup || null;
+      let newEntries = sess.entries.filter((_, i) => i !== exIdx);
+      // Removing one member can drop a superset/giant-set down to a single
+      // remaining exercise — a "group" of one is meaningless, so clear it
+      // rather than leave a stale supersetGroup nothing else shares.
+      if (removedGroup) {
+        const stillGrouped = newEntries.filter(e => e.supersetGroup === removedGroup);
+        if (stillGrouped.length === 1) {
+          newEntries = newEntries.map(e => e.supersetGroup === removedGroup ? { ...e, supersetGroup: null } : e);
+        }
+      }
       const newIdx = exIdx >= newEntries.length ? newEntries.length - 1 : exIdx;
       return { ...sess, entries: newEntries, currentExIdx: Math.max(0, newIdx) };
     });
@@ -2667,6 +2711,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (newSets !== mesoAdjustedPlan) {
         diffs.push({ type: 'sets', idx: originalIdx, exName: entry.name, oldSets: item.sets, newSets });
       }
+    });
+
+    // Superset link/unlink on matched (already-in-plan) exercises. Needed as
+    // its own diff type because linking two exercises that were already
+    // plan-adjacent produces no swap/sets/reorder diff by itself — without
+    // this, computePlanDiff() would return [] and confirmWithFeel's
+    // `diffs.length > 0` check would skip the "Update plan?" step entirely,
+    // silently dropping the new supersetGroup (the session's own entries
+    // keep it, but the plan the NEXT session seeds from would not).
+    planItems.forEach(({ item, originalIdx }, i) => {
+      if (!matched[i]) return;
+      const entry = matched[i];
+      const planGroup = item.supersetGroup || null;
+      const entryGroup = entry.supersetGroup || null;
+      if (planGroup === entryGroup) return;
+      const partner = entryGroup ? session.entries.find(e => e !== entry && e.supersetGroup === entryGroup) : null;
+      diffs.push({ type: 'superset', idx: originalIdx, exName: entry.name, partnerName: partner?.name || null, linked: !!entryGroup });
     });
 
     // Swaps: pair each unmatched plan item with the unmatched session entry at the same relative position
@@ -2919,8 +2980,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ? { ...e, sets: e.sets.map((st, si) => (st.warmup || si === skipIdx) ? st : { ...st, done: true }) }
         : e),
     }));
-    persistRestStart(Date.now(), restDef);
-    if (skipIdx < 0) setTimeout(() => navigate(1), 600);
+    if (skipIdx >= 0) { persistRestStart(Date.now(), restDef); return; }
+    // Superset/giant-set aware: jump to whichever partner still has open
+    // sets instead of blindly advancing past the whole group.
+    if (!advanceIntoGroupOrPartner(300)) {
+      persistRestStart(Date.now(), restDef);
+      setTimeout(() => navigate(1), 600);
+    }
   };
 
   const skipWarmup = () => {
@@ -2962,6 +3028,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         <div style={{ position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 100 }} />,
         document.body
       )}
+
+      <CardioPROverlay pr={cardioPR} onDone={() => setCardioPR(null)} />
 
       {/* New best (personal record) overlay */}
       {newBestSet && ReactDOM.createPortal(
@@ -4512,6 +4580,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <span style={{ color: UI.inkSoft }}>
                     <strong style={{ color: UI.ink }}>{d.name}</strong>{' added'}
                     {d.supersetWithName && <span>{' · superset with '}<strong style={{ color: UI.ink }}>{d.supersetWithName}</strong></span>}
+                  </span>
+                </>
+              ) : d.type === 'superset' ? (
+                <>
+                  <span style={{ color: UI.goldLight, fontSize: 14 }}>⟷</span>
+                  <span style={{ color: UI.inkSoft }}>
+                    <strong style={{ color: UI.ink }}>{d.exName}</strong>
+                    {d.linked
+                      ? <>{' · superset with '}<strong style={{ color: UI.ink }}>{d.partnerName}</strong></>
+                      : ' · superset removed'}
                   </span>
                 </>
               ) : d.type === 'reorder' ? (
