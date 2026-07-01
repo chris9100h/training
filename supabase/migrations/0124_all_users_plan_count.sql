@@ -3,7 +3,11 @@
 -- separate get_users_with_plans() view covered (LEFT JOIN here instead of
 -- its INNER JOIN, so users with zero plans still appear with plan_count=0
 -- rather than being excluded).
-CREATE OR REPLACE FUNCTION public.get_all_users_admin()
+-- Return type changed (new plan_count column), so the old signature must be
+-- dropped first -- CREATE OR REPLACE alone can't change OUT parameters.
+DROP FUNCTION IF EXISTS public.get_all_users_admin();
+
+CREATE FUNCTION public.get_all_users_admin()
  RETURNS TABLE(user_id uuid, name text, email text, sw_version text, created_at timestamptz, approved boolean, plan_count int)
  LANGUAGE plpgsql
  SECURITY DEFINER
