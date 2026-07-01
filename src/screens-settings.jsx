@@ -413,7 +413,6 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [importSourceUnit, _setImportSourceUnit] = useStateSet(store.settings?.unit || 'kg');
   const importSourceUnitRef = useRefSet(store.settings?.unit || 'kg');
   const setImportSourceUnit = v => { importSourceUnitRef.current = v; _setImportSourceUnit(v); };
-  const [swVersion, setSwVersion] = useStateSet('');
   const [pushStatus, setPushStatus] = useStateSet(null);
   const [pushEnabled, setPushEnabled] = useStateSet(() => store.settings?.pushEnabled ?? localStorage.getItem('logbook-push-enabled') === 'true');
   const [pushKeyDraft, setPushKeyDraft] = useStateSet('');
@@ -483,6 +482,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const [vipBgSaving, setVipBgSaving] = useStateSet(false);
   const [vipBgMsg, setVipBgMsg] = useStateSet(null);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
+  // Detected/reported in app.jsx (boot, foreground, controllerchange) — this
+  // screen only reads it for display, so it stays fresh even if Settings is
+  // never opened.
+  const swVersion = store.settings?.swVersion || '';
 
   useEffectSet(() => {
     if (openSupportInbox && isAdmin) setSupportInboxSheet(true);
@@ -507,21 +510,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const iv = setInterval(() => { loadSessions(); setNowS(Date.now()); }, 2000);
     return () => { mounted = false; clearInterval(iv); };
   }, [hasActiveUsersAccess, isAdmin]);
-
-  useEffectSet(() => {
-    if (!('caches' in window)) return;
-    caches.keys().then(keys => {
-      const name = keys.find(k => k.startsWith('zane-'));
-      if (!name) return;
-      const version = name.replace('zane-', '');
-      setSwVersion(version);
-      // Report to the account so an admin can tell whether a user reporting
-      // a bug is stuck on a stale/broken cache without asking them to check.
-      if (version !== store.settings?.swVersion) {
-        setStore(s => ({ ...s, settings: { ...s.settings, swVersion: version } }));
-      }
-    });
-  }, []);
 
   useEffectSet(() => {
     if (!pushSheet) return;
@@ -658,14 +646,23 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   // Admin-only: full user list (name/email/last-known SW version/plan count)
   // — the single source for the unseen-signup badge (computed from it) and
   // the All-users sheet, which folds in what used to be the separate Recent
-  // Sign-ups/Onboarded views as client-side filters. Loaded on mount (for the
-  // badge) and refreshed whenever Account/Admin/All-users opens.
+  // Sign-ups/Onboarded views as client-side filters. Loaded on mount and
+  // refreshed whenever Account/Admin opens, so the badge stays current.
   useEffectSet(() => {
     if (!isAdmin) return;
     let mounted = true;
     LB.supabase.rpc('get_all_users_admin').then(({ data, error }) => { if (mounted && !error) setAllUsers(data || []); }).catch(() => {});
     return () => { mounted = false; };
-  }, [isAdmin, accountSheet, adminSheet, allUsersSheet]);
+  }, [isAdmin, accountSheet, adminSheet]);
+
+  // Admin-only: re-fetch every time the All-users sheet itself is opened, so
+  // it never shows a stale snapshot from whenever the badge last refreshed.
+  useEffectSet(() => {
+    if (!isAdmin || !allUsersSheet) return;
+    let mounted = true;
+    LB.supabase.rpc('get_all_users_admin').then(({ data, error }) => { if (mounted && !error) setAllUsers(data || []); }).catch(() => {});
+    return () => { mounted = false; };
+  }, [isAdmin, allUsersSheet]);
 
   useEffectSet(() => {
     if (!isAdmin || !vipBgSheet) return;

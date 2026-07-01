@@ -356,6 +356,21 @@ function App() {
     }
   }, [store?.settings?.darkMode]);
 
+  // Report the active SW cache version to Supabase (so an admin can spot a
+  // user stuck on a stale cache without asking them to check Settings).
+  // Re-checked at boot, on every foreground and right when the cache
+  // actually rotates (controllerchange) — a single boot-time check isn't
+  // enough since most users leave the PWA open for days without reloading.
+  const reportSwVersion = useCallbackA(() => {
+    if (!('caches' in window)) return;
+    caches.keys().then(keys => {
+      const name = keys.find(k => k.startsWith('zane-'));
+      if (!name) return;
+      const version = name.replace('zane-', '');
+      setStore(s => (s && s.settings?.swVersion !== version) ? { ...s, settings: { ...s.settings, swVersion: version } } : s);
+    }).catch(() => {});
+  }, [setStore]);
+
   useEffectA(() => {
     const THRESHOLD      = 30 * 60 * 1000; // full reload after 30 min
     const SOFT_THRESHOLD = 30 * 1000; // data-only refresh after 30 s
@@ -394,6 +409,7 @@ function App() {
       if (elapsed > THRESHOLD) { window.location.reload(); return; }
       if (elapsed > SOFT_THRESHOLD) softRefresh();
       swReg.current?.update().catch(() => {});
+      reportSwVersion();
     };
     // visibilitychange as additional fallback
     const onVisibility = () => {
@@ -406,6 +422,7 @@ function App() {
         if (elapsed > THRESHOLD) { window.location.reload(); return; }
         if (elapsed > SOFT_THRESHOLD) softRefresh();
         swReg.current?.update().catch(() => {});
+        reportSwVersion();
       }
     };
 
@@ -443,6 +460,7 @@ function App() {
     navigator.serviceWorker.ready.then(reg => {
       swReg.current = reg;
       reg.update().catch(() => {});
+      reportSwVersion();
       const trackWorker = (worker) => {
         if (!worker) return;
         worker.addEventListener('statechange', () => {
@@ -458,8 +476,12 @@ function App() {
       }
       reg.addEventListener('updatefound', () => trackWorker(reg.installing));
     });
-    // Only reload when the user explicitly clicked "Update now"
+    // Only reload when the user explicitly clicked "Update now" — but every
+    // tab (not just the one that triggered it) gets this event the instant
+    // the new SW takes control and rotates the cache, so it's the most
+    // precise moment to re-check the version even for tabs that don't reload.
     const onControllerChange = () => {
+      reportSwVersion();
       if (intentionalUpdate.current) window.location.reload(true);
     };
     navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
