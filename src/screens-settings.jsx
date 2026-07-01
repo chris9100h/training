@@ -1967,6 +1967,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           const plateSizes  = isLbs ? PLATE_SIZE_LBS   : PLATE_SIZE_KG;
           const current = store.settings?.equipmentConfig?.[invKey] ?? allPlates;
           const toggle = (p) => {
+            // The plate calculator's correction math indexes the smallest
+            // available plate (plateSet[plateSet.length - 1]) — an empty
+            // inventory turns that into NaN throughout. Refuse to deselect
+            // the last remaining plate instead of allowing an empty set.
+            if (current.includes(p) && current.length <= 1) return;
             const newInv = current.includes(p)
               ? current.filter(x => x !== p)
               : [...current, p].sort((a, b) => b - a);
