@@ -438,6 +438,21 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   );
 }
 
+// Moves the entry at `from` to sit at post-removal index `to` (Array.splice
+// semantics: `to` is interpreted against the array with `from` already
+// removed) and re-maps currentExIdx so the view stays on the same entry.
+// Shared by the chip drag-reorder and the mid-session superset-link flow.
+function reorderSessionEntries(entries, currentIdx, from, to) {
+  const next = [...entries];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  let idx = currentIdx;
+  if (idx === from) idx = to;
+  else if (from < to && idx > from && idx <= to) idx--;
+  else if (from > to && idx >= to && idx < from) idx++;
+  return { entries: next, currentExIdx: idx };
+}
+
 function TrainingScreen(props) {
   const session = props.store.sessions.find(s => s.id === props.sessionId);
   // Redirect from an effect — never call go() during render, and never return
@@ -1336,16 +1351,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // chip drag-to-reorder — uses the shared horizontal drag hook from ui.jsx
   const chipDragReorderRef = UI.useDragReorderH({ longPressMs: 600,
     onReorder: (from, to) => {
-      updateSession(sess => {
-        const entries = [...sess.entries];
-        const [moved] = entries.splice(from, 1);
-        entries.splice(to, 0, moved);
-        let idx = sess.currentExIdx || 0;
-        if (idx === from) idx = to;
-        else if (from < to && idx > from && idx <= to) idx--;
-        else if (from > to && idx >= to && idx < from) idx++;
-        return { ...sess, entries, currentExIdx: idx };
-      });
+      updateSession(sess => ({ ...sess, ...reorderSessionEntries(sess.entries, sess.currentExIdx || 0, from, to) }));
     },
   });
   const chipRowSetRef = React.useCallback(node => {
@@ -1534,6 +1540,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [addOpen, setAddOpen] = useStateT(() => !!(session.isFreestyle && session.entries.length === 0));
   const [addSupersetData, setAddSupersetData] = useStateT(null); // { newIdx } | null
   const addAndJumpRef = useRefT(false); // set to true when adding via the finish-dialog button
+  const [supersetLinkData, setSupersetLinkData] = useStateT(null); // null | {} | { picking: true } — mirrors addSupersetData's shape
+  const [supersetNewPickerOpen, setSupersetNewPickerOpen] = useStateT(false);
   const [avgStats, setAvgStats] = useStateT(null);
   const [tempoActive, setTempoActive] = useStateT(false);
   const [outlierConfirm, setOutlierConfirm] = useStateT(null);
@@ -2449,13 +2457,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
   };
 
-  // Called from the superset modal: targetIdx = null → solo (insert after current),
-  // targetIdx = i → link with entry i and insert right after it.
-  const confirmAdd = (targetIdx) => {
-    const { newExId } = addSupersetData;
-    const jump = addAndJumpRef.current;
-    if (jump) addAndJumpRef.current = false;
-    setAddSupersetData(null);
+  // targetIdx = null → solo (insert after current), targetIdx = i → link with
+  // entry i and insert right after it. Shared by the add-exercise superset
+  // modal (confirmAdd below) and the Intensity-sheet "Superset → new
+  // exercise" flow (doLinkNewExerciseSuperset), which always links to the
+  // currently open exercise.
+  const linkNewExercise = (targetIdx, newExId, jump) => {
     setStore(s => {
       const sess = s.sessions.find(x => x.id === session.id);
       if (!sess) return s;
@@ -2502,6 +2509,65 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (jump && store.exercises?.find(e => e.id === newExId)?.movement_type !== 'cardio') {
       setTimeout(() => activateKb(0, 'kg'), 200);
     }
+  };
+
+  // Called from the superset modal opened by the "Add exercise" button.
+  const confirmAdd = (targetIdx) => {
+    const { newExId } = addSupersetData;
+    const jump = addAndJumpRef.current;
+    if (jump) addAndJumpRef.current = false;
+    setAddSupersetData(null);
+    linkNewExercise(targetIdx, newExId, jump);
+  };
+
+  // Intensity sheet → Superset → "New exercise": always links the freshly
+  // picked/created exercise to the currently open one, no solo/link question
+  // (unlike confirmAdd, whose caller doesn't yet know which entry is "mother").
+  const doLinkNewExerciseSuperset = (ids) => {
+    const newExId = Array.isArray(ids) ? ids[0] : ids;
+    setSupersetNewPickerOpen(false);
+    linkNewExercise(exIdx, newExId, false);
+  };
+
+  // Intensity sheet → Superset → "Existing exercise": links the current
+  // exercise with an already-in-session entry (only offered when that entry
+  // has no completed/skipped working sets yet, see supersetCandidates) by
+  // moving it to sit right after the current exercise and giving both the
+  // same supersetGroup. Reuses reorderSessionEntries (the chip drag-reorder's
+  // splice+currentExIdx math) since this is the same "move an existing entry"
+  // operation, just triggered from the Intensity sheet instead of a drag.
+  const linkExistingSuperset = (targetIdx) => {
+    setSupersetLinkData(null);
+    updateSession(sess => {
+      const motherIdx = sess.currentExIdx || 0;
+      const mother = sess.entries[motherIdx];
+      const target = sess.entries[targetIdx];
+      if (!mother || !target || targetIdx === motherIdx) return sess;
+      const group = mother.supersetGroup || LB.uid();
+      // Match the target's working-set count to the mother's — trim from the
+      // end (working sets are always seeded after any warmups) or pad by
+      // cloning the last working set as a starting suggestion.
+      const motherWorkingCount = mother.sets.filter(s => !s.warmup).length;
+      const targetWorking = target.sets.filter(s => !s.warmup);
+      let sets = target.sets;
+      if (targetWorking.length > motherWorkingCount) {
+        sets = target.sets.slice(0, target.sets.length - (targetWorking.length - motherWorkingCount));
+      } else if (targetWorking.length < motherWorkingCount) {
+        const templateSet = targetWorking[targetWorking.length - 1] || { kg: null, reps: null };
+        const extra = Array.from({ length: motherWorkingCount - targetWorking.length }, () => ({
+          ...templateSet, done: false, skipped: false, technique: null, drops: null,
+        }));
+        sets = [...target.sets, ...extra];
+      }
+      const linkedEntries = sess.entries.map((e, i) => {
+        if (i === targetIdx) return { ...target, supersetGroup: group, sets, plannedSets: sets.filter(s => !s.warmup).length };
+        if (i === motherIdx) return e.supersetGroup === group ? e : { ...e, supersetGroup: group };
+        return e;
+      });
+      const to = targetIdx < motherIdx ? motherIdx : motherIdx + 1;
+      const { entries, currentExIdx } = reorderSessionEntries(linkedEntries, motherIdx, targetIdx, to);
+      return { ...sess, entries, currentExIdx };
+    });
   };
 
   const removeExercise = async () => {
@@ -2785,6 +2851,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     ? entry.sets.findIndex(s => !s.warmup)
     : currentSetIdx;
   const heroSet = bgSetIdx >= 0 ? entry.sets[bgSetIdx] : null;
+  // Warmups are seeded only onto whichever entry the session-start builder
+  // picked (screens-home.jsx), normally entries[0] — but mid-session superset
+  // linking can now move that entry away from position 0, so the WARMUP
+  // COMPLETE screen below looks it up by content instead of assuming index 0.
+  const warmupEntry = session.entries.find(e => (e.sets || []).some(s => s.warmup)) || session.entries[0];
   // For warmup sets there's no meaningful "last session" comparison
   const prevHeroSet = isCurrentWarmup ? null : (last?.entry?.sets || []).filter(s => !s.warmup)[bgSetIdx >= 0 ? bgSetIdx - warmupCount : 0];
   const progressionTarget = progressionTargetForSet(Math.max(0, bgSetIdx - warmupCount));
@@ -2792,6 +2863,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const workingSetsArr = entry.sets.filter(s => !s.warmup);
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
   const anyMissingData = !isNoWeightReps && workingSetsArr.some(st => !st.done && !st.skipped && ((!isBodyweight && st.kg == null) || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
+
+  // Superset linking (Intensity sheet) is only offered before the exercise's
+  // own working sets have started — retroactively linking a partially-logged
+  // exercise would need to reconcile already-done sets against the round
+  // matching, so we sidestep that entirely by requiring a clean slate on both
+  // sides (see supersetCandidates below for the partner-side equivalent).
+  // Not offered once already grouped either — growing an existing superset
+  // into a giant set isn't part of this flow.
+  const supersetEligible = !entry.supersetGroup && workingSetsArr.every(s => !s.done && !s.skipped);
+  const supersetCandidates = session.entries
+    .map((e, i) => ({ e, i }))
+    .filter(({ e, i }) => i !== exIdx && !e.isCardio && !e.supersetGroup
+      && (e.sets || []).filter(s => !s.warmup).every(s => !s.done && !s.skipped));
 
   const checkAllSets = async () => {
     if (allWorkingDone || anyMissingData) return;
@@ -4287,10 +4371,58 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   </div>
                 </button>
               </div>
+              {/* Superset — structural (links this exercise with another),
+                  not a set-completion technique like the three above, so it's
+                  only offered before this exercise's own working sets start. */}
+              {supersetEligible && (
+                <button onClick={() => {
+                  setIntensityOpen(false);
+                  if (supersetCandidates.length === 0) setSupersetNewPickerOpen(true);
+                  else setSupersetLinkData({});
+                }} style={btnBase(true)}>
+                  <i className="fa-solid fa-link" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>SUPERSET</div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Pair with another exercise, no rest between</div>
+                  </div>
+                </button>
+              )}
             </div>
           );
         })()}
       </Sheet>
+
+      {/* superset-link modal (from Intensity): step 1 existing-vs-new, step 2 pick existing */}
+      {supersetLinkData && (
+        <Sheet open={true} onClose={() => setSupersetLinkData(null)} title="Superset">
+          {!supersetLinkData.picking ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.inkSoft, lineHeight: 1.5 }}>
+                Link "{entry.name}" with an existing exercise, or add a new one?
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn kind="ghost" onClick={() => setSupersetLinkData(d => ({ ...d, picking: true }))} style={{ flex: 1 }}>Existing</Btn>
+                <Btn onClick={() => { setSupersetLinkData(null); setSupersetNewPickerOpen(true); }} style={{ flex: 1 }}>New</Btn>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {supersetCandidates.map(({ e, i }) => (
+                <button key={i} onClick={() => linkExistingSuperset(i)} style={{
+                  padding: '14px 0', textAlign: 'left', background: 'none', border: 'none',
+                  borderBottom: `1px solid ${UI.hair}`, cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <span className="micro" style={{ display: 'block', marginBottom: 3, color: UI.inkFaint }}>EX {String(i + 1).padStart(2, '0')}</span>
+                  <span style={{ fontFamily: UI.fontDisplay, fontSize: 15, color: UI.ink }}>{e.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </Sheet>
+      )}
+
+      {supersetNewPickerOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSupersetNewPickerOpen(false)} onPick={doLinkNewExerciseSuperset} singleSelect />}
 
       {/* session note editor */}
       <Sheet open={sessionNoteOpen} onClose={() => setSessionNoteOpen(false)} title="Session note">
@@ -4588,10 +4720,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
           {/* Exercise name */}
           <div className="display-it" style={{
-            fontSize: session.entries[0]?.name.length > 22 ? 22 : 30,
+            fontSize: warmupEntry?.name.length > 22 ? 22 : 30,
             color: UI.ink, lineHeight: 1.05,
             textAlign: 'center', marginBottom: 48,
-          }}>{session.entries[0]?.name}</div>
+          }}>{warmupEntry?.name}</div>
 
           {/* Big countdown */}
           <div className="num" style={{
