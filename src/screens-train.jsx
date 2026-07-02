@@ -2141,8 +2141,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   // Reopen an already-answered sheet prefilled with the current answer so the
   // user can revise it — a mistap is no longer permanent. Only reachable from
-  // the recap sheet, which itself is only offered while no other meso sheet
-  // is already open (see mesoRecapRows/its render guard below).
+  // the recap sheet (see mesoRecapGroups / the footer nav button below).
   const openSorenessEdit = (muscle) => {
     const record = mesoAnswersRef.current.soreness[muscle];
     if (!record) return;
@@ -2182,26 +2181,42 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const JOINT_LABELS = { none: 'None', noticeable: 'Noticeable', sharp: 'Sharp pain' };
   const PUMP_LABELS = { low: 'Low', moderate: 'Moderate', amazing: 'Amazing' };
   const VOLUME_LABELS = { not_enough: 'Not enough', just_right: 'Just right', pushed: 'Pushed my limits', too_much: 'Too much' };
-  // Flat list of every answered question this session, for the recap sheet.
-  const mesoRecapRows = () => {
-    const rows = [];
-    Object.values(mesoAnswersRef.current.soreness || {}).forEach(r => {
-      if (r.answer == null) return;
-      rows.push({ key: 'soreness-' + r.muscle, title: `${r.muscle} soreness`, sub: SORENESS_LABELS[r.answer] || r.answer, onEdit: () => openSorenessEdit(r.muscle) });
+  // Every answered question this session, grouped by muscle in workout order
+  // (the order questions are actually asked within a muscle group: Soreness
+  // first, then each exercise's Joint check, then Pump & Volume last) — for
+  // the recap sheet. Deriving joint rows straight from session.entries (not
+  // from mesoAnswersRef directly) automatically excludes an exercise that was
+  // swapped out or removed since — it's simply no longer in session.entries,
+  // so there's nothing left to reason a stale index against.
+  const mesoRecapGroups = () => {
+    const muscleOrder = [];
+    const seenMuscles = new Set();
+    session.entries.forEach(e => {
+      if (e.isCardio) return;
+      const pm = primaryMuscleForExercise(store.exercises?.find(x => x.id === e.exId));
+      if (pm && !seenMuscles.has(pm)) { seenMuscles.add(pm); muscleOrder.push(pm); }
     });
-    Object.values(mesoAnswersRef.current.joint || {}).forEach(r => {
-      if (r.answer == null) return;
-      // Hide (don't offer to edit) feedback for an exercise that was swapped
-      // out or removed since — its position no longer exists, so the "is
-      // this the last exercise of the muscle" cascade can't reason about it.
-      if (!session.entries.some(e => e.exId === r.exId)) return;
-      rows.push({ key: 'joint-' + r.exId, title: `${r.exName} joint check`, sub: JOINT_LABELS[r.answer] || r.answer, onEdit: () => openJointEdit(r.exId) });
+    const groups = [];
+    muscleOrder.forEach(muscle => {
+      const sRec = mesoAnswersRef.current.soreness[muscle];
+      const vRec = mesoAnswersRef.current.volume[muscle];
+      const rows = [];
+      if (sRec?.answer != null) {
+        rows.push({ key: 'soreness-' + muscle, title: 'Soreness', sub: SORENESS_LABELS[sRec.answer] || sRec.answer, onEdit: () => openSorenessEdit(muscle) });
+      }
+      session.entries.forEach(e => {
+        if (e.isCardio) return;
+        if (primaryMuscleForExercise(store.exercises?.find(x => x.id === e.exId)) !== muscle) return;
+        const r = mesoAnswersRef.current.joint[e.exId];
+        if (!r || r.answer == null) return;
+        rows.push({ key: 'joint-' + e.exId, title: r.exName, sub: JOINT_LABELS[r.answer] || r.answer, onEdit: () => openJointEdit(e.exId) });
+      });
+      if (vRec?.pump != null && vRec?.volume != null) {
+        rows.push({ key: 'volume-' + muscle, title: 'Pump & Volume', sub: `${PUMP_LABELS[vRec.pump] || vRec.pump} pump · ${VOLUME_LABELS[vRec.volume] || vRec.volume}`, onEdit: () => openVolumeEdit(muscle) });
+      }
+      if (rows.length) groups.push({ muscle, rows });
     });
-    Object.values(mesoAnswersRef.current.volume || {}).forEach(r => {
-      if (r.pump == null || r.volume == null) return;
-      rows.push({ key: 'volume-' + r.muscle, title: `${r.muscle} feedback`, sub: `${PUMP_LABELS[r.pump] || r.pump} pump · ${VOLUME_LABELS[r.volume] || r.volume}`, onEdit: () => openVolumeEdit(r.muscle) });
-    });
-    return rows;
+    return groups;
   };
 
   // Compute per-exercise weight boosts earned this session and return gain items for
@@ -3218,6 +3233,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const entrySets = entry?.sets || [];
   const completed = isCardio ? (entry?.cardioDone ? 1 : 0) : entrySets.filter(s => s.done).length;
   const allDone = !entry || (isCardio ? !!entry.cardioDone : (completed === entrySets.length));
+  // Computed once per render and reused by the footer's feedback button, the
+  // "Check set" shrink/compact logic, and the recap sheet itself.
+  const mesoFeedbackGroups = mesoState ? mesoRecapGroups() : [];
   const currentSetIdx = entrySets.findIndex(s => !s.done);
   const warmupCount = entrySets.filter(s => s.warmup).length;
   const isCurrentWarmup = warmupCount > 0 && currentSetIdx >= 0 && !!entry.sets[currentSetIdx]?.warmup;
@@ -4520,6 +4538,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
+        {/* Session feedback — only takes a footer slot once there's something
+            to revisit; Check set shrinks (and its label compacts) to make
+            room rather than the row growing past its usual button count. */}
+        {mesoFeedbackGroups.length > 0 && (
+          <button onClick={() => setMesoRecapOpen(true)} style={{
+            width: 44, minHeight: 44, borderRadius: 6,
+            background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }} aria-label="Session feedback">
+            <i className="fa-solid fa-list-check" style={{ fontSize: 15, color: UI.gold }} />
+          </button>
+        )}
         {allDone ? (
           <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>
             {(session.entries.length === 0 || exIdx === session.entries.length - 1) ? 'Finish →' : 'Next exercise →'}
@@ -4533,7 +4564,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {(() => {
             const pending = entrySets.find(s => !s.done && !s.skipped);
             const hasVal = pending && (pending.kg != null || pending.reps != null || pending.repsL != null || pending.repsR != null);
-            return <Btn onClick={checkSet} disabled={!hasVal} style={{ flex: 2, minHeight: 44, padding: '10px 16px' }}>Check set</Btn>;
+            const hasFeedback = mesoFeedbackGroups.length > 0;
+            return (
+              <Btn onClick={checkSet} disabled={!hasVal} style={{ flex: hasFeedback ? 1 : 2, minHeight: 44, padding: hasFeedback ? '10px 4px' : '10px 16px' }}>
+                {hasFeedback ? (<><i className="fa-solid fa-check" style={{ marginRight: 5 }} />Set</>) : 'Check set'}
+              </Btn>
+            );
           })()}
           <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '6px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
             <span>Skip</span>
@@ -5348,39 +5384,34 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {/* Session feedback recap — lets you revisit and change any soreness/
-          joint/volume answer given so far this session. Only offered while no
-          other meso sheet is already open, so reopening one for edit can never
-          collide with a fresh auto-triggered prompt. */}
-      {mesoState && !mesoSorenessOpen && !mesoJointOpen && !mesoVolumeOpen && mesoRecapRows().length > 0 && (
-        <button onClick={() => setMesoRecapOpen(true)} style={{
-          position: 'fixed', right: 14, bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))', zIndex: 5,
-          width: 40, height: 40, borderRadius: '50%',
-          background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-        }} aria-label="Session feedback">
-          <i className="fa-solid fa-list-check" style={{ fontSize: 15, color: UI.gold }} />
-        </button>
-      )}
+          joint/volume answer given so far this session, grouped by muscle in
+          the order questions are actually asked (Soreness, then each
+          exercise's Joint check, then Pump & Volume). Opened from the small
+          square button in the footer nav (see "Footer nav" below). */}
       <Sheet open={mesoRecapOpen} onClose={() => setMesoRecapOpen(false)} title="Session feedback">
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
           Tap any answer to change it — feedback stays editable until you finish the session.
         </div>
-        {mesoRecapRows().map(row => (
-          <button key={row.key} onClick={row.onEdit} style={{
-            width: '100%', marginBottom: 8, padding: '12px 14px',
-            background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
-            WebkitTapHighlightColor: 'transparent',
-          }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.title}</div>
-              <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{row.sub}</div>
-            </div>
-            <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
-          </button>
+        {mesoFeedbackGroups.map((group, gi) => (
+          <div key={group.muscle} style={{ marginBottom: 18 }}>
+            {gi > 0 && <div className="knurl" style={{ marginBottom: 14 }} />}
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{group.muscle.toUpperCase()}</div>
+            {group.rows.map(row => (
+              <button key={row.key} onClick={row.onEdit} style={{
+                width: '100%', marginBottom: 8, padding: '12px 14px',
+                background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+                borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.title}</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{row.sub}</div>
+                </div>
+                <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
+              </button>
+            ))}
+          </div>
         ))}
       </Sheet>
 
