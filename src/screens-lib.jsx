@@ -3253,12 +3253,6 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
                       <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>NOT LOGGED THEN</span>
                     )}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px', gap: 10, marginBottom: 4 }}>
-                    <span />
-                    <span />
-                    <span className="micro" style={{ color: UI.inkFaint, textAlign: 'right' }}>{fmtDate(cmp.date, { day: 'numeric', month: 'short' }).toUpperCase()}</span>
-                    <span />
-                  </div>
                   {Array.from({ length: maxLen }).map((_, si) => {
                     const curr = sets[si];
                     const prev = cmpSets[si];
