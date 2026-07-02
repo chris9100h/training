@@ -16,10 +16,11 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
-    id: 'v2.454',
+    id: 'v2.455',
     title: 'Second Thoughts, Officially Allowed',
     items: [
       "✏️ Mesocycle check-ins (Soreness, Joint, Pump & Volume) are no longer one-tap-and-it's-final — pick an answer, then confirm it, and revisit anything from a new 'Session feedback' button in the training footer, sorted by muscle group with Joint feedback and General feedback split apart. Change your mind as often as you like — nothing's sent anywhere until you finish the workout.",
+      "🔄 Pull down on Home to open Quick Actions — there's a Reload App button in there now, for those \"why isn't this updating\" moments. Clears the cache and refetches everything, no digging through Settings required.",
       '🛠 Fixed a crash that could hit the plan viewer under certain conditions, and toggling Flexible mode on/off while editing a plan no longer resets your spot in the cycle.',
       '🎯 A lighter session on a different day type could wrongly trigger a NEW BEST celebration — fixed. Typing a warmup weight on the number pad could also silently overwrite your working sets; fixed that too.',
       '💾 Backups and restores got a reliability pass: exports/restores now cover your full history (cardio goals, glucose log, mesocycle state, sick/vacation/deload periods), and restoring a backup no longer quietly turns off your workout push notifications.',
