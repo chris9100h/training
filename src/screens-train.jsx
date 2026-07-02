@@ -394,7 +394,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
 }
 
 // ─── Custom Keyboard ──────────────────────────────────────────────────
-function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfirm, onDismiss, onPlateCalc }) {
+function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfirm, onDismiss, onPlateCalc, confirmDisabled }) {
   if (!visible) return null;
   const isKg = field === 'kg';
   const H = 40;
@@ -419,7 +419,15 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(-1); }}>↓</button>
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onPlateCalc(); }}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(1); }}>↑</button>
-        <button onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onConfirm(); }} style={{ ...base, gridColumn: 4, gridRow: '1 / span 4', background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', fontSize: 20, fontWeight: 700, borderColor: 'var(--accent-deep)' }}>✓</button>
+        <button
+          onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!confirmDisabled) onConfirm(); }}
+          style={{
+            ...base, gridColumn: 4, gridRow: '1 / span 4', fontSize: 20, fontWeight: 700,
+            ...(confirmDisabled
+              ? { background: 'var(--bg-inset)', color: 'var(--ink-faint)', borderColor: 'var(--hair)', cursor: 'default' }
+              : { background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', borderColor: 'var(--accent-deep)' }),
+          }}
+        >✓</button>
 
         {/* Row 2: 1 2 3 */}
         {[1,2,3].map(n => <button key={n} style={base} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onType(String(n)); }}>{n}</button>)}
@@ -521,50 +529,63 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // and there's no active meso for this plan yet.
   useEffectT(() => {
     if (!_sch?.mesocycle_weeks || !session.scheduleId) return;
-    const existing = getMesoState(session.scheduleId, store.mesoStates);
-    // Keep existing meso only if weeks match the current config.
-    // A mismatch (changed week count) always starts fresh.
-    if (existing && existing.weeks === _sch.mesocycle_weeks) return;
-    // Align meso start to a clean boundary so week 1 is always a full rotation/week.
-    // Weekday: next Monday (or today). Flex: next D1 via cycleIndex. Cycle: next D1 via date.
-    const _isWeekday = LB.isWeekdayPlan(_sch);
-    const _isFlex = LB.isFlexPlan(_sch);
-    const _daysLen = _sch.days.length || 1;
-    const _ci = store.cycleIndex || 0;
-    let alignedStartDate, alignedStartIdx;
-    if (_isWeekday) {
-      alignedStartDate = LB.nextMondayISO();
-      alignedStartIdx = _ci;
-    } else if (_isFlex) {
-      alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
-      alignedStartDate = LB.todayISO();
-    } else {
-      // Date-based cycle plan: use version-aware D1 so the meso aligns with how
-      // the date strip renders (getCyclePosForDate respects version boundaries).
-      alignedStartDate = LB.nextCycleD1ISOFromSchedule(_sch, store.cycleStartDate);
-      alignedStartIdx = 0;
-    }
-    const newMeso = {
-      id: userId + '_' + session.scheduleId,
-      scheduleId: session.scheduleId,
-      weeks: _sch.mesocycle_weeks,
-      startDate: alignedStartDate,
-      startCycleIndex: alignedStartIdx,
-      deltas: {},
-      jointFlags: {},
-      pumpLowCounts: {},
-      weightBoosts: {},
-      completions: existing?.completions ?? 0,
-      updatedAt: new Date().toISOString(),
-    };
-    saveMesoStateToStorage(newMeso);
-    setMesoStateLocal(newMeso);
-    // Immediately flush new meso state to store so it's synced to DB without
-    // waiting for session end (covers the case where user exits without finishing).
+    const schId = session.scheduleId;
+    // Recompute everything from the freshest store snapshot (`s`, inside the
+    // functional setStore updater) instead of the `_sch`/`store` closed over
+    // above — a plan edit that changes the day structure (new version +
+    // cycleOffset) and flips mesocycle_weeks on can commit via back-to-back
+    // setStore calls, and aligning against a stale closure risks dropping the
+    // cycleOffset and computing "today" instead of the true next D1.
+    let newMeso = null;
     setStore(s => {
-      const others = (s.mesoStates || []).filter(m => m.scheduleId !== newMeso.scheduleId);
+      const freshSch = s.schedules.find(x => x.id === schId);
+      if (!freshSch?.mesocycle_weeks) return s;
+      const existing = getMesoState(schId, s.mesoStates);
+      // Keep existing meso only if weeks match the current config.
+      // A mismatch (changed week count) always starts fresh.
+      if (existing && existing.weeks === freshSch.mesocycle_weeks) return s;
+      // Align meso start to a clean boundary so week 1 is always a full rotation/week.
+      // Weekday: next Monday (or today). Flex: next D1 via cycleIndex. Cycle: next D1 via date.
+      const _isWeekday = LB.isWeekdayPlan(freshSch);
+      const _isFlex = LB.isFlexPlan(freshSch);
+      const _daysLen = freshSch.days.length || 1;
+      const _ci = s.cycleIndex || 0;
+      let alignedStartDate, alignedStartIdx;
+      if (_isWeekday) {
+        alignedStartDate = LB.nextMondayISO();
+        alignedStartIdx = _ci;
+      } else if (_isFlex) {
+        alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
+        alignedStartDate = LB.todayISO();
+      } else {
+        // Date-based cycle plan: use version-aware D1 so the meso aligns with how
+        // the date strip renders (getCyclePosForDate respects version boundaries).
+        alignedStartDate = LB.nextCycleD1ISOFromSchedule(freshSch, s.cycleStartDate);
+        alignedStartIdx = 0;
+      }
+      newMeso = {
+        id: userId + '_' + schId,
+        scheduleId: schId,
+        weeks: freshSch.mesocycle_weeks,
+        startDate: alignedStartDate,
+        startCycleIndex: alignedStartIdx,
+        deltas: {},
+        jointFlags: {},
+        pumpLowCounts: {},
+        weightBoosts: {},
+        completions: existing?.completions ?? 0,
+        updatedAt: new Date().toISOString(),
+      };
+      const others = (s.mesoStates || []).filter(m => m.scheduleId !== schId);
       return { ...s, mesoStates: [...others, newMeso] };
     });
+    // Immediately mirror the new meso state to the local cache / component
+    // state too, so it's synced to DB without waiting for session end (covers
+    // the case where user exits without finishing) and is available offline.
+    if (newMeso) {
+      saveMesoStateToStorage(newMeso);
+      setMesoStateLocal(newMeso);
+    }
   }, []);
 
   const exIdx = session.currentExIdx || 0;
@@ -679,14 +700,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // they're seeded onto at most one exercise for the whole session, unrelated
   // to superset rounds, so a cross-exercise focus jump should skip straight to
   // real working sets.
-  const firstOpenWorkingFocus = (e) => {
+  const firstOpenWorkingFocus = (e, skipWeightIfFilled) => {
     if (!e || e.isCardio) return null;
     const idx = (e.sets || []).findIndex(s => !s.warmup && !s.done && !s.skipped);
     if (idx < 0) return null;
     const ex = store.exercises?.find(x => x.id === e.exId);
     const noWeight = !!ex?.no_weight_reps;
     const uni = (ex?.movement_type ?? (ex?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
-    return { setIdx: idx, field: noWeight ? (uni ? 'repsL' : 'reps') : 'kg' };
+    const repsField = uni ? 'repsL' : 'reps';
+    // Same "don't re-enter an already-correct weight" skip as nextOwnFocus,
+    // applied across an exercise/superset-partner switch too.
+    if (!noWeight && skipWeightIfFilled && e.sets[idx]?.kg != null) {
+      return { setIdx: idx, field: repsField };
+    }
+    return { setIdx: idx, field: noWeight ? repsField : 'kg' };
   };
   // Next undone/unskipped set of THIS SAME exercise (any type, including a
   // following warmup) — used when navigation stays put, so the field type
@@ -694,7 +721,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const nextOwnFocus = (setsArr, afterIdx) => {
     const idx = setsArr.findIndex((s, i) => i > afterIdx && !s.done && !s.skipped);
     if (idx < 0) return null;
-    return { setIdx: idx, field: isNoWeightReps ? (isUnilateral ? 'repsL' : 'reps') : 'kg' };
+    const repsField = isUnilateral ? 'repsL' : 'reps';
+    // Skip the next set's weight field when it's pointless to re-enter: no
+    // intensity technique on the set just finished (a drop/myo/lengthened
+    // set already routes through its own dedicated flow, not this one) and
+    // the next set's weight is already filled in (pre-seeded from
+    // progression/last-time). Jump straight to reps instead of back to kg.
+    if (!isNoWeightReps && !setsArr[afterIdx]?.technique && setsArr[idx]?.kg != null) {
+      return { setIdx: idx, field: repsField };
+    }
+    return { setIdx: idx, field: isNoWeightReps ? repsField : 'kg' };
   };
 
   // Single source of truth for "where does the screen go, and where does the
@@ -717,6 +753,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // pending, jumping to it mid-round for no reason and blocking the
     // round/group from ever reading as complete.
     const resolved = (s) => !!s && (s.done || s.skipped);
+    const noTechnique = !entry.sets[setIdx]?.technique;
     if (group && !entry.sets[setIdx]?.warmup) {
       const workingIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
       const partnerWorkingSets = (e) => (e.sets || []).filter(s => !s.warmup);
@@ -724,7 +761,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const nextPartner = partners.find(({ e }) => !resolved(partnerWorkingSets(e)[workingIdx]));
       if (nextPartner) {
         // Mid-round: jump to partner, no rest
-        if (advanceFocus) pendingFocusRef.current = firstOpenWorkingFocus(nextPartner.e);
+        if (advanceFocus) pendingFocusRef.current = firstOpenWorkingFocus(nextPartner.e, noTechnique);
         setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), 300);
       } else {
         // Round complete: start rest
@@ -733,7 +770,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         if (allGroupDone) {
           const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
           const nextAfterGroup = lastGroupIdx + 1 < session.entries.length ? session.entries[lastGroupIdx + 1] : null;
-          if (advanceFocus && nextAfterGroup) pendingFocusRef.current = firstOpenWorkingFocus(nextAfterGroup);
+          if (advanceFocus && nextAfterGroup) pendingFocusRef.current = firstOpenWorkingFocus(nextAfterGroup, noTechnique);
           setTimeout(() => {
             if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
             else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
@@ -744,7 +781,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             i === exIdx ? !updatedSets.every(resolved) : partnerWorkingSets(e).some(s => !resolved(s))
           );
           if (firstIncomplete) {
-            if (advanceFocus) pendingFocusRef.current = firstOpenWorkingFocus(firstIncomplete.i === exIdx ? { ...entry, sets: updatedSets } : firstIncomplete.e);
+            if (advanceFocus) pendingFocusRef.current = firstOpenWorkingFocus(firstIncomplete.i === exIdx ? { ...entry, sets: updatedSets } : firstIncomplete.e, noTechnique);
             setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: firstIncomplete.i })), 600);
           }
         }
@@ -755,7 +792,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
       if (updatedSets.every(resolved)) {
         const nextEntry = session.entries[exIdx + 1];
-        if (advanceFocus && nextEntry) pendingFocusRef.current = firstOpenWorkingFocus(nextEntry);
+        if (advanceFocus && nextEntry) pendingFocusRef.current = firstOpenWorkingFocus(nextEntry, noTechnique);
         setTimeout(() => navigate(1), Math.max(600, overlayHoldMs));
       } else if (advanceFocus) {
         const focus = nextOwnFocus(updatedSets, setIdx);
@@ -5020,6 +5057,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         onBackspace={kbBackspace}
         onAdjust={kbAdjust}
         onConfirm={kbConfirm}
+        confirmDisabled={
+          ((kbField?.setIdx === 'drop' || kbField?.setIdx === 'myo') && kbField?.field === 'reps') ||
+          (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === kbField?.setIdx && (kbField?.field === 'reps' || kbField?.field === 'repsR'))
+        }
         onDismiss={() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); armKbShield(); }}
         onPlateCalc={() => setPlateCalcOpen(true)}
       />

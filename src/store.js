@@ -1548,6 +1548,20 @@ async function refreshExerciseBests(userId) {
 // done:false in Supabase even though the user actually performed them.
 // Ended sessions outside the boot window carry no entries — fall back to the
 // server aggregate (get_session_stats) attached at load time.
+// Volume for a single session entry (one exercise) — same working-set filter
+// totalVolume uses, factored out so per-exercise volume (e.g. a session
+// compare view) doesn't duplicate the filter logic.
+function entryVolume(entry, ended) {
+  if (!entry || entry.isCardio) return 0;
+  return (entry.sets || []).filter(st => {
+    if (st.warmup || st.skipped) return false;
+    if (ended) return st.kg != null && (st.reps != null || st.repsL != null || st.repsR != null);
+    return st.done;
+  }).reduce((s, st) => {
+    const reps = effReps(st) ?? 0;
+    return s + (+st.kg || 0) * reps;
+  }, 0);
+}
 function totalVolume(session, exercises) {
   const ended = !!session.ended;
   if (ended && !(session.entries || []).length && session.aggVolume != null) return session.aggVolume;
@@ -1555,16 +1569,8 @@ function totalVolume(session, exercises) {
     ? new Set(exercises.filter(e => e.movement_type === 'mobility' || e.movement_type === 'cardio').map(e => e.id))
     : null;
   return (session.entries || []).reduce((sum, entry) => {
-    if (entry.isCardio) return sum;
     if (excludedIds && excludedIds.has(entry.exId)) return sum;
-    return sum + (entry.sets || []).filter(st => {
-      if (st.warmup || st.skipped) return false;
-      if (ended) return st.kg != null && (st.reps != null || st.repsL != null || st.repsR != null);
-      return st.done;
-    }).reduce((s, st) => {
-      const reps = effReps(st) ?? 0;
-      return s + (+st.kg || 0) * reps;
-    }, 0);
+    return sum + entryVolume(entry, ended);
   }, 0);
 }
 
@@ -3141,7 +3147,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
-  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
+  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,
   cancelPushover,

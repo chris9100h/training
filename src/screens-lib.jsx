@@ -2031,6 +2031,14 @@ function feelLabel(key) {
   return FEEL_LEVELS.find(f => f.key === key)?.label ?? null;
 }
 
+const FEEL_ICONS = {
+  easy: 'fa-face-smile',
+  good: 'fa-bolt',
+  hard: 'fa-fire',
+  very_hard: 'fa-skull',
+  max: 'fa-trophy',
+};
+
 function FeelSelector({ value, onChange }) {
   return (
     <div style={{ display: 'flex', gap: 6 }}>
@@ -2039,13 +2047,15 @@ function FeelSelector({ value, onChange }) {
         return (
           <button key={f.key} onClick={() => onChange(active ? null : f.key)}
             style={{
-              flex: 1, padding: '7px 2px', borderRadius: 4, cursor: 'pointer',
+              flex: 1, padding: '9px 2px', borderRadius: 4, cursor: 'pointer',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
               border: `1px solid ${active ? f.color : UI.hairStrong}`,
               background: active ? `${f.color}22` : 'transparent',
               color: active ? f.color : UI.inkSoft,
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: active ? 600 : 400,
               letterSpacing: '0.07em', WebkitTapHighlightColor: 'transparent',
             }}>
+            <i className={`fa-solid ${FEEL_ICONS[f.key]}`} style={{ fontSize: 15 }} />
             {f.label}
           </button>
         );
@@ -2059,6 +2069,17 @@ function FeelSelector({ value, onChange }) {
 // Canonical logic lives in store.js (window.LB) — one definition, no drift.
 const isImprovement = LB.isImprovement;
 const isDecline = LB.isDecline;
+
+// Sessions eligible for comparison against `s`: same dayId, ended, excluding
+// itself — newest first. Deload sessions excluded for the same reason as
+// prevEntryMap below (artificially light, not a fair comparison baseline).
+// Shared by the Compare button (SessionDetailScreen) and the session picker
+// (SessionCompareScreen).
+function sameDaySessions(sessions, s) {
+  return sessions
+    .filter(x => x.ended && x.id !== s.id && x.dayId === s.dayId && !x.isDeload)
+    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+}
 
 // ─── SESSION DETAIL ──────────────────────────────────────────────────
 function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, back, userId }) {
@@ -2148,6 +2169,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
   const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay) : null;
+  const compareCandidates = sameDaySessions(store.sessions, s);
 
   const exIsUnilateral = (exId) => !!store.exercises.find(x => x.id === exId)?.unilateral;
   const prReps = (st, exId) => exIsUnilateral(exId)
@@ -2445,6 +2467,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           </div>
         )}
 
+        {/* Compare to another session of this same day */}
+        {!capturing && !justFinished && compareCandidates.length > 0 && (
+          <Btn kind="ghost" onClick={() => go({ name: 'compare', sessionId: s.id, back: { name: 'session', sessionId: s.id, back } })} style={{ width: '100%', marginTop: -8 }}>
+            <i className="fa-solid fa-code-compare" style={{ marginRight: 8 }} /> Compare to another session
+          </Btn>
+        )}
+
         {/* Exercise entries */}
         <div style={{ position: 'relative' }}>
           {capturing && <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />}
@@ -2682,7 +2711,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                 {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
                               </span>
                               {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
-                              {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}<span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>}
+                              {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}</span>}
                             </div>
                           </div>
                         );
@@ -2897,6 +2926,426 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   );
 }
 
+// ─── SESSION COMPARE ───────────────────────────────────────────────────
+// Set-string formatting for the compact "compared" (right) column — kept
+// as plain text (not chips) since the 100px column has no room for chip
+// pills; the full drop/myo/partial chain still reads fine as a string.
+function fmtCompareSet(st) {
+  if (!st) return '—';
+  if (st.skipped && !st.done) return 'skipped';
+  const drops = st.drops && (Array.isArray(st.drops) ? st.drops.length > 0 : st.drops.partials) ? st.drops : null;
+  if (st.technique === 'drop' && Array.isArray(drops)) {
+    return drops.map(d => `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(' → ');
+  }
+  if ((st.technique === 'myorep' || st.technique === 'myorep_match') && Array.isArray(drops)) {
+    const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
+    const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
+    return `${chain} (${total})`;
+  }
+  if (st.technique === 'lengthened_partial') {
+    const partials = st.drops?.partials || 0;
+    const main = `${st.kg != null ? st.kg + UI.unit() : '—'} × ${st.reps ?? '—'}`;
+    return partials > 0 ? `${main} +${partials} partials` : main;
+  }
+  const repsStr = (st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—');
+  return `${st.kg != null ? st.kg + UI.unit() : '—'} × ${repsStr}`;
+}
+
+const isTechniqueSet = (st) => !!st && !!st.technique;
+
+// Badge + connected chips for today's (left column) drop/myo/myo-match/
+// lengthened-partial set — same visual language as SessionDetailScreen's
+// per-set chip rendering (colored rail, badge tag, bordered chips joined
+// by →/↺, Total chip for myo variants). Chips wrap onto their own line
+// within the flexible compare column instead of overflowing it.
+function TechniqueBlock({ st, highlight = false, decline = false }) {
+  if (!st || !st.technique) return null;
+  const railColor = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)';
+  const badgeColor = highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint;
+  const badgeBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)';
+  const badgeBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)';
+  const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
+  const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
+  const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
+  const unitColor = highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint;
+
+  if (st.technique === 'lengthened_partial') {
+    const partials = st.drops?.partials || 0;
+    return (
+      <div style={{ borderLeft: `2px solid ${railColor}`, paddingLeft: 10 }}>
+        <div style={{ marginBottom: 6 }}>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+          <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
+            {st.kg ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+          </span>
+          {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
+          {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}</span>}
+        </div>
+      </div>
+    );
+  }
+
+  const isMyo = st.technique === 'myorep' || st.technique === 'myorep_match';
+  const badgeLabel = st.technique === 'drop' ? 'DROP SET' : st.technique === 'myorep_match' ? 'MYO MATCH' : 'MYO-REPS';
+  const drops = (st.drops && Array.isArray(st.drops) && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
+
+  return (
+    <div style={{ borderLeft: `2px solid ${railColor}`, paddingLeft: 10 }}>
+      <div style={{ marginBottom: 6 }}>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{badgeLabel}</span>
+      </div>
+      <div style={{ display: isMyo ? 'inline-flex' : 'flex', flexDirection: isMyo ? 'column' : 'row', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+          {drops.map((d, di) => (
+            <React.Fragment key={di}>
+              {di > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>{isMyo ? '↺' : '→'}</span>}
+              <span style={{
+                background: di === 0 ? chipBg : 'transparent',
+                border: `1px solid ${di === 0 || !isMyo ? chipBorder : UI.hair}`,
+                borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12,
+                color: di === 0 || !isMyo ? chipColor : UI.inkSoft,
+                opacity: di === 0 ? 1 : (isMyo ? 0.7 : 0.75),
+              }}>
+                {(di === 0 || !isMyo) && <>{d.kg ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span></>}
+                {d.reps ?? '—'}
+              </span>
+            </React.Fragment>
+          ))}
+        </div>
+        {isMyo && (() => { const t = drops.reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? (
+          <div style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
+            Total {t}
+          </div>
+        ) : null; })()}
+      </div>
+    </div>
+  );
+}
+
+function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back }) {
+  const [pickerOpen, setPickerOpen] = useStateL(false);
+  const [capturing, setCapturing] = useStateL(false);
+  const captureRef = useRefL(null);
+  // Screenshot background: same treatment as the HomeScreen watermark — VIPs
+  // get their custom image, everyone else the faint centered ZANE mark.
+  const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
+  const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
+  const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
+  const _shotDefaultStyle = { width: '85%', maxWidth: 320, opacity: _shotIsLight ? 0.14 : 0.04, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' };
+  const s = store.sessions.find(x => x.id === sessionId);
+  const candidates = s ? sameDaySessions(store.sessions, s) : [];
+  const cmp = (compareId && store.sessions.find(x => x.id === compareId)) || candidates[0] || null;
+
+  useEffectL(() => { if (!s || !cmp) go({ name: 'hist' }); }, [!!s, !!cmp]);
+
+  // Either side may be outside the 70-day boot window (aggregates only, no
+  // entries) — lazy-load on demand, same pattern as SessionDetailScreen.
+  const needsEntries = (sess) => !!(sess && sess.ended && !(sess.entries || []).length && (sess.aggExercises || 0) > 0);
+  useEffectL(() => {
+    const need = [s, cmp].filter(needsEntries).map(x => x.id);
+    if (!need.length) return;
+    let on = true;
+    LB.fetchSessionEntries(need)
+      .then(bySession => {
+        if (!on) return;
+        setStore(st => ({
+          ...st,
+          sessions: st.sessions.map(x => (bySession[x.id] && !(x.entries || []).length) ? { ...x, entries: bySession[x.id] } : x),
+        }));
+      })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [s?.id, cmp?.id]);
+
+  if (!s || !cmp) return null;
+
+  const volA = LB.totalVolume(s, store.exercises);
+  const volB = LB.totalVolume(cmp, store.exercises);
+  const volDelta = volA - volB;
+  const volDeltaRounded = Math.round(volDelta);
+  const fmtDate = (d, opts) => LB.parseDate(d).toLocaleDateString('en-US', opts || { weekday: 'short', day: 'numeric', month: 'short' });
+  // isCardio may be missing on entries loaded from DB (not a DB column) — fall
+  // back to the exercise's movement_type, matching SessionDetailScreen.
+  const isEntryCardio = (e) => !!e.isCardio || store.exercises.find(x => x.id === e.exId)?.movement_type === 'cardio';
+  const entries = s.entries.filter(e => !isEntryCardio(e));
+  const extraCmpEntries = cmp.entries.filter(e => !isEntryCardio(e) && !s.entries.some(se => se.exId === e.exId));
+
+  // Group consecutive same-supersetGroup entries — same grouping SessionDetailScreen uses.
+  const groups = [];
+  {
+    let idx = 0;
+    while (idx < entries.length) {
+      const e = entries[idx];
+      if (e.supersetGroup) {
+        const members = [{ entry: e, idx }];
+        let j = idx + 1;
+        while (j < entries.length && entries[j].supersetGroup === e.supersetGroup) {
+          members.push({ entry: entries[j], idx: j });
+          j++;
+        }
+        groups.push({ type: 'superset', members });
+        idx = j;
+      } else {
+        groups.push({ type: 'standalone', entry: e, idx });
+        idx++;
+      }
+    }
+  }
+
+  // Same html2canvas flow as SessionDetailScreen's takeScreenshot — kept in
+  // lockstep with that one (imperative KnurlCanvas draw). The watermark here
+  // is a full-page centered background (HomeScreen-style) rather than a
+  // foreground corner mark, so unlike SessionDetailScreen there's no need to
+  // measure/dodge it — knurl dividers always draw full width.
+  const takeScreenshot = async () => {
+    if (!captureRef.current) return;
+    const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
+    if (!html2canvas) return;
+    setCapturing(true);
+    const scrollParent = captureRef.current.parentElement;
+    const saved = { overflow: scrollParent.style.overflow, height: scrollParent.style.height, minHeight: scrollParent.style.minHeight };
+    scrollParent.style.overflow = 'visible';
+    scrollParent.style.height = 'auto';
+    scrollParent.style.minHeight = 'auto';
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const avatarEl = captureRef.current.querySelector('img[data-shot-avatar]');
+    if (avatarEl && !avatarEl.complete) {
+      await new Promise(res => {
+        avatarEl.addEventListener('load', res, { once: true });
+        avatarEl.addEventListener('error', res, { once: true });
+      });
+      await new Promise(r => requestAnimationFrame(r));
+    }
+    captureRef.current.querySelectorAll('canvas[data-knurl]').forEach(c => {
+      const w = c.parentElement ? c.parentElement.offsetWidth : 320;
+      if (w <= 0) return;
+      c.width = w; c.height = 3;
+      const ctx = c.getContext('2d');
+      const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
+      ctx.strokeStyle = `rgba(${knurlRgb},0.20)`;
+      ctx.lineWidth = 1.5;
+      for (let x = -2; x < w + 6; x += 5.2) {
+        ctx.beginPath(); ctx.moveTo(x, 3); ctx.lineTo(x + 1.73, 0); ctx.stroke();
+      }
+    });
+    try {
+      const el = captureRef.current;
+      const canvas = await html2canvas(el, {
+        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
+        scale: 2, useCORS: true, logging: false,
+        height: el.scrollHeight, windowHeight: el.scrollHeight,
+      });
+      canvas.toBlob(async (blob) => {
+        const filename = `${s.dayName}-compare-${s.date.slice(0, 10)}.png`;
+        const file = new File([blob], filename, { type: 'image/png' });
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
+          try { await navigator.share({ files: [file] }); } catch (_) {}
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = filename;
+          document.body.appendChild(a); a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+      }, 'image/png');
+    } finally {
+      scrollParent.style.overflow = saved.overflow;
+      scrollParent.style.height = saved.height;
+      scrollParent.style.minHeight = saved.minHeight;
+      setCapturing(false);
+    }
+  };
+
+  return (
+    <Screen>
+      <TopBar
+        title="Compare sessions"
+        onBack={() => go(back || { name: 'session', sessionId })}
+        right={
+          <button onClick={takeScreenshot} disabled={capturing} style={{
+            background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
+            color: capturing ? UI.inkGhost : UI.inkSoft, lineHeight: 1,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
+          </button>
+        }
+      />
+      <Hairline />
+
+      <div ref={captureRef} style={{ padding: capturing ? '20px 22px 24px' : '14px 22px 28px', background: UI.bg, position: 'relative' }}>
+
+        {/* Screenshot background watermark — centered, faint, full document (HomeScreen-style) */}
+        {capturing && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+            <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
+          </div>
+        )}
+
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+        {/* Screenshot-only header */}
+        {capturing && (
+          <div style={{ marginBottom: -4 }}>
+            <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+              <div>
+                <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 4 }}>SESSION COMPARE</div>
+                <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
+              </div>
+              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
+            </div>
+            <div className="knurl" />
+          </div>
+        )}
+
+        {/* Today / compared-to header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>TODAY</div>
+            <div className="display" style={{ fontSize: 18, lineHeight: 1.1 }}>{fmtDate(s.date)}</div>
+          </div>
+          <i className="fa-solid fa-code-compare" style={{ color: UI.inkFaint, fontSize: 13, flexShrink: 0 }} />
+          <button onClick={candidates.length > 1 && !capturing ? () => setPickerOpen(true) : undefined} style={{
+            flex: 1, minWidth: 0, textAlign: 'right', background: 'none', border: 'none',
+            cursor: candidates.length > 1 ? 'pointer' : 'default', padding: 0, WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>COMPARED TO</div>
+            <div className="display" style={{ fontSize: 18, lineHeight: 1.1, color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {fmtDate(cmp.date)}
+              {candidates.length > 1 && !capturing && <i className="fa-solid fa-chevron-down" style={{ fontSize: 10 }} />}
+            </div>
+          </button>
+        </div>
+
+        <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDeltaRounded > 0 ? UI.gold : volDeltaRounded < 0 ? UI.danger : UI.inkFaint }}>
+          {volDeltaRounded > 0 ? '↑' : volDeltaRounded < 0 ? '↓' : '—'} {Math.abs(volDeltaRounded).toLocaleString('en-US')} {UI.unit()} total volume
+          {cmp.isDeload && <span style={{ color: UI.inkFaint }}> · compared session was a deload week</span>}
+        </div>
+
+        {capturing ? <KnurlCanvas /> : <div className="knurl" />}
+
+        {/* Exercise entries */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {(() => {
+            const renderEntry = (entry, ei) => {
+              const cmpEntry = cmp.entries.find(e => e.exId === entry.exId);
+              const sets = (entry.sets || []).filter(st => !st.warmup);
+              const cmpSets = (cmpEntry?.sets || []).filter(st => !st.warmup);
+              const maxLen = Math.max(sets.length, cmpSets.length);
+              const entryVolA = LB.entryVolume(entry, true);
+              const entryVolB = cmpEntry ? LB.entryVolume(cmpEntry, true) : 0;
+              const entryDelta = entryVolA - entryVolB;
+              const entryDeltaRounded = Math.round(entryDelta);
+              return (
+                <div key={entry.exId + ei}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 10 }}>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.05em', color: UI.ink }}>{entry.name}</span>
+                    {cmpEntry ? (
+                      <span className="num" style={{ fontSize: 12, color: entryDeltaRounded > 0 ? UI.gold : entryDeltaRounded < 0 ? UI.danger : UI.inkFaint, flexShrink: 0 }}>
+                        {entryDeltaRounded > 0 ? '↑' : entryDeltaRounded < 0 ? '↓' : '—'} {Math.abs(entryDeltaRounded).toLocaleString('en-US')} {UI.unit()}
+                      </span>
+                    ) : (
+                      <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>NOT LOGGED THEN</span>
+                    )}
+                  </div>
+                  {Array.from({ length: maxLen }).map((_, si) => {
+                    const curr = sets[si];
+                    const prev = cmpSets[si];
+                    if (!curr && !prev) return null;
+                    const prevDone = prev && !prev.skipped;
+                    const improved = isImprovement(curr, prev);
+                    const anyImprovementBefore = sets.slice(0, si).some((c, j) => isImprovement(c, cmpSets[j]));
+                    const currSkipped = curr?.skipped && !curr?.done;
+                    const declined = !anyImprovementBefore && (isDecline(curr, prev) || ((!curr || currSkipped) && prevDone));
+                    // A "+" only signals a real improvement (extra set added to an
+                    // exercise you already had a baseline for) when cmpEntry exists.
+                    // If the whole exercise is new (NOT LOGGED THEN), there's nothing
+                    // to have improved on, so every set stays neutral instead of "+".
+                    const icon = !curr ? '−' : !prev ? (cmpEntry ? '+' : '—') : currSkipped && prevDone ? '↓' : curr && !currSkipped && prev?.skipped && !prev?.done ? '↑' : improved ? '↑' : declined ? '↓' : '—';
+                    const iconColor = (improved || (!prev && cmpEntry && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
+                      : declined ? UI.danger : UI.inkFaint;
+                    const isLastSet = si === maxLen - 1;
+                    const currIsTechnique = isTechniqueSet(curr);
+
+                    return (
+                      <div key={si} style={{
+                        display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px',
+                        alignItems: currIsTechnique ? 'start' : 'center', gap: 10, padding: '6px 0',
+                        borderBottom: !isLastSet ? `0.5px solid ${UI.hair}` : 'none',
+                      }}>
+                        <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
+                        {currIsTechnique ? (
+                          <TechniqueBlock st={curr} highlight={improved} decline={declined} />
+                        ) : (
+                          <span className="num" style={{ fontSize: 14, color: curr && (!curr.skipped || curr.done) ? UI.ink : UI.inkFaint }}>
+                            {fmtCompareSet(curr)}
+                          </span>
+                        )}
+                        <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right' }}>
+                          {fmtCompareSet(prev)}
+                        </span>
+                        <span style={{ fontSize: 14, color: iconColor, textAlign: 'right' }}>{icon}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            };
+
+            return groups.map((g, gi) => (
+              <div key={gi}>
+                {g.type === 'superset' ? (
+                  <div style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 12 }}>
+                    <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{g.members.length >= 3 ? 'GIANT SET' : 'SUPERSET'}</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {g.members.map(({ entry: e, idx: i }) => renderEntry(e, i))}
+                    </div>
+                  </div>
+                ) : renderEntry(g.entry, g.idx)}
+                {gi < groups.length - 1 && (capturing ? <KnurlCanvas style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
+              </div>
+            ));
+          })()}
+        </div>
+        {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: -4 }} />}
+
+        {extraCmpEntries.length > 0 && !capturing && (
+          <div className="micro" style={{ color: UI.inkFaint, marginTop: -10 }}>
+            + {extraCmpEntries.length} exercise(s) only in the compared session
+          </div>
+        )}
+        </div>
+      </div>
+
+      <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title={s.dayName}>
+        <div style={{ display: 'flex', flexDirection: 'column', maxHeight: '55vh', overflowY: 'auto' }}>
+          {candidates.map(c => {
+            const active = c.id === cmp.id;
+            return (
+              <button key={c.id} onClick={() => { setPickerOpen(false); go({ name: 'compare', sessionId, compareId: c.id, back }); }} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '13px 2px', background: 'none', border: 'none', cursor: 'pointer',
+                borderBottom: `0.5px solid ${UI.hair}`, textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+              }}>
+                <span className="num" style={{ fontSize: 14, color: active ? 'var(--accent)' : UI.ink }}>
+                  {fmtDate(c.date, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+                </span>
+                {active && <i className="fa-solid fa-check" style={{ color: 'var(--accent)', fontSize: 12 }} />}
+              </button>
+            );
+          })}
+        </div>
+      </Sheet>
+    </Screen>
+  );
+}
 
 function ComparisonScreen({ session, onDismiss, go, userName }) {
   const entries     = session.entries || [];
@@ -3727,6 +4176,6 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
 }
 
 
-Object.assign(window.Screens, { LibraryScreen, ExerciseCreator, ExerciseDetailScreen, HistoryScreen, SessionDetailScreen, SpectatorScreen, ExerciseHistoryScreen });
+Object.assign(window.Screens, { LibraryScreen, ExerciseCreator, ExerciseDetailScreen, HistoryScreen, SessionDetailScreen, SessionCompareScreen, SpectatorScreen, ExerciseHistoryScreen });
 
 window.EQUIPMENT_TYPES = EQUIPMENT_TYPES;

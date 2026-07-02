@@ -124,10 +124,42 @@ function HowToSheet({ open, onClose }) {
             {chevron}
           </button>
           <div className="knurl" />
+          <button onClick={() => { onClose(); window.__startTour?.('quickActions'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Use Quick Actions</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Swipe down on Home for fast-access logging shortcuts</div>
+            </div>
+            {chevron}
+          </button>
+          <div className="knurl" />
           <button onClick={() => { onClose(); window.__startTour?.('healthTab'); }} style={btnStyle}>
             <div style={{ textAlign: 'left' }}>
               <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Use the Health tab</div>
               <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Daily logging, macro targets, cardio tracking, and week overview</div>
+            </div>
+            {chevron}
+          </button>
+          <div className="knurl" />
+          <button onClick={() => { onClose(); window.__startTour?.('cardioPlans'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Build a cardio plan</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Manual weekly targets, or a progressive plan toward a goal</div>
+            </div>
+            {chevron}
+          </button>
+          <div className="knurl" />
+          <button onClick={() => { onClose(); window.__startTour?.('statusModes'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Deload, sick &amp; vacation</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Take it easier without losing progress or skewing your stats</div>
+            </div>
+            {chevron}
+          </button>
+          <div className="knurl" />
+          <button onClick={() => { onClose(); window.__startTour?.('customize'); }} style={btnStyle}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi }}>Customize the app</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Appearance, rest timers, equipment, progression &amp; tempo</div>
             </div>
             {chevron}
           </button>
