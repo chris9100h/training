@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.457',
+    title: 'Compare Sessions, Sharper',
+    items: [
+      "📊 Compare Sessions — the set-by-set, side-by-side view against a past session of the same workout day — is now one tap away right after you finish too, not just from your history. Look for the button right under the volume delta on the Well Done screen.",
+      '🎯 Fixed the default match it picks: it now always lines you up against your most recent earlier session, never one you haven’t even gotten to yet.',
+      '📐 Rows using an intensity technique (Partials, Drop Sets, Myo Reps…) no longer shove the compared value to the top — it sits centered now, however tall the row gets.',
+    ],
+  },
+  {
     id: 'v2.455',
     title: 'Second Thoughts, Officially Allowed',
     items: [
